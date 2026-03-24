@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EJB to REST API Generator</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>EJB to REST API Generator</h1>
+            <p class="subtitle">Transformez automatiquement vos projets EJB en API REST Spring Boot</p>
+            <p class="subtitle-small">Support JSON &amp; XML (JAXB)</p>
+        </header>
+
+        <!-- Messages -->
+        <div th:if="${success}" class="alert alert-success">
+            <span th:text="${success}"></span>
+        </div>
+        <div th:if="${error}" class="alert alert-error">
+            <span th:text="${error}"></span>
+        </div>
+        <div th:if="${warning}" class="alert alert-warning">
+            <span th:text="${warning}"></span>
+        </div>
+
+        <!-- Step 1: Upload -->
+        <section class="card">
+            <div class="card-header">
+                <span class="step-number">1</span>
+                <h2>Upload du projet EJB</h2>
+            </div>
+            <div class="card-body">
+                <form method="post" th:action="@{/upload}" enctype="multipart/form-data">
+                    <div class="upload-area" id="uploadArea">
+                        <div class="upload-icon">&#128230;</div>
+                        <p>Glissez-d&eacute;posez votre fichier ZIP ici ou cliquez pour s&eacute;lectionner</p>
+                        <input type="file" name="file" id="fileInput" accept=".zip" required>
+                        <span id="fileName" class="file-name"></span>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        Uploader le projet
+                    </button>
+                </form>
+                <div th:if="${projectUploaded}" class="status-badge status-ok">
+                    Projet upload&eacute;
+                </div>
+            </div>
+        </section>
+
+        <!-- Step 2: Scan -->
+        <section class="card" th:classappend="${!projectUploaded} ? 'card-disabled' : ''">
+            <div class="card-header">
+                <span class="step-number">2</span>
+                <h2>Scanner le projet</h2>
+            </div>
+            <div class="card-body">
+                <form method="post" th:action="@{/scan}">
+                    <button type="submit" class="btn btn-secondary"
+                            th:disabled="${!projectUploaded}">
+                        Scanner le projet EJB
+                    </button>
+                </form>
+
+                <!-- Résultats du scan -->
+                <div th:if="${projectAnalyzed}" class="scan-results">
+                    <h3>R&eacute;sultats de l'analyse</h3>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <span class="stat-number" th:text="${analysisResult.totalFilesAnalyzed}">0</span>
+                            <span class="stat-label">Fichiers analys&eacute;s</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-number" th:text="${analysisResult.useCases.size()}">0</span>
+                            <span class="stat-label">UseCases d&eacute;tect&eacute;s</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-number" th:text="${analysisResult.dtos.size()}">0</span>
+                            <span class="stat-label">DTOs d&eacute;tect&eacute;s</span>
+                        </div>
+                    </div>
+
+                    <!-- UseCases détectés -->
+                    <div th:if="${!analysisResult.useCases.isEmpty()}">
+                        <h4>UseCases d&eacute;tect&eacute;s</h4>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Classe</th>
+                                    <th>DTO Entr&eacute;e</th>
+                                    <th>DTO Sortie</th>
+                                    <th>Endpoint REST</th>
+                                    <th>Controller</th>
+                                    <th>Format</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr th:each="uc : ${analysisResult.useCases}">
+                                    <td th:text="${uc.className}"></td>
+                                    <td th:text="${uc.inputDtoClassName}"></td>
+                                    <td th:text="${uc.outputDtoClassName}"></td>
+                                    <td><code th:text="${uc.restEndpoint}"></code></td>
+                                    <td th:text="${uc.controllerName}"></td>
+                                    <td>
+                                        <span class="format-badge"
+                                              th:classappend="${uc.hasXmlSupport()} ? 'format-xml' : 'format-json'"
+                                              th:text="${uc.serializationFormat.label}">JSON</span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- DTOs détectés -->
+                    <div th:if="${!analysisResult.dtos.isEmpty()}">
+                        <h4>DTOs d&eacute;tect&eacute;s</h4>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Classe</th>
+                                    <th>Package</th>
+                                    <th>Champs</th>
+                                    <th>Classe parente</th>
+                                    <th>S&eacute;rialisation</th>
+                                    <th>Annotations JAXB</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr th:each="dto : ${analysisResult.dtos}">
+                                    <td th:text="${dto.className}"></td>
+                                    <td th:text="${dto.packageName}"></td>
+                                    <td th:text="${dto.fields.size()}"></td>
+                                    <td th:text="${dto.parentClassName != null ? dto.parentClassName : '-'}"></td>
+                                    <td>
+                                        <span class="format-badge"
+                                              th:classappend="${dto.hasJaxbAnnotations()} ? 'format-xml' : 'format-json'"
+                                              th:text="${dto.serializationLabel}">JSON</span>
+                                    </td>
+                                    <td>
+                                        <span th:if="${dto.hasJaxbAnnotations()}"
+                                              th:each="annot : ${dto.jaxbAnnotations}"
+                                              class="jaxb-tag" th:text="${annot}"></span>
+                                        <span th:unless="${dto.hasJaxbAnnotations()}" class="text-muted">-</span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Avertissements -->
+                    <div th:if="${!analysisResult.warnings.isEmpty()}" class="warnings">
+                        <h4>Avertissements</h4>
+                        <ul>
+                            <li th:each="w : ${analysisResult.warnings}" th:text="${w}"></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Step 3: Generate -->
+        <section class="card" th:classappend="${!projectAnalyzed} ? 'card-disabled' : ''">
+            <div class="card-header">
+                <span class="step-number">3</span>
+                <h2>G&eacute;n&eacute;rer l'API REST</h2>
+            </div>
+            <div class="card-body">
+                <form method="post" th:action="@{/generate}">
+                    <button type="submit" class="btn btn-success"
+                            th:disabled="${!projectAnalyzed || analysisResult == null || analysisResult.useCases.isEmpty()}">
+                        G&eacute;n&eacute;rer le projet API REST
+                    </button>
+                </form>
+                <div th:if="${projectGenerated}" class="status-badge status-ok">
+                    Projet g&eacute;n&eacute;r&eacute;
+                </div>
+            </div>
+        </section>
+
+        <!-- Step 4: Download -->
+        <section class="card" th:classappend="${!projectGenerated} ? 'card-disabled' : ''">
+            <div class="card-header">
+                <span class="step-number">4</span>
+                <h2>T&eacute;l&eacute;charger le projet</h2>
+            </div>
+            <div class="card-body">
+                <a th:href="@{/download}" class="btn btn-download"
+                   th:classappend="${!projectGenerated} ? 'btn-disabled' : ''">
+                    T&eacute;l&eacute;charger le projet API g&eacute;n&eacute;r&eacute; (ZIP)
+                </a>
+            </div>
+        </section>
+
+        <!-- Reset -->
+        <section class="reset-section">
+            <form method="post" th:action="@{/reset}">
+                <button type="submit" class="btn btn-reset">
+                    R&eacute;initialiser
+                </button>
+            </form>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>EJB to REST API Generator &mdash; Java 21 &bull; Spring Boot 3 &bull; JavaParser &bull; JSON &amp; XML</p>
+        </footer>
+    </div>
+
+    <script th:src="@{/js/app.js}"></script>
+</body>
+</html>
