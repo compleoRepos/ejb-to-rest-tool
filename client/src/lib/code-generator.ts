@@ -56,22 +56,33 @@ export function generateModernCode(
   }
 
   // Générer les clients API pour chaque service
+  const generatedPaths = new Set<string>();
   for (const [serviceName, calls] of Array.from(serviceMap.entries())) {
     const clientName = serviceName.replace(/Service$/, "").replace(/Bean$/, "") + "ApiClient";
     files.push(generateApiClient(serviceName, clientName, calls, basePackage, packagePath));
+    generatedPaths.add(files[files.length - 1].path);
 
-    // Générer les DTOs
+    // Générer les DTOs (dédupliquer par chemin pour éviter les doublons)
     for (const call of calls) {
       if (call.parameters.length > 0) {
-        files.push(generateRequestDto(serviceName, call, basePackage, packagePath));
+        const reqDto = generateRequestDto(serviceName, call, basePackage, packagePath);
+        if (!generatedPaths.has(reqDto.path)) {
+          files.push(reqDto);
+          generatedPaths.add(reqDto.path);
+        }
       }
       if (call.returnType !== "void") {
-        files.push(generateResponseDto(serviceName, call, basePackage, packagePath));
+        const resDto = generateResponseDto(serviceName, call, basePackage, packagePath);
+        if (!generatedPaths.has(resDto.path)) {
+          files.push(resDto);
+          generatedPaths.add(resDto.path);
+        }
       }
     }
 
     // Générer les tests
     files.push(generateClientTest(clientName, calls, basePackage, packagePath));
+    generatedPaths.add(files[files.length - 1].path);
   }
 
   // Générer la configuration WebClient
