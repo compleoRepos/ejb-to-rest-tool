@@ -19,6 +19,7 @@
         </header>
 
         <div class="page-body">
+            <!-- No report yet -->
             <div class="card" th:if="${enhancementReport == null}">
                 <div class="card-body">
                     <div class="empty-state">
@@ -49,15 +50,15 @@
                                 <span class="score-stat-label">Regles appliquees</span>
                             </div>
                             <div class="score-stat">
-                                <span class="score-stat-value" th:text="${criticalCount ?: 0}">0</span>
+                                <span class="score-stat-value" th:text="${criticalCount != null ? criticalCount : 0}">0</span>
                                 <span class="score-stat-label">Critiques</span>
                             </div>
                             <div class="score-stat">
-                                <span class="score-stat-value" th:text="${warningCount ?: 0}">0</span>
+                                <span class="score-stat-value" th:text="${warningCount != null ? warningCount : 0}">0</span>
                                 <span class="score-stat-label">Avertissements</span>
                             </div>
                             <div class="score-stat">
-                                <span class="score-stat-value" th:text="${suggestionCount ?: 0}">0</span>
+                                <span class="score-stat-value" th:text="${suggestionCount != null ? suggestionCount : 0}">0</span>
                                 <span class="score-stat-label">Suggestions</span>
                             </div>
                         </div>
@@ -71,27 +72,17 @@
                     </div>
                     <div class="card-body">
                         <div class="category-grid">
-                            <div class="category-card" th:each="cat : ${categories}" th:if="${cat.count > 0}">
-                                <div class="category-icon" th:classappend="${'cat-' + cat.key}">
-                                    <i th:class="${cat.key == 'SECURITY' ? 'fas fa-shield-alt' :
-                                        (cat.key == 'PERFORMANCE' ? 'fas fa-tachometer-alt' :
-                                        (cat.key == 'OBSERVABILITY' ? 'fas fa-eye' :
-                                        (cat.key == 'TESTS' ? 'fas fa-vial' :
-                                        (cat.key == 'DOCUMENTATION' ? 'fas fa-book' :
-                                        (cat.key == 'RESILIENCE' ? 'fas fa-heartbeat' :
-                                        (cat.key == 'NAMING' ? 'fas fa-tag' :
-                                        (cat.key == 'HTTP_METHODS' ? 'fas fa-exchange-alt' :
-                                        (cat.key == 'VALIDATION' ? 'fas fa-check-double' :
-                                        (cat.key == 'ERROR_HANDLING' ? 'fas fa-exclamation-circle' :
-                                        (cat.key == 'CONTENT_NEGOTIATION' ? 'fas fa-file-code' :
-                                        (cat.key == 'PROJECT_STRUCTURE' ? 'fas fa-folder-open' :
-                                        'fas fa-cog'))))))))))))}"></i>
+                            <th:block th:each="cat : ${categories}" th:if="${cat.count > 0}">
+                                <div class="category-card">
+                                    <div class="category-icon" th:classappend="${'cat-' + cat.key}">
+                                        <i th:class="${cat.icon}"></i>
+                                    </div>
+                                    <div class="category-info">
+                                        <span class="category-name" th:text="${cat.label}">Categorie</span>
+                                        <span class="category-count" th:text="${cat.count + ' regles'}">N regles</span>
+                                    </div>
                                 </div>
-                                <div class="category-info">
-                                    <span class="category-name" th:text="${cat.label}">Categorie</span>
-                                    <span class="category-count" th:text="${cat.count + ' regles'}">N regles</span>
-                                </div>
-                            </div>
+                            </th:block>
                         </div>
                     </div>
                 </div>
@@ -103,7 +94,9 @@
                         <div class="card-header-actions">
                             <select class="form-select form-select-sm" id="filterCategory" onchange="filterRules(this.value)">
                                 <option value="all">Toutes les categories</option>
-                                <option th:each="cat : ${categories}" th:value="${cat.key}" th:text="${cat.label}" th:if="${cat.count > 0}">Cat</option>
+                                <th:block th:each="cat : ${categories}" th:if="${cat.count > 0}">
+                                    <option th:value="${cat.key}" th:text="${cat.label}">Cat</option>
+                                </th:block>
                             </select>
                         </div>
                     </div>
@@ -124,8 +117,10 @@
                                     <tr th:each="e : ${enhancementReport.enhancements}" th:attr="data-category=${e.category.name()}">
                                         <td><code th:text="${e.ruleId}">R01</code></td>
                                         <td>
-                                            <span class="severity-badge" th:classappend="${e.severity.name() == 'CRITICAL' ? 'severity-critical' : (e.severity.name() == 'WARNING' ? 'severity-warning' : 'severity-suggestion')}"
-                                                  th:text="${e.severity.label}">Severite</span>
+                                            <span th:if="${e.severity.name() == 'CRITICAL'}" class="severity-badge severity-critical" th:text="${e.severity.label}">Critique</span>
+                                            <span th:if="${e.severity.name() == 'WARNING'}" class="severity-badge severity-warning" th:text="${e.severity.label}">Avertissement</span>
+                                            <span th:if="${e.severity.name() == 'SUGGESTION'}" class="severity-badge severity-suggestion" th:text="${e.severity.label}">Suggestion</span>
+                                            <span th:if="${e.severity.name() == 'INFO'}" class="severity-badge severity-info" th:text="${e.severity.label}">Info</span>
                                         </td>
                                         <td><span class="text-muted" th:text="${e.category.label}">Cat</span></td>
                                         <td th:text="${e.description}">Description</td>

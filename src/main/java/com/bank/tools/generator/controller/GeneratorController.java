@@ -352,7 +352,22 @@ public class GeneratorController {
             model.addAttribute("warningCount", report.countBySeverity(EnhancementReport.Severity.WARNING));
             model.addAttribute("suggestionCount", report.countBySeverity(EnhancementReport.Severity.SUGGESTION));
 
-            // Build category info list
+            // Build category info list with icons and colors
+            Map<String, String> iconMap = Map.ofEntries(
+                Map.entry("SECURITY", "fas fa-shield-alt"),
+                Map.entry("PERFORMANCE", "fas fa-tachometer-alt"),
+                Map.entry("OBSERVABILITY", "fas fa-eye"),
+                Map.entry("TESTING", "fas fa-vial"),
+                Map.entry("DOCUMENTATION", "fas fa-book"),
+                Map.entry("RESILIENCE", "fas fa-heartbeat"),
+                Map.entry("NAMING", "fas fa-tag"),
+                Map.entry("HTTP_METHODS", "fas fa-exchange-alt"),
+                Map.entry("INPUT_VALIDATION", "fas fa-check-double"),
+                Map.entry("ERROR_HANDLING", "fas fa-exclamation-circle"),
+                Map.entry("CONTENT_NEGOTIATION", "fas fa-file-code"),
+                Map.entry("PROJECT_STRUCTURE", "fas fa-folder-open")
+            );
+
             List<Map<String, Object>> categories = new ArrayList<>();
             for (EnhancementReport.Category cat : EnhancementReport.Category.values()) {
                 long count = report.countByCategory(cat);
@@ -360,6 +375,7 @@ public class GeneratorController {
                 catInfo.put("key", cat.name());
                 catInfo.put("label", cat.getLabel());
                 catInfo.put("count", count);
+                catInfo.put("icon", iconMap.getOrDefault(cat.name(), "fas fa-cog"));
                 categories.add(catInfo);
             }
             model.addAttribute("categories", categories);
