@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telechargement - EJB to REST Generator</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" th:replace="~{fragments/sidebar :: sidebar(activePage='download')}"></aside>
+    <main class="main-content">
+        <header class="page-header">
+            <div class="page-header-left">
+                <h1 class="page-title">Telechargement</h1>
+                <p class="page-subtitle">Exportez le projet API REST genere et le rapport d'amelioration</p>
+            </div>
+        </header>
+
+        <div class="page-body">
+            <div class="card" th:if="${!projectGenerated}">
+                <div class="card-body">
+                    <div class="empty-state">
+                        <i class="fas fa-download"></i>
+                        <h3>Aucun projet a telecharger</h3>
+                        <p>Veuillez d'abord lancer la transformation.</p>
+                        <a th:href="@{/generation}" class="btn btn-primary"><i class="fas fa-rocket"></i> Aller a la transformation</a>
+                    </div>
+                </div>
+            </div>
+
+            <div th:if="${projectGenerated}">
+                <!-- Download Card -->
+                <div class="download-hero">
+                    <div class="download-hero-icon">
+                        <i class="fas fa-box-open"></i>
+                    </div>
+                    <h2>Votre projet API REST est pret !</h2>
+                    <p>Le projet a ete genere et ameliore avec succes par le SmartCodeEnhancer.</p>
+                    <a th:href="@{/download}" class="btn btn-success btn-xl">
+                        <i class="fas fa-download"></i> Telecharger le projet (ZIP)
+                    </a>
+                </div>
+
+                <!-- Summary Stats -->
+                <div class="dashboard-stats">
+                    <div class="stat-card">
+                        <div class="stat-card-icon stat-icon-blue"><i class="fas fa-file-code"></i></div>
+                        <div class="stat-card-content">
+                            <span class="stat-card-value" th:text="${generatedFiles != null ? generatedFiles.size() : 0}">0</span>
+                            <span class="stat-card-label">Fichiers generes</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-icon stat-icon-green"><i class="fas fa-cubes"></i></div>
+                        <div class="stat-card-content">
+                            <span class="stat-card-value" th:text="${analysisResult != null ? analysisResult.useCases.size() : 0}">0</span>
+                            <span class="stat-card-label">Endpoints REST</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-icon stat-icon-purple"><i class="fas fa-magic"></i></div>
+                        <div class="stat-card-content">
+                            <span class="stat-card-value" th:text="${enhancementReport != null ? enhancementReport.totalRulesApplied : 0}">0</span>
+                            <span class="stat-card-label">Regles IA appliquees</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-icon stat-icon-orange"><i class="fas fa-shield-alt"></i></div>
+                        <div class="stat-card-content">
+                            <span class="stat-card-value" th:text="${enhancementReport != null ? enhancementReport.qualityScore + '/100' : '-'}">-</span>
+                            <span class="stat-card-label">Score qualite</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- What's Included -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-clipboard-list"></i> Contenu du projet genere</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="included-grid">
+                            <div class="included-item">
+                                <i class="fas fa-server included-icon"></i>
+                                <h4>Controllers REST</h4>
+                                <p>Endpoints REST avec annotations OpenAPI, validation, et gestion d'erreurs</p>
+                            </div>
+                            <div class="included-item">
+                                <i class="fas fa-plug included-icon"></i>
+                                <h4>Service Adapters</h4>
+                                <p>Adaptateurs avec lookup JNDI vers les EJB existants</p>
+                            </div>
+                            <div class="included-item">
+                                <i class="fas fa-exchange-alt included-icon"></i>
+                                <h4>DTOs</h4>
+                                <p>Objets de transfert avec annotations JAXB preservees</p>
+                            </div>
+                            <div class="included-item">
+                                <i class="fas fa-shield-alt included-icon"></i>
+                                <h4>Securite</h4>
+                                <p>SecurityConfig, CORS, CorrelationIdFilter</p>
+                            </div>
+                            <div class="included-item">
+                                <i class="fas fa-vial included-icon"></i>
+                                <h4>Tests</h4>
+                                <p>Tests unitaires @WebMvcTest pour chaque controller</p>
+                            </div>
+                            <div class="included-item">
+                                <i class="fas fa-docker included-icon"></i>
+                                <h4>Docker</h4>
+                                <p>Dockerfile multi-stage et docker-compose.yml</p>
+                            </div>
+                            <div class="included-item">
+                                <i class="fas fa-heartbeat included-icon"></i>
+                                <h4>Actuator</h4>
+                                <p>Health check, metriques et monitoring</p>
+                            </div>
+                            <div class="included-item">
+                                <i class="fas fa-book included-icon"></i>
+                                <h4>Documentation</h4>
+                                <p>README, ENHANCEMENT_REPORT.md, OpenAPI/Swagger</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Start -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-play-circle"></i> Demarrage rapide</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="quickstart-steps">
+                            <div class="quickstart-step">
+                                <span class="step-number">1</span>
+                                <div class="step-content">
+                                    <h4>Extraire le ZIP</h4>
+                                    <code>unzip generated-api.zip</code>
+                                </div>
+                            </div>
+                            <div class="quickstart-step">
+                                <span class="step-number">2</span>
+                                <div class="step-content">
+                                    <h4>Compiler le projet</h4>
+                                    <code>cd generated-api && mvn clean package</code>
+                                </div>
+                            </div>
+                            <div class="quickstart-step">
+                                <span class="step-number">3</span>
+                                <div class="step-content">
+                                    <h4>Lancer l'application</h4>
+                                    <code>java -jar target/*.jar</code>
+                                </div>
+                            </div>
+                            <div class="quickstart-step">
+                                <span class="step-number">4</span>
+                                <div class="step-content">
+                                    <h4>Acceder a l'API</h4>
+                                    <code>http://localhost:8081/swagger-ui.html</code>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+<script th:src="@{/js/app.js}"></script>
+</body>
+</html>

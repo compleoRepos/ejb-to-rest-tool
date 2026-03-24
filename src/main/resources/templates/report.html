@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rapport IA - EJB to REST Generator</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" th:replace="~{fragments/sidebar :: sidebar(activePage='report')}"></aside>
+    <main class="main-content">
+        <header class="page-header">
+            <div class="page-header-left">
+                <h1 class="page-title">Rapport SmartCodeEnhancer</h1>
+                <p class="page-subtitle">Analyse de qualite et ameliorations appliquees par le moteur IA interne</p>
+            </div>
+        </header>
+
+        <div class="page-body">
+            <div class="card" th:if="${enhancementReport == null}">
+                <div class="card-body">
+                    <div class="empty-state">
+                        <i class="fas fa-chart-bar"></i>
+                        <h3>Aucun rapport disponible</h3>
+                        <p>Lancez d'abord la transformation pour generer le rapport d'amelioration.</p>
+                        <a th:href="@{/generation}" class="btn btn-primary"><i class="fas fa-rocket"></i> Aller a la transformation</a>
+                    </div>
+                </div>
+            </div>
+
+            <div th:if="${enhancementReport != null}">
+                <!-- Score Card -->
+                <div class="score-card">
+                    <div class="score-circle" th:classappend="${enhancementReport.qualityScore >= 80 ? 'score-excellent' : (enhancementReport.qualityScore >= 60 ? 'score-good' : 'score-poor')}">
+                        <span class="score-value" th:text="${enhancementReport.qualityScore}">100</span>
+                        <span class="score-max">/100</span>
+                    </div>
+                    <div class="score-details">
+                        <h2>Score de Qualite Global</h2>
+                        <div class="score-stats">
+                            <div class="score-stat">
+                                <span class="score-stat-value" th:text="${enhancementReport.totalRulesChecked}">0</span>
+                                <span class="score-stat-label">Regles verifiees</span>
+                            </div>
+                            <div class="score-stat">
+                                <span class="score-stat-value" th:text="${enhancementReport.totalRulesApplied}">0</span>
+                                <span class="score-stat-label">Regles appliquees</span>
+                            </div>
+                            <div class="score-stat">
+                                <span class="score-stat-value" th:text="${criticalCount ?: 0}">0</span>
+                                <span class="score-stat-label">Critiques</span>
+                            </div>
+                            <div class="score-stat">
+                                <span class="score-stat-value" th:text="${warningCount ?: 0}">0</span>
+                                <span class="score-stat-label">Avertissements</span>
+                            </div>
+                            <div class="score-stat">
+                                <span class="score-stat-value" th:text="${suggestionCount ?: 0}">0</span>
+                                <span class="score-stat-label">Suggestions</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Categories -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-layer-group"></i> Ameliorations par categorie</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="category-grid">
+                            <div class="category-card" th:each="cat : ${categories}" th:if="${cat.count > 0}">
+                                <div class="category-icon" th:classappend="${'cat-' + cat.key}">
+                                    <i th:class="${cat.key == 'SECURITY' ? 'fas fa-shield-alt' :
+                                        (cat.key == 'PERFORMANCE' ? 'fas fa-tachometer-alt' :
+                                        (cat.key == 'OBSERVABILITY' ? 'fas fa-eye' :
+                                        (cat.key == 'TESTS' ? 'fas fa-vial' :
+                                        (cat.key == 'DOCUMENTATION' ? 'fas fa-book' :
+                                        (cat.key == 'RESILIENCE' ? 'fas fa-heartbeat' :
+                                        (cat.key == 'NAMING' ? 'fas fa-tag' :
+                                        (cat.key == 'HTTP_METHODS' ? 'fas fa-exchange-alt' :
+                                        (cat.key == 'VALIDATION' ? 'fas fa-check-double' :
+                                        (cat.key == 'ERROR_HANDLING' ? 'fas fa-exclamation-circle' :
+                                        (cat.key == 'CONTENT_NEGOTIATION' ? 'fas fa-file-code' :
+                                        (cat.key == 'PROJECT_STRUCTURE' ? 'fas fa-folder-open' :
+                                        'fas fa-cog'))))))))))))}"></i>
+                                </div>
+                                <div class="category-info">
+                                    <span class="category-name" th:text="${cat.label}">Categorie</span>
+                                    <span class="category-count" th:text="${cat.count + ' regles'}">N regles</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Detailed Rules Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-list-check"></i> Detail des regles appliquees</h2>
+                        <div class="card-header-actions">
+                            <select class="form-select form-select-sm" id="filterCategory" onchange="filterRules(this.value)">
+                                <option value="all">Toutes les categories</option>
+                                <option th:each="cat : ${categories}" th:value="${cat.key}" th:text="${cat.label}" th:if="${cat.count > 0}">Cat</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="data-table" id="rulesTable">
+                                <thead>
+                                    <tr>
+                                        <th>Regle</th>
+                                        <th>Severite</th>
+                                        <th>Categorie</th>
+                                        <th>Description</th>
+                                        <th>Fichier</th>
+                                        <th>Statut</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="e : ${enhancementReport.enhancements}" th:attr="data-category=${e.category.name()}">
+                                        <td><code th:text="${e.ruleId}">R01</code></td>
+                                        <td>
+                                            <span class="severity-badge" th:classappend="${e.severity.name() == 'CRITICAL' ? 'severity-critical' : (e.severity.name() == 'WARNING' ? 'severity-warning' : 'severity-suggestion')}"
+                                                  th:text="${e.severity.label}">Severite</span>
+                                        </td>
+                                        <td><span class="text-muted" th:text="${e.category.label}">Cat</span></td>
+                                        <td th:text="${e.description}">Description</td>
+                                        <td><code class="file-path" th:text="${e.filePath}">file</code></td>
+                                        <td>
+                                            <span th:if="${e.applied}" class="badge badge-success"><i class="fas fa-check"></i> Appliquee</span>
+                                            <span th:if="${!e.applied}" class="badge badge-default">Non appliquee</span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="card-actions" style="margin-top: 1.5rem;">
+                    <a th:href="@{/results}" class="btn btn-primary btn-lg"><i class="fas fa-code"></i> Voir les resultats</a>
+                    <a th:href="@{/export}" class="btn btn-success btn-lg"><i class="fas fa-download"></i> Telecharger le projet</a>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+<script th:src="@{/js/app.js}"></script>
+</body>
+</html>

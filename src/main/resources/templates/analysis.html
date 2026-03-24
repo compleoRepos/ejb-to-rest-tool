@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyse - EJB to REST Generator</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" th:replace="~{fragments/sidebar :: sidebar(activePage='analysis')}"></aside>
+    <main class="main-content">
+        <header class="page-header">
+            <div class="page-header-left">
+                <h1 class="page-title">Analyse du Code EJB</h1>
+                <p class="page-subtitle">Detection automatique des UseCases, DTOs et annotations JAXB</p>
+            </div>
+            <div class="page-header-right" th:if="${projectId != null and analysisResult == null}">
+                <form th:action="@{/scan}" method="post" style="display:inline;">
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-search-plus"></i> Lancer l'analyse</button>
+                </form>
+            </div>
+        </header>
+
+        <div class="page-alerts">
+            <div th:if="${success}" class="alert alert-success"><i class="fas fa-check-circle"></i> <span th:text="${success}"></span></div>
+            <div th:if="${error}" class="alert alert-error"><i class="fas fa-exclamation-circle"></i> <span th:text="${error}"></span></div>
+            <div th:if="${warning}" class="alert alert-warning"><i class="fas fa-exclamation-triangle"></i> <span th:text="${warning}"></span></div>
+        </div>
+
+        <div class="page-body">
+            <!-- No project -->
+            <div class="card" th:if="${projectId == null}">
+                <div class="card-body">
+                    <div class="empty-state">
+                        <i class="fas fa-inbox"></i>
+                        <h3>Aucun projet charge</h3>
+                        <p>Veuillez d'abord importer un projet EJB.</p>
+                        <a th:href="@{/import}" class="btn btn-primary"><i class="fas fa-cloud-upload-alt"></i> Importer un projet</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analysis not run yet -->
+            <div class="card" th:if="${projectId != null and analysisResult == null}">
+                <div class="card-body">
+                    <div class="empty-state">
+                        <i class="fas fa-search"></i>
+                        <h3>Projet charge, analyse en attente</h3>
+                        <p>Cliquez sur le bouton "Lancer l'analyse" pour demarrer le scan du code EJB.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analysis Results -->
+            <div th:if="${analysisResult != null}">
+                <!-- Stats -->
+                <div class="dashboard-stats">
+                    <div class="stat-card">
+                        <div class="stat-card-icon stat-icon-blue"><i class="fas fa-file-code"></i></div>
+                        <div class="stat-card-content">
+                            <span class="stat-card-value" th:text="${analysisResult.totalFilesAnalyzed}">0</span>
+                            <span class="stat-card-label">Fichiers analyses</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-icon stat-icon-green"><i class="fas fa-cubes"></i></div>
+                        <div class="stat-card-content">
+                            <span class="stat-card-value" th:text="${analysisResult.useCases.size()}">0</span>
+                            <span class="stat-card-label">UseCases</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-icon stat-icon-purple"><i class="fas fa-exchange-alt"></i></div>
+                        <div class="stat-card-content">
+                            <span class="stat-card-value" th:text="${analysisResult.dtos.size()}">0</span>
+                            <span class="stat-card-label">DTOs</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-icon stat-icon-orange"><i class="fas fa-exclamation-triangle"></i></div>
+                        <div class="stat-card-content">
+                            <span class="stat-card-value" th:text="${analysisResult.warnings.size()}">0</span>
+                            <span class="stat-card-label">Avertissements</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- UseCases Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-cubes"></i> UseCases detectes</h2>
+                        <span class="badge badge-info" th:text="${analysisResult.useCases.size() + ' trouves'}">0</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive" th:if="${!analysisResult.useCases.isEmpty()}">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>UseCase</th>
+                                        <th>DTO Input</th>
+                                        <th>DTO Output</th>
+                                        <th>Format</th>
+                                        <th>Endpoint REST</th>
+                                        <th>JAXB</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="uc, iter : ${analysisResult.useCases}">
+                                        <td th:text="${iter.count}">1</td>
+                                        <td>
+                                            <span class="code-text" th:text="${uc.className}">UseCase</span>
+                                            <br><small class="text-muted" th:text="${uc.packageName}">package</small>
+                                        </td>
+                                        <td><span class="code-text" th:text="${uc.inputDtoClassName ?: '-'}">Input</span></td>
+                                        <td><span class="code-text" th:text="${uc.outputDtoClassName ?: '-'}">Output</span></td>
+                                        <td>
+                                            <span class="format-badge" th:classappend="${uc.serializationFormat.name() == 'XML' ? 'format-xml' : (uc.serializationFormat.name() == 'BOTH' ? 'format-both' : 'format-json')}"
+                                                  th:text="${uc.serializationFormat.label}">JSON</span>
+                                        </td>
+                                        <td><code th:text="${uc.restEndpoint}">endpoint</code></td>
+                                        <td>
+                                            <span th:if="${uc.inputDtoHasJaxb}" class="badge badge-warning" title="Input DTO a des annotations JAXB">In</span>
+                                            <span th:if="${uc.outputDtoHasJaxb}" class="badge badge-warning" title="Output DTO a des annotations JAXB">Out</span>
+                                            <span th:if="${!uc.inputDtoHasJaxb and !uc.outputDtoHasJaxb}" class="text-muted">-</span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="empty-state" th:if="${analysisResult.useCases.isEmpty()}">
+                            <i class="fas fa-search"></i>
+                            <p>Aucun UseCase detecte dans le projet.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DTOs Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-exchange-alt"></i> DTOs detectes</h2>
+                        <span class="badge badge-info" th:text="${analysisResult.dtos.size() + ' trouves'}">0</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive" th:if="${!analysisResult.dtos.isEmpty()}">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Classe DTO</th>
+                                        <th>Package</th>
+                                        <th>Champs</th>
+                                        <th>JAXB</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="dto, iter : ${analysisResult.dtos}">
+                                        <td th:text="${iter.count}">1</td>
+                                        <td><span class="code-text" th:text="${dto.className}">DTO</span></td>
+                                        <td><small class="text-muted" th:text="${dto.packageName}">package</small></td>
+                                        <td>
+                                            <div class="field-list">
+                                                <span class="field-tag" th:each="field : ${dto.fields}" th:text="${field}">field</span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span th:if="${dto.hasJaxbAnnotations}" class="badge badge-warning"><i class="fas fa-code"></i> JAXB</span>
+                                            <span th:if="${!dto.hasJaxbAnnotations}" class="text-muted">-</span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Warnings -->
+                <div class="card" th:if="${!analysisResult.warnings.isEmpty()}">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-exclamation-triangle"></i> Avertissements</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="warning-list">
+                            <div class="warning-item" th:each="warn : ${analysisResult.warnings}">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <span th:text="${warn}"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Next Step -->
+                <div class="card-actions" style="margin-top: 1.5rem;">
+                    <a th:href="@{/configuration}" class="btn btn-primary btn-lg">
+                        <i class="fas fa-arrow-right"></i> Configurer la transformation
+                    </a>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+<script th:src="@{/js/app.js}"></script>
+</body>
+</html>

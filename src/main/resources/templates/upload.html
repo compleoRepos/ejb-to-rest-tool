@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Importer Projet - EJB to REST Generator</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" th:replace="~{fragments/sidebar :: sidebar(activePage='upload')}"></aside>
+    <main class="main-content">
+        <header class="page-header">
+            <div class="page-header-left">
+                <h1 class="page-title">Importer un Projet EJB</h1>
+                <p class="page-subtitle">Uploadez le fichier ZIP contenant le code source de votre projet EJB</p>
+            </div>
+        </header>
+
+        <div class="page-alerts">
+            <div th:if="${success}" class="alert alert-success"><i class="fas fa-check-circle"></i> <span th:text="${success}"></span></div>
+            <div th:if="${error}" class="alert alert-error"><i class="fas fa-exclamation-circle"></i> <span th:text="${error}"></span></div>
+        </div>
+
+        <div class="page-body">
+            <!-- Upload Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title"><i class="fas fa-cloud-upload-alt"></i> Upload du projet</h2>
+                </div>
+                <div class="card-body">
+                    <form th:action="@{/upload}" method="post" enctype="multipart/form-data" id="uploadForm">
+                        <div class="upload-zone" id="uploadArea">
+                            <div class="upload-zone-content">
+                                <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                                <h3>Glissez-deposez votre fichier ZIP ici</h3>
+                                <p>ou cliquez pour selectionner un fichier</p>
+                                <p class="upload-hint">Formats acceptes : .zip | Taille max : 100 Mo</p>
+                                <input type="file" name="file" id="fileInput" accept=".zip" style="display:none;">
+                                <span class="file-name" id="fileName"></span>
+                            </div>
+                        </div>
+                        <div class="upload-actions">
+                            <button type="submit" class="btn btn-primary btn-lg" id="uploadBtn" disabled>
+                                <i class="fas fa-upload"></i> Uploader le projet
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Project Info (if uploaded) -->
+            <div class="card" th:if="${projectId != null}">
+                <div class="card-header">
+                    <h2 class="card-title"><i class="fas fa-folder-open"></i> Projet charge</h2>
+                    <span class="badge badge-success">Pret</span>
+                </div>
+                <div class="card-body">
+                    <table class="info-table">
+                        <tr><td class="info-label">Identifiant</td><td th:text="${projectId}">-</td></tr>
+                        <tr><td class="info-label">Statut</td><td><span class="badge badge-success">Uploade</span></td></tr>
+                    </table>
+                    <div class="card-actions">
+                        <a th:href="@{/analysis}" class="btn btn-primary">
+                            <i class="fas fa-arrow-right"></i> Passer a l'analyse
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- File Tree (if uploaded and analyzed) -->
+            <div class="card" th:if="${fileTree != null and !fileTree.isEmpty()}">
+                <div class="card-header">
+                    <h2 class="card-title"><i class="fas fa-sitemap"></i> Arborescence du projet</h2>
+                </div>
+                <div class="card-body">
+                    <div class="file-tree">
+                        <div class="file-tree-item" th:each="entry : ${fileTree}">
+                            <i th:class="${entry.endsWith('.java') ? 'fas fa-file-code file-icon-java' : (entry.endsWith('/') ? 'fas fa-folder file-icon-folder' : 'fas fa-file file-icon-default')}"></i>
+                            <span th:text="${entry}"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats (if analyzed) -->
+            <div class="dashboard-stats" th:if="${fileStats != null}">
+                <div class="stat-card">
+                    <div class="stat-card-icon stat-icon-blue"><i class="fas fa-file"></i></div>
+                    <div class="stat-card-content">
+                        <span class="stat-card-value" th:text="${fileStats.totalFiles}">0</span>
+                        <span class="stat-card-label">Fichiers totaux</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card-icon stat-icon-green"><i class="fas fa-file-code"></i></div>
+                    <div class="stat-card-content">
+                        <span class="stat-card-value" th:text="${fileStats.javaFiles}">0</span>
+                        <span class="stat-card-label">Fichiers Java</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+<script th:src="@{/js/app.js}"></script>
+</body>
+</html>

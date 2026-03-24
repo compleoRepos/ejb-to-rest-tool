@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${pageTitle != null ? pageTitle + ' - EJB to REST Generator' : 'EJB to REST API Generator'}">EJB to REST API Generator</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">
+                    <i class="fas fa-exchange-alt"></i>
+                    <span>EJB to REST</span>
+                </div>
+                <span class="sidebar-version">v1.0.0</span>
+            </div>
+
+            <nav class="sidebar-nav">
+                <ul class="nav-list">
+                    <li class="nav-item" th:classappend="${activePage == 'dashboard' ? 'active' : ''}">
+                        <a th:href="@{/dashboard}">
+                            <i class="fas fa-th-large"></i>
+                            <span>Dashboard</span>
+                        </a>
+                    </li>
+                    <li class="nav-item" th:classappend="${activePage == 'upload' ? 'active' : ''}">
+                        <a th:href="@{/import}">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <span>Importer Projet</span>
+                        </a>
+                    </li>
+                    <li class="nav-item" th:classappend="${activePage == 'analysis' ? 'active' : ''}">
+                        <a th:href="@{/analysis}">
+                            <i class="fas fa-search-plus"></i>
+                            <span>Analyse</span>
+                        </a>
+                    </li>
+                    <li class="nav-item" th:classappend="${activePage == 'configuration' ? 'active' : ''}">
+                        <a th:href="@{/configuration}">
+                            <i class="fas fa-cogs"></i>
+                            <span>Configuration</span>
+                        </a>
+                    </li>
+                    <li class="nav-item" th:classappend="${activePage == 'generation' ? 'active' : ''}">
+                        <a th:href="@{/generation}">
+                            <i class="fas fa-rocket"></i>
+                            <span>Transformation</span>
+                        </a>
+                    </li>
+                    <li class="nav-item" th:classappend="${activePage == 'results' ? 'active' : ''}">
+                        <a th:href="@{/results}">
+                            <i class="fas fa-code"></i>
+                            <span>Resultats</span>
+                        </a>
+                    </li>
+                    <li class="nav-item" th:classappend="${activePage == 'report' ? 'active' : ''}">
+                        <a th:href="@{/report}">
+                            <i class="fas fa-chart-bar"></i>
+                            <span>Rapport IA</span>
+                        </a>
+                    </li>
+                    <li class="nav-item" th:classappend="${activePage == 'download' ? 'active' : ''}">
+                        <a th:href="@{/export}">
+                            <i class="fas fa-download"></i>
+                            <span>Telechargement</span>
+                        </a>
+                    </li>
+                </ul>
+
+                <div class="nav-separator"></div>
+
+                <ul class="nav-list nav-list-secondary">
+                    <li class="nav-item" th:classappend="${activePage == 'logs' ? 'active' : ''}">
+                        <a th:href="@{/logs}">
+                            <i class="fas fa-terminal"></i>
+                            <span>Logs</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a th:href="@{/reset}" onclick="event.preventDefault(); document.getElementById('resetForm').submit();">
+                            <i class="fas fa-redo-alt"></i>
+                            <span>Reinitialiser</span>
+                        </a>
+                        <form id="resetForm" th:action="@{/reset}" method="post" style="display:none;"></form>
+                    </li>
+                </ul>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="sidebar-status">
+                    <span class="status-dot" th:classappend="${projectId != null ? 'status-active' : 'status-inactive'}"></span>
+                    <span th:text="${projectId != null ? 'Projet charge' : 'Aucun projet'}">Statut</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="page-header">
+                <div class="page-header-left">
+                    <h1 class="page-title" th:text="${pageTitle ?: 'Dashboard'}">Page Title</h1>
+                    <p class="page-subtitle" th:text="${pageSubtitle ?: ''}"></p>
+                </div>
+                <div class="page-header-right">
+                    <div class="header-badges" th:if="${projectId != null}">
+                        <span class="badge badge-info">
+                            <i class="fas fa-fingerprint"></i>
+                            <span th:text="${#strings.abbreviate(projectId, 12)}">ID</span>
+                        </span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Flash Messages -->
+            <div class="page-alerts">
+                <div th:if="${success}" class="alert alert-success">
+                    <i class="fas fa-check-circle"></i>
+                    <span th:text="${success}"></span>
+                </div>
+                <div th:if="${error}" class="alert alert-error">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <span th:text="${error}"></span>
+                </div>
+                <div th:if="${warning}" class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <span th:text="${warning}"></span>
+                </div>
+            </div>
+
+            <div class="page-body">
+                <div th:replace="${content}">
+                    <!-- Page content will be inserted here -->
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script th:src="@{/js/app.js}"></script>
+</body>
+</html>

@@ -13,17 +13,17 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
 import java.nio.file.*;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 /**
  * Service d'orchestration principal.
- * <p>
- * Coordonne l'upload, l'extraction, l'analyse, la génération
- * et l'amélioration IA du projet API REST à partir d'un projet EJB uploadé.
- * </p>
+ * Coordonne l'upload, l'extraction, l'analyse, la generation
+ * et l'amelioration IA du projet API REST a partir d'un projet EJB uploade.
  */
 @Service
 public class GeneratorService {
@@ -43,26 +43,22 @@ public class GeneratorService {
         this.enhancer = enhancer;
     }
 
-    /**
-     * Upload et extrait un projet EJB à partir d'un fichier ZIP.
-     *
-     * @param file fichier ZIP uploadé
-     * @return identifiant unique du projet uploadé
-     */
+    // ============================================================
+    // Upload
+    // ============================================================
+
     public String uploadProject(MultipartFile file) throws IOException {
         String projectId = UUID.randomUUID().toString();
         Path uploadDir = Path.of(appConfig.getUploadDir(), projectId);
         Files.createDirectories(uploadDir);
 
-        // Extraire le ZIP
         try (ZipInputStream zis = new ZipInputStream(file.getInputStream())) {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
                 Path entryPath = uploadDir.resolve(entry.getName()).normalize();
 
-                // Protection contre les attaques de type Zip Slip
                 if (!entryPath.startsWith(uploadDir)) {
-                    throw new IOException("Entrée ZIP invalide : " + entry.getName());
+                    throw new IOException("Entree ZIP invalide : " + entry.getName());
                 }
 
                 if (entry.isDirectory()) {
@@ -77,93 +73,71 @@ public class GeneratorService {
             }
         }
 
-        log.info("Projet uploadé et extrait : {}", projectId);
+        log.info("Projet uploade et extrait : {}", projectId);
         return projectId;
     }
 
-    /**
-     * Analyse un projet EJB précédemment uploadé.
-     *
-     * @param projectId identifiant du projet
-     * @return résultat de l'analyse
-     */
+    // ============================================================
+    // Analysis
+    // ============================================================
+
     public ProjectAnalysisResult analyzeProject(String projectId) {
         Path projectPath = Path.of(appConfig.getUploadDir(), projectId);
         if (!Files.exists(projectPath)) {
-            throw new IllegalArgumentException("Projet non trouvé : " + projectId);
+            throw new IllegalArgumentException("Projet non trouve : " + projectId);
         }
         return parser.analyzeProject(projectPath);
     }
 
-    /**
-     * Génère le projet API REST puis applique les améliorations IA.
-     * <p>
-     * Pipeline : CodeGenerationEngine → SmartCodeEnhancer
-     * </p>
-     *
-     * @param projectId      identifiant du projet
-     * @param analysisResult résultat de l'analyse
-     * @return chemin du projet généré et amélioré
-     */
+    // ============================================================
+    // Generation
+    // ============================================================
+
     public Path generateProject(String projectId, ProjectAnalysisResult analysisResult) throws IOException {
         Path outputDir = Path.of(appConfig.getOutputDir(), projectId);
         Files.createDirectories(outputDir);
 
-        // Étape 1 : Génération du code de base
         Path projectRoot = engine.generateProject(analysisResult, outputDir);
-        log.info("Étape 1/2 : Code de base généré dans {}", projectRoot);
+        log.info("Etape 1/2 : Code de base genere dans {}", projectRoot);
 
-        // Étape 2 : Amélioration IA (moteur de règles interne)
         EnhancementReport report = enhancer.enhance(projectRoot, analysisResult);
-        log.info("Étape 2/2 : Améliorations IA appliquées - Score: {}/100, Règles: {}/{}",
+        log.info("Etape 2/2 : Ameliorations IA appliquees - Score: {}/100, Regles: {}/{}",
                 report.getQualityScore(), report.getTotalRulesApplied(), report.getTotalRulesChecked());
 
-        // Sauvegarder le rapport d'amélioration
         generateEnhancementReportFile(projectRoot, report);
-
         return projectRoot;
     }
 
-    /**
-     * Applique uniquement les améliorations IA sur un projet déjà généré.
-     *
-     * @param projectId      identifiant du projet
-     * @param analysisResult résultat de l'analyse
-     * @return rapport d'amélioration
-     */
     public EnhancementReport enhanceProject(String projectId, ProjectAnalysisResult analysisResult) throws IOException {
         Path projectRoot = Path.of(appConfig.getOutputDir(), projectId, "generated-api");
         if (!Files.exists(projectRoot)) {
-            throw new IllegalArgumentException("Projet généré non trouvé : " + projectId);
+            throw new IllegalArgumentException("Projet genere non trouve : " + projectId);
         }
         EnhancementReport report = enhancer.enhance(projectRoot, analysisResult);
         generateEnhancementReportFile(projectRoot, report);
         return report;
     }
 
-    /**
-     * Génère le fichier de rapport d'amélioration dans le projet.
-     */
     private void generateEnhancementReportFile(Path projectRoot, EnhancementReport report) throws IOException {
         StringBuilder sb = new StringBuilder();
-        sb.append("# Rapport d'Amélioration IA\n\n");
-        sb.append("**Moteur** : SmartCodeEnhancer (moteur de règles interne, sans IA externe)\n\n");
-        sb.append("## Résumé\n\n");
-        sb.append("| Métrique | Valeur |\n");
+        sb.append("# Rapport d'Amelioration IA\n\n");
+        sb.append("**Moteur** : SmartCodeEnhancer (moteur de regles interne, sans IA externe)\n\n");
+        sb.append("## Resume\n\n");
+        sb.append("| Metrique | Valeur |\n");
         sb.append("|----------|--------|\n");
-        sb.append("| Score de qualité | **").append(report.getQualityScore()).append("/100** |\n");
-        sb.append("| Règles vérifiées | ").append(report.getTotalRulesChecked()).append(" |\n");
-        sb.append("| Règles appliquées | ").append(report.getTotalRulesApplied()).append(" |\n");
-        sb.append("| Améliorations critiques | ").append(report.countBySeverity(EnhancementReport.Severity.CRITICAL)).append(" |\n");
+        sb.append("| Score de qualite | **").append(report.getQualityScore()).append("/100** |\n");
+        sb.append("| Regles verifiees | ").append(report.getTotalRulesChecked()).append(" |\n");
+        sb.append("| Regles appliquees | ").append(report.getTotalRulesApplied()).append(" |\n");
+        sb.append("| Ameliorations critiques | ").append(report.countBySeverity(EnhancementReport.Severity.CRITICAL)).append(" |\n");
         sb.append("| Avertissements | ").append(report.countBySeverity(EnhancementReport.Severity.WARNING)).append(" |\n");
         sb.append("| Suggestions | ").append(report.countBySeverity(EnhancementReport.Severity.SUGGESTION)).append(" |\n\n");
 
-        sb.append("## Détail par catégorie\n\n");
+        sb.append("## Detail par categorie\n\n");
         for (EnhancementReport.Category cat : EnhancementReport.Category.values()) {
             long count = report.countByCategory(cat);
             if (count > 0) {
-                sb.append("### ").append(cat.getLabel()).append(" (").append(count).append(" règles)\n\n");
-                sb.append("| Règle | Sévérité | Description | Fichier | Appliquée |\n");
+                sb.append("### ").append(cat.getLabel()).append(" (").append(count).append(" regles)\n\n");
+                sb.append("| Regle | Severite | Description | Fichier | Appliquee |\n");
                 sb.append("|-------|----------|-------------|---------|----------|\n");
                 for (EnhancementReport.Enhancement e : report.getEnhancements()) {
                     if (e.getCategory() == cat) {
@@ -180,19 +154,17 @@ public class GeneratorService {
         }
 
         Files.writeString(projectRoot.resolve("ENHANCEMENT_REPORT.md"), sb.toString());
-        log.info("Rapport d'amélioration IA généré : ENHANCEMENT_REPORT.md");
+        log.info("Rapport d'amelioration IA genere : ENHANCEMENT_REPORT.md");
     }
 
-    /**
-     * Crée un fichier ZIP du projet généré pour le téléchargement.
-     *
-     * @param projectId identifiant du projet
-     * @return chemin du fichier ZIP
-     */
+    // ============================================================
+    // Download
+    // ============================================================
+
     public Path createDownloadZip(String projectId) throws IOException {
         Path generatedDir = Path.of(appConfig.getOutputDir(), projectId, "generated-api");
         if (!Files.exists(generatedDir)) {
-            throw new IllegalArgumentException("Projet généré non trouvé : " + projectId);
+            throw new IllegalArgumentException("Projet genere non trouve : " + projectId);
         }
 
         Path zipFile = Path.of(appConfig.getOutputDir(), projectId, "generated-api.zip");
@@ -207,25 +179,141 @@ public class GeneratorService {
                             Files.copy(file, zos);
                             zos.closeEntry();
                         } catch (IOException e) {
-                            log.error("Erreur lors de la création du ZIP", e);
+                            log.error("Erreur lors de la creation du ZIP", e);
                         }
                     });
         }
 
-        log.info("ZIP de téléchargement créé : {}", zipFile);
+        log.info("ZIP de telechargement cree : {}", zipFile);
         return zipFile;
     }
 
+    // ============================================================
+    // File Tree & Content (for IHM)
+    // ============================================================
+
     /**
-     * Vérifie si un projet a été uploadé.
+     * Retourne l'arborescence des fichiers du projet uploade.
      */
+    public List<String> getProjectFileTree(String projectId) throws IOException {
+        Path projectPath = Path.of(appConfig.getUploadDir(), projectId);
+        if (!Files.exists(projectPath)) {
+            return Collections.emptyList();
+        }
+        try (Stream<Path> walk = Files.walk(projectPath)) {
+            return walk
+                    .filter(Files::isRegularFile)
+                    .map(p -> projectPath.relativize(p).toString())
+                    .sorted()
+                    .collect(Collectors.toList());
+        }
+    }
+
+    /**
+     * Retourne l'arborescence des fichiers du projet genere.
+     */
+    public List<String> getGeneratedFileTree(String projectId) throws IOException {
+        Path generatedDir = Path.of(appConfig.getOutputDir(), projectId, "generated-api");
+        if (!Files.exists(generatedDir)) {
+            return Collections.emptyList();
+        }
+        try (Stream<Path> walk = Files.walk(generatedDir)) {
+            return walk
+                    .filter(Files::isRegularFile)
+                    .map(p -> generatedDir.relativize(p).toString())
+                    .sorted()
+                    .collect(Collectors.toList());
+        }
+    }
+
+    /**
+     * Retourne le contenu d'un fichier du projet genere.
+     */
+    public String getGeneratedFileContent(String projectId, String relativePath) throws IOException {
+        Path filePath = Path.of(appConfig.getOutputDir(), projectId, "generated-api", relativePath).normalize();
+        Path generatedDir = Path.of(appConfig.getOutputDir(), projectId, "generated-api");
+
+        // Security: ensure path is within generated dir
+        if (!filePath.startsWith(generatedDir)) {
+            throw new SecurityException("Acces refuse : chemin hors du projet genere");
+        }
+
+        if (!Files.exists(filePath) || !Files.isRegularFile(filePath)) {
+            throw new FileNotFoundException("Fichier non trouve : " + relativePath);
+        }
+
+        return Files.readString(filePath);
+    }
+
+    /**
+     * Retourne le contenu d'un fichier du projet uploade (original EJB).
+     */
+    public String getUploadedFileContent(String projectId, String relativePath) throws IOException {
+        Path filePath = Path.of(appConfig.getUploadDir(), projectId, relativePath).normalize();
+        Path uploadDir = Path.of(appConfig.getUploadDir(), projectId);
+
+        if (!filePath.startsWith(uploadDir)) {
+            throw new SecurityException("Acces refuse : chemin hors du projet uploade");
+        }
+
+        if (!Files.exists(filePath) || !Files.isRegularFile(filePath)) {
+            throw new FileNotFoundException("Fichier non trouve : " + relativePath);
+        }
+
+        return Files.readString(filePath);
+    }
+
+    /**
+     * Retourne le diff entre le code EJB original et le controller REST genere
+     * pour un UseCase donne.
+     */
+    public Map<String, String> getUseCaseDiff(String projectId, String useCaseClassName) throws IOException {
+        Map<String, String> result = new HashMap<>();
+
+        // Find original EJB file
+        Path uploadDir = Path.of(appConfig.getUploadDir(), projectId);
+        String originalContent = findFileContent(uploadDir, useCaseClassName + ".java");
+        result.put("original", originalContent != null ? originalContent : "// Fichier original non trouve");
+
+        // Find generated controller
+        Path generatedDir = Path.of(appConfig.getOutputDir(), projectId, "generated-api");
+        String controllerName = useCaseClassName.replace("UC", "") + "Controller.java";
+        String generatedContent = findFileContent(generatedDir, controllerName);
+        result.put("generated", generatedContent != null ? generatedContent : "// Controller genere non trouve");
+
+        result.put("originalName", useCaseClassName + ".java");
+        result.put("generatedName", controllerName);
+
+        return result;
+    }
+
+    /**
+     * Recherche un fichier par nom dans une arborescence et retourne son contenu.
+     */
+    private String findFileContent(Path rootDir, String fileName) throws IOException {
+        if (!Files.exists(rootDir)) return null;
+
+        try (Stream<Path> walk = Files.walk(rootDir)) {
+            Optional<Path> found = walk
+                    .filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().equals(fileName))
+                    .findFirst();
+
+            if (found.isPresent()) {
+                return Files.readString(found.get());
+            }
+        }
+        return null;
+    }
+
+    // ============================================================
+    // Status checks
+    // ============================================================
+
     public boolean projectExists(String projectId) {
         return Files.exists(Path.of(appConfig.getUploadDir(), projectId));
     }
 
-    /**
-     * Vérifie si un projet a été généré.
-     */
     public boolean generatedProjectExists(String projectId) {
         return Files.exists(Path.of(appConfig.getOutputDir(), projectId, "generated-api"));
     }

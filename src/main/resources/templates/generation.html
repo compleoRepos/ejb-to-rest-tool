@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformation - EJB to REST Generator</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" th:replace="~{fragments/sidebar :: sidebar(activePage='generation')}"></aside>
+    <main class="main-content">
+        <header class="page-header">
+            <div class="page-header-left">
+                <h1 class="page-title">Transformation EJB vers REST</h1>
+                <p class="page-subtitle">Generation du projet API REST et amelioration par le moteur IA</p>
+            </div>
+        </header>
+
+        <div class="page-alerts">
+            <div th:if="${success}" class="alert alert-success"><i class="fas fa-check-circle"></i> <span th:text="${success}"></span></div>
+            <div th:if="${error}" class="alert alert-error"><i class="fas fa-exclamation-circle"></i> <span th:text="${error}"></span></div>
+        </div>
+
+        <div class="page-body">
+            <!-- Not ready -->
+            <div class="card" th:if="${analysisResult == null}">
+                <div class="card-body">
+                    <div class="empty-state">
+                        <i class="fas fa-rocket"></i>
+                        <h3>Analyse requise</h3>
+                        <p>Veuillez d'abord importer et analyser un projet EJB.</p>
+                        <a th:href="@{/analysis}" class="btn btn-primary"><i class="fas fa-search-plus"></i> Aller a l'analyse</a>
+                    </div>
+                </div>
+            </div>
+
+            <div th:if="${analysisResult != null}">
+                <!-- Pipeline Steps -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-tasks"></i> Etapes de transformation</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="generation-steps">
+                            <div class="gen-step" id="step-parsing" th:classappend="${analysisResult != null ? 'gen-step-done' : ''}">
+                                <div class="gen-step-icon"><i class="fas fa-search"></i></div>
+                                <div class="gen-step-content">
+                                    <h4>1. Parsing du code EJB</h4>
+                                    <p>Analyse statique avec JavaParser, detection des UseCases et DTOs</p>
+                                </div>
+                                <div class="gen-step-status">
+                                    <span class="badge badge-success" th:if="${analysisResult != null}"><i class="fas fa-check"></i> Termine</span>
+                                    <span class="badge badge-default" th:if="${analysisResult == null}">En attente</span>
+                                </div>
+                            </div>
+                            <div class="gen-step" id="step-generation" th:classappend="${projectGenerated ? 'gen-step-done' : ''}">
+                                <div class="gen-step-icon"><i class="fas fa-code"></i></div>
+                                <div class="gen-step-content">
+                                    <h4>2. Generation du code REST</h4>
+                                    <p>Creation des controllers, adapters, DTOs, configuration Spring Boot</p>
+                                </div>
+                                <div class="gen-step-status">
+                                    <span class="badge badge-success" th:if="${projectGenerated}"><i class="fas fa-check"></i> Termine</span>
+                                    <span class="badge badge-default" th:if="${!projectGenerated}">En attente</span>
+                                </div>
+                            </div>
+                            <div class="gen-step" id="step-enhancement" th:classappend="${enhancementReport != null ? 'gen-step-done' : ''}">
+                                <div class="gen-step-icon"><i class="fas fa-magic"></i></div>
+                                <div class="gen-step-content">
+                                    <h4>3. Amelioration SmartCodeEnhancer</h4>
+                                    <p>Application des 77 regles d'amelioration (securite, tests, performance...)</p>
+                                </div>
+                                <div class="gen-step-status">
+                                    <span class="badge badge-success" th:if="${enhancementReport != null}"><i class="fas fa-check"></i> Termine</span>
+                                    <span class="badge badge-default" th:if="${enhancementReport == null}">En attente</span>
+                                </div>
+                            </div>
+                            <div class="gen-step" id="step-packaging" th:classappend="${enhancementReport != null ? 'gen-step-done' : ''}">
+                                <div class="gen-step-icon"><i class="fas fa-box"></i></div>
+                                <div class="gen-step-content">
+                                    <h4>4. Packaging</h4>
+                                    <p>Creation du fichier ZIP avec le projet complet pret au deploiement</p>
+                                </div>
+                                <div class="gen-step-status">
+                                    <span class="badge badge-success" th:if="${enhancementReport != null}"><i class="fas fa-check"></i> Pret</span>
+                                    <span class="badge badge-default" th:if="${enhancementReport == null}">En attente</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Progress Bar -->
+                        <div class="progress-section" th:if="${!projectGenerated}">
+                            <div class="progress-bar-container" id="progressContainer" style="display:none;">
+                                <div class="progress-bar" id="progressBar"></div>
+                            </div>
+                            <p class="progress-text" id="progressText" style="display:none;">Generation en cours...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Launch Button -->
+                <div class="card" th:if="${!projectGenerated}">
+                    <div class="card-body" style="text-align:center; padding: 2rem;">
+                        <form th:action="@{/generate}" method="post" id="generateForm">
+                            <button type="submit" class="btn btn-success btn-xl" id="generateBtn" onclick="startGeneration()">
+                                <i class="fas fa-rocket"></i> Lancer la transformation
+                            </button>
+                        </form>
+                        <p class="text-muted" style="margin-top: 1rem;">
+                            <i class="fas fa-info-circle"></i>
+                            <span th:text="${analysisResult.useCases.size() + ' UseCase(s) et ' + analysisResult.dtos.size() + ' DTO(s) seront transformes'}">X UseCases seront transformes</span>
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Log Console -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-terminal"></i> Console de logs</h2>
+                        <button class="btn btn-sm btn-outline" onclick="clearLogs()"><i class="fas fa-trash"></i> Effacer</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="log-console" id="logConsole">
+                            <div class="log-entry log-info" th:if="${analysisResult != null}">
+                                <span class="log-time">--:--:--</span>
+                                <span class="log-level">INFO</span>
+                                <span class="log-msg" th:text="${'Analyse terminee : ' + analysisResult.useCases.size() + ' UseCases, ' + analysisResult.dtos.size() + ' DTOs detectes'}">Log</span>
+                            </div>
+                            <div class="log-entry log-info" th:if="${projectGenerated}">
+                                <span class="log-time">--:--:--</span>
+                                <span class="log-level">INFO</span>
+                                <span class="log-msg">Generation du projet API REST terminee</span>
+                            </div>
+                            <div class="log-entry log-success" th:if="${enhancementReport != null}">
+                                <span class="log-time">--:--:--</span>
+                                <span class="log-level">SUCCESS</span>
+                                <span class="log-msg" th:text="${'SmartCodeEnhancer : Score ' + enhancementReport.qualityScore + '/100, ' + enhancementReport.totalRulesApplied + ' regles appliquees'}">Log</span>
+                            </div>
+                            <div class="log-entry log-info" th:if="${logEntries == null and !projectGenerated}">
+                                <span class="log-time">--:--:--</span>
+                                <span class="log-level">INFO</span>
+                                <span class="log-msg">En attente du lancement de la transformation...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Next Steps -->
+                <div class="card-actions" th:if="${projectGenerated}" style="margin-top: 1.5rem;">
+                    <a th:href="@{/results}" class="btn btn-primary btn-lg"><i class="fas fa-code"></i> Voir les resultats</a>
+                    <a th:href="@{/report}" class="btn btn-info btn-lg"><i class="fas fa-chart-bar"></i> Voir le rapport IA</a>
+                    <a th:href="@{/export}" class="btn btn-success btn-lg"><i class="fas fa-download"></i> Telecharger</a>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+<script th:src="@{/js/app.js}"></script>
+</body>
+</html>

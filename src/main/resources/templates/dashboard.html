@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - EJB to REST Generator</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" th:replace="~{fragments/sidebar :: sidebar(activePage='dashboard')}"></aside>
+    <main class="main-content">
+        <header class="page-header">
+            <div class="page-header-left">
+                <h1 class="page-title">Dashboard</h1>
+                <p class="page-subtitle">Vue d'ensemble de l'outil de transformation EJB vers REST</p>
+            </div>
+            <div class="page-header-right">
+                <div class="header-badges" th:if="${projectId != null}">
+                    <span class="badge badge-info"><i class="fas fa-fingerprint"></i> <span th:text="${#strings.abbreviate(projectId, 12)}">ID</span></span>
+                </div>
+            </div>
+        </header>
+
+        <div class="page-alerts">
+            <div th:if="${success}" class="alert alert-success"><i class="fas fa-check-circle"></i> <span th:text="${success}"></span></div>
+            <div th:if="${error}" class="alert alert-error"><i class="fas fa-exclamation-circle"></i> <span th:text="${error}"></span></div>
+        </div>
+
+        <div class="page-body">
+            <!-- Stats Cards -->
+            <div class="dashboard-stats">
+                <div class="stat-card">
+                    <div class="stat-card-icon stat-icon-blue"><i class="fas fa-file-code"></i></div>
+                    <div class="stat-card-content">
+                        <span class="stat-card-value" th:text="${analysisResult != null ? analysisResult.totalFilesAnalyzed : 0}">0</span>
+                        <span class="stat-card-label">Fichiers analyses</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card-icon stat-icon-green"><i class="fas fa-cubes"></i></div>
+                    <div class="stat-card-content">
+                        <span class="stat-card-value" th:text="${analysisResult != null ? analysisResult.useCases.size() : 0}">0</span>
+                        <span class="stat-card-label">UseCases detectes</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card-icon stat-icon-purple"><i class="fas fa-exchange-alt"></i></div>
+                    <div class="stat-card-content">
+                        <span class="stat-card-value" th:text="${analysisResult != null ? analysisResult.dtos.size() : 0}">0</span>
+                        <span class="stat-card-label">DTOs detectes</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card-icon stat-icon-orange"><i class="fas fa-shield-alt"></i></div>
+                    <div class="stat-card-content">
+                        <span class="stat-card-value" th:text="${enhancementReport != null ? enhancementReport.qualityScore : '-'}">-</span>
+                        <span class="stat-card-label">Score qualite IA</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pipeline Status -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title"><i class="fas fa-stream"></i> Pipeline de transformation</h2>
+                </div>
+                <div class="card-body">
+                    <div class="pipeline">
+                        <div class="pipeline-step" th:classappend="${projectId != null ? 'pipeline-step-done' : ''}">
+                            <div class="pipeline-step-icon"><i class="fas fa-cloud-upload-alt"></i></div>
+                            <div class="pipeline-step-label">Import</div>
+                            <div class="pipeline-step-status" th:text="${projectId != null ? 'Termine' : 'En attente'}">En attente</div>
+                        </div>
+                        <div class="pipeline-connector" th:classappend="${analysisResult != null ? 'pipeline-connector-done' : ''}"></div>
+                        <div class="pipeline-step" th:classappend="${analysisResult != null ? 'pipeline-step-done' : ''}">
+                            <div class="pipeline-step-icon"><i class="fas fa-search-plus"></i></div>
+                            <div class="pipeline-step-label">Analyse</div>
+                            <div class="pipeline-step-status" th:text="${analysisResult != null ? 'Termine' : 'En attente'}">En attente</div>
+                        </div>
+                        <div class="pipeline-connector" th:classappend="${projectGenerated ? 'pipeline-connector-done' : ''}"></div>
+                        <div class="pipeline-step" th:classappend="${projectGenerated ? 'pipeline-step-done' : ''}">
+                            <div class="pipeline-step-icon"><i class="fas fa-cogs"></i></div>
+                            <div class="pipeline-step-label">Generation</div>
+                            <div class="pipeline-step-status" th:text="${projectGenerated ? 'Termine' : 'En attente'}">En attente</div>
+                        </div>
+                        <div class="pipeline-connector" th:classappend="${enhancementReport != null ? 'pipeline-connector-done' : ''}"></div>
+                        <div class="pipeline-step" th:classappend="${enhancementReport != null ? 'pipeline-step-done' : ''}">
+                            <div class="pipeline-step-icon"><i class="fas fa-magic"></i></div>
+                            <div class="pipeline-step-label">Amelioration IA</div>
+                            <div class="pipeline-step-status" th:text="${enhancementReport != null ? 'Termine' : 'En attente'}">En attente</div>
+                        </div>
+                        <div class="pipeline-connector" th:classappend="${enhancementReport != null ? 'pipeline-connector-done' : ''}"></div>
+                        <div class="pipeline-step" th:classappend="${enhancementReport != null ? 'pipeline-step-done' : ''}">
+                            <div class="pipeline-step-icon"><i class="fas fa-download"></i></div>
+                            <div class="pipeline-step-label">Export</div>
+                            <div class="pipeline-step-status" th:text="${enhancementReport != null ? 'Pret' : 'En attente'}">En attente</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Actions + Recent Activity -->
+            <div class="dashboard-grid-2">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-bolt"></i> Actions rapides</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="quick-actions">
+                            <a th:href="@{/import}" class="quick-action-btn">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <span>Importer un projet</span>
+                            </a>
+                            <a th:href="@{/analysis}" class="quick-action-btn" th:classappend="${projectId == null ? 'disabled' : ''}">
+                                <i class="fas fa-search-plus"></i>
+                                <span>Lancer l'analyse</span>
+                            </a>
+                            <a th:href="@{/generation}" class="quick-action-btn" th:classappend="${analysisResult == null ? 'disabled' : ''}">
+                                <i class="fas fa-rocket"></i>
+                                <span>Generer l'API</span>
+                            </a>
+                            <a th:href="@{/export}" class="quick-action-btn" th:classappend="${!projectGenerated ? 'disabled' : ''}">
+                                <i class="fas fa-download"></i>
+                                <span>Telecharger</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-info-circle"></i> Informations projet</h2>
+                    </div>
+                    <div class="card-body">
+                        <div th:if="${projectId == null}" class="empty-state">
+                            <i class="fas fa-inbox"></i>
+                            <p>Aucun projet charge. Commencez par importer un projet EJB.</p>
+                        </div>
+                        <div th:if="${projectId != null}">
+                            <table class="info-table">
+                                <tr><td class="info-label">ID Projet</td><td th:text="${projectId}">-</td></tr>
+                                <tr><td class="info-label">Fichiers analyses</td><td th:text="${analysisResult != null ? analysisResult.totalFilesAnalyzed : 'Non analyse'}">-</td></tr>
+                                <tr><td class="info-label">UseCases</td><td th:text="${analysisResult != null ? analysisResult.useCases.size() : 'Non analyse'}">-</td></tr>
+                                <tr><td class="info-label">DTOs</td><td th:text="${analysisResult != null ? analysisResult.dtos.size() : 'Non analyse'}">-</td></tr>
+                                <tr th:if="${enhancementReport != null}"><td class="info-label">Score qualite</td><td><span class="badge badge-success" th:text="${enhancementReport.qualityScore + '/100'}">-</span></td></tr>
+                                <tr th:if="${enhancementReport != null}"><td class="info-label">Regles appliquees</td><td th:text="${enhancementReport.totalRulesApplied + '/' + enhancementReport.totalRulesChecked}">-</td></tr>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Warnings -->
+            <div class="card" th:if="${analysisResult != null and !analysisResult.warnings.isEmpty()}">
+                <div class="card-header">
+                    <h2 class="card-title"><i class="fas fa-exclamation-triangle"></i> Avertissements</h2>
+                </div>
+                <div class="card-body">
+                    <div class="warning-list">
+                        <div class="warning-item" th:each="warn : ${analysisResult.warnings}">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <span th:text="${warn}"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+<script th:src="@{/js/app.js}"></script>
+</body>
+</html>

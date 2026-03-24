@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resultats - EJB to REST Generator</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" th:replace="~{fragments/sidebar :: sidebar(activePage='results')}"></aside>
+    <main class="main-content">
+        <header class="page-header">
+            <div class="page-header-left">
+                <h1 class="page-title">Resultats de la Transformation</h1>
+                <p class="page-subtitle">Structure du projet genere, apercu du code et comparaison</p>
+            </div>
+        </header>
+
+        <div class="page-alerts">
+            <div th:if="${success}" class="alert alert-success"><i class="fas fa-check-circle"></i> <span th:text="${success}"></span></div>
+            <div th:if="${error}" class="alert alert-error"><i class="fas fa-exclamation-circle"></i> <span th:text="${error}"></span></div>
+        </div>
+
+        <div class="page-body">
+            <!-- Not generated -->
+            <div class="card" th:if="${!projectGenerated}">
+                <div class="card-body">
+                    <div class="empty-state">
+                        <i class="fas fa-code"></i>
+                        <h3>Aucun projet genere</h3>
+                        <p>Veuillez d'abord lancer la transformation.</p>
+                        <a th:href="@{/generation}" class="btn btn-primary"><i class="fas fa-rocket"></i> Aller a la transformation</a>
+                    </div>
+                </div>
+            </div>
+
+            <div th:if="${projectGenerated}">
+                <!-- Stats -->
+                <div class="dashboard-stats">
+                    <div class="stat-card">
+                        <div class="stat-card-icon stat-icon-blue"><i class="fas fa-file-code"></i></div>
+                        <div class="stat-card-content">
+                            <span class="stat-card-value" th:text="${generatedFiles != null ? generatedFiles.size() : 0}">0</span>
+                            <span class="stat-card-label">Fichiers generes</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-icon stat-icon-green"><i class="fas fa-server"></i></div>
+                        <div class="stat-card-content">
+                            <span class="stat-card-value" th:text="${analysisResult != null ? analysisResult.useCases.size() : 0}">0</span>
+                            <span class="stat-card-label">Controllers generes</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-icon stat-icon-purple"><i class="fas fa-vial"></i></div>
+                        <div class="stat-card-content">
+                            <span class="stat-card-value" th:text="${testCount ?: 0}">0</span>
+                            <span class="stat-card-label">Tests generes</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-icon stat-icon-orange"><i class="fas fa-shield-alt"></i></div>
+                        <div class="stat-card-content">
+                            <span class="stat-card-value" th:text="${enhancementReport != null ? enhancementReport.qualityScore : '-'}">-</span>
+                            <span class="stat-card-label">Score qualite</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- File Tree -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-sitemap"></i> Structure du projet genere</h2>
+                        <span class="badge badge-info" th:text="${generatedFiles != null ? generatedFiles.size() + ' fichiers' : ''}">N fichiers</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="file-tree" th:if="${generatedFiles != null}">
+                            <div th:each="file : ${generatedFiles}" class="file-tree-item"
+                                 th:classappend="${file.endsWith('/') ? 'file-tree-folder' : 'file-tree-file'}"
+                                 th:attr="data-path=${file}">
+                                <i th:class="${file.endsWith('.java') ? 'fas fa-file-code file-icon-java' :
+                                    (file.endsWith('.xml') || file.endsWith('.properties') ? 'fas fa-file-alt file-icon-config' :
+                                    (file.endsWith('.md') ? 'fas fa-file-alt file-icon-md' :
+                                    (file.endsWith('/') ? 'fas fa-folder file-icon-folder' :
+                                    'fas fa-file file-icon-default')))}"></i>
+                                <span th:text="${file}" class="file-name-text" onclick="loadFilePreview(this.textContent)"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Code Preview -->
+                <div class="card" id="codePreviewCard" style="display:none;">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-eye"></i> Apercu du code</h2>
+                        <span class="badge badge-info" id="previewFileName">-</span>
+                    </div>
+                    <div class="card-body">
+                        <pre class="code-preview" id="codePreview"><code>Selectionnez un fichier dans l'arborescence...</code></pre>
+                    </div>
+                </div>
+
+                <!-- Diff Viewer -->
+                <div class="card" th:if="${analysisResult != null and !analysisResult.useCases.isEmpty()}">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-columns"></i> Comparaison : EJB Original vs REST Genere</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="diff-selector">
+                            <label class="form-label">Selectionner un UseCase :</label>
+                            <select class="form-select" id="diffSelector" onchange="loadDiff(this.value)">
+                                <option value="">-- Choisir --</option>
+                                <option th:each="uc : ${analysisResult.useCases}" th:value="${uc.className}" th:text="${uc.className}">UseCase</option>
+                            </select>
+                        </div>
+                        <div class="diff-container" id="diffContainer" style="display:none;">
+                            <div class="diff-panel diff-panel-left">
+                                <div class="diff-panel-header">
+                                    <i class="fas fa-file-code"></i> <span>Code EJB Original</span>
+                                </div>
+                                <pre class="diff-content" id="diffOriginal"><code></code></pre>
+                            </div>
+                            <div class="diff-panel diff-panel-right">
+                                <div class="diff-panel-header">
+                                    <i class="fas fa-file-code"></i> <span>Code REST Genere</span>
+                                </div>
+                                <pre class="diff-content" id="diffGenerated"><code></code></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="card-actions" style="margin-top: 1.5rem;">
+                    <a th:href="@{/report}" class="btn btn-info btn-lg"><i class="fas fa-chart-bar"></i> Voir le rapport IA</a>
+                    <a th:href="@{/export}" class="btn btn-success btn-lg"><i class="fas fa-download"></i> Telecharger le projet</a>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+<script th:src="@{/js/app.js}"></script>
+</body>
+</html>

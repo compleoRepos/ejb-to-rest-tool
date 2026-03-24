@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuration - EJB to REST Generator</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" th:replace="~{fragments/sidebar :: sidebar(activePage='configuration')}"></aside>
+    <main class="main-content">
+        <header class="page-header">
+            <div class="page-header-left">
+                <h1 class="page-title">Configuration de la Transformation</h1>
+                <p class="page-subtitle">Parametrez les options de generation du projet API REST</p>
+            </div>
+        </header>
+
+        <div class="page-alerts">
+            <div th:if="${success}" class="alert alert-success"><i class="fas fa-check-circle"></i> <span th:text="${success}"></span></div>
+            <div th:if="${error}" class="alert alert-error"><i class="fas fa-exclamation-circle"></i> <span th:text="${error}"></span></div>
+        </div>
+
+        <div class="page-body">
+            <div class="card" th:if="${analysisResult == null}">
+                <div class="card-body">
+                    <div class="empty-state">
+                        <i class="fas fa-cogs"></i>
+                        <h3>Analyse requise</h3>
+                        <p>Veuillez d'abord analyser un projet EJB avant de configurer la transformation.</p>
+                        <a th:href="@{/analysis}" class="btn btn-primary"><i class="fas fa-search-plus"></i> Aller a l'analyse</a>
+                    </div>
+                </div>
+            </div>
+
+            <form th:if="${analysisResult != null}" th:action="@{/save-config}" method="post" id="configForm">
+                <!-- Generation Options -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-layer-group"></i> Options de generation</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="config-grid">
+                            <div class="config-item">
+                                <label class="config-toggle">
+                                    <input type="checkbox" name="generateControllers" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <div class="config-info">
+                                    <span class="config-label">Controllers REST</span>
+                                    <span class="config-desc">Generer les classes @RestController pour chaque UseCase</span>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label class="config-toggle">
+                                    <input type="checkbox" name="generateAdapters" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <div class="config-info">
+                                    <span class="config-label">Service Adapters</span>
+                                    <span class="config-desc">Generer les adaptateurs de service avec lookup JNDI</span>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label class="config-toggle">
+                                    <input type="checkbox" name="generateDtos" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <div class="config-info">
+                                    <span class="config-label">DTOs</span>
+                                    <span class="config-desc">Generer les objets de transfert de donnees</span>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label class="config-toggle">
+                                    <input type="checkbox" name="generateTests" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <div class="config-info">
+                                    <span class="config-label">Tests unitaires</span>
+                                    <span class="config-desc">Generer les tests @WebMvcTest pour chaque controller</span>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label class="config-toggle">
+                                    <input type="checkbox" name="enableSmartEnhancer" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <div class="config-info">
+                                    <span class="config-label">SmartCodeEnhancer (IA)</span>
+                                    <span class="config-desc">Appliquer les 77 regles d'amelioration automatique</span>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label class="config-toggle">
+                                    <input type="checkbox" name="enableXmlSupport" th:checked="${hasJaxbDtos}">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <div class="config-info">
+                                    <span class="config-label">Support XML / JAXB</span>
+                                    <span class="config-desc">Activer la negociation de contenu JSON + XML</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Advanced Options -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-sliders-h"></i> Options avancees</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label class="form-label">Base Package</label>
+                                <input type="text" name="basePackage" class="form-input" value="com.bank.api" placeholder="com.bank.api">
+                                <span class="form-hint">Package racine du projet genere</span>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Version Spring Boot</label>
+                                <select name="springBootVersion" class="form-select">
+                                    <option value="3.2.0" selected>3.2.0 (Recommande)</option>
+                                    <option value="3.1.0">3.1.0</option>
+                                    <option value="3.0.0">3.0.0</option>
+                                </select>
+                                <span class="form-hint">Version de Spring Boot pour le projet genere</span>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Version Java</label>
+                                <select name="javaVersion" class="form-select">
+                                    <option value="21" selected>Java 21 (Recommande)</option>
+                                    <option value="17">Java 17</option>
+                                </select>
+                                <span class="form-hint">Version de Java cible</span>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Port du serveur</label>
+                                <input type="number" name="serverPort" class="form-input" value="8081" min="1024" max="65535">
+                                <span class="form-hint">Port HTTP du projet genere</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- OpenAPI Options -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-book-open"></i> Documentation OpenAPI</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label class="form-label">Titre de l'API</label>
+                                <input type="text" name="apiTitle" class="form-input" value="Generated REST API" placeholder="Mon API REST">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Version de l'API</label>
+                                <input type="text" name="apiVersion" class="form-input" value="1.0.0" placeholder="1.0.0">
+                            </div>
+                            <div class="form-group full-width">
+                                <label class="form-label">Description</label>
+                                <textarea name="apiDescription" class="form-textarea" rows="3" placeholder="Description de votre API REST generee">API REST generee automatiquement a partir d'un projet EJB legacy</textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="card-actions" style="margin-top: 1.5rem;">
+                    <button type="submit" class="btn btn-primary btn-lg">
+                        <i class="fas fa-save"></i> Sauvegarder la configuration
+                    </button>
+                    <a th:href="@{/generation}" class="btn btn-success btn-lg">
+                        <i class="fas fa-rocket"></i> Lancer la transformation
+                    </a>
+                </div>
+            </form>
+        </div>
+    </main>
+</div>
+<script th:src="@{/js/app.js}"></script>
+</body>
+</html>
