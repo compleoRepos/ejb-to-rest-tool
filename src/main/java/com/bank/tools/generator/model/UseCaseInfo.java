@@ -82,6 +82,9 @@ public class UseCaseInfo {
     /** Indique si le DTO de sortie utilise des annotations JAXB */
     private boolean outputDtoHasJaxb;
 
+    /** Indique si le DTO d'entrée possède des champs required (pour @Valid) */
+    private boolean inputDtoHasRequiredFields;
+
     public UseCaseInfo() {
     }
 
@@ -219,6 +222,14 @@ public class UseCaseInfo {
 
     public void setOutputDtoHasJaxb(boolean outputDtoHasJaxb) {
         this.outputDtoHasJaxb = outputDtoHasJaxb;
+    }
+
+    public boolean isInputDtoHasRequiredFields() {
+        return inputDtoHasRequiredFields;
+    }
+
+    public void setInputDtoHasRequiredFields(boolean inputDtoHasRequiredFields) {
+        this.inputDtoHasRequiredFields = inputDtoHasRequiredFields;
     }
 
     /**

@@ -7,6 +7,7 @@ import com.bank.tools.generator.model.UseCaseInfo.SerializationFormat;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.Modifier;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
@@ -33,8 +34,10 @@ import java.util.regex.Pattern;
  *     <li>Les classes implémentant {@code BaseUseCase}</li>
  *     <li>Les méthodes {@code execute(ValueObject voIn)}</li>
  *     <li>Les DTO d'entrée et de sortie utilisés</li>
- *     <li>Les annotations JAXB ({@code @XmlRootElement}, {@code @XmlElement}, etc.)
- *         indiquant un format de sérialisation XML</li>
+ *     <li>Les annotations JAXB ({@code @XmlRootElement}, {@code @XmlElement},
+ *         {@code @XmlElementWrapper}, etc.) indiquant un format de sérialisation XML</li>
+ *     <li>Les champs requis via {@code @XmlElement(required=true)}</li>
+ *     <li>Le filtrage des champs static final (serialVersionUID)</li>
  * </ul>
  * </p>
  */
@@ -165,6 +168,10 @@ public class EjbProjectParser {
                 inputHasJaxb = dto.hasJaxbAnnotations();
                 useCase.setInputDtoHasJaxb(inputHasJaxb);
                 useCase.setInputDtoPackage(dto.getPackageName());
+                // Détecter si le DTO d'entrée a des champs required
+                boolean hasRequired = dto.getFields().stream()
+                        .anyMatch(DtoInfo.FieldInfo::isRequired);
+                useCase.setInputDtoHasRequiredFields(hasRequired);
             }
             if (dto.getClassName().equals(useCase.getOutputDtoClassName())) {
                 outputHasJaxb = dto.hasJaxbAnnotations();
@@ -319,6 +326,14 @@ public class EjbProjectParser {
 
     /**
      * Extrait les informations d'un DTO, y compris les annotations JAXB.
+     * <p>
+     * Détecte :
+     * <ul>
+     *     <li>Les champs static/final (pour filtrer serialVersionUID)</li>
+     *     <li>Les annotations @XmlElement, @XmlAttribute, @XmlElementWrapper</li>
+     *     <li>L'attribut required=true sur @XmlElement</li>
+     * </ul>
+     * </p>
      */
     private DtoInfo extractDtoInfo(CompilationUnit cu, ClassOrInterfaceDeclaration classDecl) {
         DtoInfo dto = new DtoInfo();
@@ -363,7 +378,7 @@ public class EjbProjectParser {
         }
         dto.setJaxbAnnotations(jaxbAnnotationsList);
 
-        // Extraire les champs avec détection des annotations JAXB
+        // Extraire les champs avec détection des annotations JAXB, static/final, required
         for (FieldDeclaration field : classDecl.getFields()) {
             for (VariableDeclarator var : field.getVariables()) {
                 String accessMod = field.getAccessSpecifier().asString();
@@ -373,18 +388,43 @@ public class EjbProjectParser {
                         accessMod
                 );
 
+                // BUG 1 FIX: Détecter les modificateurs static et final
+                boolean isStatic = field.getModifiers().stream()
+                        .anyMatch(m -> m.getKeyword() == Modifier.Keyword.STATIC);
+                boolean isFinal = field.getModifiers().stream()
+                        .anyMatch(m -> m.getKeyword() == Modifier.Keyword.FINAL);
+                fieldInfo.setStatic(isStatic);
+                fieldInfo.setFinal(isFinal);
+
                 // Détecter les annotations JAXB sur les champs
                 for (AnnotationExpr fieldAnnot : field.getAnnotations()) {
                     String fieldAnnotName = fieldAnnot.getNameAsString();
+
                     if (fieldAnnotName.equals("XmlElement")) {
                         fieldInfo.setHasXmlElement(true);
                         extractAnnotationStringAttribute(fieldAnnot, "name")
                                 .ifPresent(fieldInfo::setXmlName);
+
+                        // BUG 6 FIX: Détecter required=true sur @XmlElement
+                        extractAnnotationBooleanAttribute(fieldAnnot, "required")
+                                .ifPresent(fieldInfo::setRequired);
                     }
+
                     if (fieldAnnotName.equals("XmlAttribute")) {
                         fieldInfo.setHasXmlAttribute(true);
                         extractAnnotationStringAttribute(fieldAnnot, "name")
                                 .ifPresent(fieldInfo::setXmlName);
+
+                        // Détecter required=true sur @XmlAttribute aussi
+                        extractAnnotationBooleanAttribute(fieldAnnot, "required")
+                                .ifPresent(fieldInfo::setRequired);
+                    }
+
+                    // BUG 8 FIX: Détecter @XmlElementWrapper
+                    if (fieldAnnotName.equals("XmlElementWrapper")) {
+                        fieldInfo.setHasXmlElementWrapper(true);
+                        extractAnnotationStringAttribute(fieldAnnot, "name")
+                                .ifPresent(fieldInfo::setXmlElementWrapperName);
                     }
                 }
 
@@ -418,6 +458,21 @@ public class EjbProjectParser {
         if (annotation instanceof SingleMemberAnnotationExpr singleAnnot) {
             if (singleAnnot.getMemberValue() instanceof StringLiteralExpr strExpr) {
                 return Optional.of(strExpr.getValue());
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Extrait la valeur d'un attribut booléen d'une annotation.
+     * Ex: @XmlElement(required = true) -> true
+     */
+    private Optional<Boolean> extractAnnotationBooleanAttribute(AnnotationExpr annotation, String attrName) {
+        if (annotation instanceof NormalAnnotationExpr normalAnnot) {
+            for (MemberValuePair pair : normalAnnot.getPairs()) {
+                if (pair.getNameAsString().equals(attrName) && pair.getValue() instanceof BooleanLiteralExpr boolExpr) {
+                    return Optional.of(boolExpr.getValue());
+                }
             }
         }
         return Optional.empty();

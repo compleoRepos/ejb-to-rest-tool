@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
+import java.util.*;
 
 /**
  * Moteur de génération de code.
@@ -19,6 +19,19 @@ import java.util.List;
  * d'un projet EJB. Produit les controllers REST, les service adapters,
  * les DTO (avec support JSON et XML/JAXB), la configuration JNDI,
  * le logging, la gestion des exceptions, le pom.xml et le README.
+ * </p>
+ * <p>
+ * Règles appliquées :
+ * <ul>
+ *   <li>R1 : Filtrage des champs static final (serialVersionUID, constantes, loggers)</li>
+ *   <li>R2 : Résolution automatique des imports selon les types détectés</li>
+ *   <li>R3 : Nommage cohérent des classes de test</li>
+ *   <li>R4 : @NotBlank/@NotNull uniquement sur les champs required</li>
+ *   <li>R5 : Codes HTTP adaptés au type d'opération</li>
+ *   <li>R6 : Préservation de @XmlElementWrapper pour les listes</li>
+ *   <li>R7 : Cast typé BaseUseCase dans les ServiceAdapters</li>
+ *   <li>R8 : Pas de dépendance Maven inutilisée (Lombok supprimé)</li>
+ * </ul>
  * </p>
  */
 @Component
@@ -29,12 +42,37 @@ public class CodeGenerationEngine {
     private static final String BASE_PACKAGE = "com.bank.api";
     private static final String BASE_PACKAGE_PATH = "com/bank/api";
 
+    /** RÈGLE 2 : Table de mapping type → import */
+    private static final Map<String, String> TYPE_IMPORT_MAP = Map.ofEntries(
+            Map.entry("BigDecimal", "java.math.BigDecimal"),
+            Map.entry("BigInteger", "java.math.BigInteger"),
+            Map.entry("List", "java.util.List"),
+            Map.entry("ArrayList", "java.util.ArrayList"),
+            Map.entry("Map", "java.util.Map"),
+            Map.entry("HashMap", "java.util.HashMap"),
+            Map.entry("Set", "java.util.Set"),
+            Map.entry("HashSet", "java.util.HashSet"),
+            Map.entry("Date", "java.util.Date"),
+            Map.entry("LocalDate", "java.time.LocalDate"),
+            Map.entry("LocalDateTime", "java.time.LocalDateTime"),
+            Map.entry("Instant", "java.time.Instant"),
+            Map.entry("Optional", "java.util.Optional"),
+            Map.entry("Collection", "java.util.Collection")
+    );
+
+    /** Types du package java.lang qui ne nécessitent pas d'import */
+    private static final Set<String> JAVA_LANG_TYPES = Set.of(
+            "String", "Integer", "Long", "Double", "Float", "Boolean",
+            "Byte", "Short", "Character", "Object", "Number", "Void"
+    );
+
+    /** Types primitifs Java */
+    private static final Set<String> PRIMITIVE_TYPES = Set.of(
+            "int", "long", "double", "float", "boolean", "byte", "short", "char"
+    );
+
     /**
      * Génère le projet API REST complet.
-     *
-     * @param analysisResult résultat de l'analyse du projet EJB
-     * @param outputDir      répertoire de sortie
-     * @return chemin du projet généré
      */
     public Path generateProject(ProjectAnalysisResult analysisResult, Path outputDir) throws IOException {
         log.info("Début de la génération du projet API REST");
@@ -49,6 +87,7 @@ public class CodeGenerationEngine {
         Files.createDirectories(srcMain.resolve("config"));
         Files.createDirectories(srcMain.resolve("exception"));
         Files.createDirectories(srcMain.resolve("logging"));
+        Files.createDirectories(srcMain.resolve("ejb/interfaces"));
 
         Path resourcesDir = projectRoot.resolve("src/main/resources");
         Files.createDirectories(resourcesDir);
@@ -57,12 +96,19 @@ public class CodeGenerationEngine {
         boolean projectHasXml = analysisResult.getUseCases().stream().anyMatch(UseCaseInfo::hasXmlSupport)
                 || analysisResult.getDtos().stream().anyMatch(DtoInfo::hasJaxbAnnotations);
 
-        generatePomXml(projectRoot, projectHasXml);
+        // Déterminer si des champs ont des validations required
+        boolean projectHasValidation = analysisResult.getDtos().stream()
+                .flatMap(dto -> dto.getFields().stream())
+                .anyMatch(DtoInfo.FieldInfo::isRequired);
+
+        generatePomXml(projectRoot, projectHasXml, projectHasValidation);
         generateApplicationClass(srcMain);
         generateApplicationProperties(resourcesDir);
         generateGlobalExceptionHandler(srcMain);
         generateLoggingAspect(srcMain);
         generateEjbLookupConfig(srcMain);
+        generateBaseUseCaseInterface(srcMain);
+        generateValueObjectInterface(srcMain);
 
         if (projectHasXml) {
             generateXmlConfig(srcMain);
@@ -83,9 +129,9 @@ public class CodeGenerationEngine {
         return projectRoot;
     }
 
-    // ==================== POM.XML ====================
+    // ==================== POM.XML (RÈGLE 8 : pas de Lombok) ====================
 
-    private void generatePomXml(Path projectRoot, boolean includeXml) throws IOException {
+    private void generatePomXml(Path projectRoot, boolean includeXml, boolean includeValidation) throws IOException {
         StringBuilder deps = new StringBuilder();
         deps.append("""
                         <!-- Spring Boot Web -->
@@ -100,13 +146,6 @@ public class CodeGenerationEngine {
                             <artifactId>spring-boot-starter-aop</artifactId>
                         </dependency>
                 
-                        <!-- Lombok -->
-                        <dependency>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                            <optional>true</optional>
-                        </dependency>
-                
                         <!-- Jakarta EE API (pour JNDI) -->
                         <dependency>
                             <groupId>jakarta.platform</groupId>
@@ -115,6 +154,17 @@ public class CodeGenerationEngine {
                             <scope>provided</scope>
                         </dependency>
                 """);
+
+        if (includeValidation) {
+            deps.append("""
+                
+                        <!-- Bean Validation (pour @NotBlank, @NotNull) -->
+                        <dependency>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-starter-validation</artifactId>
+                        </dependency>
+                """);
+        }
 
         if (includeXml) {
             deps.append("""
@@ -185,14 +235,6 @@ public class CodeGenerationEngine {
                             <plugin>
                                 <groupId>org.springframework.boot</groupId>
                                 <artifactId>spring-boot-maven-plugin</artifactId>
-                                <configuration>
-                                    <excludes>
-                                        <exclude>
-                                            <groupId>org.projectlombok</groupId>
-                                            <artifactId>lombok</artifactId>
-                                        </exclude>
-                                    </excludes>
-                                </configuration>
                             </plugin>
                         </plugins>
                     </build>
@@ -201,7 +243,7 @@ public class CodeGenerationEngine {
                 """.formatted(deps.toString());
 
         Files.writeString(projectRoot.resolve("pom.xml"), pom);
-        log.info("pom.xml généré (XML support: {})", includeXml);
+        log.info("pom.xml généré (XML: {}, Validation: {}, Lombok: supprimé)", includeXml, includeValidation);
     }
 
     // ==================== APPLICATION CLASS ====================
@@ -247,6 +289,51 @@ public class CodeGenerationEngine {
         Files.writeString(resourcesDir.resolve("application.properties"), props);
     }
 
+    // ==================== RÈGLE 7 : BaseUseCase et ValueObject interfaces ====================
+
+    private void generateBaseUseCaseInterface(Path srcMain) throws IOException {
+        String code = """
+                package %s.ejb.interfaces;
+                
+                /**
+                 * Interface BaseUseCase recopiee depuis le projet EJB source.
+                 * Permet le cast type lors du lookup JNDI des EJB.
+                 */
+                public interface BaseUseCase {
+                
+                    /**
+                     * Execute le cas d'utilisation.
+                     *
+                     * @param input ValueObject d'entree
+                     * @return ValueObject de sortie
+                     * @throws Exception en cas d'erreur metier
+                     */
+                    ValueObject execute(ValueObject input) throws Exception;
+                }
+                """.formatted(BASE_PACKAGE);
+
+        Files.writeString(srcMain.resolve("ejb/interfaces/BaseUseCase.java"), code);
+        log.info("Interface BaseUseCase générée");
+    }
+
+    private void generateValueObjectInterface(Path srcMain) throws IOException {
+        String code = """
+                package %s.ejb.interfaces;
+                
+                import java.io.Serializable;
+                
+                /**
+                 * Interface ValueObject recopiee depuis le projet EJB source.
+                 * Tous les DTOs VoIn/VoOut implementent cette interface.
+                 */
+                public interface ValueObject extends Serializable {
+                }
+                """.formatted(BASE_PACKAGE);
+
+        Files.writeString(srcMain.resolve("ejb/interfaces/ValueObject.java"), code);
+        log.info("Interface ValueObject générée");
+    }
+
     // ==================== XML CONFIGURATION ====================
 
     private void generateXmlConfig(Path srcMain) throws IOException {
@@ -257,22 +344,13 @@ public class CodeGenerationEngine {
                 import com.fasterxml.jackson.dataformat.xml.ser.ToXmlGenerator;
                 import org.springframework.context.annotation.Bean;
                 import org.springframework.context.annotation.Configuration;
-                import org.springframework.http.converter.HttpMessageConverter;
-                import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
+                import org.springframework.http.MediaType;
                 import org.springframework.http.converter.xml.MappingJackson2XmlHttpMessageConverter;
                 import org.springframework.web.servlet.config.annotation.ContentNegotiationConfigurer;
                 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
-                import org.springframework.http.MediaType;
-                
-                import java.util.List;
                 
                 /**
                  * Configuration pour le support de la negociation de contenu JSON/XML.
-                 * <p>
-                 * Permet aux clients de l'API de choisir le format de reponse
-                 * via l'en-tete Accept (application/json ou application/xml)
-                 * ou via le parametre de requete ?format=xml.
-                 * </p>
                  */
                 @Configuration
                 public class ContentNegotiationConfig implements WebMvcConfigurer {
@@ -302,7 +380,7 @@ public class CodeGenerationEngine {
         log.info("ContentNegotiationConfig généré (support JSON + XML)");
     }
 
-    // ==================== CONTROLLER ====================
+    // ==================== CONTROLLER (RÈGLE 5 : codes HTTP adaptés) ====================
 
     private void generateController(Path srcMain, UseCaseInfo useCase) throws IOException {
         String inputDto = useCase.getInputDtoClassName();
@@ -313,6 +391,11 @@ public class CodeGenerationEngine {
         String endpoint = useCase.getRestEndpoint();
         boolean hasXml = useCase.hasXmlSupport();
 
+        // RÈGLE 5 : Déterminer le code HTTP selon le type d'opération
+        String httpStatusCode = determineHttpStatus(useCase.getClassName());
+        String httpStatusImport = httpStatusCode.equals("ResponseEntity.ok(result)")
+                ? "" : "\nimport org.springframework.http.HttpStatus;";
+
         // Construire les produces/consumes
         String producesConsumes = "";
         if (hasXml) {
@@ -322,7 +405,10 @@ public class CodeGenerationEngine {
                         consumes = { "application/json", "application/xml" }""";
         }
 
-        String mediaTypeImport = hasXml ? "\nimport org.springframework.http.MediaType;" : "";
+        // Déterminer si le VoIn a des validations
+        boolean hasValidation = useCase.isInputDtoHasRequiredFields();
+        String validAnnotation = hasValidation ? "@Valid " : "";
+        String validImport = hasValidation ? "\nimport jakarta.validation.Valid;" : "";
 
         String code = """
                 package %s.controller;
@@ -333,7 +419,7 @@ public class CodeGenerationEngine {
                 import org.slf4j.Logger;
                 import org.slf4j.LoggerFactory;
                 import org.springframework.http.ResponseEntity;
-                import org.springframework.web.bind.annotation.*;%s
+                import org.springframework.web.bind.annotation.*;%s%s
                 
                 /**
                  * Controller REST pour le UseCase %s.
@@ -352,13 +438,13 @@ public class CodeGenerationEngine {
                     }
                 
                     @PostMapping
-                    public ResponseEntity<%s> execute(@RequestBody %s input) {
+                    public ResponseEntity<%s> execute(%s@RequestBody %s input) {
                         log.info("Requete recue sur %s");
                         try {
                             log.debug("Appel du UseCase %s avec input : {}", input);
                             %s result = %s.execute(input);
                             log.info("UseCase %s execute avec succes");
-                            return ResponseEntity.ok(result);
+                            return %s;
                         } catch (Exception e) {
                             log.error("Erreur lors de l'execution du UseCase %s", e);
                             throw new RuntimeException("Erreur lors de l'appel au UseCase %s", e);
@@ -370,7 +456,7 @@ public class CodeGenerationEngine {
                 BASE_PACKAGE, inputDto,
                 BASE_PACKAGE, outputDto,
                 BASE_PACKAGE, adapterName,
-                mediaTypeImport,
+                httpStatusImport, validImport,
                 useCase.getClassName(),
                 endpoint,
                 hasXml ? "\n * Supporte les formats JSON et XML (negociation de contenu)." : "",
@@ -380,20 +466,37 @@ public class CodeGenerationEngine {
                 adapterName, adapterField,
                 controllerName, adapterName, adapterField,
                 adapterField, adapterField,
-                outputDto, inputDto,
+                outputDto, validAnnotation, inputDto,
                 endpoint,
                 useCase.getClassName(),
                 outputDto, adapterField,
                 useCase.getClassName(),
+                httpStatusCode,
                 useCase.getClassName(),
                 useCase.getClassName()
         );
 
         Files.writeString(srcMain.resolve("controller/" + controllerName + ".java"), code);
-        log.info("Controller généré : {} (XML: {})", controllerName, hasXml);
+        log.info("Controller généré : {} (XML: {}, HTTP: {})", controllerName, hasXml, httpStatusCode);
     }
 
-    // ==================== SERVICE ADAPTER ====================
+    /**
+     * RÈGLE 5 : Détermine le code HTTP selon le nom du UseCase.
+     */
+    private String determineHttpStatus(String useCaseClassName) {
+        String name = useCaseClassName.toLowerCase();
+        if (name.contains("create") || name.contains("add") || name.contains("register")
+                || name.contains("open") || name.contains("insert") || name.contains("souscri")) {
+            return "ResponseEntity.status(HttpStatus.CREATED).body(result)";
+        }
+        if (name.contains("delete") || name.contains("remove") || name.contains("close")) {
+            return "ResponseEntity.noContent().build()";
+        }
+        // Par défaut : consultation ou mise à jour → 200 OK
+        return "ResponseEntity.ok(result)";
+    }
+
+    // ==================== SERVICE ADAPTER (RÈGLE 7 : cast typé) ====================
 
     private void generateServiceAdapter(Path srcMain, UseCaseInfo useCase) throws IOException {
         String inputDto = useCase.getInputDtoClassName();
@@ -407,6 +510,8 @@ public class CodeGenerationEngine {
                 
                 import %s.dto.%s;
                 import %s.dto.%s;
+                import %s.ejb.interfaces.BaseUseCase;
+                import %s.ejb.interfaces.ValueObject;
                 import org.slf4j.Logger;
                 import org.slf4j.LoggerFactory;
                 import org.springframework.beans.factory.annotation.Value;
@@ -420,6 +525,7 @@ public class CodeGenerationEngine {
                 /**
                  * Service adapter pour le UseCase %s.
                  * Realise le lookup JNDI pour appeler l'EJB distant.
+                 * Utilise un cast type vers BaseUseCase (pas de reflexion).
                  */
                 @Service
                 public class %s {
@@ -434,6 +540,7 @@ public class CodeGenerationEngine {
                 
                     /**
                      * Execute le UseCase EJB via lookup JNDI.
+                     * Cast direct vers BaseUseCase au lieu de la reflexion.
                      *
                      * @param input DTO d'entree
                      * @return DTO de sortie
@@ -449,16 +556,12 @@ public class CodeGenerationEngine {
                         InitialContext ctx = null;
                         try {
                             ctx = new InitialContext(props);
-                            Object lookup = ctx.lookup("%s");
-                
+                            // Cast direct vers l'interface BaseUseCase
+                            BaseUseCase useCase = (BaseUseCase) ctx.lookup("%s");
                             log.debug("EJB %s trouve via JNDI");
                 
-                            // Cast vers l'interface du UseCase et appel de execute
-                            @SuppressWarnings("unchecked")
-                            var useCase = lookup;
-                            var method = useCase.getClass().getMethod("execute", Object.class);
-                            Object result = method.invoke(useCase, input);
-                
+                            // Appel typé de execute(ValueObject)
+                            ValueObject result = useCase.execute(input);
                             return (%s) result;
                         } finally {
                             if (ctx != null) {
@@ -475,6 +578,8 @@ public class CodeGenerationEngine {
                 BASE_PACKAGE,
                 BASE_PACKAGE, inputDto,
                 BASE_PACKAGE, outputDto,
+                BASE_PACKAGE,
+                BASE_PACKAGE,
                 ucClassName,
                 adapterName,
                 adapterName,
@@ -486,30 +591,89 @@ public class CodeGenerationEngine {
         );
 
         Files.writeString(srcMain.resolve("service/" + adapterName + ".java"), code);
-        log.info("Service adapter généré : {}", adapterName);
+        log.info("Service adapter généré : {} (cast typé BaseUseCase)", adapterName);
     }
 
-    // ==================== DTO ====================
+    // ==================== DTO (RÈGLES 1, 2, 4, 6) ====================
 
     private void generateDtoClass(Path srcMain, DtoInfo dto) throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(BASE_PACKAGE).append(".dto;\n\n");
-        sb.append("import java.io.Serializable;\n");
+
+        // RÈGLE 2 : Collecter les imports nécessaires
+        Set<String> imports = new TreeSet<>();
+        // Serializable n'est plus nécessaire pour les DTOs REST (Jackson/JAXB gèrent la sérialisation)
+
+        // Import de l'interface ValueObject pour les VoIn (pour le cast dans ServiceAdapter)
+        boolean isVoIn = dto.getClassName().endsWith("VoIn") || dto.getClassName().endsWith("VOIn")
+                || dto.getClassName().endsWith("Input") || dto.getClassName().endsWith("Request");
+        if (isVoIn) {
+            imports.add(BASE_PACKAGE + ".ejb.interfaces.ValueObject");
+        }
 
         // Imports JAXB si nécessaire
-        if (dto.hasJaxbAnnotations()) {
-            sb.append("import jakarta.xml.bind.annotation.*;\n");
+        boolean hasJaxb = dto.hasJaxbAnnotations();
+        if (hasJaxb) {
+            imports.add("jakarta.xml.bind.annotation.*");
         }
-        // Import Jackson XML si JAXB détecté (pour compatibilité JSON + XML)
-        if (dto.hasJaxbAnnotations()) {
-            sb.append("import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement;\n");
+        // Import Jackson XML si JAXB détecté
+        if (dto.isHasXmlRootElement() || hasJaxb) {
+            imports.add("com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement");
+        }
+
+        // RÈGLE 6 : Vérifier si @XmlElementWrapper est utilisé
+        boolean hasXmlElementWrapper = dto.getFields().stream()
+                .anyMatch(DtoInfo.FieldInfo::isHasXmlElementWrapper);
+        if (hasXmlElementWrapper && !hasJaxb) {
+            // Si pas déjà importé via le wildcard
+            imports.add("jakarta.xml.bind.annotation.XmlElementWrapper");
+            imports.add("jakarta.xml.bind.annotation.XmlElement");
+        }
+
+        // RÈGLE 4 : Imports de validation si des champs sont required
+        boolean hasRequiredStringFields = false;
+        boolean hasRequiredNonStringFields = false;
+        boolean hasRequiredListFields = false;
+
+        for (DtoInfo.FieldInfo field : dto.getFields()) {
+            // Ignorer les champs static final (RÈGLE 1)
+            if (field.isStatic() && field.isFinal()) continue;
+
+            if (field.isRequired()) {
+                String baseType = extractBaseType(field.getType());
+                if (baseType.equals("String")) {
+                    hasRequiredStringFields = true;
+                } else if (baseType.equals("List") || baseType.equals("Set") || baseType.equals("Collection")) {
+                    hasRequiredListFields = true;
+                } else if (!PRIMITIVE_TYPES.contains(baseType)) {
+                    hasRequiredNonStringFields = true;
+                }
+            }
+
+            // RÈGLE 2 : Résoudre les imports pour chaque type de champ
+            resolveTypeImports(field.getType(), imports);
+        }
+
+        if (hasRequiredStringFields) {
+            imports.add("jakarta.validation.constraints.NotBlank");
+        }
+        if (hasRequiredNonStringFields || hasRequiredListFields) {
+            imports.add("jakarta.validation.constraints.NotNull");
+        }
+        if (hasRequiredListFields) {
+            imports.add("jakarta.validation.constraints.Size");
+        }
+
+        // Écrire les imports
+        for (String imp : imports) {
+            sb.append("import ").append(imp).append(";\n");
         }
 
         sb.append("\n");
         sb.append("/**\n");
         sb.append(" * DTO genere automatiquement pour ").append(dto.getClassName()).append(".\n");
         sb.append(" * Utilise comme objet d'echange ");
-        if (dto.hasJaxbAnnotations()) {
+        if (hasJaxb) {
             sb.append("JSON et XML ");
         } else {
             sb.append("JSON ");
@@ -527,8 +691,7 @@ public class CodeGenerationEngine {
                 sb.append("@XmlRootElement(name = \"").append(defaultName).append("\")\n");
                 sb.append("@JacksonXmlRootElement(localName = \"").append(defaultName).append("\")\n");
             }
-        } else if (dto.hasJaxbAnnotations()) {
-            // Ajouter @XmlRootElement même si absent dans l'original, pour que XML fonctionne
+        } else if (hasJaxb) {
             String defaultName = Character.toLowerCase(dto.getClassName().charAt(0)) + dto.getClassName().substring(1);
             sb.append("@XmlRootElement(name = \"").append(defaultName).append("\")\n");
             sb.append("@JacksonXmlRootElement(localName = \"").append(defaultName).append("\")\n");
@@ -536,7 +699,7 @@ public class CodeGenerationEngine {
 
         if (dto.isHasXmlAccessorType()) {
             sb.append("@XmlAccessorType(").append(dto.getXmlAccessorTypeValue() != null ? dto.getXmlAccessorTypeValue() : "XmlAccessType.FIELD").append(")\n");
-        } else if (dto.hasJaxbAnnotations()) {
+        } else if (hasJaxb) {
             sb.append("@XmlAccessorType(XmlAccessType.FIELD)\n");
         }
 
@@ -544,24 +707,76 @@ public class CodeGenerationEngine {
             sb.append("@XmlType\n");
         }
 
+        // Déclaration de la classe
         sb.append("public class ").append(dto.getClassName());
 
-        if (dto.getParentClassName() != null && !dto.getParentClassName().equals("Object")) {
+        if (dto.getParentClassName() != null && !dto.getParentClassName().equals("Object")
+                && !dto.getParentClassName().equals("ValueObject")) {
             sb.append(" extends ").append(dto.getParentClassName());
         }
 
-        sb.append(" implements Serializable {\n\n");
-        sb.append("    private static final long serialVersionUID = 1L;\n\n");
+        // Les VoIn implémentent ValueObject pour le cast dans ServiceAdapter
+        if (isVoIn) {
+            sb.append(" implements ValueObject");
+        }
+        // Note : pas de Serializable car les DTOs REST utilisent Jackson/JAXB, pas la sérialisation Java native
+        sb.append(" {\n\n");
 
-        // Champs avec annotations JAXB
+        // RÈGLE 1 : Filtrer les champs - exclure serialVersionUID, loggers, et champs static final inutiles
+        // Les DTOs REST n'ont pas besoin de serialVersionUID (pas de sérialisation Java native)
+        List<DtoInfo.FieldInfo> instanceFields = new ArrayList<>();
+        List<DtoInfo.FieldInfo> constantFields = new ArrayList<>();
+
         for (DtoInfo.FieldInfo field : dto.getFields()) {
-            if (field.isHasXmlElement()) {
-                if (field.getXmlName() != null) {
-                    sb.append("    @XmlElement(name = \"").append(field.getXmlName()).append("\")\n");
+            // Exclure serialVersionUID (inutile en REST)
+            if (field.getName().equals("serialVersionUID")) continue;
+            // Exclure les loggers
+            if (isLoggerField(field)) continue;
+            // Séparer les constantes des champs d'instance
+            if (field.isStatic() && field.isFinal()) {
+                constantFields.add(field);
+            } else {
+                instanceFields.add(field);
+            }
+        }
+
+        // Écrire les constantes métier (pas serialVersionUID, pas logger)
+        for (DtoInfo.FieldInfo field : constantFields) {
+            sb.append("    private static final ").append(field.getType()).append(" ").append(field.getName());
+            sb.append(";\n");
+        }
+        if (!constantFields.isEmpty()) {
+            sb.append("\n");
+        }
+
+        // Écrire les champs d'instance avec annotations JAXB et validation
+        for (DtoInfo.FieldInfo field : instanceFields) {
+            // RÈGLE 6 : @XmlElementWrapper avant @XmlElement pour les listes
+            if (field.isHasXmlElementWrapper()) {
+                if (field.getXmlElementWrapperName() != null) {
+                    sb.append("    @XmlElementWrapper(name = \"").append(field.getXmlElementWrapperName()).append("\")\n");
                 } else {
-                    sb.append("    @XmlElement\n");
+                    sb.append("    @XmlElementWrapper\n");
                 }
             }
+
+            // @XmlElement
+            if (field.isHasXmlElement()) {
+                StringBuilder xmlElementAnnot = new StringBuilder("    @XmlElement");
+                List<String> xmlElementAttrs = new ArrayList<>();
+                if (field.getXmlName() != null) {
+                    xmlElementAttrs.add("name = \"" + field.getXmlName() + "\"");
+                }
+                if (field.isRequired()) {
+                    xmlElementAttrs.add("required = true");
+                }
+                if (!xmlElementAttrs.isEmpty()) {
+                    xmlElementAnnot.append("(").append(String.join(", ", xmlElementAttrs)).append(")");
+                }
+                sb.append(xmlElementAnnot).append("\n");
+            }
+
+            // @XmlAttribute
             if (field.isHasXmlAttribute()) {
                 if (field.getXmlName() != null) {
                     sb.append("    @XmlAttribute(name = \"").append(field.getXmlName()).append("\")\n");
@@ -569,6 +784,20 @@ public class CodeGenerationEngine {
                     sb.append("    @XmlAttribute\n");
                 }
             }
+
+            // RÈGLE 4 : Annotations de validation uniquement sur les champs required
+            if (field.isRequired()) {
+                String baseType = extractBaseType(field.getType());
+                if (baseType.equals("String")) {
+                    sb.append("    @NotBlank\n");
+                } else if (baseType.equals("List") || baseType.equals("Set") || baseType.equals("Collection")) {
+                    sb.append("    @NotNull\n");
+                    sb.append("    @Size(min = 1)\n");
+                } else if (!PRIMITIVE_TYPES.contains(baseType)) {
+                    sb.append("    @NotNull\n");
+                }
+            }
+
             sb.append("    private ").append(field.getType()).append(" ").append(field.getName()).append(";\n");
         }
 
@@ -578,11 +807,12 @@ public class CodeGenerationEngine {
         sb.append("    public ").append(dto.getClassName()).append("() {\n");
         sb.append("    }\n\n");
 
-        // Getters et Setters
-        for (DtoInfo.FieldInfo field : dto.getFields()) {
+        // RÈGLE 1 : Getters et Setters UNIQUEMENT pour les champs d'instance
+        for (DtoInfo.FieldInfo field : instanceFields) {
             String capitalizedName = Character.toUpperCase(field.getName().charAt(0)) + field.getName().substring(1);
+            String getterPrefix = field.getType().equals("boolean") ? "is" : "get";
 
-            sb.append("    public ").append(field.getType()).append(" get").append(capitalizedName).append("() {\n");
+            sb.append("    public ").append(field.getType()).append(" ").append(getterPrefix).append(capitalizedName).append("() {\n");
             sb.append("        return ").append(field.getName()).append(";\n");
             sb.append("    }\n\n");
 
@@ -591,13 +821,12 @@ public class CodeGenerationEngine {
             sb.append("    }\n\n");
         }
 
-        // toString
+        // RÈGLE 1 : toString UNIQUEMENT avec les champs d'instance
         sb.append("    @Override\n");
         sb.append("    public String toString() {\n");
         sb.append("        return \"").append(dto.getClassName()).append("{");
-        List<DtoInfo.FieldInfo> fields = dto.getFields();
-        for (int i = 0; i < fields.size(); i++) {
-            DtoInfo.FieldInfo field = fields.get(i);
+        for (int i = 0; i < instanceFields.size(); i++) {
+            DtoInfo.FieldInfo field = instanceFields.get(i);
             if (i > 0) sb.append(", ");
             sb.append(field.getName()).append("='\" + ").append(field.getName()).append(" + \"'");
         }
@@ -607,7 +836,53 @@ public class CodeGenerationEngine {
         sb.append("}\n");
 
         Files.writeString(srcMain.resolve("dto/" + dto.getClassName() + ".java"), sb.toString());
-        log.info("DTO généré : {} (JAXB: {})", dto.getClassName(), dto.hasJaxbAnnotations());
+        log.info("DTO généré : {} (JAXB: {}, champs instance: {}, constantes: {})",
+                dto.getClassName(), hasJaxb, instanceFields.size(), constantFields.size());
+    }
+
+    /**
+     * RÈGLE 2 : Résout les imports nécessaires pour un type donné.
+     */
+    private void resolveTypeImports(String type, Set<String> imports) {
+        // Extraire le type de base (avant les génériques)
+        String baseType = extractBaseType(type);
+
+        // Vérifier si le type de base nécessite un import
+        if (TYPE_IMPORT_MAP.containsKey(baseType)) {
+            imports.add(TYPE_IMPORT_MAP.get(baseType));
+        }
+
+        // Traiter les types génériques : List<String>, Map<String, BigDecimal>, etc.
+        if (type.contains("<")) {
+            String genericPart = type.substring(type.indexOf('<') + 1, type.lastIndexOf('>'));
+            // Gérer les types multiples séparés par des virgules
+            for (String paramType : genericPart.split(",")) {
+                String trimmed = paramType.trim();
+                // Récursion pour les types imbriqués
+                resolveTypeImports(trimmed, imports);
+            }
+        }
+    }
+
+    /**
+     * Extrait le type de base d'un type potentiellement générique.
+     * Ex: "List<String>" → "List", "BigDecimal" → "BigDecimal"
+     */
+    private String extractBaseType(String type) {
+        if (type.contains("<")) {
+            return type.substring(0, type.indexOf('<')).trim();
+        }
+        return type.trim();
+    }
+
+    /**
+     * RÈGLE 1 : Vérifie si un champ est un logger.
+     */
+    private boolean isLoggerField(DtoInfo.FieldInfo field) {
+        String name = field.getName().toLowerCase();
+        String type = field.getType().toLowerCase();
+        return name.equals("logger") || name.equals("log") || name.equals("log_")
+                || type.contains("logger") || type.contains("log4j");
     }
 
     // ==================== GLOBAL EXCEPTION HANDLER ====================
@@ -793,6 +1068,14 @@ public class CodeGenerationEngine {
         sb.append("- `ejb.jndi.provider.url` : URL du serveur JNDI\n");
         sb.append("- `ejb.jndi.factory` : factory JNDI\n\n");
 
+        sb.append("## Architecture\n\n");
+        sb.append("Le projet utilise le pattern **Strangler Fig** via JNDI :\n\n");
+        sb.append("```\n");
+        sb.append("Client HTTP → Controller REST → ServiceAdapter → JNDI Lookup → EJB\n");
+        sb.append("```\n\n");
+        sb.append("Les ServiceAdapters utilisent un **cast typé** vers l'interface `BaseUseCase`\n");
+        sb.append("(pas de réflexion), ce qui garantit la sécurité de type à la compilation.\n\n");
+
         // Section formats supportés
         sb.append("## Formats supportes\n\n");
         sb.append("L'API supporte les formats suivants :\n\n");
@@ -808,59 +1091,56 @@ public class CodeGenerationEngine {
             sb.append("   ```\n\n");
             sb.append("2. **Parametre de requete** :\n");
             sb.append("   ```\n");
-            sb.append("   GET /api/client-data?format=json\n");
-            sb.append("   GET /api/client-data?format=xml\n");
+            sb.append("   GET /api/endpoint?format=json\n");
+            sb.append("   GET /api/endpoint?format=xml\n");
             sb.append("   ```\n\n");
         }
 
         sb.append("## Endpoints REST\n\n");
-        sb.append("| UseCase | Endpoint | Methode | DTO Entree | DTO Sortie | Format |\n");
-        sb.append("|---------|----------|---------|------------|------------|--------|\n");
+        sb.append("| UseCase | Endpoint | Methode | DTO Entree | DTO Sortie | Format | HTTP Status |\n");
+        sb.append("|---------|----------|---------|------------|------------|--------|-------------|\n");
         for (UseCaseInfo uc : analysisResult.getUseCases()) {
+            String httpCode = determineHttpStatusLabel(uc.getClassName());
             sb.append("| ").append(uc.getClassName())
               .append(" | ").append(uc.getRestEndpoint())
               .append(" | POST")
               .append(" | ").append(uc.getInputDtoClassName())
               .append(" | ").append(uc.getOutputDtoClassName())
               .append(" | ").append(uc.getSerializationFormat().getLabel())
+              .append(" | ").append(httpCode)
               .append(" |\n");
         }
 
-        if (hasXml) {
-            sb.append("\n## Exemples d'appels\n\n");
-            sb.append("### Requete JSON\n\n");
-            sb.append("```bash\n");
-            sb.append("curl -X POST http://localhost:8081/api/client-data \\\n");
-            sb.append("  -H \"Content-Type: application/json\" \\\n");
-            sb.append("  -H \"Accept: application/json\" \\\n");
-            sb.append("  -d '{\"clientId\": \"123\"}'\n");
-            sb.append("```\n\n");
-            sb.append("### Requete XML\n\n");
-            sb.append("```bash\n");
-            sb.append("curl -X POST http://localhost:8081/api/client-data \\\n");
-            sb.append("  -H \"Content-Type: application/xml\" \\\n");
-            sb.append("  -H \"Accept: application/xml\" \\\n");
-            sb.append("  -d '<clientDataVoIn><clientId>123</clientId></clientDataVoIn>'\n");
-            sb.append("```\n\n");
-        }
-
-        sb.append("\n## Architecture\n\n");
+        sb.append("\n## Structure du projet\n\n");
         sb.append("```\n");
         sb.append("src/main/java/com/bank/api/\n");
-        sb.append("  controller/    - Controllers REST\n");
-        sb.append("  service/       - Service Adapters (JNDI lookup)\n");
-        sb.append("  dto/           - Objets de transfert JSON");
+        sb.append("  controller/       - Controllers REST\n");
+        sb.append("  service/          - Service Adapters (JNDI lookup avec cast type)\n");
+        sb.append("  dto/              - Objets de transfert JSON");
         if (hasXml) sb.append("/XML");
         sb.append("\n");
-        sb.append("  config/        - Configuration JNDI");
+        sb.append("  config/           - Configuration JNDI");
         if (hasXml) sb.append(" et negociation de contenu");
         sb.append("\n");
-        sb.append("  exception/     - Gestion globale des erreurs\n");
-        sb.append("  logging/       - Aspect de logging\n");
+        sb.append("  ejb/interfaces/   - Interfaces BaseUseCase et ValueObject\n");
+        sb.append("  exception/        - Gestion globale des erreurs\n");
+        sb.append("  logging/          - Aspect de logging\n");
         sb.append("  Application.java\n");
         sb.append("```\n");
 
         Files.writeString(projectRoot.resolve("README.md"), sb.toString());
         log.info("README.md généré");
+    }
+
+    private String determineHttpStatusLabel(String useCaseClassName) {
+        String name = useCaseClassName.toLowerCase();
+        if (name.contains("create") || name.contains("add") || name.contains("register")
+                || name.contains("open") || name.contains("insert") || name.contains("souscri")) {
+            return "201 CREATED";
+        }
+        if (name.contains("delete") || name.contains("remove") || name.contains("close")) {
+            return "204 NO_CONTENT";
+        }
+        return "200 OK";
     }
 }

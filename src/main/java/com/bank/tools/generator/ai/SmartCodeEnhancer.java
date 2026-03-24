@@ -141,9 +141,30 @@ public class SmartCodeEnhancer {
                         "Méthode execute() mappée sur POST dans " + uc.getControllerName(),
                         controllerFile.getFileName().toString(), usesPost));
 
-                // R11: POST doit retourner 201 Created
-                if (usesPost && !content.contains("HttpStatus.CREATED") && !content.contains("201")) {
-                    // Améliorer le controller pour retourner 201
+                // R11: Déterminer le code HTTP selon le type d'opération
+                // Consultation (Charger, Consulter, Rechercher, Lister, Get, Find, Search, Load) → 200 OK
+                // Création/Exécution (Souscrire, Creer, Ajouter, Inscrire, Enregistrer, etc.) → 201 Created
+                String ucName = uc.getClassName().toLowerCase();
+                boolean isConsultation = ucName.contains("charger") || ucName.contains("consulter")
+                        || ucName.contains("rechercher") || ucName.contains("lister")
+                        || ucName.contains("get") || ucName.contains("find")
+                        || ucName.contains("search") || ucName.contains("load")
+                        || ucName.contains("fetch") || ucName.contains("read");
+
+                if (isConsultation) {
+                    // Opération de consultation : garder 200 OK
+                    if (content.contains("HttpStatus.CREATED")) {
+                        // Corriger si le code avait déjà été mis à 201 par erreur
+                        String improved = content.replace(
+                                "ResponseEntity.status(HttpStatus.CREATED).body(",
+                                "ResponseEntity.ok(");
+                        Files.writeString(controllerFile, improved);
+                    }
+                    report.addEnhancement(new Enhancement("R11", Category.HTTP_METHODS, Severity.INFO,
+                            "POST de consultation retourne 200 OK dans " + uc.getControllerName() + " (opération de lecture)",
+                            controllerFile.getFileName().toString(), true));
+                } else if (usesPost && !content.contains("HttpStatus.CREATED") && !content.contains("201")) {
+                    // Opération de création/exécution : mettre 201 Created
                     String improved = content.replace(
                             "return ResponseEntity.ok(",
                             "return ResponseEntity.status(HttpStatus.CREATED).body(");
@@ -154,11 +175,11 @@ public class SmartCodeEnhancer {
                     }
                     Files.writeString(controllerFile, improved);
                     report.addEnhancement(new Enhancement("R11", Category.HTTP_METHODS, Severity.WARNING,
-                            "POST retourne désormais 201 Created au lieu de 200 OK dans " + uc.getControllerName(),
+                            "POST de création/exécution retourne désormais 201 Created dans " + uc.getControllerName(),
                             controllerFile.getFileName().toString(), true));
                 } else {
                     report.addEnhancement(new Enhancement("R11", Category.HTTP_METHODS, Severity.INFO,
-                            "POST retourne déjà un code approprié dans " + uc.getControllerName(),
+                            "POST retourne déjà un code HTTP approprié dans " + uc.getControllerName(),
                             controllerFile.getFileName().toString(), true));
                 }
             }
@@ -211,13 +232,21 @@ public class SmartCodeEnhancer {
                         }
                     }
 
-                    // Ajouter @NotNull sur les champs String
+                    // Ajouter @NotBlank uniquement sur les champs String marqués required
                     for (DtoInfo.FieldInfo field : dto.getFields()) {
+                        if (field.isSerializationField()) continue; // ignorer serialVersionUID
                         if ("String".equals(field.getType())) {
                             String fieldDecl = "private String " + field.getName();
-                            String annotatedField = "@NotBlank(message = \"Le champ " + field.getName() + " est obligatoire\")\n    @Size(max = 255)\n    private String " + field.getName();
                             int idx = sb.indexOf(fieldDecl);
                             if (idx > 0 && !sb.substring(Math.max(0, idx - 100), idx).contains("@NotBlank")) {
+                                String annotatedField;
+                                if (field.isRequired()) {
+                                    // Champ marqué required=true dans le DTO source
+                                    annotatedField = "@NotBlank(message = \"Le champ " + field.getName() + " est obligatoire\")\n    @Size(max = 255)\n    private String " + field.getName();
+                                } else {
+                                    // Champ optionnel : seulement @Size
+                                    annotatedField = "@Size(max = 255)\n    private String " + field.getName();
+                                }
                                 sb.replace(idx, idx + fieldDecl.length(), annotatedField);
                                 modified = true;
                             }
@@ -914,6 +943,16 @@ public class SmartCodeEnhancer {
                                    ProjectAnalysisResult analysisResult) throws IOException {
         // R69: Générer un test unitaire par controller
         for (UseCaseInfo uc : analysisResult.getUseCases()) {
+            // Déterminer le code HTTP attendu selon le type d'opération
+            String ucNameLower = uc.getClassName().toLowerCase();
+            boolean isConsultation = ucNameLower.contains("charger") || ucNameLower.contains("consulter")
+                    || ucNameLower.contains("rechercher") || ucNameLower.contains("lister")
+                    || ucNameLower.contains("get") || ucNameLower.contains("find")
+                    || ucNameLower.contains("search") || ucNameLower.contains("load")
+                    || ucNameLower.contains("fetch") || ucNameLower.contains("read");
+            String expectedStatus = isConsultation ? "isOk" : "isCreated";
+            String expectedCode = isConsultation ? "200" : "201";
+
             Path testFile = testDir.resolve("controller/" + uc.getControllerName() + "Test.java");
             if (!Files.exists(testFile)) {
                 String resourceName = uc.getClassName().replace("UC", "");
@@ -954,8 +993,8 @@ public class SmartCodeEnhancer {
                             private %s serviceAdapter;
 
                             @Test
-                            @DisplayName("POST %s - Execution reussie retourne 201")
-                            void execute_shouldReturn201_whenValidRequest() throws Exception {
+                            @DisplayName("POST %s - Execution reussie retourne %s")
+                            void execute_shouldReturnSuccess_whenValidRequest() throws Exception {
                                 // Given
                                 %s request = new %s();
                                 %s response = new %s();
@@ -965,7 +1004,7 @@ public class SmartCodeEnhancer {
                                 mockMvc.perform(post("%s")
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(objectMapper.writeValueAsString(request)))
-                                        .andExpect(status().isCreated())
+                                        .andExpect(status().%s())
                                         .andExpect(content().contentType(MediaType.APPLICATION_JSON));
                             }
 
@@ -1001,13 +1040,14 @@ public class SmartCodeEnhancer {
                         BASE_PACKAGE, uc.getServiceAdapterName(),
                         uc.getControllerName(),
                         uc.getControllerName(),
-                        uc.getControllerName() + "Test",
+                        uc.getControllerName(),
                         uc.getServiceAdapterName(),
-                        uc.getRestEndpoint(),
+                        uc.getRestEndpoint(), expectedCode,
                         uc.getInputDtoClassName(), uc.getInputDtoClassName(),
                         uc.getOutputDtoClassName(), uc.getOutputDtoClassName(),
                         uc.getInputDtoClassName(),
                         uc.getRestEndpoint(),
+                        expectedStatus,
                         uc.getRestEndpoint(),
                         uc.getRestEndpoint(),
                         uc.getRestEndpoint(),
@@ -1016,7 +1056,7 @@ public class SmartCodeEnhancer {
                         uc.getRestEndpoint());
                 Files.writeString(testFile, testCode);
                 report.addEnhancement(new Enhancement("R69", Category.TESTING, Severity.WARNING,
-                        "Création du test unitaire " + uc.getControllerName() + "Test (3 scénarios: 201, 4xx, 500)",
+                        "Création du test unitaire " + uc.getControllerName() + "Test (3 scénarios: " + expectedCode + ", 4xx, 500)",
                         uc.getControllerName() + "Test.java", true));
             }
         }

@@ -193,14 +193,29 @@ public class DtoInfo {
         private String type;
         private String accessModifier;
 
+        /** Indique si le champ est static */
+        private boolean isStatic;
+
+        /** Indique si le champ est final */
+        private boolean isFinal;
+
         /** Indique si le champ porte @XmlElement */
         private boolean hasXmlElement;
 
         /** Indique si le champ porte @XmlAttribute */
         private boolean hasXmlAttribute;
 
+        /** Indique si le champ porte @XmlElementWrapper */
+        private boolean hasXmlElementWrapper;
+
+        /** Nom du wrapper XML si défini via @XmlElementWrapper(name=...) */
+        private String xmlElementWrapperName;
+
         /** Nom XML personnalisé si défini via @XmlElement(name=...) */
         private String xmlName;
+
+        /** Indique si le champ est requis (@XmlElement(required=true) ou vérifié dans execute()) */
+        private boolean required;
 
         public FieldInfo() {
         }
@@ -235,6 +250,22 @@ public class DtoInfo {
             this.accessModifier = accessModifier;
         }
 
+        public boolean isStatic() {
+            return isStatic;
+        }
+
+        public void setStatic(boolean isStatic) {
+            this.isStatic = isStatic;
+        }
+
+        public boolean isFinal() {
+            return isFinal;
+        }
+
+        public void setFinal(boolean isFinal) {
+            this.isFinal = isFinal;
+        }
+
         public boolean isHasXmlElement() {
             return hasXmlElement;
         }
@@ -251,6 +282,22 @@ public class DtoInfo {
             this.hasXmlAttribute = hasXmlAttribute;
         }
 
+        public boolean isHasXmlElementWrapper() {
+            return hasXmlElementWrapper;
+        }
+
+        public void setHasXmlElementWrapper(boolean hasXmlElementWrapper) {
+            this.hasXmlElementWrapper = hasXmlElementWrapper;
+        }
+
+        public String getXmlElementWrapperName() {
+            return xmlElementWrapperName;
+        }
+
+        public void setXmlElementWrapperName(String xmlElementWrapperName) {
+            this.xmlElementWrapperName = xmlElementWrapperName;
+        }
+
         public String getXmlName() {
             return xmlName;
         }
@@ -259,8 +306,24 @@ public class DtoInfo {
             this.xmlName = xmlName;
         }
 
+        public boolean isRequired() {
+            return required;
+        }
+
+        public void setRequired(boolean required) {
+            this.required = required;
+        }
+
         public boolean hasJaxbAnnotation() {
-            return hasXmlElement || hasXmlAttribute;
+            return hasXmlElement || hasXmlAttribute || hasXmlElementWrapper;
+        }
+
+        /**
+         * Indique si ce champ est un champ de sérialisation (serialVersionUID).
+         * Ces champs doivent être exclus de la génération de champs d'instance.
+         */
+        public boolean isSerializationField() {
+            return "serialVersionUID".equals(name) && isStatic && isFinal;
         }
 
         @Override
