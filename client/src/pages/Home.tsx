@@ -37,6 +37,9 @@ import {
   X,
   Plus,
   FilePlus2,
+  FolderGit2,
+  Loader2,
+  PackageOpen,
 } from "lucide-react";
 import { Streamdown } from "streamdown";
 
@@ -47,6 +50,8 @@ import { mergeReports, generateMultiFileMarkdownReport } from "@/lib/ejb-analyze
 import { generateModernCode } from "@/lib/code-generator";
 import type { GeneratedFile, GenerationResult } from "@/lib/code-generator";
 import { SAMPLE_CODES } from "@/lib/sample-code";
+import { exportToZip } from "@/lib/zip-exporter";
+import type { GeneratedFile as ZipFile } from "@/lib/zip-exporter";
 
 // ============================================================
 // Types
@@ -87,6 +92,12 @@ export default function Home() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const projectInputRef = useRef<HTMLInputElement>(null);
+
+  // Project mode state
+  const [isProjectMode, setIsProjectMode] = useState(false);
+  const [projectName, setProjectName] = useState<string>("");
+  const [projectProgress, setProjectProgress] = useState<{ current: number; total: number; phase: string } | null>(null);
 
   const activeFile = useMemo(
     () => sourceFiles.find((f) => f.id === activeFileId) || sourceFiles[0],
@@ -227,6 +238,164 @@ export default function Home() {
     [addStatus]
   );
 
+  // ---- Project mode: load entire project ----
+
+  const handleProjectUpload = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
+
+      const allFiles = Array.from(files);
+      const javaFiles = allFiles.filter(
+        (f) => f.name.endsWith(".java") && !f.name.endsWith("package-info.java")
+      );
+
+      if (javaFiles.length === 0) {
+        toast.error("Aucun fichier .java trouvé dans le projet.");
+        e.target.value = "";
+        return;
+      }
+
+      // Detect project name from common root
+      const firstPath = (allFiles[0] as any).webkitRelativePath || allFiles[0].name;
+      const detectedName = firstPath.split("/")[0] || "Projet";
+      setProjectName(detectedName);
+      setIsProjectMode(true);
+      setProjectProgress({ current: 0, total: javaFiles.length, phase: "Chargement des fichiers..." });
+      addStatus(`Projet "${detectedName}" : ${javaFiles.length} fichier(s) .java détecté(s)`);
+
+      let loaded = 0;
+      const newFiles: SourceFile[] = [];
+
+      for (const file of javaFiles) {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const content = ev.target?.result as string;
+          const relativePath = (file as any).webkitRelativePath || file.name;
+          newFiles.push({
+            id: nextFileId(),
+            name: relativePath.split("/").pop() || file.name,
+            content,
+          });
+          loaded++;
+          setProjectProgress({ current: loaded, total: javaFiles.length, phase: "Chargement des fichiers..." });
+
+          if (loaded === javaFiles.length) {
+            // Replace all tabs with project files
+            setSourceFiles(newFiles);
+            setActiveFileId(newFiles[0].id);
+            setMergedReport(null);
+            setGenerationResult(null);
+            setSelectedGenFile(null);
+            addStatus(`${newFiles.length} fichier(s) chargé(s) depuis "${detectedName}"`);
+            toast.success(`Projet "${detectedName}" chargé : ${newFiles.length} fichier(s) Java`);
+
+            // Auto-analyze after loading
+            setProjectProgress({ current: 0, total: newFiles.length, phase: "Analyse en cours..." });
+            setTimeout(() => {
+              runProjectBatch(newFiles);
+            }, 300);
+          }
+        };
+        reader.readAsText(file);
+      }
+
+      e.target.value = "";
+    },
+    [addStatus]
+  );
+
+  const runProjectBatch = useCallback(
+    (files: SourceFile[]) => {
+      setIsAnalyzing(true);
+      addStatus(`Analyse batch de ${files.length} fichier(s)...`);
+
+      const reports: AnalysisReport[] = [];
+      const updatedFiles: SourceFile[] = [];
+      let analyzed = 0;
+
+      // Process files in chunks to avoid blocking the UI
+      const chunkSize = 5;
+      const processChunk = (startIdx: number) => {
+        const endIdx = Math.min(startIdx + chunkSize, files.length);
+
+        for (let i = startIdx; i < endIdx; i++) {
+          const sf = files[i];
+          if (sf.content.trim()) {
+            try {
+              const report = analyzeJavaCode(sf.content, sf.name);
+              reports.push(report);
+              updatedFiles.push({ ...sf, report });
+            } catch {
+              updatedFiles.push(sf);
+            }
+          } else {
+            updatedFiles.push(sf);
+          }
+          analyzed++;
+        }
+
+        setProjectProgress({ current: analyzed, total: files.length, phase: "Analyse en cours..." });
+
+        if (endIdx < files.length) {
+          // Process next chunk
+          setTimeout(() => processChunk(endIdx), 10);
+        } else {
+          // All files analyzed, now merge and generate
+          setSourceFiles(updatedFiles);
+
+          const merged = mergeReports(reports);
+          setMergedReport(merged);
+
+          let md: string;
+          if (reports.length === 1) {
+            md = generateMarkdownReport(reports[0]);
+          } else {
+            md = generateMultiFileMarkdownReport(reports, merged);
+          }
+          setMarkdownReport(md);
+          setIsAnalyzing(false);
+
+          addStatus(
+            `Analyse terminée : ${merged.summary.totalEjbInjections} @EJB, ${merged.summary.totalJndiLookups} JNDI, ${merged.summary.totalMethodCalls} appels`
+          );
+          toast.success(
+            `Analyse terminée : ${merged.summary.servicesDetected.length} service(s) dans ${reports.length} fichier(s)`
+          );
+
+          // Auto-generate
+          setProjectProgress({ current: 0, total: 1, phase: "Génération du code..." });
+          setIsGenerating(true);
+          addStatus("Génération du code API Client moderne...");
+
+          setTimeout(() => {
+            try {
+              const result = generateModernCode(merged);
+              setGenerationResult(result);
+              if (result.files.length > 0) {
+                setSelectedGenFile(result.files[0]);
+              }
+              setActiveRightTab("code");
+              addStatus(`Génération terminée : ${result.files.length} fichier(s) généré(s)`);
+              toast.success(
+                `Projet "${projectName || 'Projet'}" traité : ${result.files.length} fichier(s) générés à partir de ${reports.length} source(s)`
+              );
+            } catch {
+              addStatus("Erreur lors de la génération");
+              toast.error("Erreur lors de la génération du code.");
+            }
+            setIsGenerating(false);
+            setProjectProgress(null);
+          }, 300);
+        }
+      };
+
+      // Start processing
+      setTimeout(() => processChunk(0), 10);
+    },
+    [addStatus, projectName]
+  );
+
   // ---- Analysis ----
 
   const handleAnalyze = useCallback(() => {
@@ -310,22 +479,33 @@ export default function Home() {
     }, 600);
   }, [mergedReport, addStatus]);
 
-  // ---- Download ----
+  // ---- Download ZIP ----
 
-  const handleDownload = useCallback(() => {
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleDownload = useCallback(async () => {
     if (!generationResult) return;
-    const content = generationResult.files
-      .map((f) => `// ===== ${f.path} =====\n${f.content}`)
-      .join("\n\n");
-    const blob = new Blob([content], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "api-client-modernized.txt";
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Code téléchargé");
-  }, [generationResult]);
+    setIsExporting(true);
+    addStatus("Export ZIP Maven en cours...");
+
+    try {
+      // Adapter les fichiers au format attendu par zip-exporter
+      const zipFiles: ZipFile[] = generationResult.files.map((f) => ({
+        path: f.path,
+        content: f.content,
+        category: f.type.toUpperCase(),
+      }));
+
+      await exportToZip(zipFiles, "ejb-client-modernized", markdownReport || undefined);
+
+      addStatus(`Export ZIP terminé : ${generationResult.files.length} fichier(s)`);
+      toast.success("Archive ZIP Maven téléchargée avec succès");
+    } catch (e) {
+      addStatus("Erreur lors de l'export ZIP");
+      toast.error("Erreur lors de la génération du ZIP.");
+    }
+    setIsExporting(false);
+  }, [generationResult, markdownReport, addStatus]);
 
   // ---- Copy ----
 
@@ -450,6 +630,15 @@ export default function Home() {
             className="hidden"
             onChange={handleFolderUpload}
           />
+          <input
+            ref={projectInputRef}
+            type="file"
+            /* @ts-expect-error webkitdirectory is valid */
+            webkitdirectory=""
+            multiple
+            className="hidden"
+            onChange={handleProjectUpload}
+          />
 
           <Button
             variant="outline"
@@ -468,6 +657,19 @@ export default function Home() {
           >
             <FolderOpen className="w-3.5 h-3.5" />
             Dossier
+          </Button>
+          <Button
+            size="sm"
+            className="h-8 text-xs gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700"
+            onClick={() => projectInputRef.current?.click()}
+            disabled={!!projectProgress}
+          >
+            {projectProgress ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <FolderGit2 className="w-3.5 h-3.5" />
+            )}
+            Projet entier
           </Button>
 
           <div className="w-px h-6 bg-border mx-1" />
@@ -505,13 +707,39 @@ export default function Home() {
               size="sm"
               className="h-8 text-xs gap-1.5"
               onClick={handleDownload}
+              disabled={isExporting}
             >
-              <Download className="w-3.5 h-3.5" />
-              Télécharger
+              {isExporting ? (
+                <Clock className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5" />
+              )}
+              {isExporting ? "Export..." : "ZIP Maven"}
             </Button>
           )}
         </div>
       </header>
+
+      {/* Project progress bar */}
+      {projectProgress && (
+        <div className="h-8 border-b border-border flex items-center px-4 gap-3 bg-emerald-950/30 shrink-0">
+          <FolderGit2 className="w-4 h-4 text-emerald-400" />
+          <span className="text-xs text-emerald-300 font-medium">
+            {projectName ? `Projet : ${projectName}` : "Projet"}
+          </span>
+          <div className="flex-1 h-2 bg-secondary rounded-full overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+              style={{
+                width: `${projectProgress.total > 0 ? (projectProgress.current / projectProgress.total) * 100 : 0}%`,
+              }}
+            />
+          </div>
+          <span className="text-[10px] text-emerald-400 font-mono">
+            {projectProgress.phase} ({projectProgress.current}/{projectProgress.total})
+          </span>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="flex-1 overflow-hidden">
@@ -830,6 +1058,16 @@ export default function Home() {
           <FilePlus2 className="w-3 h-3" />
           <span>{sourceFiles.length} fichier(s)</span>
         </div>
+
+        {isProjectMode && projectName && (
+          <>
+            <div className="w-px h-3.5 bg-border" />
+            <div className="flex items-center gap-1 text-emerald-400">
+              <PackageOpen className="w-3 h-3" />
+              <span>{projectName}</span>
+            </div>
+          </>
+        )}
 
         {mergedReport && (
           <>
