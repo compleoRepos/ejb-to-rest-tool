@@ -233,6 +233,53 @@ public class GeneratorController {
         return "redirect:/generation";
     }
 
+    /**
+     * API JSON pour la generation via AJAX.
+     * Retourne le resultat en JSON pour permettre au JS de synchroniser
+     * l'animation de progression avec la reponse serveur.
+     */
+    @PostMapping("/api/generate")
+    @ResponseBody
+    public ResponseEntity<Map<String, Object>> generateProjectApi(HttpSession session) {
+        String projectId = (String) session.getAttribute("projectId");
+        ProjectAnalysisResult analysisResult = (ProjectAnalysisResult) session.getAttribute("analysisResult");
+
+        Map<String, Object> response = new HashMap<>();
+
+        if (projectId == null || analysisResult == null) {
+            response.put("success", false);
+            response.put("error", "Veuillez d'abord uploader et scanner un projet.");
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        if (analysisResult.getUseCases().isEmpty()) {
+            response.put("success", false);
+            response.put("error", "Aucun UseCase a generer.");
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        try {
+            log.info("[API] Generation du projet API pour : {}", projectId);
+            generatorService.generateProject(projectId, analysisResult);
+
+            EnhancementReport report = generatorService.enhanceProject(projectId, analysisResult);
+            session.setAttribute("enhancementReport", report);
+
+            response.put("success", true);
+            response.put("qualityScore", report.getQualityScore());
+            response.put("totalRulesApplied", report.getTotalRulesApplied());
+            response.put("totalRulesChecked", report.getTotalRulesChecked());
+            response.put("message", "Projet API REST genere et ameliore par l'IA ! Score qualite : " +
+                    report.getQualityScore() + "/100");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("[API] Erreur lors de la generation", e);
+            response.put("success", false);
+            response.put("error", "Erreur lors de la generation : " + e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
     // ============================================================
     // 6. Results
     // ============================================================

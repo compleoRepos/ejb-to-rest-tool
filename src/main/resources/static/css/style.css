@@ -744,6 +744,22 @@ a:hover { text-decoration: underline; }
 
 .gen-step-status { flex-shrink: 0; }
 
+.gen-step-active {
+    border-color: #fbbf24;
+    background: #fffbeb;
+}
+
+.gen-step-active .gen-step-icon {
+    background: var(--warning-bg);
+    color: var(--warning);
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
 /* --- Progress Bar --- */
 .progress-section { margin-top: 1.25rem; }
 

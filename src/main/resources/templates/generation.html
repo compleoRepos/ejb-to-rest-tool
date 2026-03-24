@@ -50,40 +50,40 @@
                                     <h4>1. Parsing du code EJB</h4>
                                     <p>Analyse statique avec JavaParser, detection des UseCases et DTOs</p>
                                 </div>
-                                <div class="gen-step-status">
+                                <div class="gen-step-status" id="status-parsing">
                                     <span class="badge badge-success" th:if="${analysisResult != null}"><i class="fas fa-check"></i> Termine</span>
                                     <span class="badge badge-default" th:if="${analysisResult == null}">En attente</span>
                                 </div>
                             </div>
-                            <div class="gen-step" id="step-generation" th:classappend="${projectGenerated ? 'gen-step-done' : ''}">
+                            <div class="gen-step" id="step-generation">
                                 <div class="gen-step-icon"><i class="fas fa-code"></i></div>
                                 <div class="gen-step-content">
                                     <h4>2. Generation du code REST</h4>
                                     <p>Creation des controllers, adapters, DTOs, configuration Spring Boot</p>
                                 </div>
-                                <div class="gen-step-status">
+                                <div class="gen-step-status" id="status-generation">
                                     <span class="badge badge-success" th:if="${projectGenerated}"><i class="fas fa-check"></i> Termine</span>
                                     <span class="badge badge-default" th:if="${!projectGenerated}">En attente</span>
                                 </div>
                             </div>
-                            <div class="gen-step" id="step-enhancement" th:classappend="${enhancementReport != null ? 'gen-step-done' : ''}">
+                            <div class="gen-step" id="step-enhancement">
                                 <div class="gen-step-icon"><i class="fas fa-magic"></i></div>
                                 <div class="gen-step-content">
                                     <h4>3. Amelioration SmartCodeEnhancer</h4>
                                     <p>Application des 77 regles d'amelioration (securite, tests, performance...)</p>
                                 </div>
-                                <div class="gen-step-status">
+                                <div class="gen-step-status" id="status-enhancement">
                                     <span class="badge badge-success" th:if="${enhancementReport != null}"><i class="fas fa-check"></i> Termine</span>
                                     <span class="badge badge-default" th:if="${enhancementReport == null}">En attente</span>
                                 </div>
                             </div>
-                            <div class="gen-step" id="step-packaging" th:classappend="${enhancementReport != null ? 'gen-step-done' : ''}">
+                            <div class="gen-step" id="step-packaging">
                                 <div class="gen-step-icon"><i class="fas fa-box"></i></div>
                                 <div class="gen-step-content">
                                     <h4>4. Packaging</h4>
                                     <p>Creation du fichier ZIP avec le projet complet pret au deploiement</p>
                                 </div>
-                                <div class="gen-step-status">
+                                <div class="gen-step-status" id="status-packaging">
                                     <span class="badge badge-success" th:if="${enhancementReport != null}"><i class="fas fa-check"></i> Pret</span>
                                     <span class="badge badge-default" th:if="${enhancementReport == null}">En attente</span>
                                 </div>
@@ -91,7 +91,7 @@
                         </div>
 
                         <!-- Progress Bar -->
-                        <div class="progress-section" th:if="${!projectGenerated}">
+                        <div class="progress-section" id="progressSection" th:if="${!projectGenerated}">
                             <div class="progress-bar-container" id="progressContainer" style="display:none;">
                                 <div class="progress-bar" id="progressBar"></div>
                             </div>
@@ -101,13 +101,11 @@
                 </div>
 
                 <!-- Launch Button -->
-                <div class="card" th:if="${!projectGenerated}">
+                <div class="card" id="launchCard" th:if="${!projectGenerated}">
                     <div class="card-body" style="text-align:center; padding: 2rem;">
-                        <form th:action="@{/generate}" method="post" id="generateForm">
-                            <button type="submit" class="btn btn-success btn-xl" id="generateBtn" onclick="startGeneration()">
-                                <i class="fas fa-rocket"></i> Lancer la transformation
-                            </button>
-                        </form>
+                        <button type="button" class="btn btn-success btn-xl" id="generateBtn" onclick="launchTransformation()">
+                            <i class="fas fa-rocket"></i> Lancer la transformation
+                        </button>
                         <p class="text-muted" style="margin-top: 1rem;">
                             <i class="fas fa-info-circle"></i>
                             <span th:text="${analysisResult.useCases.size() + ' UseCase(s) et ' + analysisResult.dtos.size() + ' DTO(s) seront transformes'}">X UseCases seront transformes</span>
@@ -147,11 +145,18 @@
                     </div>
                 </div>
 
-                <!-- Next Steps -->
-                <div class="card-actions" th:if="${projectGenerated}" style="margin-top: 1.5rem;">
-                    <a th:href="@{/results}" class="btn btn-primary btn-lg"><i class="fas fa-code"></i> Voir les resultats</a>
-                    <a th:href="@{/report}" class="btn btn-info btn-lg"><i class="fas fa-chart-bar"></i> Voir le rapport IA</a>
-                    <a th:href="@{/export}" class="btn btn-success btn-lg"><i class="fas fa-download"></i> Telecharger</a>
+                <!-- Success: Next Steps (shown after generation) -->
+                <div class="card" id="nextStepsCard" th:if="${projectGenerated}" style="margin-top: 1.5rem;">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-arrow-right"></i> Etapes suivantes</h2>
+                    </div>
+                    <div class="card-body" style="text-align:center; padding: 2rem;">
+                        <div class="card-actions">
+                            <a th:href="@{/results}" class="btn btn-primary btn-lg"><i class="fas fa-code"></i> Voir les resultats</a>
+                            <a th:href="@{/report}" class="btn btn-info btn-lg"><i class="fas fa-chart-bar"></i> Voir le rapport IA</a>
+                            <a th:href="@{/export}" class="btn btn-success btn-lg"><i class="fas fa-download"></i> Telecharger</a>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

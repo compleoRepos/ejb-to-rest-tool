@@ -5,7 +5,6 @@
 
 document.addEventListener('DOMContentLoaded', function() {
     initUploadZone();
-    initProgressBar();
     initAlertDismiss();
 });
 
@@ -16,13 +15,11 @@ document.addEventListener('DOMContentLoaded', function() {
 function initUploadZone() {
     var zone = document.getElementById('uploadArea');
     var fileInput = document.getElementById('fileInput');
-    var uploadBtn = document.getElementById('uploadBtn');
 
     if (!zone || !fileInput) return;
 
     // Click on zone opens file dialog
     zone.addEventListener('click', function(e) {
-        // Prevent triggering if clicking on the file input itself
         if (e.target !== fileInput) {
             fileInput.click();
         }
@@ -59,7 +56,6 @@ function initUploadZone() {
         if (files.length > 0) {
             var file = files[0];
             if (file.name.endsWith('.zip')) {
-                // Set the file on the input
                 fileInput.files = files;
                 showFileInfo(file);
                 enableUploadBtn();
@@ -151,6 +147,175 @@ function initAlertDismiss() {
 }
 
 // ============================================================
+// Generation - AJAX with synchronized progress animation
+// ============================================================
+
+var generationInProgress = false;
+
+function launchTransformation() {
+    if (generationInProgress) return;
+    generationInProgress = true;
+
+    var progressContainer = document.getElementById('progressContainer');
+    var progressBar = document.getElementById('progressBar');
+    var progressText = document.getElementById('progressText');
+    var generateBtn = document.getElementById('generateBtn');
+
+    // Show progress UI
+    if (progressContainer) progressContainer.style.display = 'block';
+    if (progressText) {
+        progressText.style.display = 'block';
+        progressText.textContent = 'Initialisation de la transformation...';
+    }
+    if (generateBtn) {
+        generateBtn.disabled = true;
+        generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Transformation en cours...';
+    }
+
+    // Animation steps (visual feedback)
+    var steps = [
+        { pct: 10, msg: 'Parsing du code EJB avec JavaParser...', stepId: 'step-parsing' },
+        { pct: 25, msg: 'Generation des Controllers REST...', stepId: 'step-generation' },
+        { pct: 40, msg: 'Generation des Service Adapters et DTOs...', stepId: null },
+        { pct: 55, msg: 'Application des regles SmartCodeEnhancer...', stepId: 'step-enhancement' },
+        { pct: 70, msg: 'Generation des tests unitaires...', stepId: null },
+        { pct: 80, msg: 'Packaging du projet...', stepId: 'step-packaging' }
+    ];
+
+    var stepIndex = 0;
+    var animationDone = false;
+    var serverDone = false;
+    var serverResult = null;
+
+    // Start animation
+    var interval = setInterval(function() {
+        if (stepIndex < steps.length) {
+            var step = steps[stepIndex];
+            if (progressBar) progressBar.style.width = step.pct + '%';
+            if (progressText) progressText.textContent = step.msg;
+            addLogEntry('INFO', step.msg);
+
+            // Mark step as active (spinning)
+            if (step.stepId) {
+                var stepEl = document.getElementById(step.stepId);
+                if (stepEl) {
+                    stepEl.classList.add('gen-step-active');
+                    var statusEl = stepEl.querySelector('.gen-step-status');
+                    if (statusEl) {
+                        statusEl.innerHTML = '<span class="badge badge-warning"><i class="fas fa-spinner fa-spin"></i> En cours</span>';
+                    }
+                }
+            }
+
+            stepIndex++;
+        } else {
+            clearInterval(interval);
+            animationDone = true;
+            checkCompletion();
+        }
+    }, 900);
+
+    // Start AJAX call to server
+    fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin'
+    })
+    .then(function(response) {
+        return response.json();
+    })
+    .then(function(data) {
+        serverDone = true;
+        serverResult = data;
+        checkCompletion();
+    })
+    .catch(function(error) {
+        serverDone = true;
+        serverResult = { success: false, error: 'Erreur de connexion : ' + error.message };
+        checkCompletion();
+    });
+
+    // Called when both animation and server are done
+    function checkCompletion() {
+        if (!animationDone || !serverDone) return;
+
+        // Finish the progress bar
+        if (serverResult && serverResult.success) {
+            // Success path
+            if (progressBar) progressBar.style.width = '100%';
+            if (progressText) progressText.textContent = 'Transformation terminee !';
+            addLogEntry('SUCCESS', 'Transformation terminee !');
+            addLogEntry('SUCCESS', 'Score qualite IA : ' + serverResult.qualityScore + '/100, ' +
+                serverResult.totalRulesApplied + '/' + serverResult.totalRulesChecked + ' regles appliquees');
+
+            // Mark all steps as done
+            markAllStepsDone();
+
+            // Show success message
+            showAlert('success', serverResult.message);
+
+            // Auto-redirect to results after 2 seconds
+            setTimeout(function() {
+                window.location.href = '/results';
+            }, 2500);
+
+        } else {
+            // Error path
+            if (progressBar) {
+                progressBar.style.width = '100%';
+                progressBar.style.background = '#ef4444';
+            }
+            if (progressText) progressText.textContent = 'Erreur lors de la transformation';
+            addLogEntry('ERROR', serverResult ? serverResult.error : 'Erreur inconnue');
+
+            showAlert('error', serverResult ? serverResult.error : 'Erreur inconnue');
+
+            // Re-enable button
+            if (generateBtn) {
+                generateBtn.disabled = false;
+                generateBtn.innerHTML = '<i class="fas fa-rocket"></i> Relancer la transformation';
+            }
+            generationInProgress = false;
+        }
+    }
+}
+
+function markAllStepsDone() {
+    var stepIds = ['step-parsing', 'step-generation', 'step-enhancement', 'step-packaging'];
+    stepIds.forEach(function(id) {
+        var stepEl = document.getElementById(id);
+        if (stepEl) {
+            stepEl.classList.remove('gen-step-active');
+            stepEl.classList.add('gen-step-done');
+            var statusEl = stepEl.querySelector('.gen-step-status');
+            if (statusEl) {
+                statusEl.innerHTML = '<span class="badge badge-success"><i class="fas fa-check"></i> Termine</span>';
+            }
+        }
+    });
+}
+
+function showAlert(type, message) {
+    var alertsContainer = document.querySelector('.page-alerts');
+    if (!alertsContainer) return;
+
+    var alertClass = type === 'success' ? 'alert-success' : 'alert-error';
+    var iconClass = type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle';
+
+    var alertDiv = document.createElement('div');
+    alertDiv.className = 'alert ' + alertClass;
+    alertDiv.innerHTML = '<i class="fas ' + iconClass + '"></i> <span>' + escapeHtml(message) + '</span>';
+    alertsContainer.appendChild(alertDiv);
+
+    // Auto-dismiss
+    setTimeout(function() {
+        alertDiv.style.transition = 'opacity 0.5s';
+        alertDiv.style.opacity = '0';
+        setTimeout(function() { alertDiv.remove(); }, 500);
+    }, 10000);
+}
+
+// ============================================================
 // File Preview (Results page)
 // ============================================================
 
@@ -219,53 +384,6 @@ function loadDiff(useCaseClassName) {
             if (original) original.innerHTML = '<code>// Erreur : ' + error.message + '</code>';
             if (generated) generated.innerHTML = '<code>// Erreur : ' + error.message + '</code>';
         });
-}
-
-// ============================================================
-// Progress Bar (Generation page)
-// ============================================================
-
-function initProgressBar() {
-    // Auto-init if progress elements exist
-}
-
-function startGeneration() {
-    var progressContainer = document.getElementById('progressContainer');
-    var progressBar = document.getElementById('progressBar');
-    var progressText = document.getElementById('progressText');
-    var generateBtn = document.getElementById('generateBtn');
-
-    if (progressContainer) progressContainer.style.display = 'block';
-    if (progressText) {
-        progressText.style.display = 'block';
-        progressText.textContent = 'Initialisation de la transformation...';
-    }
-    if (generateBtn) {
-        generateBtn.disabled = true;
-        generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Transformation en cours...';
-    }
-
-    var steps = [
-        { pct: 15, msg: 'Parsing du code EJB avec JavaParser...' },
-        { pct: 35, msg: 'Generation des Controllers REST...' },
-        { pct: 55, msg: 'Generation des Service Adapters et DTOs...' },
-        { pct: 70, msg: 'Application des regles SmartCodeEnhancer...' },
-        { pct: 85, msg: 'Generation des tests unitaires...' },
-        { pct: 95, msg: 'Packaging du projet...' },
-        { pct: 100, msg: 'Transformation terminee !' }
-    ];
-
-    var stepIndex = 0;
-    var interval = setInterval(function() {
-        if (stepIndex < steps.length) {
-            if (progressBar) progressBar.style.width = steps[stepIndex].pct + '%';
-            if (progressText) progressText.textContent = steps[stepIndex].msg;
-            addLogEntry('INFO', steps[stepIndex].msg);
-            stepIndex++;
-        } else {
-            clearInterval(interval);
-        }
-    }, 800);
 }
 
 // ============================================================
