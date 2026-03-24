@@ -609,3 +609,4 @@ export function exportAiReportPdf(aiResult: AiAnalysisResult, projectName?: stri
     : `rapport-ia-ejb-client-modernizer.pdf`;
   doc.save(fileName);
 }
+// PDF export v1.0 - Hamza NORDINE
