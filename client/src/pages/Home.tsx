@@ -40,6 +40,14 @@ import {
   FolderGit2,
   Loader2,
   PackageOpen,
+  Brain,
+  ShieldAlert,
+  Gauge,
+  Lightbulb,
+  ArrowUpRight,
+  CircleDot,
+  Wrench,
+  TrendingUp,
 } from "lucide-react";
 import { Streamdown } from "streamdown";
 
@@ -52,6 +60,8 @@ import type { GeneratedFile, GenerationResult } from "@/lib/code-generator";
 import { SAMPLE_CODES } from "@/lib/sample-code";
 import { exportToZip } from "@/lib/zip-exporter";
 import type { GeneratedFile as ZipFile } from "@/lib/zip-exporter";
+import { runAiAnalysis, runMultiFileAiAnalysis } from "@/lib/ai-engine";
+import type { AiAnalysisResult, AiSuggestion, Severity } from "@/lib/ai-engine";
 
 // ============================================================
 // Types
@@ -89,6 +99,9 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeRightTab, setActiveRightTab] = useState("code");
   const [statusMessages, setStatusMessages] = useState<string[]>([]);
+
+  // AI engine state
+  const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -468,6 +481,24 @@ export default function Home() {
           setSelectedGenFile(result.files[0]);
         }
         setActiveRightTab("code");
+
+        // Run AI analysis (deterministic, no hallucination)
+        try {
+          const filesForAi = sourceFiles
+            .filter((sf) => sf.report)
+            .map((sf) => ({ code: sf.content, fileName: sf.name, report: sf.report! }));
+          const aiRes = filesForAi.length > 1
+            ? runMultiFileAiAnalysis(filesForAi, result)
+            : filesForAi.length === 1
+            ? runAiAnalysis(filesForAi[0].code, filesForAi[0].report, result, filesForAi[0].fileName)
+            : null;
+          setAiResult(aiRes);
+          if (aiRes) {
+            addStatus(`IA : ${aiRes.summary.totalSuggestions} suggestion(s), score legacy ${aiRes.legacyScore.overall}/100`);
+          }
+        } catch {
+          // AI analysis is non-blocking
+        }
 
         addStatus(`Génération terminée : ${result.files.length} fichier(s) généré(s)`);
         toast.success(`${result.files.length} fichier(s) généré(s) avec succès`);
@@ -916,6 +947,18 @@ export default function Home() {
                       <BarChart3 className="w-3.5 h-3.5 mr-1.5" />
                       Rapport
                     </TabsTrigger>
+                    <TabsTrigger
+                      value="ai"
+                      className="h-7 text-xs px-3 rounded-none data-[state=active]:bg-background data-[state=active]:border-b-2 data-[state=active]:border-amber-500 data-[state=active]:text-foreground text-muted-foreground"
+                    >
+                      <Brain className="w-3.5 h-3.5 mr-1.5" />
+                      IA Interne
+                      {aiResult && (
+                        <Badge className="ml-1.5 h-4 text-[10px] bg-amber-500/20 text-amber-400 border-0">
+                          {aiResult.summary.totalSuggestions}
+                        </Badge>
+                      )}
+                    </TabsTrigger>
                   </TabsList>
 
                   {selectedGenFile && activeRightTab === "code" && (
@@ -1024,6 +1067,143 @@ export default function Home() {
                   )}
                 </TabsContent>
 
+                {/* AI Tab */}
+                <TabsContent value="ai" className="flex-1 m-0 overflow-hidden">
+                  {aiResult ? (
+                    <ScrollArea className="h-full">
+                      <div className="p-5 space-y-6">
+                        {/* Score comparison */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <ScoreCard
+                            title="Code Legacy"
+                            score={aiResult.legacyScore.overall}
+                            color="destructive"
+                            details={[
+                              { label: "Maintenabilité", value: aiResult.legacyScore.maintainability },
+                              { label: "Sécurité", value: aiResult.legacyScore.security },
+                              { label: "Performance", value: aiResult.legacyScore.performance },
+                              { label: "Résilience", value: aiResult.legacyScore.resilience },
+                            ]}
+                          />
+                          <ScoreCard
+                            title="Code Modernisé"
+                            score={aiResult.modernScore.overall}
+                            color="primary"
+                            details={[
+                              { label: "Maintenabilité", value: aiResult.modernScore.maintainability },
+                              { label: "Sécurité", value: aiResult.modernScore.security },
+                              { label: "Performance", value: aiResult.modernScore.performance },
+                              { label: "Résilience", value: aiResult.modernScore.resilience },
+                            ]}
+                          />
+                        </div>
+
+                        {/* Summary badges */}
+                        <div className="flex flex-wrap gap-2">
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-red-500/10 border border-red-500/20">
+                            <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
+                            <span className="text-xs text-red-300">{aiResult.summary.criticalCount} critique(s)</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-500/10 border border-amber-500/20">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                            <span className="text-xs text-amber-300">{aiResult.summary.warningCount} avertissement(s)</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20">
+                            <Lightbulb className="w-3.5 h-3.5 text-blue-400" />
+                            <span className="text-xs text-blue-300">{aiResult.summary.infoCount} info(s)</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-purple-500/10 border border-purple-500/20">
+                            <Gauge className="w-3.5 h-3.5 text-purple-400" />
+                            <span className="text-xs text-purple-300">Complexité : {aiResult.summary.migrationComplexity}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20">
+                            <Clock className="w-3.5 h-3.5 text-emerald-400" />
+                            <span className="text-xs text-emerald-300">Effort : {aiResult.summary.estimatedEffortDays} jour(s)</span>
+                          </div>
+                        </div>
+
+                        {/* Confidence notice */}
+                        <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-emerald-500/5 border border-emerald-500/20">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+                          <span className="text-xs text-emerald-300">{aiResult.summary.confidenceLevel}</span>
+                        </div>
+
+                        {/* Optimizations */}
+                        {aiResult.optimizations.length > 0 && (
+                          <div>
+                            <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                              <Wrench className="w-4 h-4 text-primary" />
+                              Optimisations ({aiResult.optimizations.length})
+                            </h3>
+                            <div className="space-y-2">
+                              {aiResult.optimizations.map((opt) => (
+                                <div
+                                  key={opt.id}
+                                  className="flex items-start gap-3 px-3 py-2.5 rounded-md bg-secondary/40 border border-border"
+                                >
+                                  <div className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${
+                                    opt.applied ? "bg-emerald-400" : "bg-amber-400"
+                                  }`} />
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-0.5">
+                                      <span className="text-xs font-medium text-foreground capitalize">{opt.type}</span>
+                                      <Badge variant="outline" className={`text-[9px] h-4 ${
+                                        opt.applied
+                                          ? "border-emerald-500/40 text-emerald-400"
+                                          : "border-amber-500/40 text-amber-400"
+                                      }`}>
+                                        {opt.applied ? "Appliqué" : "Recommandé"}
+                                      </Badge>
+                                    </div>
+                                    <p className="text-[11px] text-muted-foreground leading-relaxed">{opt.description}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Suggestions list */}
+                        <div>
+                          <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                            <Lightbulb className="w-4 h-4 text-amber-400" />
+                            Suggestions ({aiResult.suggestions.length})
+                          </h3>
+                          <div className="space-y-2">
+                            {aiResult.suggestions.map((sug) => (
+                              <SuggestionCard key={sug.id} suggestion={sug} />
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Top risks */}
+                        {aiResult.summary.topRisks.length > 0 && (
+                          <div>
+                            <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                              <ShieldAlert className="w-4 h-4 text-red-400" />
+                              Risques principaux
+                            </h3>
+                            <div className="space-y-1.5">
+                              {aiResult.summary.topRisks.map((risk, i) => (
+                                <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-red-500/5 border border-red-500/15">
+                                  <CircleDot className="w-3 h-3 text-red-400 shrink-0" />
+                                  <span className="text-xs text-red-300">{risk}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </ScrollArea>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-3">
+                      <Brain className="w-10 h-10 text-muted-foreground/30" />
+                      <p className="text-sm">L'analyse IA apparaîtra automatiquement après la transformation</p>
+                      <p className="text-[11px] text-muted-foreground/60">Moteur déterministe — aucune hallucination</p>
+                    </div>
+                  )}
+                </TabsContent>
+
                 <TabsContent value="report" className="flex-1 m-0 overflow-hidden">
                   {markdownReport ? (
                     <ScrollArea className="h-full">
@@ -1103,6 +1283,98 @@ export default function Home() {
           {statusMessages.length > 0 && statusMessages[statusMessages.length - 1]}
         </div>
       </footer>
+    </div>
+  );
+}
+
+// ============================================================
+// Sub-components for AI tab
+// ============================================================
+
+function ScoreCard({
+  title,
+  score,
+  color,
+  details,
+}: {
+  title: string;
+  score: number;
+  color: "destructive" | "primary";
+  details: { label: string; value: number }[];
+}) {
+  const colorClasses =
+    color === "destructive"
+      ? { ring: "border-red-500/30", bg: "bg-red-500/5", text: "text-red-400", bar: "bg-red-500" }
+      : { ring: "border-primary/30", bg: "bg-primary/5", text: "text-primary", bar: "bg-primary" };
+
+  return (
+    <div className={`rounded-lg border ${colorClasses.ring} ${colorClasses.bg} p-4`}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs font-semibold text-foreground">{title}</span>
+        <span className={`text-2xl font-bold font-mono ${colorClasses.text}`}>{score}</span>
+      </div>
+      <div className="space-y-2">
+        {details.map((d) => (
+          <div key={d.label}>
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[10px] text-muted-foreground">{d.label}</span>
+              <span className="text-[10px] font-mono text-muted-foreground">{Math.min(100, Math.max(0, d.value))}%</span>
+            </div>
+            <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${colorClasses.bar}`}
+                style={{ width: `${Math.min(100, Math.max(0, d.value))}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SuggestionCard({ suggestion }: { suggestion: AiSuggestion }) {
+  const severityConfig: Record<Severity, { icon: typeof ShieldAlert; color: string; bg: string; border: string }> = {
+    critical: { icon: ShieldAlert, color: "text-red-400", bg: "bg-red-500/5", border: "border-red-500/20" },
+    warning: { icon: AlertTriangle, color: "text-amber-400", bg: "bg-amber-500/5", border: "border-amber-500/20" },
+    info: { icon: Lightbulb, color: "text-blue-400", bg: "bg-blue-500/5", border: "border-blue-500/20" },
+    suggestion: { icon: TrendingUp, color: "text-emerald-400", bg: "bg-emerald-500/5", border: "border-emerald-500/20" },
+  };
+
+  const cfg = severityConfig[suggestion.severity];
+  const Icon = cfg.icon;
+
+  return (
+    <div className={`rounded-md border ${cfg.border} ${cfg.bg} p-3`}>
+      <div className="flex items-start gap-2.5">
+        <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${cfg.color}`} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <span className="text-xs font-semibold text-foreground">{suggestion.title}</span>
+            <Badge variant="outline" className="text-[9px] h-4 border-border text-muted-foreground">
+              {suggestion.ruleId}
+            </Badge>
+            <Badge variant="outline" className="text-[9px] h-4 border-border text-muted-foreground">
+              {suggestion.category}
+            </Badge>
+            {suggestion.line && (
+              <span className="text-[9px] font-mono text-muted-foreground/70">
+                {suggestion.fileName ? `${suggestion.fileName}:` : ""}L{suggestion.line}
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground leading-relaxed mb-1.5">{suggestion.description}</p>
+          {suggestion.codeSnippet && (
+            <pre className="text-[10px] font-mono bg-secondary/60 rounded px-2 py-1 mb-1.5 text-muted-foreground overflow-x-auto">
+              {suggestion.codeSnippet}
+            </pre>
+          )}
+          <div className="flex items-start gap-1.5 text-[10px]">
+            <ArrowUpRight className="w-3 h-3 text-primary mt-0.5 shrink-0" />
+            <span className="text-primary/80">{suggestion.fix}</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
