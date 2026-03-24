@@ -21,6 +21,7 @@ import {
   Play,
   Zap,
   Download,
+  FileDown,
   Upload,
   FolderOpen,
   FileCode2,
@@ -62,6 +63,7 @@ import { exportToZip } from "@/lib/zip-exporter";
 import type { GeneratedFile as ZipFile } from "@/lib/zip-exporter";
 import { runAiAnalysis, runMultiFileAiAnalysis } from "@/lib/ai-engine";
 import type { AiAnalysisResult, AiSuggestion, Severity } from "@/lib/ai-engine";
+import { exportAiReportPdf } from "@/lib/pdf-exporter";
 
 // ============================================================
 // Types
@@ -1193,6 +1195,29 @@ export default function Home() {
                             </div>
                           </div>
                         )}
+
+                        {/* PDF Export button */}
+                        <div className="pt-4 border-t border-border">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-full h-10 gap-2 bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20 hover:text-amber-200 transition-all"
+                            onClick={() => {
+                              try {
+                                exportAiReportPdf(aiResult, projectName || undefined);
+                                toast.success("Rapport IA exporté en PDF avec succès");
+                              } catch (e) {
+                                toast.error("Erreur lors de l'export PDF");
+                              }
+                            }}
+                          >
+                            <FileDown className="w-4 h-4" />
+                            Exporter le rapport IA en PDF
+                          </Button>
+                          <p className="text-[10px] text-muted-foreground/60 text-center mt-2">
+                            Rapport professionnel incluant scores, optimisations et suggestions
+                          </p>
+                        </div>
                       </div>
                     </ScrollArea>
                   ) : (
