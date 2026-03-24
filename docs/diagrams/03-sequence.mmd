@@ -1,0 +1,76 @@
+sequenceDiagram
+    actor User as Utilisateur
+    participant UI as Interface Web
+    participant Ctrl as GeneratorController
+    participant Svc as GeneratorService
+    participant Parser as EjbProjectParser
+    participant Engine as CodeGenerationEngine
+    participant AI as SmartCodeEnhancer
+    participant FS as Système de fichiers
+
+    Note over User,FS: ÉTAPE 1 — UPLOAD
+
+    User->>UI: Dépose fichier ZIP
+    UI->>Ctrl: POST /upload (multipart)
+    Ctrl->>Ctrl: Valide fichier (.zip, non vide)
+    Ctrl->>Ctrl: Génère projectId (UUID)
+    Ctrl->>FS: Extrait ZIP dans /uploads/{id}/
+    Ctrl->>UI: Redirect /import (succès)
+    UI->>User: Affiche arborescence + stats
+
+    Note over User,FS: ÉTAPE 2 — ANALYSE
+
+    User->>UI: Clic "Lancer l'analyse"
+    UI->>Ctrl: POST /scan
+    Ctrl->>Svc: analyzeProject(path)
+    Svc->>Parser: parse(projectPath)
+    Parser->>Parser: Parcourt fichiers .java
+    Parser->>Parser: JavaParser → AST
+    Parser->>Parser: Détecte EJB, DTOs, JNDI
+    Parser-->>Svc: ProjectAnalysisResult
+    Svc-->>Ctrl: ProjectAnalysisResult
+    Ctrl->>UI: Redirect /analysis
+    UI->>User: Affiche UseCases, DTOs, Warnings
+
+    Note over User,FS: ÉTAPE 3 — GÉNÉRATION + AMÉLIORATION IA
+
+    User->>UI: Clic "Lancer la transformation"
+    UI->>UI: Animation progression (6 étapes)
+    UI->>Ctrl: POST /api/generate (AJAX)
+    Ctrl->>Svc: generateProject(analysisResult)
+    Svc->>FS: Crée /output/{id}/generated-api/
+    Svc->>Engine: generateProject(path, analysis)
+    Engine->>FS: pom.xml, Application.java
+    Engine->>FS: Controllers REST
+    Engine->>FS: Service Adapters (JNDI)
+    Engine->>FS: Classes DTO
+    Engine->>FS: ExceptionHandler, Logging, Config
+    Engine->>FS: TRANSFORMATION_SUMMARY.md
+    Engine-->>Svc: Génération terminée
+    Svc->>AI: enhance(path, analysis)
+    AI->>FS: SecurityConfig, CorsConfig
+    AI->>FS: CorrelationIdFilter
+    AI->>FS: Tests unitaires
+    AI->>FS: Dockerfile, docker-compose.yml
+    AI->>AI: Calcul score qualité
+    AI-->>Svc: EnhancementReport
+    Svc-->>Ctrl: Résultat complet
+    Ctrl-->>UI: JSON (succès, score, fichiers)
+    UI->>User: Barre 100%, redirect /results
+
+    Note over User,FS: ÉTAPE 4 — RÉSULTATS
+
+    User->>UI: Parcourt arborescence
+    UI->>Ctrl: GET /api/file-content?path=...
+    Ctrl-->>UI: Contenu du fichier
+    User->>UI: Compare EJB vs REST
+    UI->>Ctrl: GET /api/diff?useCase=...
+    Ctrl-->>UI: Code original + généré
+
+    Note over User,FS: ÉTAPE 5 — EXPORT
+
+    User->>UI: Clic "Télécharger"
+    UI->>Ctrl: GET /download
+    Ctrl->>FS: Compresse en ZIP
+    Ctrl-->>UI: generated-rest-api.zip
+    UI->>User: Téléchargement du fichier

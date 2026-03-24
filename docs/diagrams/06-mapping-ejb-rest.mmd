@@ -1,0 +1,37 @@
+flowchart LR
+    subgraph EJB["Projet EJB Legacy"]
+        direction TB
+        E1["@Stateless<br/>ClientDataUC<br/>implements BaseUseCase"]
+        E2["ClientDataVoIn<br/>extends ValueObject"]
+        E3["ClientDataVoOut<br/>extends ValueObject"]
+        E4["@EJB<br/>lookup JNDI"]
+        E5["javax.xml.bind<br/>@XmlRootElement<br/>@XmlElement"]
+    end
+
+    subgraph MAPPING["Règles de transformation"]
+        direction TB
+        M1["G6: @Stateless → @RestController<br/>POST /api/client-data"]
+        M2["G10: @EJB → ServiceAdapter<br/>lookup JNDI via Properties"]
+        M3["G3: javax → jakarta<br/>+ @JacksonXmlRootElement"]
+        M4["G13: required=true →<br/>@NotBlank + @Size"]
+        M5["G11: → @Operation<br/>@ApiResponse Swagger"]
+    end
+
+    subgraph REST["Projet REST Spring Boot"]
+        direction TB
+        R1["@RestController<br/>ClientDataController<br/>@PostMapping"]
+        R2["ClientDataVoIn<br/>implements ValueObject<br/>@NotBlank @Size @XmlElement"]
+        R3["ClientDataVoOut<br/>implements ValueObject<br/>serialVersionUID"]
+        R4["@Service<br/>ClientDataServiceAdapter<br/>JNDI lookup"]
+        R5["jakarta.xml.bind<br/>@XmlRootElement<br/>@JacksonXmlRootElement"]
+    end
+
+    E1 --> M1 --> R1
+    E2 --> M4 --> R2
+    E3 --> M3 --> R3
+    E4 --> M2 --> R4
+    E5 --> M3 --> R5
+
+    style EJB fill:#ffebee,stroke:#c62828,stroke-width:2px
+    style MAPPING fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style REST fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px

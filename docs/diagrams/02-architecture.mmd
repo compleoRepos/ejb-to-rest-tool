@@ -1,0 +1,60 @@
+flowchart TB
+    subgraph UI["Couche Présentation — Thymeleaf + JavaScript"]
+        direction LR
+        P1["upload.html<br/>Import ZIP"]
+        P2["analysis.html<br/>Résultats analyse"]
+        P3["generation.html<br/>Transformation"]
+        P4["results.html<br/>Inspection code"]
+        P5["export.html<br/>Téléchargement"]
+        P6["app.js<br/>Orchestration AJAX<br/>Progression temps réel"]
+    end
+
+    subgraph CTRL["Couche Contrôleur"]
+        C1["GeneratorController<br/>Orchestrateur HTTP<br/>Gestion session"]
+    end
+
+    subgraph SVC["Couche Service"]
+        S1["GeneratorService<br/>Coordination<br/>Parser → Engine → Enhancer"]
+    end
+
+    subgraph CORE["Couche Métier"]
+        direction LR
+        M1["EjbProjectParser<br/>Analyse statique<br/>JavaParser AST"]
+        M2["CodeGenerationEngine<br/>Génération code Java<br/>14 règles G1-G14"]
+        M3["SmartCodeEnhancer<br/>Moulinette IA<br/>77 règles, 12 catégories"]
+    end
+
+    subgraph MODEL["Couche Modèle"]
+        direction LR
+        D1["ProjectAnalysisResult"]
+        D2["UseCaseInfo"]
+        D3["DtoInfo"]
+        D4["EnhancementReport"]
+    end
+
+    subgraph CONFIG["Configuration"]
+        direction LR
+        CF1["AppConfig<br/>upload.dir, output.dir"]
+        CF2["application.properties"]
+    end
+
+    subgraph FS["Système de fichiers"]
+        direction LR
+        F1["/tmp/ejb-to-rest-uploads/<br/>Projets EJB extraits"]
+        F2["/tmp/ejb-to-rest-output/<br/>Projets REST générés"]
+    end
+
+    UI --> CTRL
+    CTRL --> SVC
+    SVC --> CORE
+    CORE --> MODEL
+    CORE --> FS
+    CONFIG --> FS
+
+    style UI fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    style CTRL fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style SVC fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style CORE fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    style MODEL fill:#fce4ec,stroke:#b71c1c,stroke-width:2px
+    style CONFIG fill:#f5f5f5,stroke:#616161,stroke-width:2px
+    style FS fill:#fff8e1,stroke:#f57f17,stroke-width:2px

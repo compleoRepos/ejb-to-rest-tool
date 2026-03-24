@@ -1,0 +1,91 @@
+flowchart TB
+    subgraph PROJET["Projet REST Généré — generated-rest-api/"]
+        direction TB
+        subgraph ROOT["Racine"]
+            R1["pom.xml<br/>Spring Boot 3.2.5, Java 21"]
+            R2["Dockerfile<br/>Multi-stage build"]
+            R3["docker-compose.yml"]
+            R4["TRANSFORMATION_SUMMARY.md"]
+            R5["README.md"]
+        end
+
+        subgraph SRC["src/main/java/com/bank/api/"]
+            direction TB
+            S0["Application.java<br/>@SpringBootApplication"]
+
+            subgraph CTRL["controller/"]
+                C1["ClientDataController.java"]
+                C2["AccountBalanceController.java"]
+                C3["CreateAccountController.java"]
+                C4["...Controller.java"]
+            end
+
+            subgraph SVC["service/"]
+                V1["ClientDataServiceAdapter.java"]
+                V2["AccountBalanceServiceAdapter.java"]
+                V3["CreateAccountServiceAdapter.java"]
+                V4["...ServiceAdapter.java"]
+            end
+
+            subgraph DTO["dto/"]
+                D1["ClientDataVoIn.java"]
+                D2["ClientDataVoOut.java"]
+                D3["CreateAccountVoIn.java"]
+                D4["...VoIn.java / ...VoOut.java"]
+            end
+
+            subgraph EJB["ejb/interfaces/"]
+                E1["BaseUseCase.java"]
+                E2["ValueObject.java"]
+            end
+
+            subgraph CFG["config/"]
+                F1["SecurityConfig.java"]
+                F2["CorsConfig.java"]
+                F3["ContentNegotiationConfig.java"]
+                F4["EjbLookupConfig.java"]
+            end
+
+            subgraph EXC["exception/"]
+                X1["GlobalExceptionHandler.java"]
+                X2["BusinessException.java"]
+                X3["ServiceUnavailableException.java"]
+            end
+
+            subgraph OBS["filter/ + logging/"]
+                O1["CorrelationIdFilter.java"]
+                O2["LoggingAspect.java"]
+            end
+        end
+
+        subgraph RES["src/main/resources/"]
+            RS1["application.properties"]
+            RS2["application-dev.properties"]
+            RS3["application-prod.properties"]
+        end
+
+        subgraph TEST["src/test/java/.../controller/"]
+            T1["ClientDataControllerTest.java"]
+            T2["AccountBalanceControllerTest.java"]
+            T3["...ControllerTest.java"]
+        end
+    end
+
+    CTRL --> SVC
+    SVC --> EJB
+    SVC --> DTO
+    CTRL --> DTO
+    CTRL --> EXC
+
+    style PROJET fill:#fafafa,stroke:#424242,stroke-width:2px
+    style ROOT fill:#fff3e0,stroke:#e65100,stroke-width:1px
+    style SRC fill:#e3f2fd,stroke:#1565c0,stroke-width:1px
+    style CTRL fill:#e8f5e9,stroke:#2e7d32,stroke-width:1px
+    style SVC fill:#fff3e0,stroke:#e65100,stroke-width:1px
+    style DTO fill:#fce4ec,stroke:#b71c1c,stroke-width:1px
+    style EJB fill:#f5f5f5,stroke:#616161,stroke-width:1px
+    style CFG fill:#e8eaf6,stroke:#283593,stroke-width:1px
+    style EXC fill:#ffebee,stroke:#c62828,stroke-width:1px
+    style OBS fill:#f3e5f5,stroke:#6a1b9a,stroke-width:1px
+    style RES fill:#fff8e1,stroke:#f57f17,stroke-width:1px
+    style TEST fill:#e0f2f1,stroke:#00695c,stroke-width:1px

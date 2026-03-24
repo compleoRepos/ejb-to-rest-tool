@@ -1,0 +1,37 @@
+flowchart TB
+    subgraph INPUT["Entrée"]
+        I1["Projet REST généré<br/>par CodeGenerationEngine"]
+        I2["ProjectAnalysisResult<br/>(UseCases + DTOs)"]
+    end
+
+    subgraph ENGINE["SmartCodeEnhancer — Moulinette IA interne"]
+        direction TB
+        C1["1. Conventions de nommage<br/>R01-R08<br/>kebab-case, pas de verbes,<br/>versioning /api/v1/"]
+        C2["2. Méthodes HTTP<br/>R09-R11<br/>POST, 200/201/204<br/>détection sémantique"]
+        C3["3. Validation entrées<br/>R19-R25<br/>@Valid, @NotBlank,<br/>@Size, imports"]
+        C4["4. Gestion erreurs<br/>R26-R31<br/>BusinessException,<br/>ServiceUnavailableException"]
+        C5["5. Sécurité<br/>R32-R40<br/>SecurityFilterChain,<br/>CORS, headers"]
+        C6["6. Résilience<br/>R41-R46<br/>Circuit breaker, retry,<br/>Actuator health"]
+        C7["7. Observabilité<br/>R48-R51<br/>CorrelationIdFilter,<br/>MDC logging"]
+        C8["8. Documentation API<br/>R54-R58<br/>OpenAPI, @Operation,<br/>@Tag, dépendances"]
+        C9["9. Négociation contenu<br/>R59-R61<br/>JSON, XML,<br/>?format=xml"]
+        C10["10. Structure projet<br/>R63-R66<br/>Profils Spring,<br/>Dockerfile, Compose"]
+        C11["11. Tests<br/>R69<br/>@WebMvcTest, MockMvc,<br/>3 scénarios par UC"]
+        C12["12. Performance<br/>R74-R76<br/>gzip, pagination,<br/>ETag"]
+    end
+
+    subgraph OUTPUT["Sortie"]
+        O1["Projet REST amélioré<br/>+ fichiers supplémentaires"]
+        O2["EnhancementReport<br/>Score qualité /100"]
+    end
+
+    I1 --> C1
+    I2 --> C1
+    C1 --> C2 --> C3 --> C4 --> C5 --> C6
+    C6 --> C7 --> C8 --> C9 --> C10 --> C11 --> C12
+    C12 --> O1
+    C12 --> O2
+
+    style INPUT fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    style ENGINE fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    style OUTPUT fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px

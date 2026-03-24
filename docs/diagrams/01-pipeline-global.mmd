@@ -1,0 +1,49 @@
+flowchart TB
+    subgraph UPLOAD["1. UPLOAD — Import du projet EJB"]
+        U1["Utilisateur dépose<br/>un fichier ZIP"] --> U2["Validation du fichier<br/>(non vide, .zip)"]
+        U2 --> U3["Génération UUID<br/>projectId"]
+        U3 --> U4["Extraction ZIP dans<br/>/tmp/ejb-to-rest-uploads/{id}/"]
+        U4 --> U5["Comptage fichiers<br/>.java et arborescence"]
+    end
+
+    subgraph ANALYSE["2. ANALYSE — Scan du projet EJB"]
+        A1["EjbProjectParser<br/>parcourt les .java"] --> A2["JavaParser<br/>construit l'AST"]
+        A2 --> A3["Détection EJB<br/>@Stateless @Stateful<br/>@Singleton @MDB"]
+        A3 --> A4["Détection Pattern<br/>BaseUseCase vs<br/>Multi-méthodes"]
+        A4 --> A5["Extraction DTOs<br/>VoIn, VoOut, champs,<br/>annotations JAXB"]
+        A5 --> A6["ProjectAnalysisResult<br/>UseCases + DTOs +<br/>Warnings"]
+    end
+
+    subgraph GENERATION["3. GÉNÉRATION — Transformation EJB → REST"]
+        G1["CodeGenerationEngine"] --> G2["Structure projet<br/>pom.xml, Application.java<br/>application.properties"]
+        G2 --> G3["Interfaces recopiées<br/>BaseUseCase.java<br/>ValueObject.java"]
+        G3 --> G4["Controllers REST<br/>+ Service Adapters<br/>(1 par UseCase)"]
+        G4 --> G5["Classes DTO<br/>avec validation<br/>et annotations JAXB"]
+        G5 --> G6["Infrastructure<br/>ExceptionHandler, Logging,<br/>Config, Summary"]
+    end
+
+    subgraph ENHANCEMENT["4. AMÉLIORATION IA — SmartCodeEnhancer"]
+        E1["77 règles<br/>12 catégories"] --> E2["Sécurité<br/>SecurityConfig<br/>CorsConfig"]
+        E2 --> E3["Validation<br/>@Valid, @Size<br/>@NotBlank"]
+        E3 --> E4["Observabilité<br/>CorrelationIdFilter<br/>Logging MDC"]
+        E4 --> E5["Tests unitaires<br/>@WebMvcTest<br/>MockMvc"]
+        E5 --> E6["DevOps<br/>Dockerfile<br/>docker-compose.yml"]
+        E6 --> E7["Score qualité<br/>/100"]
+    end
+
+    subgraph EXPORT["5. EXPORT — Livraison"]
+        X1["Inspection des<br/>fichiers générés"] --> X2["Comparaison<br/>EJB vs REST"]
+        X2 --> X3["Rapport qualité<br/>détaillé"]
+        X3 --> X4["Téléchargement<br/>ZIP final"]
+    end
+
+    UPLOAD --> ANALYSE
+    ANALYSE --> GENERATION
+    GENERATION --> ENHANCEMENT
+    ENHANCEMENT --> EXPORT
+
+    style UPLOAD fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    style ANALYSE fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style GENERATION fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style ENHANCEMENT fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    style EXPORT fill:#fce4ec,stroke:#b71c1c,stroke-width:2px
