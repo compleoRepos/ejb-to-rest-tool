@@ -3,64 +3,141 @@
  * Handles: drag-and-drop upload, file preview, diff viewer, progress bar, log console
  */
 
-// ============================================================
-// Upload / Drag & Drop
-// ============================================================
-
 document.addEventListener('DOMContentLoaded', function() {
     initUploadZone();
     initProgressBar();
     initAlertDismiss();
 });
 
+// ============================================================
+// Upload / Drag & Drop
+// ============================================================
+
 function initUploadZone() {
-    var zone = document.querySelector('.upload-zone');
-    if (!zone) return;
+    var zone = document.getElementById('uploadArea');
+    var fileInput = document.getElementById('fileInput');
+    var uploadBtn = document.getElementById('uploadBtn');
 
-    var fileInput = zone.querySelector('input[type="file"]');
+    if (!zone || !fileInput) return;
 
+    // Click on zone opens file dialog
+    zone.addEventListener('click', function(e) {
+        // Prevent triggering if clicking on the file input itself
+        if (e.target !== fileInput) {
+            fileInput.click();
+        }
+    });
+
+    // Drag over
     zone.addEventListener('dragover', function(e) {
         e.preventDefault();
+        e.stopPropagation();
         zone.classList.add('drag-over');
     });
 
+    // Drag enter
+    zone.addEventListener('dragenter', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        zone.classList.add('drag-over');
+    });
+
+    // Drag leave
     zone.addEventListener('dragleave', function(e) {
         e.preventDefault();
+        e.stopPropagation();
         zone.classList.remove('drag-over');
     });
 
+    // Drop
     zone.addEventListener('drop', function(e) {
         e.preventDefault();
+        e.stopPropagation();
         zone.classList.remove('drag-over');
-        if (e.dataTransfer.files.length > 0 && fileInput) {
-            fileInput.files = e.dataTransfer.files;
-            updateFileName(fileInput);
+
+        var files = e.dataTransfer.files;
+        if (files.length > 0) {
+            var file = files[0];
+            if (file.name.endsWith('.zip')) {
+                // Set the file on the input
+                fileInput.files = files;
+                showFileInfo(file);
+                enableUploadBtn();
+            } else {
+                alert('Seuls les fichiers ZIP sont acceptes.');
+            }
         }
     });
 
-    if (fileInput) {
-        fileInput.addEventListener('change', function() {
-            updateFileName(this);
-        });
-    }
+    // File input change (click selection)
+    fileInput.addEventListener('change', function() {
+        if (this.files.length > 0) {
+            showFileInfo(this.files[0]);
+            enableUploadBtn();
+        } else {
+            hideFileInfo();
+            disableUploadBtn();
+        }
+    });
 }
 
-function updateFileName(input) {
-    var zone = input.closest('.upload-zone');
-    if (!zone) return;
+function showFileInfo(file) {
+    var fileInfo = document.getElementById('fileInfo');
+    var fileName = document.getElementById('fileName');
+    var fileSize = document.getElementById('fileSize');
+    var zone = document.getElementById('uploadArea');
 
-    var nameDisplay = zone.querySelector('.file-name-display');
-    if (input.files.length > 0) {
-        var fileName = input.files[0].name;
-        var fileSize = (input.files[0].size / 1024 / 1024).toFixed(2);
-        if (nameDisplay) {
-            nameDisplay.textContent = fileName + ' (' + fileSize + ' MB)';
-            nameDisplay.style.display = 'block';
-        }
+    if (fileInfo) fileInfo.style.display = 'flex';
+    if (fileName) fileName.textContent = file.name;
+    if (fileSize) fileSize.textContent = '(' + (file.size / 1024 / 1024).toFixed(2) + ' Mo)';
+
+    if (zone) {
         zone.style.borderColor = '#16a34a';
         zone.style.background = '#f0fdf4';
+        var content = zone.querySelector('.upload-zone-content');
+        if (content) {
+            content.querySelector('h3').textContent = 'Fichier selectionne !';
+            content.querySelector('h3').style.color = '#16a34a';
+        }
     }
 }
+
+function hideFileInfo() {
+    var fileInfo = document.getElementById('fileInfo');
+    var zone = document.getElementById('uploadArea');
+
+    if (fileInfo) fileInfo.style.display = 'none';
+    if (zone) {
+        zone.style.borderColor = '';
+        zone.style.background = '';
+        var content = zone.querySelector('.upload-zone-content');
+        if (content) {
+            content.querySelector('h3').textContent = 'Glissez-deposez votre fichier ZIP ici';
+            content.querySelector('h3').style.color = '';
+        }
+    }
+}
+
+function enableUploadBtn() {
+    var btn = document.getElementById('uploadBtn');
+    if (btn) btn.disabled = false;
+}
+
+function disableUploadBtn() {
+    var btn = document.getElementById('uploadBtn');
+    if (btn) btn.disabled = true;
+}
+
+function clearFile() {
+    var fileInput = document.getElementById('fileInput');
+    if (fileInput) fileInput.value = '';
+    hideFileInfo();
+    disableUploadBtn();
+}
+
+// ============================================================
+// Alert Auto-dismiss
+// ============================================================
 
 function initAlertDismiss() {
     var alerts = document.querySelectorAll('.alert');

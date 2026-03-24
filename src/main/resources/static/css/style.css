@@ -198,8 +198,28 @@ a:hover { text-decoration: underline; }
     padding: 1rem 1.25rem;
     border-top: 1px solid rgba(255,255,255,0.08);
     font-size: 0.75rem;
-    color: rgba(255,255,255,0.35);
-    text-align: center;
+    color: rgba(255,255,255,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.status-active {
+    background: #4ade80;
+    box-shadow: 0 0 6px rgba(74, 222, 128, 0.5);
+}
+
+.status-inactive {
+    background: #64748b;
 }
 
 /* --- Main Content --- */
@@ -641,9 +661,41 @@ a:hover { text-decoration: underline; }
 }
 
 .upload-zone input[type="file"] {
-    position: absolute;
-    top: 0; left: 0; width: 100%; height: 100%;
-    opacity: 0; cursor: pointer;
+    display: none;
+}
+
+.upload-hint {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+}
+
+.file-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.85rem 1.25rem;
+    background: var(--success-bg);
+    border: 1px solid #bbf7d0;
+    border-radius: var(--radius-md);
+    margin-top: 1rem;
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--success);
+}
+
+.file-info i {
+    font-size: 1.2rem;
+}
+
+.file-info #fileSize {
+    color: var(--text-muted);
+    font-weight: 400;
+    font-size: 0.82rem;
+}
+
+.upload-actions {
+    margin-top: 1.25rem;
 }
 
 /* --- Generation Steps --- */

@@ -33,13 +33,21 @@
                     <form th:action="@{/upload}" method="post" enctype="multipart/form-data" id="uploadForm">
                         <div class="upload-zone" id="uploadArea">
                             <div class="upload-zone-content">
-                                <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                                <i class="fas fa-cloud-upload-alt"></i>
                                 <h3>Glissez-deposez votre fichier ZIP ici</h3>
                                 <p>ou cliquez pour selectionner un fichier</p>
                                 <p class="upload-hint">Formats acceptes : .zip | Taille max : 100 Mo</p>
-                                <input type="file" name="file" id="fileInput" accept=".zip" style="display:none;">
-                                <span class="file-name" id="fileName"></span>
                             </div>
+                            <!-- Hidden file input, NOT positioned absolute over the zone -->
+                            <input type="file" name="file" id="fileInput" accept=".zip" style="display:none;">
+                        </div>
+                        <div id="fileInfo" class="file-info" style="display:none;">
+                            <i class="fas fa-file-archive"></i>
+                            <span id="fileName"></span>
+                            <span id="fileSize"></span>
+                            <button type="button" class="btn btn-sm btn-outline" onclick="clearFile()">
+                                <i class="fas fa-times"></i> Supprimer
+                            </button>
                         </div>
                         <div class="upload-actions">
                             <button type="submit" class="btn btn-primary btn-lg" id="uploadBtn" disabled>
@@ -61,7 +69,7 @@
                         <tr><td class="info-label">Identifiant</td><td th:text="${projectId}">-</td></tr>
                         <tr><td class="info-label">Statut</td><td><span class="badge badge-success">Uploade</span></td></tr>
                     </table>
-                    <div class="card-actions">
+                    <div class="card-actions" style="margin-top: 1rem;">
                         <a th:href="@{/analysis}" class="btn btn-primary">
                             <i class="fas fa-arrow-right"></i> Passer a l'analyse
                         </a>
@@ -69,7 +77,7 @@
                 </div>
             </div>
 
-            <!-- File Tree (if uploaded and analyzed) -->
+            <!-- File Tree (if uploaded) -->
             <div class="card" th:if="${fileTree != null and !fileTree.isEmpty()}">
                 <div class="card-header">
                     <h2 class="card-title"><i class="fas fa-sitemap"></i> Arborescence du projet</h2>
@@ -84,7 +92,7 @@
                 </div>
             </div>
 
-            <!-- Stats (if analyzed) -->
+            <!-- Stats -->
             <div class="dashboard-stats" th:if="${fileStats != null}">
                 <div class="stat-card">
                     <div class="stat-card-icon stat-icon-blue"><i class="fas fa-file"></i></div>

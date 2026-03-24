@@ -2,58 +2,56 @@
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
 <aside class="sidebar" th:fragment="sidebar(activePage)">
-    <div class="sidebar-header">
-        <div class="sidebar-logo">
+    <div class="sidebar-brand">
+        <div class="sidebar-brand-icon">
             <i class="fas fa-exchange-alt"></i>
-            <span>EJB to REST</span>
         </div>
-        <span class="sidebar-version">v1.0.0</span>
+        <div class="sidebar-brand-text">
+            EJB to REST
+            <small>Generator v1.0.0</small>
+        </div>
     </div>
     <nav class="sidebar-nav">
-        <ul class="nav-list">
-            <li class="nav-item" th:classappend="${activePage == 'dashboard' ? 'active' : ''}">
-                <a th:href="@{/dashboard}"><i class="fas fa-th-large"></i><span>Dashboard</span></a>
-            </li>
-            <li class="nav-item" th:classappend="${activePage == 'upload' ? 'active' : ''}">
-                <a th:href="@{/import}"><i class="fas fa-cloud-upload-alt"></i><span>Importer Projet</span></a>
-            </li>
-            <li class="nav-item" th:classappend="${activePage == 'analysis' ? 'active' : ''}">
-                <a th:href="@{/analysis}"><i class="fas fa-search-plus"></i><span>Analyse</span></a>
-            </li>
-            <li class="nav-item" th:classappend="${activePage == 'configuration' ? 'active' : ''}">
-                <a th:href="@{/configuration}"><i class="fas fa-cogs"></i><span>Configuration</span></a>
-            </li>
-            <li class="nav-item" th:classappend="${activePage == 'generation' ? 'active' : ''}">
-                <a th:href="@{/generation}"><i class="fas fa-rocket"></i><span>Transformation</span></a>
-            </li>
-            <li class="nav-item" th:classappend="${activePage == 'results' ? 'active' : ''}">
-                <a th:href="@{/results}"><i class="fas fa-code"></i><span>Resultats</span></a>
-            </li>
-            <li class="nav-item" th:classappend="${activePage == 'report' ? 'active' : ''}">
-                <a th:href="@{/report}"><i class="fas fa-chart-bar"></i><span>Rapport IA</span></a>
-            </li>
-            <li class="nav-item" th:classappend="${activePage == 'download' ? 'active' : ''}">
-                <a th:href="@{/export}"><i class="fas fa-download"></i><span>Telechargement</span></a>
-            </li>
-        </ul>
-        <div class="nav-separator"></div>
-        <ul class="nav-list nav-list-secondary">
-            <li class="nav-item" th:classappend="${activePage == 'logs' ? 'active' : ''}">
-                <a th:href="@{/logs}"><i class="fas fa-terminal"></i><span>Logs</span></a>
-            </li>
-            <li class="nav-item">
-                <a href="#" onclick="event.preventDefault(); if(confirm('Reinitialiser la session ?')) document.getElementById('resetForm').submit();">
-                    <i class="fas fa-redo-alt"></i><span>Reinitialiser</span>
-                </a>
-                <form id="resetForm" th:action="@{/reset}" method="post" style="display:none;"></form>
-            </li>
-        </ul>
+        <div class="sidebar-section">Navigation</div>
+        <a th:href="@{/dashboard}" class="sidebar-link" th:classappend="${activePage == 'dashboard' ? 'active' : ''}">
+            <i class="fas fa-th-large"></i><span>Dashboard</span>
+        </a>
+        <a th:href="@{/import}" class="sidebar-link" th:classappend="${activePage == 'upload' ? 'active' : ''}">
+            <i class="fas fa-cloud-upload-alt"></i><span>Importer Projet</span>
+        </a>
+        <a th:href="@{/analysis}" class="sidebar-link" th:classappend="${activePage == 'analysis' ? 'active' : ''}">
+            <i class="fas fa-search-plus"></i><span>Analyse</span>
+        </a>
+        <a th:href="@{/configuration}" class="sidebar-link" th:classappend="${activePage == 'configuration' ? 'active' : ''}">
+            <i class="fas fa-cogs"></i><span>Configuration</span>
+        </a>
+
+        <div class="sidebar-section">Transformation</div>
+        <a th:href="@{/generation}" class="sidebar-link" th:classappend="${activePage == 'generation' ? 'active' : ''}">
+            <i class="fas fa-rocket"></i><span>Transformation</span>
+        </a>
+        <a th:href="@{/results}" class="sidebar-link" th:classappend="${activePage == 'results' ? 'active' : ''}">
+            <i class="fas fa-code"></i><span>Resultats</span>
+        </a>
+        <a th:href="@{/report}" class="sidebar-link" th:classappend="${activePage == 'report' ? 'active' : ''}">
+            <i class="fas fa-chart-bar"></i><span>Rapport IA</span>
+        </a>
+        <a th:href="@{/export}" class="sidebar-link" th:classappend="${activePage == 'export' ? 'active' : ''}">
+            <i class="fas fa-download"></i><span>Telechargement</span>
+        </a>
+
+        <div class="sidebar-section">Systeme</div>
+        <a th:href="@{/logs}" class="sidebar-link" th:classappend="${activePage == 'logs' ? 'active' : ''}">
+            <i class="fas fa-terminal"></i><span>Logs</span>
+        </a>
+        <a href="#" class="sidebar-link" onclick="event.preventDefault(); if(confirm('Reinitialiser la session ?')) document.getElementById('resetForm').submit();">
+            <i class="fas fa-redo-alt"></i><span>Reinitialiser</span>
+        </a>
+        <form id="resetForm" th:action="@{/reset}" method="post" style="display:none;"></form>
     </nav>
     <div class="sidebar-footer">
-        <div class="sidebar-status">
-            <span class="status-dot" th:classappend="${session.projectId != null ? 'status-active' : 'status-inactive'}"></span>
-            <span th:text="${session.projectId != null ? 'Projet charge' : 'Aucun projet'}">Statut</span>
-        </div>
+        <span class="status-dot" th:classappend="${session.projectId != null ? 'status-active' : 'status-inactive'}"></span>
+        <span th:text="${session.projectId != null ? 'Projet charge' : 'Aucun projet'}">Statut</span>
     </div>
 </aside>
 </body>
