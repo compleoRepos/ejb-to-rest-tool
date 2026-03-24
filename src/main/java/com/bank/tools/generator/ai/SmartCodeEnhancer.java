@@ -142,44 +142,59 @@ public class SmartCodeEnhancer {
                         controllerFile.getFileName().toString(), usesPost));
 
                 // R11: Déterminer le code HTTP selon le type d'opération
-                // Consultation (Charger, Consulter, Rechercher, Lister, Get, Find, Search, Load) → 200 OK
-                // Création/Exécution (Souscrire, Creer, Ajouter, Inscrire, Enregistrer, etc.) → 201 Created
+                // Logique inversée : on détecte les CRÉATIONS (201) et SUPPRESSIONS (204)
+                // Tout le reste (consultation, transfert, etc.) → 200 OK par défaut
                 String ucName = uc.getClassName().toLowerCase();
-                boolean isConsultation = ucName.contains("charger") || ucName.contains("consulter")
-                        || ucName.contains("rechercher") || ucName.contains("lister")
-                        || ucName.contains("get") || ucName.contains("find")
-                        || ucName.contains("search") || ucName.contains("load")
-                        || ucName.contains("fetch") || ucName.contains("read");
+                String javadoc = uc.getJavadoc() != null ? uc.getJavadoc().toLowerCase() : "";
 
-                if (isConsultation) {
-                    // Opération de consultation : garder 200 OK
+                // Détection basée UNIQUEMENT sur le nom de classe (pas le Javadoc car trop ambigu)
+                boolean isCreation = ucName.contains("create") || ucName.contains("creer")
+                        || ucName.contains("souscrire") || ucName.contains("ajouter")
+                        || ucName.contains("inscrire") || ucName.contains("enregistrer")
+                        || ucName.contains("add") || ucName.contains("insert")
+                        || ucName.contains("register") || ucName.contains("open")
+                        || ucName.contains("save") || ucName.contains("nouveau");
+
+                boolean isDeletion = ucName.contains("delete") || ucName.contains("supprimer")
+                        || ucName.contains("remove") || ucName.contains("close")
+                        || ucName.contains("cancel") || ucName.contains("annuler");
+
+                if (isCreation && usesPost) {
+                    // Opération de création : mettre 201 Created
+                    if (!content.contains("HttpStatus.CREATED")) {
+                        String improved = content.replace(
+                                "return ResponseEntity.ok(",
+                                "return ResponseEntity.status(HttpStatus.CREATED).body(");
+                        if (!improved.contains("import org.springframework.http.HttpStatus;")) {
+                            improved = improved.replace(
+                                    "import org.springframework.http.ResponseEntity;",
+                                    "import org.springframework.http.HttpStatus;\nimport org.springframework.http.ResponseEntity;");
+                        }
+                        Files.writeString(controllerFile, improved);
+                    }
+                    report.addEnhancement(new Enhancement("R11", Category.HTTP_METHODS, Severity.WARNING,
+                            "POST de création retourne 201 Created dans " + uc.getControllerName(),
+                            controllerFile.getFileName().toString(), true));
+                } else if (isDeletion) {
+                    // Opération de suppression : garder 204 si déjà présent
+                    report.addEnhancement(new Enhancement("R11", Category.HTTP_METHODS, Severity.INFO,
+                            "Opération de suppression détectée dans " + uc.getControllerName(),
+                            controllerFile.getFileName().toString(), true));
+                } else {
+                    // Tout le reste (consultation, transfert, etc.) → 200 OK
                     if (content.contains("HttpStatus.CREATED")) {
-                        // Corriger si le code avait déjà été mis à 201 par erreur
+                        // Corriger si le code avait été mis à 201 par erreur
                         String improved = content.replace(
                                 "ResponseEntity.status(HttpStatus.CREATED).body(",
                                 "ResponseEntity.ok(");
+                        // Supprimer l'import HttpStatus s'il n'est plus nécessaire
+                        if (!improved.contains("HttpStatus.")) {
+                            improved = improved.replace("import org.springframework.http.HttpStatus;\n", "");
+                        }
                         Files.writeString(controllerFile, improved);
                     }
                     report.addEnhancement(new Enhancement("R11", Category.HTTP_METHODS, Severity.INFO,
-                            "POST de consultation retourne 200 OK dans " + uc.getControllerName() + " (opération de lecture)",
-                            controllerFile.getFileName().toString(), true));
-                } else if (usesPost && !content.contains("HttpStatus.CREATED") && !content.contains("201")) {
-                    // Opération de création/exécution : mettre 201 Created
-                    String improved = content.replace(
-                            "return ResponseEntity.ok(",
-                            "return ResponseEntity.status(HttpStatus.CREATED).body(");
-                    if (!improved.contains("import org.springframework.http.HttpStatus;")) {
-                        improved = improved.replace(
-                                "import org.springframework.http.ResponseEntity;",
-                                "import org.springframework.http.HttpStatus;\nimport org.springframework.http.ResponseEntity;");
-                    }
-                    Files.writeString(controllerFile, improved);
-                    report.addEnhancement(new Enhancement("R11", Category.HTTP_METHODS, Severity.WARNING,
-                            "POST de création/exécution retourne désormais 201 Created dans " + uc.getControllerName(),
-                            controllerFile.getFileName().toString(), true));
-                } else {
-                    report.addEnhancement(new Enhancement("R11", Category.HTTP_METHODS, Severity.INFO,
-                            "POST retourne déjà un code HTTP approprié dans " + uc.getControllerName(),
+                            "POST retourne 200 OK dans " + uc.getControllerName() + " (opération non-création)",
                             controllerFile.getFileName().toString(), true));
                 }
             }
@@ -220,35 +235,52 @@ public class SmartCodeEnhancer {
                     boolean modified = false;
                     StringBuilder sb = new StringBuilder(content);
 
-                    // Ajouter les imports de validation si nécessaire
-                    if (!content.contains("import jakarta.validation.constraints.")) {
-                        int importIdx = content.indexOf("import java.");
-                        if (importIdx > 0) {
-                            sb.insert(importIdx,
-                                    "import jakarta.validation.constraints.NotBlank;\n" +
-                                    "import jakarta.validation.constraints.NotNull;\n" +
-                                    "import jakarta.validation.constraints.Size;\n\n");
+                    // BUG 10 : Ajouter les imports de validation si nécessaire
+                    // Vérifier chaque import individuellement (pas en bloc)
+                    if (!content.contains("import jakarta.validation.constraints.NotBlank;")) {
+                        int importIdx = sb.indexOf("import ");
+                        if (importIdx >= 0) {
+                            sb.insert(importIdx, "import jakarta.validation.constraints.NotBlank;\n");
+                            modified = true;
+                        }
+                    }
+                    if (!content.contains("import jakarta.validation.constraints.NotNull;")) {
+                        int importIdx = sb.indexOf("import ");
+                        if (importIdx >= 0) {
+                            sb.insert(importIdx, "import jakarta.validation.constraints.NotNull;\n");
+                            modified = true;
+                        }
+                    }
+                    if (!content.contains("import jakarta.validation.constraints.Size;")) {
+                        int importIdx = sb.indexOf("import ");
+                        if (importIdx >= 0) {
+                            sb.insert(importIdx, "import jakarta.validation.constraints.Size;\n");
                             modified = true;
                         }
                     }
 
-                    // Ajouter @NotBlank uniquement sur les champs String marqués required
+                    // BUG 11 : Ajouter @NotBlank/@Size uniquement si pas déjà présent
+                    // Vérifier @Size ET @NotBlank pour éviter les doublons (idempotent)
                     for (DtoInfo.FieldInfo field : dto.getFields()) {
                         if (field.isSerializationField()) continue; // ignorer serialVersionUID
                         if ("String".equals(field.getType())) {
                             String fieldDecl = "private String " + field.getName();
                             int idx = sb.indexOf(fieldDecl);
-                            if (idx > 0 && !sb.substring(Math.max(0, idx - 100), idx).contains("@NotBlank")) {
-                                String annotatedField;
-                                if (field.isRequired()) {
-                                    // Champ marqué required=true dans le DTO source
-                                    annotatedField = "@NotBlank(message = \"Le champ " + field.getName() + " est obligatoire\")\n    @Size(max = 255)\n    private String " + field.getName();
-                                } else {
-                                    // Champ optionnel : seulement @Size
-                                    annotatedField = "@Size(max = 255)\n    private String " + field.getName();
+                            if (idx > 0) {
+                                String before = sb.substring(Math.max(0, idx - 150), idx);
+                                boolean hasNotBlank = before.contains("@NotBlank");
+                                boolean hasSize = before.contains("@Size");
+                                if (!hasSize) {
+                                    // Ajouter @Size seulement s'il n'est pas déjà présent
+                                    String annotatedField;
+                                    if (field.isRequired() && !hasNotBlank) {
+                                        annotatedField = "@NotBlank(message = \"Le champ " + field.getName() + " est obligatoire\")\n    @Size(max = 255)\n    private String " + field.getName();
+                                    } else {
+                                        annotatedField = "@Size(max = 255)\n    private String " + field.getName();
+                                    }
+                                    sb.replace(idx, idx + fieldDecl.length(), annotatedField);
+                                    modified = true;
                                 }
-                                sb.replace(idx, idx + fieldDecl.length(), annotatedField);
-                                modified = true;
                             }
                         }
                     }
@@ -944,14 +976,18 @@ public class SmartCodeEnhancer {
         // R69: Générer un test unitaire par controller
         for (UseCaseInfo uc : analysisResult.getUseCases()) {
             // Déterminer le code HTTP attendu selon le type d'opération
+            // Logique inversée : on détecte les CRÉATIONS (201), tout le reste → 200 OK
             String ucNameLower = uc.getClassName().toLowerCase();
-            boolean isConsultation = ucNameLower.contains("charger") || ucNameLower.contains("consulter")
-                    || ucNameLower.contains("rechercher") || ucNameLower.contains("lister")
-                    || ucNameLower.contains("get") || ucNameLower.contains("find")
-                    || ucNameLower.contains("search") || ucNameLower.contains("load")
-                    || ucNameLower.contains("fetch") || ucNameLower.contains("read");
-            String expectedStatus = isConsultation ? "isOk" : "isCreated";
-            String expectedCode = isConsultation ? "200" : "201";
+            String ucJavadoc = uc.getJavadoc() != null ? uc.getJavadoc().toLowerCase() : "";
+            // Détection basée UNIQUEMENT sur le nom de classe (pas le Javadoc car trop ambigu)
+            boolean isCreation = ucNameLower.contains("create") || ucNameLower.contains("creer")
+                    || ucNameLower.contains("souscrire") || ucNameLower.contains("ajouter")
+                    || ucNameLower.contains("inscrire") || ucNameLower.contains("enregistrer")
+                    || ucNameLower.contains("add") || ucNameLower.contains("insert")
+                    || ucNameLower.contains("register") || ucNameLower.contains("open")
+                    || ucNameLower.contains("save") || ucNameLower.contains("nouveau");
+            String expectedStatus = isCreation ? "isCreated" : "isOk";
+            String expectedCode = isCreation ? "201" : "200";
 
             Path testFile = testDir.resolve("controller/" + uc.getControllerName() + "Test.java");
             if (!Files.exists(testFile)) {
