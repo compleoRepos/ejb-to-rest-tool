@@ -1,5 +1,7 @@
 package com.bank.tools.generator.service;
 
+import com.bank.tools.generator.ai.EnhancementReport;
+import com.bank.tools.generator.ai.SmartCodeEnhancer;
 import com.bank.tools.generator.config.AppConfig;
 import com.bank.tools.generator.engine.CodeGenerationEngine;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
@@ -19,8 +21,8 @@ import java.util.zip.ZipOutputStream;
 /**
  * Service d'orchestration principal.
  * <p>
- * Coordonne l'upload, l'extraction, l'analyse et la génération
- * du projet API REST à partir d'un projet EJB uploadé.
+ * Coordonne l'upload, l'extraction, l'analyse, la génération
+ * et l'amélioration IA du projet API REST à partir d'un projet EJB uploadé.
  * </p>
  */
 @Service
@@ -31,11 +33,14 @@ public class GeneratorService {
     private final AppConfig appConfig;
     private final EjbProjectParser parser;
     private final CodeGenerationEngine engine;
+    private final SmartCodeEnhancer enhancer;
 
-    public GeneratorService(AppConfig appConfig, EjbProjectParser parser, CodeGenerationEngine engine) {
+    public GeneratorService(AppConfig appConfig, EjbProjectParser parser,
+                            CodeGenerationEngine engine, SmartCodeEnhancer enhancer) {
         this.appConfig = appConfig;
         this.parser = parser;
         this.engine = engine;
+        this.enhancer = enhancer;
     }
 
     /**
@@ -91,16 +96,91 @@ public class GeneratorService {
     }
 
     /**
-     * Génère le projet API REST à partir du résultat de l'analyse.
+     * Génère le projet API REST puis applique les améliorations IA.
+     * <p>
+     * Pipeline : CodeGenerationEngine → SmartCodeEnhancer
+     * </p>
      *
      * @param projectId      identifiant du projet
      * @param analysisResult résultat de l'analyse
-     * @return chemin du projet généré
+     * @return chemin du projet généré et amélioré
      */
     public Path generateProject(String projectId, ProjectAnalysisResult analysisResult) throws IOException {
         Path outputDir = Path.of(appConfig.getOutputDir(), projectId);
         Files.createDirectories(outputDir);
-        return engine.generateProject(analysisResult, outputDir);
+
+        // Étape 1 : Génération du code de base
+        Path projectRoot = engine.generateProject(analysisResult, outputDir);
+        log.info("Étape 1/2 : Code de base généré dans {}", projectRoot);
+
+        // Étape 2 : Amélioration IA (moteur de règles interne)
+        EnhancementReport report = enhancer.enhance(projectRoot, analysisResult);
+        log.info("Étape 2/2 : Améliorations IA appliquées - Score: {}/100, Règles: {}/{}",
+                report.getQualityScore(), report.getTotalRulesApplied(), report.getTotalRulesChecked());
+
+        // Sauvegarder le rapport d'amélioration
+        generateEnhancementReportFile(projectRoot, report);
+
+        return projectRoot;
+    }
+
+    /**
+     * Applique uniquement les améliorations IA sur un projet déjà généré.
+     *
+     * @param projectId      identifiant du projet
+     * @param analysisResult résultat de l'analyse
+     * @return rapport d'amélioration
+     */
+    public EnhancementReport enhanceProject(String projectId, ProjectAnalysisResult analysisResult) throws IOException {
+        Path projectRoot = Path.of(appConfig.getOutputDir(), projectId, "generated-api");
+        if (!Files.exists(projectRoot)) {
+            throw new IllegalArgumentException("Projet généré non trouvé : " + projectId);
+        }
+        EnhancementReport report = enhancer.enhance(projectRoot, analysisResult);
+        generateEnhancementReportFile(projectRoot, report);
+        return report;
+    }
+
+    /**
+     * Génère le fichier de rapport d'amélioration dans le projet.
+     */
+    private void generateEnhancementReportFile(Path projectRoot, EnhancementReport report) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("# Rapport d'Amélioration IA\n\n");
+        sb.append("**Moteur** : SmartCodeEnhancer (moteur de règles interne, sans IA externe)\n\n");
+        sb.append("## Résumé\n\n");
+        sb.append("| Métrique | Valeur |\n");
+        sb.append("|----------|--------|\n");
+        sb.append("| Score de qualité | **").append(report.getQualityScore()).append("/100** |\n");
+        sb.append("| Règles vérifiées | ").append(report.getTotalRulesChecked()).append(" |\n");
+        sb.append("| Règles appliquées | ").append(report.getTotalRulesApplied()).append(" |\n");
+        sb.append("| Améliorations critiques | ").append(report.countBySeverity(EnhancementReport.Severity.CRITICAL)).append(" |\n");
+        sb.append("| Avertissements | ").append(report.countBySeverity(EnhancementReport.Severity.WARNING)).append(" |\n");
+        sb.append("| Suggestions | ").append(report.countBySeverity(EnhancementReport.Severity.SUGGESTION)).append(" |\n\n");
+
+        sb.append("## Détail par catégorie\n\n");
+        for (EnhancementReport.Category cat : EnhancementReport.Category.values()) {
+            long count = report.countByCategory(cat);
+            if (count > 0) {
+                sb.append("### ").append(cat.getLabel()).append(" (").append(count).append(" règles)\n\n");
+                sb.append("| Règle | Sévérité | Description | Fichier | Appliquée |\n");
+                sb.append("|-------|----------|-------------|---------|----------|\n");
+                for (EnhancementReport.Enhancement e : report.getEnhancements()) {
+                    if (e.getCategory() == cat) {
+                        sb.append("| ").append(e.getRuleId())
+                          .append(" | ").append(e.getSeverity().getLabel())
+                          .append(" | ").append(e.getDescription())
+                          .append(" | ").append(e.getFilePath())
+                          .append(" | ").append(e.isApplied() ? "Oui" : "Non")
+                          .append(" |\n");
+                    }
+                }
+                sb.append("\n");
+            }
+        }
+
+        Files.writeString(projectRoot.resolve("ENHANCEMENT_REPORT.md"), sb.toString());
+        log.info("Rapport d'amélioration IA généré : ENHANCEMENT_REPORT.md");
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.bank.tools.generator.controller;
 
+import com.bank.tools.generator.ai.EnhancementReport;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
 import com.bank.tools.generator.service.GeneratorService;
 import jakarta.servlet.http.HttpSession;
@@ -22,7 +23,8 @@ import java.nio.file.Path;
  * Controller web pour l'interface utilisateur de l'outil de génération.
  * <p>
  * Gère les interactions de l'IHM Thymeleaf :
- * upload, scan, affichage des résultats, génération et téléchargement.
+ * upload, scan, affichage des résultats, génération avec amélioration IA,
+ * et téléchargement.
  * </p>
  */
 @Controller
@@ -44,9 +46,11 @@ public class GeneratorController {
     public String index(Model model, HttpSession session) {
         String projectId = (String) session.getAttribute("projectId");
         ProjectAnalysisResult analysisResult = (ProjectAnalysisResult) session.getAttribute("analysisResult");
+        EnhancementReport enhancementReport = (EnhancementReport) session.getAttribute("enhancementReport");
 
         model.addAttribute("projectId", projectId);
         model.addAttribute("analysisResult", analysisResult);
+        model.addAttribute("enhancementReport", enhancementReport);
         model.addAttribute("projectUploaded", projectId != null);
         model.addAttribute("projectAnalyzed", analysisResult != null);
         model.addAttribute("projectGenerated",
@@ -78,6 +82,7 @@ public class GeneratorController {
             String projectId = generatorService.uploadProject(file);
             session.setAttribute("projectId", projectId);
             session.removeAttribute("analysisResult");
+            session.removeAttribute("enhancementReport");
             redirectAttributes.addFlashAttribute("success",
                     "Projet uploadé avec succès : " + file.getOriginalFilename());
             log.info("Projet uploadé avec l'ID : {}", projectId);
@@ -125,7 +130,7 @@ public class GeneratorController {
     }
 
     /**
-     * Génération du projet API REST.
+     * Génération du projet API REST avec amélioration IA.
      */
     @PostMapping("/generate")
     public String generateProject(RedirectAttributes redirectAttributes, HttpSession session) {
@@ -147,8 +152,16 @@ public class GeneratorController {
         try {
             log.info("Génération du projet API pour : {}", projectId);
             generatorService.generateProject(projectId, analysisResult);
+
+            // Récupérer le rapport d'amélioration IA
+            EnhancementReport report = generatorService.enhanceProject(projectId, analysisResult);
+            session.setAttribute("enhancementReport", report);
+
             redirectAttributes.addFlashAttribute("success",
-                    "Projet API REST généré avec succès !");
+                    "Projet API REST généré et amélioré par l'IA ! Score qualité : " +
+                    report.getQualityScore() + "/100, " +
+                    report.getTotalRulesApplied() + "/" + report.getTotalRulesChecked() +
+                    " règles appliquées.");
         } catch (Exception e) {
             log.error("Erreur lors de la génération", e);
             redirectAttributes.addFlashAttribute("error",

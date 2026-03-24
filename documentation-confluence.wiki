@@ -1,0 +1,229 @@
+h1. Documentation Technique : EJB to REST API Generator
+
+h2. 1. Introduction
+
+L'outil *EJB to REST API Generator* est une application web developpee en Java 21 et Spring Boot 3. Son objectif principal est d'automatiser la transformation de projets Java EJB (Enterprise JavaBeans) legacy en API REST modernes basees sur Spring Boot.
+
+L'application permet a un utilisateur de telecharger un fichier ZIP contenant le code source d'un projet EJB. L'outil analyse ensuite statiquement le code Java pour detecter les cas d'usage (UseCases), les objets de transfert de donnees (DTOs), et les annotations de serialisation (JAXB). A partir de cette analyse, il genere un projet Spring Boot complet, pret a etre compile et deploye, exposant les anciens EJB sous forme de points de terminaison REST (endpoints) supportant les formats JSON et XML.
+
+L'outil integre egalement un *moteur d'amelioration intelligent (SmartCodeEnhancer)* qui applique automatiquement les meilleures pratiques de l'industrie au code genere.
+
+h2. 2. Architecture de l'Application
+
+L'application suit une architecture classique en couches (MVC) basee sur le framework Spring Boot.
+
+h3. 2.1. Couche de Presentation (Web)
+
+L'interface utilisateur est rendue cote serveur a l'aide du moteur de templates *Thymeleaf*.
+
+||Composant||Role||
+|{{GeneratorController}}|Gere les requetes HTTP (GET, POST) pour l'affichage, l'upload, l'analyse, la generation et le telechargement|
+|{{ToolExceptionHandler}}|Intercepte les erreurs globales et redirige avec un message d'erreur clair|
+
+h3. 2.2. Couche de Service (Orchestration)
+
+*{{GeneratorService}}* est le chef d'orchestre de l'application :
+* Creation d'un identifiant unique (UUID) pour chaque session de travail
+* Decompression securisee du fichier ZIP (protection contre les attaques _Zip Slip_)
+* Appel du parseur pour l'analyse du code
+* Appel du moteur de generation pour creer le nouveau projet
+* Appel du moteur d'amelioration intelligent (SmartCodeEnhancer) pour optimiser le code genere
+* Compression du projet genere en un nouveau fichier ZIP pour le telechargement
+
+h3. 2.3. Couche d'Analyse Statique (Parsing)
+
+*{{EjbProjectParser}}* utilise la bibliotheque *JavaParser* pour lire et comprendre le code source Java sans avoir besoin de le compiler.
+* Il parcourt l'arborescence des fichiers extraits
+* Il detecte les classes annotees avec {{@Stateless}} ou implementant l'interface {{BaseUseCase}}
+* Il identifie les methodes {{execute}} et deduit les DTOs d'entree et de sortie
+* Il recherche activement les annotations JAXB ({{@XmlRootElement}}, {{@XmlElement}}, etc.) pour determiner si le support XML est requis
+
+h3. 2.4. Couche de Generation de Code
+
+*{{CodeGenerationEngine}}* est responsable de la creation physique des fichiers du nouveau projet Spring Boot :
+
+||Fichier Genere||Description||
+|{{pom.xml}}|Fichier Maven avec les dependances necessaires (incluant JAXB et Jackson XML si detectes)|
+|{{Application.java}}|Classe principale Spring Boot et fichier {{application.properties}}|
+|Controllers REST|Classes {{@RestController}} qui exposent les endpoints|
+|Service Adapters|Classes qui effectuent les appels JNDI vers les EJB distants|
+|DTOs|Objets de transfert recrees en conservant les annotations JAXB pour la compatibilite XML|
+|{{GlobalExceptionHandler}}|Gestion globale des exceptions|
+|{{LoggingAspect}}|Aspect de journalisation transversal|
+|{{ContentNegotiationConfig}}|Configuration de negociation de contenu JSON/XML (genere uniquement si JAXB detecte)|
+
+h3. 2.5. Couche d'Amelioration Intelligente (SmartCodeEnhancer)
+
+*{{SmartCodeEnhancer}}* est un moteur de regles interne fonctionnant en local (sans appel externe) qui analyse et modifie le code genere pour le rendre conforme aux standards de l'industrie.
+
+||Metrique||Valeur||
+|Nombre de regles|77|
+|Nombre de categories|12|
+|Score de qualite|Sur 100|
+
+{panel:title=Les 12 categories de regles|borderStyle=solid|borderColor=#ccc}
+# Conventions de nommage (R01-R08)
+# Methodes HTTP et codes de statut (R09-R14)
+# Validation des entrees (R15-R20)
+# Gestion des erreurs (R21-R30)
+# Securite (R31-R40)
+# Resilience et fiabilite (R41-R47)
+# Observabilite et logging (R48-R53)
+# Documentation et specification API (R54-R58)
+# Negociation de contenu (R59-R63)
+# Structure du projet et configuration (R64-R68)
+# Tests (R69-R73)
+# Performance (R74-R77)
+{panel}
+
+Fonctionnalites principales du SmartCodeEnhancer :
+* Genere automatiquement des *tests unitaires* ({{@WebMvcTest}}) pour chaque controleur (3 scenarios : 201, 4xx, 500)
+* Ajoute la *documentation OpenAPI* ({{@Operation}}, {{@ApiResponses}}, {{@Tag}}) et la dependance springdoc
+* Configure la *securite* : CORS, SecurityConfig, en-tetes de securite
+* Configure la *resilience* : Spring Boot Actuator (health, info, metrics)
+* Cree les *profils d'environnement* : application-dev.properties et application-prod.properties
+* Genere le *Dockerfile* multi-stage (build + runtime, utilisateur non-root) et le *docker-compose.yml*
+* Ajoute le *CorrelationIdFilter* (X-Request-ID via MDC) pour la tracabilite
+* Active la *compression gzip* pour les reponses
+* Produit un *rapport detaille* ({{ENHANCEMENT_REPORT.md}}) avec un score de qualite sur 100
+
+h2. 3. Modeles de Donnees
+
+L'analyse du code source produit un modele de donnees interne structure :
+
+||Classe||Role||
+|{{ProjectAnalysisResult}}|Contient le bilan global de l'analyse (nombre de fichiers, liste des UseCases, liste des DTOs, avertissements)|
+|{{UseCaseInfo}}|Represente un EJB detecte. Contient son nom, ses DTOs associes, le nom du endpoint REST genere, et le format de serialisation supporte (JSON, XML, ou les deux)|
+|{{DtoInfo}}|Represente un objet de transfert. Contient la liste de ses champs et un indicateur de presence d'annotations JAXB|
+|{{EnhancementReport}}|Contient le bilan des ameliorations appliquees par le SmartCodeEnhancer, incluant le score de qualite et le detail par regle|
+
+h2. 4. Flux de Traitement (Workflow)
+
+# *Upload* : L'utilisateur soumet un fichier {{.zip}}. Le {{GeneratorService}} le decompresse dans un repertoire temporaire defini par {{app.upload.dir}}.
+# *Scan* : L'utilisateur clique sur "Scanner". Le {{EjbProjectParser}} lit les fichiers {{.java}}, remplit le modele {{ProjectAnalysisResult}}, et l'interface affiche les statistiques.
+# *Generation & Amelioration* : L'utilisateur clique sur "Generer". Le {{CodeGenerationEngine}} cree l'arborescence du nouveau projet, puis le {{SmartCodeEnhancer}} l'optimise et genere le rapport.
+# *Telechargement* : L'utilisateur telecharge le resultat. Le {{GeneratorService}} zippe le dossier genere et le renvoie via le {{GeneratorController}}.
+
+h2. 5. Fichiers generes par l'outil (avec SmartCodeEnhancer)
+
+||Fichier/Dossier||Description||Genere par||
+|src/main/java/.../controller/|Controllers REST avec annotations OpenAPI|CodeGenerationEngine + SmartCodeEnhancer|
+|src/main/java/.../service/|Service Adapters (appels JNDI)|CodeGenerationEngine|
+|src/main/java/.../dto/|DTOs avec annotations JAXB preservees|CodeGenerationEngine|
+|src/main/java/.../config/SecurityConfig.java|Configuration Spring Security|SmartCodeEnhancer|
+|src/main/java/.../config/CorsConfig.java|Configuration CORS|SmartCodeEnhancer|
+|src/main/java/.../config/ContentNegotiationConfig.java|Negociation de contenu JSON/XML|CodeGenerationEngine|
+|src/main/java/.../config/EjbLookupConfig.java|Configuration JNDI|CodeGenerationEngine|
+|src/main/java/.../exception/|Gestion globale des erreurs (GlobalExceptionHandler, BusinessException, ServiceUnavailableException)|CodeGenerationEngine|
+|src/main/java/.../filter/CorrelationIdFilter.java|Filtre HTTP pour X-Request-ID|SmartCodeEnhancer|
+|src/main/java/.../logging/LoggingAspect.java|Aspect de journalisation|CodeGenerationEngine|
+|src/test/java/.../controller/|Tests unitaires (3 scenarios par controller)|SmartCodeEnhancer|
+|src/main/resources/application.properties|Configuration principale avec Actuator, compression gzip, logging|CodeGenerationEngine + SmartCodeEnhancer|
+|src/main/resources/application-dev.properties|Profil developpement|SmartCodeEnhancer|
+|src/main/resources/application-prod.properties|Profil production avec variables d'environnement|SmartCodeEnhancer|
+|pom.xml|Dependances Maven (Spring Boot, JAXB, SpringDoc, Security, Actuator)|CodeGenerationEngine + SmartCodeEnhancer|
+|Dockerfile|Image Docker multi-stage (build + runtime, utilisateur non-root)|SmartCodeEnhancer|
+|docker-compose.yml|Orchestration Docker avec health check|SmartCodeEnhancer|
+|ENHANCEMENT_REPORT.md|Rapport d'amelioration avec score de qualite|SmartCodeEnhancer|
+|README.md|Documentation du projet genere|CodeGenerationEngine|
+
+----
+
+h1. Guide d'Installation et d'Utilisation (Pas a Pas)
+
+{info:title=A propos de ce guide}
+Ce guide est concu pour vous accompagner pas a pas dans l'installation et le demarrage de l'application, meme si vous n'avez aucune experience prealable en developpement. Suivez simplement chaque etape attentivement.
+{info}
+
+h2. Etape 1 : Verifier les prerequis sur votre ordinateur
+
+Avant de commencer, votre ordinateur a besoin de deux outils essentiels pour faire fonctionner l'application : *Java* (le langage de programmation) et *Maven* (l'outil qui assemble l'application).
+
+h3. 1.1. Verifier si Java est installe
+
+# Ouvrez l'*Invite de commandes* (sur Windows, tapez {{cmd}} dans la barre de recherche du menu Demarrer et appuyez sur Entree. Sur Mac, ouvrez l'application *Terminal*).
+# Dans la fenetre noire qui s'ouvre, tapez exactement la commande suivante et appuyez sur Entree :
+{code}
+java -version
+{code}
+# *Resultat attendu* : Le systeme doit afficher un texte indiquant la version de Java. *Attention : la version doit etre 21 ou superieure.* (Exemple : {{openjdk version "21.0.2"}}).
+# *Si Java n'est pas installe ou si la version est trop ancienne* : Vous devez telecharger et installer Java 21 (OpenJDK 21) depuis internet, puis redemarrer votre ordinateur.
+
+h3. 1.2. Verifier si Maven est installe
+
+# Toujours dans la meme fenetre noire (Invite de commandes ou Terminal), tapez la commande suivante et appuyez sur Entree :
+{code}
+mvn -version
+{code}
+# *Resultat attendu* : Le systeme doit afficher des informations sur Apache Maven.
+# *Si Maven n'est pas reconnu* : Vous devez telecharger et installer Apache Maven, puis l'ajouter aux variables d'environnement de votre systeme.
+
+h2. Etape 2 : Recuperer le code de l'application
+
+Vous devez maintenant placer les fichiers de l'application sur votre ordinateur.
+
+# Telecharger le fichier ZIP contenant le code source de l'application (le fichier s'appelle generalement {{ejb-to-rest-tool-complete.zip}}).
+# Creer un nouveau dossier sur votre bureau (par exemple, nommez-le {{GenerateurAPI}}).
+# Deplacer le fichier ZIP telecharge dans ce nouveau dossier.
+# Faire un clic droit sur le fichier ZIP et choisir *"Extraire ici"* (ou "Extraire tout").
+# Vous devriez maintenant voir un dossier nomme {{ejb-to-rest-tool}} contenant plusieurs fichiers et dossiers (comme {{src}}, {{pom.xml}}, etc.).
+
+h2. Etape 3 : Preparer (compiler) l'application
+
+Nous allons maintenant demander a Maven de preparer l'application pour qu'elle soit prete a etre lancee.
+
+# Ouvrir a nouveau votre *Invite de commandes* (ou Terminal).
+# Naviguer vers le dossier ou vous avez extrait les fichiers. Pour cela, utilisez la commande {{cd}} (qui signifie "change directory"). Par exemple, si votre dossier est sur le bureau, tapez :
+{code}
+cd Desktop/GenerateurAPI/ejb-to-rest-tool
+{code}
+_(Appuyez sur Entree. Le chemin exact depend de l'endroit ou vous avez mis le dossier)._
+# Une fois dans le bon dossier, tapez la commande suivante pour assembler l'application :
+{code}
+mvn clean package -DskipTests
+{code}
+# Appuyez sur Entree et patientez. Vous allez voir beaucoup de texte defiler a l'ecran. C'est normal, Maven telecharge les elements necessaires.
+# *Resultat attendu* : A la fin, vous devez voir un grand message vert indiquant *"BUILD SUCCESS"*. Si vous voyez "BUILD FAILURE", verifiez que vous etes bien dans le bon dossier et que Java 21 est bien installe.
+
+h2. Etape 4 : Lancer l'application
+
+L'application est prete ! Il ne reste plus qu'a l'allumer.
+
+# Toujours dans la meme fenetre noire, tapez la commande suivante :
+{code}
+java -jar target/ejb-to-rest-generator-1.0.0.jar
+{code}
+# Appuyez sur Entree. Vous allez voir le logo "Spring" apparaitre en texte, suivi de plusieurs lignes d'informations.
+# L'application est demarree lorsque vous voyez une ligne indiquant : {{Started EjbToRestGeneratorApplication in ... seconds}}.
+# *Important* : Ne fermez pas cette fenetre noire ! Si vous la fermez, l'application s'arretera. Reduisez-la simplement.
+
+h2. Etape 5 : Utiliser l'application dans votre navigateur
+
+Maintenant que le "moteur" tourne en arriere-plan, vous pouvez utiliser l'interface visuelle.
+
+# Ouvrir votre navigateur internet habituel (Google Chrome, Firefox, Edge, Safari...).
+# Dans la barre d'adresse en haut (la ou vous tapez habituellement www.google.com), tapez exactement ceci :
+{code}
+http://localhost:8080
+{code}
+# Appuyez sur Entree.
+# *Felicitations !* Vous devriez voir la page d'accueil de l'outil "EJB to REST API Generator".
+
+h3. Comment utiliser l'outil :
+
+* *Etape 1 (Upload)* : Cliquez sur la zone pointillee pour selectionner le fichier ZIP de votre ancien projet EJB, puis cliquez sur le bouton bleu "Uploader le projet".
+* *Etape 2 (Scan)* : Une fois le projet uploade, le bouton gris "Scanner le projet EJB" devient cliquable. Cliquez dessus. L'outil va analyser votre code et afficher un tableau avec ce qu'il a trouve (les UseCases et les formats JSON/XML).
+* *Etape 3 (Generer)* : Cliquez sur le bouton vert "Generer et ameliorer avec l'IA". L'outil fabrique le nouveau code et applique automatiquement des dizaines de regles d'amelioration. Un rapport detaille s'affichera avec un score de qualite sur 100.
+* *Etape 4 (Telecharger)* : Cliquez sur le bouton violet "Telecharger le projet API genere". Vous obtiendrez un nouveau fichier ZIP contenant votre API toute neuve, optimisee, securisee et prete a l'emploi !
+
+h2. Etape 6 : Arreter l'application
+
+Quand vous avez termine de travailler :
+
+# Retournez sur la fenetre noire (Invite de commandes ou Terminal) que vous aviez reduite.
+# Appuyez simultanement sur les touches *Ctrl* et *C* de votre clavier.
+# L'application va s'arreter proprement. Vous pouvez maintenant fermer la fenetre.
+
+----
+
+_Fin de la documentation._
