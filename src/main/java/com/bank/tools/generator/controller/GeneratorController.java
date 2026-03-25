@@ -347,6 +347,7 @@ public class GeneratorController {
         populateCommon(model, session);
 
         EnhancementReport report = (EnhancementReport) session.getAttribute("enhancementReport");
+        model.addAttribute("enhancementReport", report);
         if (report != null) {
             model.addAttribute("criticalCount", report.countBySeverity(EnhancementReport.Severity.CRITICAL));
             model.addAttribute("warningCount", report.countBySeverity(EnhancementReport.Severity.WARNING));

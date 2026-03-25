@@ -199,7 +199,7 @@
                     <div class="card-body">
                         <div class="category-grid">
                             <th:block th:each="cat : ${categories}" th:if="${cat.count > 0}">
-                                <div class="category-card" style="cursor:pointer" th:attr="onclick='filterAndScroll(\'' + ${cat.key} + '\')'">
+                                <div class="category-card" style="cursor:pointer" th:data-catkey="${cat.key}">
                                     <div class="category-icon" th:classappend="${'cat-' + cat.key}">
                                         <i th:class="${cat.icon}"></i>
                                     </div>
@@ -248,9 +248,10 @@
                                 <tbody>
                                     <th:block th:each="e, iterStat : ${enhancementReport.enhancements}">
                                         <!-- Main rule row -->
-                                        <tr th:attr="data-category=${e.category.name()}"
+                                        <tr th:data-category="${e.category.name()}"
                                             th:classappend="${e.hasDetails() ? 'rule-row-clickable' : ''}"
-                                            th:onclick="${e.hasDetails() ? 'toggleDetail(' + iterStat.index + ')' : ''}">
+                                            th:data-index="${iterStat.index}"
+                                            th:data-hasdetails="${e.hasDetails()}">
                                             <td>
                                                 <code th:text="${e.ruleId}">R01</code>
                                                 <span th:if="${e.hasDetails()}" class="has-details-badge" title="Details disponibles"></span>
@@ -271,7 +272,7 @@
                                         </tr>
                                         <!-- Expandable detail row -->
                                         <tr th:if="${e.hasDetails()}" class="detail-row" th:id="'detail-' + ${iterStat.index}"
-                                            th:attr="data-category=${e.category.name()}" style="display:none;">
+                                            th:data-category="${e.category.name()}" style="display:none;">
                                             <td colspan="6">
                                                 <div class="rule-detail-panel open">
                                                     <div class="rule-detail-grid">
@@ -326,6 +327,20 @@
 </div>
 <script th:src="@{/js/app.js}"></script>
 <script>
+    // Event delegation for category cards
+    document.querySelectorAll('.category-card[data-catkey]').forEach(function(card) {
+        card.addEventListener('click', function() {
+            filterAndScroll(this.getAttribute('data-catkey'));
+        });
+    });
+
+    // Event delegation for rule rows
+    document.querySelectorAll('tr[data-hasdetails="true"]').forEach(function(row) {
+        row.addEventListener('click', function() {
+            toggleDetail(this.getAttribute('data-index'));
+        });
+    });
+
     // Toggle detail panel for a rule row
     function toggleDetail(index) {
         var detailRow = document.getElementById('detail-' + index);
