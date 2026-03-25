@@ -123,7 +123,10 @@ public class CodeGenerationEngine {
         for (UseCaseInfo useCase : analysisResult.getUseCases()) {
             // G4 : Verifier le type EJB
             if (useCase.getEjbType() == UseCaseInfo.EjbType.MESSAGE_DRIVEN) {
-                generateMdbComment(srcMain, useCase);
+                generateMdbController(srcMain, useCase);
+                generateMdbEventClass(srcMain, useCase);
+                generateMdbEventListener(srcMain, useCase);
+                generateMdbServiceAdapter(srcMain, useCase);
                 continue;
             }
 
@@ -798,26 +801,221 @@ public class CodeGenerationEngine {
         log.info("Service adapter multi-methodes genere : {}", adapterName);
     }
 
-    // ===================== MDB COMMENT (G4) =====================
+    // ===================== MDB GENERATION (G4 - Event-Driven) =====================
 
-    private void generateMdbComment(Path srcMain, UseCaseInfo useCase) throws IOException {
-        String code = """
-                package %s.service;
-                
-                /**
-                 * L'EJB source %s est un @MessageDriven (MDB).
-                 * Ce type d'EJB ne peut pas etre expose via REST — il consomme des messages JMS.
-                 * Integration recommandee : @JmsListener ou Spring Integration.
-                 *
-                 * Nom JNDI source : %s
-                 */
-                // @JmsListener(destination = "queue/...")
-                // public void onMessage(Message message) { ... }
-                """.formatted(BASE_PACKAGE, useCase.getClassName(), useCase.getJndiName());
+    /**
+     * Genere un controller REST asynchrone pour un MDB.
+     * Le controller recoit les messages via HTTP POST et publie un evenement Spring.
+     */
+    private void generateMdbController(Path srcMain, UseCaseInfo useCase) throws IOException {
+        String controllerName = useCase.getControllerName();
+        String endpoint = useCase.getRestEndpoint();
+        String baseName = controllerName.replace("Controller", "");
+        String eventClassName = baseName.endsWith("Event") ? baseName : baseName + "Event";
+        String swaggerSummary = deriveSwaggerSummary(useCase.getClassName());
+        String swaggerDescription = useCase.getJavadoc() != null ? useCase.getJavadoc() :
+                "Endpoint asynchrone remplacant le MDB " + useCase.getClassName() + ". " +
+                "Recoit un message via HTTP et le traite de maniere asynchrone.";
 
-        String fileName = useCase.getClassName().replace("UC", "").replace("Bean", "") + "MdbNote.java";
-        Files.writeString(srcMain.resolve("service/" + fileName), code);
-        log.info("Note MDB generee pour : {}", useCase.getClassName());
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(BASE_PACKAGE).append(".controller;\n\n");
+
+        // Imports
+        sb.append("import ").append(BASE_PACKAGE).append(".event.").append(eventClassName).append(";\n");
+        sb.append("import org.slf4j.Logger;\n");
+        sb.append("import org.slf4j.LoggerFactory;\n");
+        sb.append("import org.springframework.context.ApplicationEventPublisher;\n");
+        sb.append("import org.springframework.http.HttpStatus;\n");
+        sb.append("import org.springframework.http.ResponseEntity;\n");
+        sb.append("import org.springframework.web.bind.annotation.*;\n");
+        sb.append("import io.swagger.v3.oas.annotations.Operation;\n");
+        sb.append("import io.swagger.v3.oas.annotations.responses.ApiResponse;\n");
+        sb.append("import io.swagger.v3.oas.annotations.responses.ApiResponses;\n");
+        sb.append("import java.util.Map;\n");
+        sb.append("import java.util.UUID;\n");
+        sb.append("\n");
+
+        // Commentaire G4
+        sb.append("/**\n");
+        sb.append(" * Controller REST asynchrone remplacant le MDB ").append(useCase.getClassName()).append(".\n");
+        sb.append(" * \n");
+        sb.append(" * L'EJB source est un @MessageDriven qui consommait des messages JMS.\n");
+        sb.append(" * Ce controller recoit les messages via HTTP POST et les traite de maniere\n");
+        sb.append(" * asynchrone via le systeme d'evenements Spring (ApplicationEventPublisher).\n");
+        sb.append(" * \n");
+        sb.append(" * Destination JMS source : ").append(useCase.getJndiName()).append("\n");
+        sb.append(" * Endpoint REST : POST ").append(endpoint).append("\n");
+        sb.append(" */\n");
+        sb.append("@RestController\n");
+        sb.append("@RequestMapping(\"").append(endpoint).append("\")\n");
+        sb.append("public class ").append(controllerName).append(" {\n\n");
+        sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(controllerName).append(".class);\n\n");
+        sb.append("    private final ApplicationEventPublisher eventPublisher;\n\n");
+        sb.append("    public ").append(controllerName).append("(ApplicationEventPublisher eventPublisher) {\n");
+        sb.append("        this.eventPublisher = eventPublisher;\n");
+        sb.append("    }\n\n");
+
+        // Swagger
+        sb.append("    @Operation(\n");
+        sb.append("        summary = \"").append(escapeJavaString(swaggerSummary)).append(" (async)\",\n");
+        sb.append("        description = \"").append(escapeJavaString(swaggerDescription)).append("\"\n");
+        sb.append("    )\n");
+        sb.append("    @ApiResponses(value = {\n");
+        sb.append("        @ApiResponse(responseCode = \"202\", description = \"Message accepte pour traitement asynchrone\"),\n");
+        sb.append("        @ApiResponse(responseCode = \"400\", description = \"Requete invalide\"),\n");
+        sb.append("        @ApiResponse(responseCode = \"500\", description = \"Erreur interne\")\n");
+        sb.append("    })\n");
+
+        sb.append("    @PostMapping\n");
+        sb.append("    public ResponseEntity<Map<String, String>> receiveMessage(@RequestBody Map<String, Object> payload) {\n");
+        sb.append("        String correlationId = UUID.randomUUID().toString();\n");
+        sb.append("        log.info(\"Message recu sur ").append(endpoint).append(" [correlationId={}]\", correlationId);\n");
+        sb.append("        try {\n");
+        sb.append("            ").append(eventClassName).append(" event = new ").append(eventClassName).append("(this, correlationId, payload);\n");
+        sb.append("            eventPublisher.publishEvent(event);\n");
+        sb.append("            log.info(\"Evenement publie avec succes [correlationId={}]\", correlationId);\n");
+        sb.append("            return ResponseEntity.status(HttpStatus.ACCEPTED)\n");
+        sb.append("                    .body(Map.of(\"status\", \"ACCEPTED\", \"correlationId\", correlationId));\n");
+        sb.append("        } catch (Exception e) {\n");
+        sb.append("            log.error(\"Erreur lors de la publication de l'evenement [correlationId={}]\", correlationId, e);\n");
+        sb.append("            throw new RuntimeException(\"Erreur lors du traitement du message MDB ").append(useCase.getClassName()).append("\", e);\n");
+        sb.append("        }\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+
+        Files.createDirectories(srcMain.resolve("controller"));
+        Files.writeString(srcMain.resolve("controller/" + controllerName + ".java"), sb.toString());
+        log.info("Controller MDB genere : {} (HTTP: POST 202 Accepted)", controllerName);
+    }
+
+    /**
+     * Genere la classe d'evenement Spring pour un MDB.
+     */
+    private void generateMdbEventClass(Path srcMain, UseCaseInfo useCase) throws IOException {
+        String baseName = useCase.getControllerName().replace("Controller", "");
+        String eventClassName = baseName.endsWith("Event") ? baseName : baseName + "Event";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(BASE_PACKAGE).append(".event;\n\n");
+        sb.append("import org.springframework.context.ApplicationEvent;\n");
+        sb.append("import java.util.Map;\n");
+        sb.append("\n");
+        sb.append("/**\n");
+        sb.append(" * Evenement Spring remplacant le message JMS du MDB ").append(useCase.getClassName()).append(".\n");
+        sb.append(" * Contient le payload du message et un identifiant de correlation.\n");
+        sb.append(" */\n");
+        sb.append("public class ").append(eventClassName).append(" extends ApplicationEvent {\n\n");
+        sb.append("    private static final long serialVersionUID = 1L;\n\n");
+        sb.append("    private final String correlationId;\n");
+        sb.append("    private final Map<String, Object> payload;\n\n");
+        sb.append("    public ").append(eventClassName).append("(Object source, String correlationId, Map<String, Object> payload) {\n");
+        sb.append("        super(source);\n");
+        sb.append("        this.correlationId = correlationId;\n");
+        sb.append("        this.payload = payload;\n");
+        sb.append("    }\n\n");
+        sb.append("    public String getCorrelationId() { return correlationId; }\n");
+        sb.append("    public Map<String, Object> getPayload() { return payload; }\n");
+        sb.append("}\n");
+
+        Files.createDirectories(srcMain.resolve("event"));
+        Files.writeString(srcMain.resolve("event/" + eventClassName + ".java"), sb.toString());
+        log.info("Event class MDB generee : {}", eventClassName);
+    }
+
+    /**
+     * Genere le listener d'evenement asynchrone pour un MDB.
+     * Equivalent Spring du onMessage() JMS.
+     */
+    private void generateMdbEventListener(Path srcMain, UseCaseInfo useCase) throws IOException {
+        String baseName = useCase.getControllerName().replace("Controller", "");
+        String eventClassName = baseName.endsWith("Event") ? baseName : baseName + "Event";
+        String listenerName = eventClassName + "Listener";
+        String adapterName = useCase.getServiceAdapterName();
+        String adapterField = Character.toLowerCase(adapterName.charAt(0)) + adapterName.substring(1);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(BASE_PACKAGE).append(".event;\n\n");
+        sb.append("import ").append(BASE_PACKAGE).append(".service.").append(adapterName).append(";\n");
+        sb.append("import org.slf4j.Logger;\n");
+        sb.append("import org.slf4j.LoggerFactory;\n");
+        sb.append("import org.springframework.context.event.EventListener;\n");
+        sb.append("import org.springframework.scheduling.annotation.Async;\n");
+        sb.append("import org.springframework.stereotype.Component;\n");
+        sb.append("\n");
+        sb.append("/**\n");
+        sb.append(" * Listener asynchrone remplacant la methode onMessage() du MDB ").append(useCase.getClassName()).append(".\n");
+        sb.append(" * \n");
+        sb.append(" * Ce composant ecoute les evenements ").append(eventClassName).append(" publies par le controller\n");
+        sb.append(" * et delegue le traitement au service adapter (pont vers l'EJB legacy).\n");
+        sb.append(" * L'annotation @Async garantit un traitement non-bloquant.\n");
+        sb.append(" */\n");
+        sb.append("@Component\n");
+        sb.append("public class ").append(listenerName).append(" {\n\n");
+        sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(listenerName).append(".class);\n\n");
+        sb.append("    private final ").append(adapterName).append(" ").append(adapterField).append(";\n\n");
+        sb.append("    public ").append(listenerName).append("(").append(adapterName).append(" ").append(adapterField).append(") {\n");
+        sb.append("        this.").append(adapterField).append(" = ").append(adapterField).append(";\n");
+        sb.append("    }\n\n");
+        sb.append("    @Async\n");
+        sb.append("    @EventListener\n");
+        sb.append("    public void handle").append(eventClassName).append("(").append(eventClassName).append(" event) {\n");
+        sb.append("        log.info(\"Traitement asynchrone du message [correlationId={}]\", event.getCorrelationId());\n");
+        sb.append("        try {\n");
+        sb.append("            ").append(adapterField).append(".processMessage(event.getPayload());\n");
+        sb.append("            log.info(\"Message traite avec succes [correlationId={}]\", event.getCorrelationId());\n");
+        sb.append("        } catch (Exception e) {\n");
+        sb.append("            log.error(\"Erreur lors du traitement du message [correlationId={}]\", event.getCorrelationId(), e);\n");
+        sb.append("            // TODO: Implementer une strategie de retry ou dead-letter\n");
+        sb.append("        }\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+
+        Files.createDirectories(srcMain.resolve("event"));
+        Files.writeString(srcMain.resolve("event/" + listenerName + ".java"), sb.toString());
+        log.info("Event listener MDB genere : {}", listenerName);
+    }
+
+    /**
+     * Genere le service adapter pour un MDB.
+     * Contient la logique de pont vers l'EJB legacy.
+     */
+    private void generateMdbServiceAdapter(Path srcMain, UseCaseInfo useCase) throws IOException {
+        String adapterName = useCase.getServiceAdapterName();
+        String jmsDestination = useCase.getJndiName();
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(BASE_PACKAGE).append(".service;\n\n");
+        sb.append("import org.slf4j.Logger;\n");
+        sb.append("import org.slf4j.LoggerFactory;\n");
+        sb.append("import org.springframework.stereotype.Service;\n");
+        sb.append("import java.util.Map;\n");
+        sb.append("\n");
+        sb.append("/**\n");
+        sb.append(" * Service adapter pour le MDB ").append(useCase.getClassName()).append(".\n");
+        sb.append(" * \n");
+        sb.append(" * Destination JMS source : ").append(jmsDestination).append("\n");
+        sb.append(" * Ce service contient la logique metier qui etait dans onMessage().\n");
+        sb.append(" * TODO: Migrer la logique metier du MDB original ici.\n");
+        sb.append(" */\n");
+        sb.append("@Service\n");
+        sb.append("public class ").append(adapterName).append(" {\n\n");
+        sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(adapterName).append(".class);\n\n");
+        sb.append("    /**\n");
+        sb.append("     * Traite un message recu (equivalent de onMessage du MDB).\n");
+        sb.append("     *\n");
+        sb.append("     * @param payload le contenu du message sous forme de Map\n");
+        sb.append("     */\n");
+        sb.append("    public void processMessage(Map<String, Object> payload) {\n");
+        sb.append("        log.info(\"Traitement du message MDB ").append(useCase.getClassName()).append(" : {}\", payload);\n");
+        sb.append("        // TODO: Implementer la logique metier du MDB ").append(useCase.getClassName()).append("\n");
+        sb.append("        // La logique originale se trouvait dans la methode onMessage()\n");
+        sb.append("        // de l'EJB @MessageDriven ").append(useCase.getClassName()).append("\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+
+        Files.createDirectories(srcMain.resolve("service"));
+        Files.writeString(srcMain.resolve("service/" + adapterName + ".java"), sb.toString());
+        log.info("Service adapter MDB genere : {}", adapterName);
     }
 
     // ===================== DTO (G1, G2, G3, BUG 10/11/12) =====================
@@ -1274,7 +1472,9 @@ public class CodeGenerationEngine {
             sb.append("- ").append(statefulCount).append(" EJB @Stateful detecte(s) — l'etat conversationnel n'est pas reproduit dans la facade REST\n");
         }
         if (mdbCount > 0) {
-            sb.append("- ").append(mdbCount).append(" EJB @MessageDriven detecte(s) — non expose(s) via REST (JMS)\n");
+            sb.append("- ").append(mdbCount).append(" EJB @MessageDriven detecte(s) \u2192 transforme(s) en Controller REST async + EventListener Spring\n");
+            sb.append("  - Chaque MDB genere : Controller (POST 202 Accepted), Event Spring, EventListener (@Async), ServiceAdapter\n");
+            sb.append("  - Les messages JMS sont remplaces par des appels HTTP POST asynchrones\n");
         }
         sb.append("- Les ServiceAdapters utilisent un lookup JNDI a chaque appel — prevoir un cache si necessaire\n");
         sb.append("- Les tests unitaires mockent les ServiceAdapters — les tests d'integration necessitent un serveur EJB\n");
@@ -1305,14 +1505,22 @@ public class CodeGenerationEngine {
         sb.append("| UseCase | Endpoint | Methode | Format | HTTP Status |\n");
         sb.append("|---------|----------|---------|--------|-------------|\n");
         for (UseCaseInfo uc : analysisResult.getUseCases()) {
-            if (uc.getEjbType() == UseCaseInfo.EjbType.MESSAGE_DRIVEN) continue;
-            HttpMapping mapping = resolveHttpMappingForUseCase(uc.getClassName());
-            sb.append("| ").append(uc.getClassName())
-              .append(" | ").append(uc.getRestEndpoint())
-              .append(" | ").append(mapping.method)
-              .append(" | ").append(uc.getSerializationFormat().getLabel())
-              .append(" | ").append(mapping.statusCode)
-              .append(" |\n");
+            if (uc.getEjbType() == UseCaseInfo.EjbType.MESSAGE_DRIVEN) {
+                sb.append("| ").append(uc.getClassName()).append(" (MDB)")
+                  .append(" | ").append(uc.getRestEndpoint())
+                  .append(" | POST (async)")
+                  .append(" | JSON")
+                  .append(" | 202 Accepted")
+                  .append(" |\n");
+            } else {
+                HttpMapping mapping = resolveHttpMappingForUseCase(uc.getClassName());
+                sb.append("| ").append(uc.getClassName())
+                  .append(" | ").append(uc.getRestEndpoint())
+                  .append(" | ").append(mapping.method)
+                  .append(" | ").append(uc.getSerializationFormat().getLabel())
+                  .append(" | ").append(mapping.statusCode)
+                  .append(" |\n");
+            }
         }
 
         if (hasXml) {

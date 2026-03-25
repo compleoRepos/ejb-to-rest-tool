@@ -198,11 +198,21 @@ public class EjbProjectParser {
                 // G4 : Detecter les EJBs (tous types)
                 UseCaseInfo.EjbType ejbType = detectEjbType(classDecl);
                 if (ejbType != null) {
-                    // G4 : MessageDriven → avertissement, pas de controller REST
+                    // G4 : MessageDriven → transformer en composant event-driven Spring
                     if (ejbType == UseCaseInfo.EjbType.MESSAGE_DRIVEN) {
-                        result.addAttentionPoint("EJB @MessageDriven detecte : " +
-                                classDecl.getNameAsString() + " — ne peut pas etre expose via REST (JMS)");
-                        result.addWarning("MDB ignore : " + classDecl.getNameAsString());
+                        UseCaseInfo mdbInfo = extractMdbInfo(cu, classDecl);
+                        if (mdbInfo != null) {
+                            classDecl.getAnnotations().forEach(ann ->
+                                    mdbInfo.getSourceAnnotations().add(ann.getNameAsString()));
+                            classDecl.getJavadocComment().ifPresent(jd ->
+                                    mdbInfo.setJavadoc(jd.getContent().trim()));
+                            mdbInfo.setSwaggerSummary(generateSwaggerSummary(mdbInfo.getClassName()));
+                            result.addUseCase(mdbInfo);
+                            result.addAttentionPoint("EJB @MessageDriven transforme : " +
+                                    classDecl.getNameAsString() + " → Controller REST async + EventListener Spring");
+                            result.addConversion("MDB " + classDecl.getNameAsString() + " → REST async + @EventListener");
+                            log.info("MDB detecte et transforme : {} → Controller REST async", classDecl.getNameAsString());
+                        }
                         continue;
                     }
 
@@ -512,6 +522,98 @@ public class EjbProjectParser {
         return info;
     }
 
+    // ==================== MDB EXTRACTION ====================
+
+    /**
+     * Extrait les informations d'un Message-Driven Bean pour le transformer
+     * en composant event-driven Spring (Controller REST async + EventListener).
+     */
+    private UseCaseInfo extractMdbInfo(CompilationUnit cu, ClassOrInterfaceDeclaration classDecl) {
+        UseCaseInfo info = new UseCaseInfo();
+        info.setClassName(classDecl.getNameAsString());
+        info.setEjbType(UseCaseInfo.EjbType.MESSAGE_DRIVEN);
+        info.setEjbPattern(UseCaseInfo.EjbPattern.GENERIC_SERVICE);
+        info.setHasExecuteMethod(false);
+        info.setStateless(true);
+
+        String packageName = cu.getPackageDeclaration()
+                .map(pd -> pd.getNameAsString()).orElse("");
+        info.setPackageName(packageName);
+        info.setFullyQualifiedName(packageName.isEmpty() ? info.getClassName() : packageName + "." + info.getClassName());
+
+        // Interfaces implementees
+        classDecl.getImplementedTypes().forEach(t -> info.getImplementedInterfaces().add(t.getNameAsString()));
+        classDecl.getImplementedTypes().stream().findFirst()
+                .ifPresent(t -> info.setImplementedInterface(t.getNameAsString()));
+
+        // Extraire les methodes publiques (notamment onMessage)
+        List<MethodDeclaration> publicMethods = classDecl.getMethods().stream()
+                .filter(MethodDeclaration::isPublic)
+                .filter(m -> !isObjectMethod(m.getNameAsString()))
+                .collect(Collectors.toList());
+
+        for (MethodDeclaration method : publicMethods) {
+            UseCaseInfo.MethodInfo mi = new UseCaseInfo.MethodInfo();
+            mi.setName(method.getNameAsString());
+            mi.setReturnType(method.getTypeAsString());
+            method.getJavadocComment().ifPresent(jd -> mi.setJavadoc(jd.getContent().trim()));
+
+            for (Parameter param : method.getParameters()) {
+                UseCaseInfo.ParameterInfo pi = new UseCaseInfo.ParameterInfo(
+                        param.getNameAsString(), param.getTypeAsString());
+                mi.getParameters().add(pi);
+            }
+
+            mi.setHttpMethod("POST");
+            mi.setHttpStatusCode(202);  // 202 Accepted pour les operations async
+            mi.setRestPath(generateMethodRestPath(method.getNameAsString(), mi.getParameters()));
+            info.getPublicMethods().add(mi);
+        }
+
+        // Extraire la destination JMS depuis @ActivationConfigProperty si present
+        String jmsDestination = extractJmsDestination(classDecl);
+
+        // Noms generes
+        String baseName = deriveBaseName(info.getClassName());
+        info.setRestEndpoint("/api/events/" + toKebabCase(baseName));
+        info.setControllerName(baseName + "Controller");
+        info.setServiceAdapterName(baseName + "ServiceAdapter");
+        info.setJndiName(jmsDestination != null ? jmsDestination : "jms/queue/" + baseName);
+
+        info.setHttpMethod("POST");
+        info.setHttpStatusCode(202);  // 202 Accepted
+
+        return info;
+    }
+
+    /**
+     * Extrait la destination JMS depuis les @ActivationConfigProperty du MDB.
+     */
+    private String extractJmsDestination(ClassOrInterfaceDeclaration classDecl) {
+        for (AnnotationExpr ann : classDecl.getAnnotations()) {
+            if (ann.getNameAsString().equals("MessageDriven") && ann.isNormalAnnotationExpr()) {
+                for (var pair : ann.asNormalAnnotationExpr().getPairs()) {
+                    if (pair.getNameAsString().equals("activationConfig")) {
+                        String value = pair.getValue().toString();
+                        // Chercher destination dans les ActivationConfigProperty
+                        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                                .compile("propertyValue\\s*=\\s*\"([^\"]+)\"")
+                                .matcher(value);
+                        while (matcher.find()) {
+                            String propValue = matcher.group(1);
+                            if (propValue.contains("queue") || propValue.contains("topic")
+                                    || propValue.contains("jms") || propValue.contains("Queue")
+                                    || propValue.contains("Topic")) {
+                                return propValue;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     // ==================== DTO EXTRACTION ====================
 
     private DtoInfo extractDtoInfo(CompilationUnit cu, ClassOrInterfaceDeclaration classDecl) {
@@ -776,7 +878,7 @@ public class EjbProjectParser {
     }
 
     private String deriveBaseName(String className) {
-        String[] suffixes = {"UC", "UseCase", "Bean", "Impl", "EJB", "ServiceBean", "Service"};
+        String[] suffixes = {"UC", "UseCase", "Bean", "Impl", "EJB", "ServiceBean", "Service", "MDB"};
         // Trier par longueur decroissante pour matcher les plus longs d'abord
         Arrays.sort(suffixes, (a, b) -> b.length() - a.length());
         for (String suffix : suffixes) {

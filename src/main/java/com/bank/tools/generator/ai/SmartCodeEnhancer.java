@@ -142,6 +142,14 @@ public class SmartCodeEnhancer {
                         controllerFile.getFileName().toString(), usesPost));
 
                 // R11: Déterminer le code HTTP selon le type d'opération
+                // MDB controllers utilisent 202 ACCEPTED — ne pas modifier
+                if (uc.getEjbType() == UseCaseInfo.EjbType.MESSAGE_DRIVEN) {
+                    report.addEnhancement(new Enhancement("R11", Category.HTTP_METHODS, Severity.INFO,
+                            "MDB " + uc.getControllerName() + " conserve 202 Accepted (traitement asynchrone)",
+                            controllerFile.getFileName().toString(), true));
+                    continue;
+                }
+
                 // Logique inversée : on détecte les CRÉATIONS (201) et SUPPRESSIONS (204)
                 // Tout le reste (consultation, transfert, etc.) → 200 OK par défaut
                 String ucName = uc.getClassName().toLowerCase();
