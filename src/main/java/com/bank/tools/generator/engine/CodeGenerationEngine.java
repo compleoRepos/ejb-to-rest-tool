@@ -1339,12 +1339,24 @@ public class CodeGenerationEngine {
             imports.add(TYPE_IMPORT_MAP.get(baseType));
         }
 
-        // Generiques
-        if (type.contains("<")) {
-            String genericPart = type.substring(type.indexOf('<') + 1, type.lastIndexOf('>'));
-            for (String paramType : genericPart.split(",")) {
-                resolveTypeImports(paramType.trim(), imports);
+        // Generiques : extraire les types parametres entre < et >
+        int openIdx = type.indexOf('<');
+        int closeIdx = type.lastIndexOf('>');
+        if (openIdx >= 0 && closeIdx > openIdx) {
+            String genericPart = type.substring(openIdx + 1, closeIdx);
+            // Split intelligent qui respecte les generiques imbriques
+            int depth = 0;
+            int start = 0;
+            for (int i = 0; i < genericPart.length(); i++) {
+                char c = genericPart.charAt(i);
+                if (c == '<') depth++;
+                else if (c == '>') depth--;
+                else if (c == ',' && depth == 0) {
+                    resolveTypeImports(genericPart.substring(start, i).trim(), imports);
+                    start = i + 1;
+                }
             }
+            resolveTypeImports(genericPart.substring(start).trim(), imports);
         }
     }
 
