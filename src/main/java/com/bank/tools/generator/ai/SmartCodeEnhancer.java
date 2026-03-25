@@ -65,7 +65,7 @@ public class SmartCodeEnhancer {
         applyErrorHandlingRules(report, srcMain);
 
         // ===== CATÉGORIE 5 : SÉCURITÉ =====
-        applySecurityRules(report, srcMain, resourcesDir);
+        applySecurityRules(report, srcMain, resourcesDir, analysisResult);
 
         // ===== CATÉGORIE 6 : RÉSILIENCE =====
         applyResilienceRules(report, srcMain, resourcesDir);
@@ -302,6 +302,46 @@ public class SmartCodeEnhancer {
                 }
             }
         }
+
+        // AXE 1.3 : @XmlTransient → @JsonIgnore dans les DTOs
+        for (DtoInfo dto : analysisResult.getDtos()) {
+            Path dtoFile = srcMain.resolve("dto/" + dto.getClassName() + ".java");
+            if (!Files.exists(dtoFile)) continue;
+            boolean hasXmlTransientField = dto.getFields().stream().anyMatch(DtoInfo.FieldInfo::isHasXmlTransient);
+            if (!hasXmlTransientField) continue;
+
+            String content = Files.readString(dtoFile);
+            boolean modified = false;
+            StringBuilder sb = new StringBuilder(content);
+
+            for (DtoInfo.FieldInfo field : dto.getFields()) {
+                if (!field.isHasXmlTransient()) continue;
+                // Chercher le champ et ajouter @JsonIgnore avant
+                String fieldDecl = "private " + field.getType() + " " + field.getName();
+                int idx = sb.indexOf(fieldDecl);
+                if (idx > 0) {
+                    String before = sb.substring(Math.max(0, idx - 100), idx);
+                    if (!before.contains("@JsonIgnore")) {
+                        sb.insert(idx, "@JsonIgnore\n    ");
+                        modified = true;
+                    }
+                }
+            }
+
+            if (modified) {
+                String result = sb.toString();
+                if (!result.contains("import com.fasterxml.jackson.annotation.JsonIgnore")) {
+                    result = result.replace("import ", "import com.fasterxml.jackson.annotation.JsonIgnore;\nimport ");
+                    // Eviter les doublons d'import
+                    result = result.replaceAll("(import com\\.fasterxml\\.jackson\\.annotation\\.JsonIgnore;\n)+",
+                            "import com.fasterxml.jackson.annotation.JsonIgnore;\n");
+                }
+                Files.writeString(dtoFile, result);
+                report.addEnhancement(new Enhancement("R21", Category.INPUT_VALIDATION, Severity.WARNING,
+                        "@XmlTransient transformé en @JsonIgnore dans " + dto.getClassName(),
+                        dtoFile.getFileName().toString(), true));
+            }
+        }
     }
 
     // ==================== CATÉGORIE 4 : ERROR HANDLING ====================
@@ -439,7 +479,7 @@ public class SmartCodeEnhancer {
 
     // ==================== CATÉGORIE 5 : SÉCURITÉ ====================
 
-    private void applySecurityRules(EnhancementReport report, Path srcMain, Path resourcesDir) throws IOException {
+    private void applySecurityRules(EnhancementReport report, Path srcMain, Path resourcesDir, ProjectAnalysisResult analysisResult) throws IOException {
         Path configDir = srcMain.resolve("config");
 
         // R32: Créer SecurityFilterChain
@@ -562,6 +602,69 @@ public class SmartCodeEnhancer {
         report.addEnhancement(new Enhancement("R40", Category.SECURITY, Severity.INFO,
                 "CSRF désactivé (API REST stateless, pas de cookies de session)",
                 "SecurityConfig.java", true));
+
+        // AXE 3 : @RolesAllowed → @PreAuthorize dans les controllers
+        if (analysisResult != null) {
+            for (UseCaseInfo uc : analysisResult.getUseCases()) {
+                Path controllerFile = srcMain.resolve("controller/" + uc.getControllerName() + ".java");
+                if (!Files.exists(controllerFile)) continue;
+                String content = Files.readString(controllerFile);
+                boolean modified = false;
+                StringBuilder sb = new StringBuilder(content);
+
+                // Verifier les roles au niveau de la classe
+                List<String> classRoles = uc.getRolesAllowed();
+                if (classRoles != null && !classRoles.isEmpty() && !content.contains("@PreAuthorize")) {
+                    String rolesExpr = classRoles.size() == 1
+                            ? "hasRole('" + classRoles.get(0) + "')"
+                            : "hasAnyRole(" + classRoles.stream().map(r -> "'" + r + "'").collect(java.util.stream.Collectors.joining(", ")) + ")";
+                    String preAuth = "@PreAuthorize(\"" + rolesExpr + "\")\n";
+                    int classIdx = sb.indexOf("public class ");
+                    if (classIdx > 0) {
+                        sb.insert(classIdx, preAuth);
+                        modified = true;
+                    }
+                }
+
+                // Verifier les roles au niveau des methodes
+                for (UseCaseInfo.MethodInfo method : uc.getPublicMethods()) {
+                    List<String> methodRoles = method.getRolesAllowed();
+                    if (methodRoles != null && !methodRoles.isEmpty()) {
+                        String rolesExpr = methodRoles.size() == 1
+                                ? "hasRole('" + methodRoles.get(0) + "')"
+                                : "hasAnyRole(" + methodRoles.stream().map(r -> "'" + r + "'").collect(java.util.stream.Collectors.joining(", ")) + ")";
+                        String preAuth = "    @PreAuthorize(\"" + rolesExpr + "\")\n";
+                        String methodDecl = "public " + method.getReturnType();
+                        // Chercher la methode dans le code et inserer @PreAuthorize avant
+                        String searchPattern = "    public ";
+                        int searchFrom = 0;
+                        while ((searchFrom = sb.indexOf(method.getName() + "(", searchFrom)) >= 0) {
+                            // Remonter pour trouver le debut de la ligne
+                            int lineStart = sb.lastIndexOf("\n", searchFrom) + 1;
+                            String line = sb.substring(lineStart, searchFrom);
+                            if (line.contains("public ") && !sb.substring(Math.max(0, lineStart - 100), lineStart).contains("@PreAuthorize")) {
+                                sb.insert(lineStart, preAuth);
+                                modified = true;
+                            }
+                            searchFrom += method.getName().length() + 1;
+                        }
+                    }
+                }
+
+                if (modified) {
+                    // Ajouter les imports necessaires
+                    String result = sb.toString();
+                    if (!result.contains("import org.springframework.security.access.prepost.PreAuthorize")) {
+                        result = result.replace("import org.springframework.web.bind.annotation",
+                                "import org.springframework.security.access.prepost.PreAuthorize;\nimport org.springframework.web.bind.annotation");
+                    }
+                    Files.writeString(controllerFile, result);
+                    report.addEnhancement(new Enhancement("R37", Category.SECURITY, Severity.WARNING,
+                            "@RolesAllowed transformé en @PreAuthorize dans " + uc.getControllerName(),
+                            uc.getControllerName() + ".java", true));
+                }
+            }
+        }
     }
 
     // ==================== CATÉGORIE 6 : RÉSILIENCE ====================

@@ -205,6 +205,9 @@ public class DtoInfo {
         /** Indique si le champ porte @XmlAttribute */
         private boolean hasXmlAttribute;
 
+        /** Indique si le champ porte @XmlTransient */
+        private boolean hasXmlTransient;
+
         /** Indique si le champ porte @XmlElementWrapper */
         private boolean hasXmlElementWrapper;
 
@@ -282,6 +285,14 @@ public class DtoInfo {
             this.hasXmlAttribute = hasXmlAttribute;
         }
 
+        public boolean isHasXmlTransient() {
+            return hasXmlTransient;
+        }
+
+        public void setHasXmlTransient(boolean hasXmlTransient) {
+            this.hasXmlTransient = hasXmlTransient;
+        }
+
         public boolean isHasXmlElementWrapper() {
             return hasXmlElementWrapper;
         }
@@ -315,7 +326,7 @@ public class DtoInfo {
         }
 
         public boolean hasJaxbAnnotation() {
-            return hasXmlElement || hasXmlAttribute || hasXmlElementWrapper;
+            return hasXmlElement || hasXmlAttribute || hasXmlElementWrapper || hasXmlTransient;
         }
 
         /**

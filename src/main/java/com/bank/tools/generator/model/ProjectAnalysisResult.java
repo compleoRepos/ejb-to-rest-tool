@@ -5,8 +5,9 @@ import java.util.List;
 
 /**
  * Resultat complet de l'analyse d'un projet EJB.
- * Contient les UseCases, DTOs, services, entites et metadonnees
- * necessaires a la generation et au rapport TRANSFORMATION_SUMMARY (G14).
+ * Contient les UseCases, DTOs, services, entites, enums, exceptions,
+ * validateurs, interfaces @Remote et metadonnees necessaires a la
+ * generation et au rapport TRANSFORMATION_SUMMARY (G14).
  */
 public class ProjectAnalysisResult {
 
@@ -48,6 +49,104 @@ public class ProjectAnalysisResult {
 
     /** Indique si des annotations javax.* ont ete detectees */
     private boolean hasLegacyJavaxImports;
+
+    // ==================== AXE 1 : ENUMS, EXCEPTIONS, VALIDATEURS ====================
+
+    /** Enums JAXB detectes dans le projet source (@XmlEnum) */
+    private List<EnumInfo> detectedEnums = new ArrayList<>();
+
+    /** Exceptions custom detectees dans le projet source */
+    private List<ExceptionInfo> detectedExceptions = new ArrayList<>();
+
+    /** Validateurs custom detectes dans le projet source (@Constraint + ConstraintValidator) */
+    private List<ValidatorInfo> detectedValidators = new ArrayList<>();
+
+    // ==================== INNER CLASSES ====================
+
+    /**
+     * Information sur un enum JAXB detecte dans le projet source.
+     */
+    public static class EnumInfo {
+        private String name;
+        private String packageName;
+        private List<String> values = new ArrayList<>();
+        private String sourceCode;
+
+        public EnumInfo() {}
+        public EnumInfo(String name, String packageName, List<String> values, String sourceCode) {
+            this.name = name; this.packageName = packageName;
+            this.values = values; this.sourceCode = sourceCode;
+        }
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public String getPackageName() { return packageName; }
+        public void setPackageName(String packageName) { this.packageName = packageName; }
+        public List<String> getValues() { return values; }
+        public void setValues(List<String> values) { this.values = values; }
+        public String getSourceCode() { return sourceCode; }
+        public void setSourceCode(String sourceCode) { this.sourceCode = sourceCode; }
+    }
+
+    /**
+     * Information sur une exception custom detectee dans le projet source.
+     */
+    public static class ExceptionInfo {
+        private String name;
+        private String packageName;
+        private String parentClass;
+        private String errorCode;
+        private String sourceCode;
+
+        public ExceptionInfo() {}
+        public ExceptionInfo(String name, String packageName, String parentClass, String errorCode, String sourceCode) {
+            this.name = name; this.packageName = packageName;
+            this.parentClass = parentClass; this.errorCode = errorCode;
+            this.sourceCode = sourceCode;
+        }
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public String getPackageName() { return packageName; }
+        public void setPackageName(String packageName) { this.packageName = packageName; }
+        public String getParentClass() { return parentClass; }
+        public void setParentClass(String parentClass) { this.parentClass = parentClass; }
+        public String getErrorCode() { return errorCode; }
+        public void setErrorCode(String errorCode) { this.errorCode = errorCode; }
+        public String getSourceCode() { return sourceCode; }
+        public void setSourceCode(String sourceCode) { this.sourceCode = sourceCode; }
+    }
+
+    /**
+     * Information sur un validateur custom detecte dans le projet source
+     * (annotation @Constraint + classe ConstraintValidator).
+     */
+    public static class ValidatorInfo {
+        private String annotationName;
+        private String validatorName;
+        private String packageName;
+        private String annotationSource;
+        private String validatorSource;
+
+        public ValidatorInfo() {}
+        public ValidatorInfo(String annotationName, String validatorName, String packageName,
+                             String annotationSource, String validatorSource) {
+            this.annotationName = annotationName; this.validatorName = validatorName;
+            this.packageName = packageName; this.annotationSource = annotationSource;
+            this.validatorSource = validatorSource;
+        }
+
+        public String getAnnotationName() { return annotationName; }
+        public void setAnnotationName(String annotationName) { this.annotationName = annotationName; }
+        public String getValidatorName() { return validatorName; }
+        public void setValidatorName(String validatorName) { this.validatorName = validatorName; }
+        public String getPackageName() { return packageName; }
+        public void setPackageName(String packageName) { this.packageName = packageName; }
+        public String getAnnotationSource() { return annotationSource; }
+        public void setAnnotationSource(String annotationSource) { this.annotationSource = annotationSource; }
+        public String getValidatorSource() { return validatorSource; }
+        public void setValidatorSource(String validatorSource) { this.validatorSource = validatorSource; }
+    }
 
     public ProjectAnalysisResult() {}
 
@@ -101,6 +200,15 @@ public class ProjectAnalysisResult {
     public boolean isHasLegacyJavaxImports() { return hasLegacyJavaxImports; }
     public void setHasLegacyJavaxImports(boolean hasLegacyJavaxImports) { this.hasLegacyJavaxImports = hasLegacyJavaxImports; }
 
+    public List<EnumInfo> getDetectedEnums() { return detectedEnums; }
+    public void setDetectedEnums(List<EnumInfo> detectedEnums) { this.detectedEnums = detectedEnums; }
+
+    public List<ExceptionInfo> getDetectedExceptions() { return detectedExceptions; }
+    public void setDetectedExceptions(List<ExceptionInfo> detectedExceptions) { this.detectedExceptions = detectedExceptions; }
+
+    public List<ValidatorInfo> getDetectedValidators() { return detectedValidators; }
+    public void setDetectedValidators(List<ValidatorInfo> detectedValidators) { this.detectedValidators = detectedValidators; }
+
     // ==================== UTILITY METHODS ====================
 
     public void addUseCase(UseCaseInfo useCase) { this.useCases.add(useCase); }
@@ -108,4 +216,7 @@ public class ProjectAnalysisResult {
     public void addWarning(String warning) { this.warnings.add(warning); }
     public void addConversion(String conversion) { this.conversionsApplied.add(conversion); }
     public void addAttentionPoint(String point) { this.attentionPoints.add(point); }
+    public void addEnum(EnumInfo enumInfo) { this.detectedEnums.add(enumInfo); }
+    public void addException(ExceptionInfo exceptionInfo) { this.detectedExceptions.add(exceptionInfo); }
+    public void addValidator(ValidatorInfo validatorInfo) { this.detectedValidators.add(validatorInfo); }
 }

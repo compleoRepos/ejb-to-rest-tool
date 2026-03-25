@@ -95,6 +95,12 @@ public class UseCaseInfo {
     /** Annotations detectees sur l'EJB source */
     private List<String> sourceAnnotations = new ArrayList<>();
 
+    /** AXE 4: Roles @RolesAllowed detectes sur la methode execute() ou la classe */
+    private List<String> rolesAllowed = new ArrayList<>();
+
+    /** AXE 3: Nom de l'interface @Remote implementee (pour services multi-methodes) */
+    private String remoteInterfaceName;
+
     // ==================== CONSTRUCTORS ====================
 
     public UseCaseInfo() {}
@@ -185,6 +191,12 @@ public class UseCaseInfo {
     public List<String> getSourceAnnotations() { return sourceAnnotations; }
     public void setSourceAnnotations(List<String> sourceAnnotations) { this.sourceAnnotations = sourceAnnotations; }
 
+    public List<String> getRolesAllowed() { return rolesAllowed; }
+    public void setRolesAllowed(List<String> rolesAllowed) { this.rolesAllowed = rolesAllowed; }
+
+    public String getRemoteInterfaceName() { return remoteInterfaceName; }
+    public void setRemoteInterfaceName(String remoteInterfaceName) { this.remoteInterfaceName = remoteInterfaceName; }
+
     // ==================== UTILITY METHODS ====================
 
     public boolean hasXmlSupport() {
@@ -232,6 +244,8 @@ public class UseCaseInfo {
         private int httpStatusCode = 200;
         private String restPath;
         private String javadoc;
+        private List<String> rolesAllowed = new ArrayList<>();
+        private List<String> throwsExceptions = new ArrayList<>();
 
         public MethodInfo() {}
 
@@ -260,6 +274,12 @@ public class UseCaseInfo {
 
         public String getJavadoc() { return javadoc; }
         public void setJavadoc(String javadoc) { this.javadoc = javadoc; }
+
+        public List<String> getRolesAllowed() { return rolesAllowed; }
+        public void setRolesAllowed(List<String> rolesAllowed) { this.rolesAllowed = rolesAllowed; }
+
+        public List<String> getThrowsExceptions() { return throwsExceptions; }
+        public void setThrowsExceptions(List<String> throwsExceptions) { this.throwsExceptions = throwsExceptions; }
 
         public boolean isVoidReturn() { return "void".equals(returnType); }
         public boolean isByteArrayReturn() { return "byte[]".equals(returnType); }

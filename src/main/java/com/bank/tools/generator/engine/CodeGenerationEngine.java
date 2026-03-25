@@ -94,6 +94,8 @@ public class CodeGenerationEngine {
         Files.createDirectories(srcMain.resolve("exception"));
         Files.createDirectories(srcMain.resolve("logging"));
         Files.createDirectories(srcMain.resolve("ejb/interfaces"));
+        Files.createDirectories(srcMain.resolve("enums"));
+        Files.createDirectories(srcMain.resolve("validation"));
 
         Path resourcesDir = projectRoot.resolve("src/main/resources");
         Files.createDirectories(resourcesDir);
@@ -109,7 +111,7 @@ public class CodeGenerationEngine {
         generatePomXml(projectRoot, projectHasXml, projectHasValidation);
         generateApplicationClass(srcMain);
         generateApplicationProperties(resourcesDir);
-        generateGlobalExceptionHandler(srcMain);   // G9 enrichi
+        generateGlobalExceptionHandler(srcMain, analysisResult);   // G9 enrichi + AXE 1.6 exceptions custom
         generateLoggingAspect(srcMain);
         generateEjbLookupConfig(srcMain);
         generateBaseUseCaseInterface(srcMain);
@@ -117,6 +119,21 @@ public class CodeGenerationEngine {
 
         if (projectHasXml) {
             generateXmlConfig(srcMain);
+        }
+
+        // AXE 1.1 : Recopier les enums JAXB
+        for (ProjectAnalysisResult.EnumInfo enumInfo : analysisResult.getDetectedEnums()) {
+            generateEnumClass(srcMain, enumInfo);
+        }
+
+        // AXE 1.6 : Recopier les exceptions custom + enrichir GlobalExceptionHandler
+        for (ProjectAnalysisResult.ExceptionInfo excInfo : analysisResult.getDetectedExceptions()) {
+            generateExceptionClass(srcMain, excInfo);
+        }
+
+        // AXE 1.5 : Recopier les validateurs custom
+        for (ProjectAnalysisResult.ValidatorInfo valInfo : analysisResult.getDetectedValidators()) {
+            generateValidatorClasses(srcMain, valInfo);
         }
 
         // Generer controllers et service adapters
@@ -482,10 +499,10 @@ public class CodeGenerationEngine {
 
         sb.append("    @PostMapping\n");
         sb.append("    public ResponseEntity<").append(outputDto).append("> execute(").append(validAnnotation).append("@RequestBody ").append(inputDto).append(" input) {\n");
-        sb.append("        log.info(\"Requete recue sur ").append(endpoint).append("\");\n");
+        sb.append("        log.info(\"[REST-IN] Requete recue sur ").append(endpoint).append(" - UC: ").append(useCase.getClassName()).append("\");\n");
         sb.append("        try {\n");
         sb.append("            ").append(outputDto).append(" result = ").append(adapterField).append(".execute(input);\n");
-        sb.append("            log.info(\"UseCase ").append(useCase.getClassName()).append(" execute avec succes\");\n");
+        sb.append("            log.info(\"[REST-OUT] UseCase ").append(useCase.getClassName()).append(" execute avec succes\");\n");
         sb.append("            return ").append(httpMapping.responseExpression).append(";\n");
         sb.append("        } catch (Exception e) {\n");
         sb.append("            log.error(\"Erreur lors de l'execution du UseCase ").append(useCase.getClassName()).append("\", e);\n");
@@ -596,7 +613,7 @@ public class CodeGenerationEngine {
             sb.append(String.join(", ", paramDecls));
             sb.append(") {\n");
 
-            sb.append("        log.info(\"Requete recue : ").append(method.getName()).append("\");\n");
+            sb.append("        log.info(\"[REST-IN] ").append(method.getName()).append(" - Service: ").append(useCase.getClassName()).append("\");\n");
             sb.append("        try {\n");
 
             // Corps de la methode
@@ -681,7 +698,7 @@ public class CodeGenerationEngine {
         sb.append("    private String jndiFactory;\n\n");
 
         sb.append("    public ").append(outputDto).append(" execute(").append(inputDto).append(" input) throws Exception {\n");
-        sb.append("        log.info(\"Lookup JNDI pour ").append(useCase.getClassName()).append("\");\n\n");
+        sb.append("        log.info(\"[EJB-CALL] Lookup JNDI pour ").append(useCase.getClassName()).append(" - JNDI: ").append(jndiName).append("\");\n\n");
         sb.append("        Properties props = new Properties();\n");
         sb.append("        props.put(Context.INITIAL_CONTEXT_FACTORY, jndiFactory);\n");
         sb.append("        props.put(Context.PROVIDER_URL, jndiProviderUrl);\n\n");
@@ -718,6 +735,13 @@ public class CodeGenerationEngine {
         imports.add("javax.naming.InitialContext");
         imports.add("javax.naming.NamingException");
         imports.add("java.util.Properties");
+
+        // AXE 2 : Importer l'interface @Remote si connue
+        String remoteIfaceName = useCase.getRemoteInterfaceName();
+        if (remoteIfaceName != null && !remoteIfaceName.isEmpty()) {
+            // L'interface @Remote est dans le package ejb.interfaces
+            imports.add(BASE_PACKAGE + ".ejb.interfaces." + remoteIfaceName);
+        }
 
         // Collecter les imports des types
         for (UseCaseInfo.MethodInfo method : useCase.getPublicMethods()) {
@@ -779,18 +803,29 @@ public class CodeGenerationEngine {
                     .collect(Collectors.joining(", "));
 
             sb.append("    public ").append(method.getReturnType()).append(" ").append(method.getName()).append("(").append(params).append(") throws Exception {\n");
-            sb.append("        log.info(\"Appel EJB ").append(useCase.getClassName()).append(".").append(method.getName()).append("\");\n");
-            sb.append("        // TODO: Remplacer par le cast vers l'interface Remote/Local appropriee\n");
-            sb.append("        Object ejb = lookupEjb();\n");
-            sb.append("        java.lang.reflect.Method m = ejb.getClass().getMethod(\"").append(method.getName()).append("\"");
-            for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
-                sb.append(", ").append(extractBaseType(param.getType())).append(".class");
-            }
-            sb.append(");\n");
-            if (method.getReturnType().equals("void")) {
-                sb.append("        m.invoke(ejb").append(args.isEmpty() ? "" : ", " + args).append(");\n");
+        sb.append("        log.info(\"[EJB-CALL] ").append(useCase.getClassName()).append(".").append(method.getName()).append(" - JNDI: ").append(jndiName).append("\");\n");
+            // AXE 2 : Si une interface @Remote est connue, utiliser le cast type au lieu de la reflexion
+            String remoteIface = useCase.getRemoteInterfaceName();
+            if (remoteIface != null && !remoteIface.isEmpty()) {
+                sb.append("        ").append(remoteIface).append(" ejb = (").append(remoteIface).append(") lookupEjb();\n");
+                if (method.getReturnType().equals("void")) {
+                    sb.append("        ejb.").append(method.getName()).append("(").append(args).append(");\n");
+                } else {
+                    sb.append("        return ejb.").append(method.getName()).append("(").append(args).append(");\n");
+                }
             } else {
-                sb.append("        return (").append(method.getReturnType()).append(") m.invoke(ejb").append(args.isEmpty() ? "" : ", " + args).append(");\n");
+                sb.append("        // TODO: Remplacer par le cast vers l'interface Remote/Local appropriee\n");
+                sb.append("        Object ejb = lookupEjb();\n");
+                sb.append("        java.lang.reflect.Method m = ejb.getClass().getMethod(\"").append(method.getName()).append("\"");
+                for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
+                    sb.append(", ").append(extractBaseType(param.getType())).append(".class");
+                }
+                sb.append(");\n");
+                if (method.getReturnType().equals("void")) {
+                    sb.append("        m.invoke(ejb").append(args.isEmpty() ? "" : ", " + args).append(");\n");
+                } else {
+                    sb.append("        return (").append(method.getReturnType()).append(") m.invoke(ejb").append(args.isEmpty() ? "" : ", " + args).append(");\n");
+                }
             }
             sb.append("    }\n");
         }
@@ -1016,6 +1051,208 @@ public class CodeGenerationEngine {
         Files.createDirectories(srcMain.resolve("service"));
         Files.writeString(srcMain.resolve("service/" + adapterName + ".java"), sb.toString());
         log.info("Service adapter MDB genere : {}", adapterName);
+    }
+
+    // ===================== AXE 1.1 : ENUM GENERATION =====================
+
+    /**
+     * AXE 1.1 : Genere une enum JAXB dans le package enums.
+     * Migre javax.xml.bind → jakarta.xml.bind et ajoute @JsonValue/@JsonCreator.
+     */
+    private void generateEnumClass(Path srcMain, ProjectAnalysisResult.EnumInfo enumInfo) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(BASE_PACKAGE).append(".enums;\n\n");
+        sb.append("import com.fasterxml.jackson.annotation.JsonCreator;\n");
+        sb.append("import com.fasterxml.jackson.annotation.JsonValue;\n");
+        sb.append("import jakarta.xml.bind.annotation.XmlEnum;\n");
+        sb.append("import jakarta.xml.bind.annotation.XmlEnumValue;\n");
+        sb.append("import jakarta.xml.bind.annotation.XmlType;\n\n");
+
+        sb.append("/**\n");
+        sb.append(" * Enum recopiee depuis le projet EJB source.\n");
+        sb.append(" * Package source : ").append(enumInfo.getPackageName()).append("\n");
+        sb.append(" * Migration : javax.xml.bind → jakarta.xml.bind + Jackson annotations.\n");
+        sb.append(" */\n");
+        sb.append("@XmlType\n");
+        sb.append("@XmlEnum\n");
+        sb.append("public enum ").append(enumInfo.getName()).append(" {\n\n");
+
+        List<String> values = enumInfo.getValues();
+        for (int i = 0; i < values.size(); i++) {
+            sb.append("    ").append(values.get(i));
+            if (i < values.size() - 1) sb.append(",");
+            else sb.append(";");
+            sb.append("\n");
+        }
+
+        sb.append("\n    @JsonValue\n");
+        sb.append("    public String toValue() {\n");
+        sb.append("        return name();\n");
+        sb.append("    }\n\n");
+
+        sb.append("    @JsonCreator\n");
+        sb.append("    public static ").append(enumInfo.getName()).append(" fromValue(String value) {\n");
+        sb.append("        return valueOf(value);\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+
+        Files.writeString(srcMain.resolve("enums/" + enumInfo.getName() + ".java"), sb.toString());
+        log.info("Enum generee : {} ({} valeurs)", enumInfo.getName(), values.size());
+    }
+
+    // ===================== AXE 1.6 : EXCEPTION GENERATION =====================
+
+    /**
+     * AXE 1.6 : Genere une exception custom dans le package exception.
+     * Preserve la hierarchie (extends RuntimeException ou Exception).
+     */
+    private void generateExceptionClass(Path srcMain, ProjectAnalysisResult.ExceptionInfo excInfo) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(BASE_PACKAGE).append(".exception;\n\n");
+
+        sb.append("/**\n");
+        sb.append(" * Exception custom recopiee depuis le projet EJB source.\n");
+        sb.append(" * Package source : ").append(excInfo.getPackageName()).append("\n");
+        if (excInfo.getErrorCode() != null) {
+            sb.append(" * Code erreur : ").append(excInfo.getErrorCode()).append("\n");
+        }
+        sb.append(" */\n");
+        sb.append("public class ").append(excInfo.getName());
+        sb.append(" extends ").append(excInfo.getParentClass() != null ? excInfo.getParentClass() : "RuntimeException");
+        sb.append(" {\n\n");
+        sb.append("    private static final long serialVersionUID = 1L;\n\n");
+
+        if (excInfo.getErrorCode() != null) {
+            sb.append("    private final String errorCode = \"").append(excInfo.getErrorCode()).append("\";\n\n");
+        }
+
+        sb.append("    public ").append(excInfo.getName()).append("() {\n");
+        sb.append("        super();\n");
+        sb.append("    }\n\n");
+
+        sb.append("    public ").append(excInfo.getName()).append("(String message) {\n");
+        sb.append("        super(message);\n");
+        sb.append("    }\n\n");
+
+        sb.append("    public ").append(excInfo.getName()).append("(String message, Throwable cause) {\n");
+        sb.append("        super(message, cause);\n");
+        sb.append("    }\n\n");
+
+        if (excInfo.getErrorCode() != null) {
+            sb.append("    public String getErrorCode() {\n");
+            sb.append("        return errorCode;\n");
+            sb.append("    }\n");
+        }
+
+        sb.append("}\n");
+
+        Files.writeString(srcMain.resolve("exception/" + excInfo.getName() + ".java"), sb.toString());
+        log.info("Exception generee : {} (extends {})", excInfo.getName(), excInfo.getParentClass());
+    }
+
+    // ===================== AXE 1.5 : VALIDATOR GENERATION =====================
+
+    /**
+     * AXE 1.5 : Genere l'annotation de validation custom et son validateur.
+     * Migre javax.validation → jakarta.validation.
+     */
+    private void generateValidatorClasses(Path srcMain, ProjectAnalysisResult.ValidatorInfo valInfo) throws IOException {
+        // 1. Generer l'annotation : recopier le source original avec migration javax → jakarta
+        if (valInfo.getAnnotationSource() != null && !valInfo.getAnnotationSource().isBlank()) {
+            String annSource = valInfo.getAnnotationSource()
+                    .replace("javax.validation", "jakarta.validation")
+                    .replace("javax.annotation", "jakarta.annotation");
+            StringBuilder annSb = new StringBuilder();
+            annSb.append("package ").append(BASE_PACKAGE).append(".validation;\n\n");
+            // Extraire les imports du source original
+            for (String line : annSource.split("\n")) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("import ")) {
+                    annSb.append(trimmed).append("\n");
+                }
+            }
+            annSb.append("\n");
+            // Extraire le corps de l'annotation (depuis @Target ou @Documented ou @Constraint)
+            boolean inBody = false;
+            for (String line : annSource.split("\n")) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("@Target") || trimmed.startsWith("@Retention") || 
+                    trimmed.startsWith("@Constraint") || trimmed.startsWith("@Documented") ||
+                    trimmed.startsWith("public @interface")) {
+                    inBody = true;
+                }
+                if (inBody) {
+                    annSb.append(line).append("\n");
+                }
+            }
+            Files.writeString(srcMain.resolve("validation/" + valInfo.getAnnotationName() + ".java"), annSb.toString());
+        } else {
+            // Fallback : generer un squelette
+            StringBuilder annSb = new StringBuilder();
+            annSb.append("package ").append(BASE_PACKAGE).append(".validation;\n\n");
+            annSb.append("import jakarta.validation.Constraint;\n");
+            annSb.append("import jakarta.validation.Payload;\n");
+            annSb.append("import java.lang.annotation.*;\n\n");
+            annSb.append("@Documented\n");
+            annSb.append("@Constraint(validatedBy = ").append(valInfo.getValidatorName()).append(".class)\n");
+            annSb.append("@Target({ElementType.FIELD, ElementType.METHOD, ElementType.PARAMETER})\n");
+            annSb.append("@Retention(RetentionPolicy.RUNTIME)\n");
+            annSb.append("public @interface ").append(valInfo.getAnnotationName()).append(" {\n\n");
+            annSb.append("    String message() default \"Validation failed for @").append(valInfo.getAnnotationName()).append("\";\n\n");
+            annSb.append("    Class<?>[] groups() default {};\n\n");
+            annSb.append("    Class<? extends Payload>[] payload() default {};\n");
+            annSb.append("}\n");
+            Files.writeString(srcMain.resolve("validation/" + valInfo.getAnnotationName() + ".java"), annSb.toString());
+        }
+
+        // 2. Generer le validateur : recopier le source original avec migration javax → jakarta
+        if (valInfo.getValidatorSource() != null && !valInfo.getValidatorSource().isBlank()) {
+            String valSource = valInfo.getValidatorSource()
+                    .replace("javax.validation", "jakarta.validation")
+                    .replace("javax.annotation", "jakarta.annotation");
+            StringBuilder valSb = new StringBuilder();
+            valSb.append("package ").append(BASE_PACKAGE).append(".validation;\n\n");
+            // Extraire les imports du source original
+            for (String line : valSource.split("\n")) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("import ")) {
+                    valSb.append(trimmed).append("\n");
+                }
+            }
+            valSb.append("\n");
+            // Extraire le corps de la classe (depuis la declaration de classe)
+            boolean inBody = false;
+            for (String line : valSource.split("\n")) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("public class ") || trimmed.startsWith("public final class ")) {
+                    inBody = true;
+                }
+                if (inBody) {
+                    valSb.append(line).append("\n");
+                }
+            }
+            Files.writeString(srcMain.resolve("validation/" + valInfo.getValidatorName() + ".java"), valSb.toString());
+        } else {
+            // Fallback : generer un squelette
+            StringBuilder valSb = new StringBuilder();
+            valSb.append("package ").append(BASE_PACKAGE).append(".validation;\n\n");
+            valSb.append("import jakarta.validation.ConstraintValidator;\n");
+            valSb.append("import jakarta.validation.ConstraintValidatorContext;\n\n");
+            valSb.append("public class ").append(valInfo.getValidatorName());
+            valSb.append(" implements ConstraintValidator<").append(valInfo.getAnnotationName()).append(", Object> {\n\n");
+            valSb.append("    @Override\n");
+            valSb.append("    public void initialize(").append(valInfo.getAnnotationName()).append(" constraintAnnotation) {\n");
+            valSb.append("        // Initialisation du validateur\n");
+            valSb.append("    }\n\n");
+            valSb.append("    @Override\n");
+            valSb.append("    public boolean isValid(Object value, ConstraintValidatorContext context) {\n");
+            valSb.append("        // TODO: Implementer la logique de validation\n");
+            valSb.append("        return value != null;\n");
+            valSb.append("    }\n");
+            valSb.append("}\n");
+            Files.writeString(srcMain.resolve("validation/" + valInfo.getValidatorName() + ".java"), valSb.toString());
+        }
+        log.info("Validateur genere : @{} / {}", valInfo.getAnnotationName(), valInfo.getValidatorName());
     }
 
     // ===================== DTO (G1, G2, G3, BUG 10/11/12) =====================
@@ -1251,7 +1488,36 @@ public class CodeGenerationEngine {
 
     // ===================== GLOBAL EXCEPTION HANDLER (G9 enrichi) =====================
 
-    private void generateGlobalExceptionHandler(Path srcMain) throws IOException {
+    private void generateGlobalExceptionHandler(Path srcMain, ProjectAnalysisResult analysisResult) throws IOException {
+        // AXE 1.6 : Generer des handlers pour chaque exception custom detectee
+        StringBuilder customHandlers = new StringBuilder();
+        if (analysisResult != null && analysisResult.getDetectedExceptions() != null) {
+            for (ProjectAnalysisResult.ExceptionInfo exc : analysisResult.getDetectedExceptions()) {
+                String excName = exc.getName();
+                String excLower = Character.toLowerCase(excName.charAt(0)) + excName.substring(1);
+                // Determiner le HTTP status en fonction du nom de l'exception
+                String httpStatus = "HttpStatus.INTERNAL_SERVER_ERROR";
+                String excNameLower = excName.toLowerCase();
+                if (excNameLower.contains("notfound") || excNameLower.contains("inexistant")) {
+                    httpStatus = "HttpStatus.NOT_FOUND";
+                } else if (excNameLower.contains("validation") || excNameLower.contains("invalid")) {
+                    httpStatus = "HttpStatus.BAD_REQUEST";
+                } else if (excNameLower.contains("authorization") || excNameLower.contains("access") || excNameLower.contains("forbidden")) {
+                    httpStatus = "HttpStatus.FORBIDDEN";
+                } else if (excNameLower.contains("conflict") || excNameLower.contains("duplicate")) {
+                    httpStatus = "HttpStatus.CONFLICT";
+                } else if (excNameLower.contains("insufficient") || excNameLower.contains("business")) {
+                    httpStatus = "HttpStatus.UNPROCESSABLE_ENTITY";
+                }
+                customHandlers.append("\n    @ExceptionHandler(").append(excName).append(".class)\n");
+                customHandlers.append("    public ResponseEntity<Map<String, Object>> handle").append(excName).append("(").append(excName).append(" ex) {\n");
+                customHandlers.append("        log.warn(\"").append(excName).append(" : {}\", ex.getMessage());\n");
+                customHandlers.append("        return buildErrorResponse(").append(httpStatus).append(", ex.getMessage());\n");
+                customHandlers.append("    }\n");
+            }
+        }
+        String customHandlersStr = customHandlers.toString();
+
         String code = """
                 package %s.exception;
                 
@@ -1329,6 +1595,7 @@ public class CodeGenerationEngine {
                         return buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Erreur interne du serveur");
                     }
                 
+                    %s
                     private ResponseEntity<Map<String, Object>> buildErrorResponse(HttpStatus status, String message) {
                         Map<String, Object> body = new LinkedHashMap<>();
                         body.put("timestamp", LocalDateTime.now().toString());
@@ -1338,7 +1605,7 @@ public class CodeGenerationEngine {
                         return new ResponseEntity<>(body, status);
                     }
                 }
-                """.formatted(BASE_PACKAGE);
+                """.formatted(BASE_PACKAGE, customHandlersStr);
 
         Files.writeString(srcMain.resolve("exception/GlobalExceptionHandler.java"), code);
     }

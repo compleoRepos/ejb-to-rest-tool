@@ -9,10 +9,13 @@ import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Modifier;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.EnumConstantDeclaration;
+import com.github.javaparser.ast.body.EnumDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.VariableDeclarator;
+import com.github.javaparser.ast.nodeTypes.NodeWithAnnotations;
 import com.github.javaparser.ast.expr.*;
 import com.github.javaparser.ast.stmt.ReturnStmt;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
@@ -223,7 +226,7 @@ public class EjbProjectParser {
                     if (pattern == UseCaseInfo.EjbPattern.BASE_USE_CASE) {
                         useCaseInfo = extractBaseUseCaseInfo(cu, classDecl, ejbType);
                     } else {
-                        useCaseInfo = extractGenericServiceInfo(cu, classDecl, ejbType, pattern);
+                        useCaseInfo = extractGenericServiceInfo(cu, classDecl, ejbType, pattern, classIndex);
                     }
 
                     if (useCaseInfo != null) {
@@ -262,6 +265,80 @@ public class EjbProjectParser {
                 // Detecter les DTOs
                 if (isDtoCandidate(classDecl.getNameAsString()) || isDtoByAnnotation(classDecl)) {
                     dtoClassNames.add(classDecl.getNameAsString());
+                }
+            }
+
+            // Detecter les enums JAXB (@XmlEnum ou enums dans le package)
+            for (EnumDeclaration enumDecl : cu.findAll(EnumDeclaration.class)) {
+                String enumPkg = cu.getPackageDeclaration().map(pd -> pd.getNameAsString()).orElse("");
+                List<String> values = new ArrayList<>();
+                for (EnumConstantDeclaration constant : enumDecl.getEntries()) {
+                    values.add(constant.getNameAsString());
+                }
+                String enumSource = enumDecl.toString();
+                ProjectAnalysisResult.EnumInfo enumInfo = new ProjectAnalysisResult.EnumInfo(
+                        enumDecl.getNameAsString(), enumPkg, values, enumSource);
+                result.addEnum(enumInfo);
+                log.info("Enum detecte : {} ({} valeurs)", enumDecl.getNameAsString(), values.size());
+            }
+
+            // Detecter les exceptions custom (extends Exception/RuntimeException/...Exception)
+            for (ClassOrInterfaceDeclaration classDecl : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                String parentClass = classDecl.getExtendedTypes().stream()
+                        .findFirst().map(t -> t.getNameAsString()).orElse("");
+                if (parentClass.endsWith("Exception") || parentClass.equals("Throwable")) {
+                    String excPkg = cu.getPackageDeclaration().map(pd -> pd.getNameAsString()).orElse("");
+                    // Extraire un eventuel errorCode
+                    String errorCode = null;
+                    for (FieldDeclaration field : classDecl.getFields()) {
+                        for (VariableDeclarator var : field.getVariables()) {
+                            if (var.getNameAsString().toLowerCase().contains("code") ||
+                                var.getNameAsString().toLowerCase().contains("error")) {
+                                if (var.getInitializer().isPresent()) {
+                                    errorCode = var.getInitializer().get().toString();
+                                }
+                            }
+                        }
+                    }
+                    ProjectAnalysisResult.ExceptionInfo excInfo = new ProjectAnalysisResult.ExceptionInfo(
+                            classDecl.getNameAsString(), excPkg, parentClass, errorCode,
+                            classDecl.toString());
+                    result.addException(excInfo);
+                    log.info("Exception custom detectee : {} extends {}", classDecl.getNameAsString(), parentClass);
+                }
+            }
+
+            // Detecter les validateurs custom (@Constraint annotation + ConstraintValidator impl)
+            // Les annotations custom sont des AnnotationDeclaration (@interface), pas des ClassOrInterfaceDeclaration
+            for (com.github.javaparser.ast.body.AnnotationDeclaration annotDecl : cu.findAll(com.github.javaparser.ast.body.AnnotationDeclaration.class)) {
+                // Verifier si l'annotation a @Constraint
+                boolean hasConstraint = annotDecl.getAnnotations().stream()
+                        .anyMatch(a -> a.getNameAsString().equals("Constraint"));
+                if (hasConstraint) {
+                    String valPkg = cu.getPackageDeclaration().map(pd -> pd.getNameAsString()).orElse("");
+                    String annotName = annotDecl.getNameAsString();
+                    String validatorName = null;
+                    String validatorSource = null;
+                    // Chercher dans tous les CU un ConstraintValidator pour cette annotation
+                    for (Map.Entry<String, CompilationUnit> cuEntry : compilationUnits.entrySet()) {
+                        for (ClassOrInterfaceDeclaration candidate : cuEntry.getValue().findAll(ClassOrInterfaceDeclaration.class)) {
+                            boolean implementsCV = candidate.getImplementedTypes().stream()
+                                    .anyMatch(t -> t.getNameAsString().equals("ConstraintValidator"));
+                            if (implementsCV && candidate.getImplementedTypes().stream()
+                                    .anyMatch(t -> t.toString().contains(annotName))) {
+                                validatorName = candidate.getNameAsString();
+                                // Capturer le CU complet (imports + classe) pour le validateur
+                                validatorSource = cuEntry.getValue().toString();
+                            }
+                        }
+                    }
+                    // Capturer le CU complet (imports + annotation) pour l'annotation
+                    String annotFullSource = cu.toString();
+                    ProjectAnalysisResult.ValidatorInfo valInfo = new ProjectAnalysisResult.ValidatorInfo(
+                            annotName, validatorName, valPkg,
+                            annotFullSource, validatorSource);
+                    result.addValidator(valInfo);
+                    log.info("Validateur custom detecte : @{} -> {}", annotName, validatorName);
                 }
             }
         }
@@ -453,7 +530,8 @@ public class EjbProjectParser {
     // ==================== G5 : GENERIC SERVICE EXTRACTION ====================
 
     private UseCaseInfo extractGenericServiceInfo(CompilationUnit cu, ClassOrInterfaceDeclaration classDecl,
-                                                   UseCaseInfo.EjbType ejbType, UseCaseInfo.EjbPattern pattern) {
+                                                   UseCaseInfo.EjbType ejbType, UseCaseInfo.EjbPattern pattern,
+                                                   Map<String, ClassOrInterfaceDeclaration> classIndex) {
         UseCaseInfo info = new UseCaseInfo();
         info.setClassName(classDecl.getNameAsString());
         info.setEjbType(ejbType);
@@ -501,7 +579,27 @@ public class EjbProjectParser {
             // G12 : Generer le sous-path REST
             mi.setRestPath(generateMethodRestPath(method.getNameAsString(), mi.getParameters()));
 
+            // AXE 4.2 : Extraire @RolesAllowed sur la methode
+            extractRolesAllowed(method, mi.getRolesAllowed());
+
+            // AXE 1.6 : Extraire les exceptions throws
+            method.getThrownExceptions().forEach(te -> mi.getThrowsExceptions().add(te.asString()));
+
             info.getPublicMethods().add(mi);
+        }
+
+        // AXE 4.2 : Extraire @RolesAllowed au niveau de la classe
+        extractRolesAllowed(classDecl, info.getRolesAllowed());
+
+        // AXE 3 : Detecter le nom de l'interface @Remote implementee
+        for (ClassOrInterfaceType iface : classDecl.getImplementedTypes()) {
+            String ifaceName = iface.getNameAsString();
+            for (ClassOrInterfaceDeclaration candidate : classIndex.values()) {
+                if (candidate.getNameAsString().equals(ifaceName) && candidate.isInterface()
+                        && hasAnnotation(candidate, "Remote")) {
+                    info.setRemoteInterfaceName(ifaceName);
+                }
+            }
         }
 
         // Pour les services generiques, pas de DTO unique
@@ -685,6 +783,9 @@ public class EjbProjectParser {
                                 .ifPresent(fieldInfo::setXmlName);
                         extractAnnotationBooleanAttribute(fieldAnnot, "required")
                                 .ifPresent(fieldInfo::setRequired);
+                    }
+                    if (fieldAnnotName.equals("XmlTransient")) {
+                        fieldInfo.setHasXmlTransient(true);
                     }
                     if (fieldAnnotName.equals("XmlElementWrapper")) {
                         fieldInfo.setHasXmlElementWrapper(true);
@@ -870,6 +971,46 @@ public class EjbProjectParser {
     private boolean hasAnnotation(ClassOrInterfaceDeclaration cls, String annotationName) {
         return cls.getAnnotations().stream()
                 .anyMatch(a -> a.getNameAsString().equals(annotationName));
+    }
+
+    private boolean hasAnnotation(MethodDeclaration method, String annotationName) {
+        return method.getAnnotations().stream()
+                .anyMatch(a -> a.getNameAsString().equals(annotationName));
+    }
+
+    /**
+     * AXE 4.2 : Extraire les roles @RolesAllowed d'un noeud annote (classe ou methode).
+     * Supporte @RolesAllowed("ADMIN"), @RolesAllowed({"ADMIN", "MANAGER"}).
+     */
+    @SuppressWarnings("unchecked")
+    private void extractRolesAllowed(com.github.javaparser.ast.nodeTypes.NodeWithAnnotations<?> node, List<String> rolesTarget) {
+        node.getAnnotations().forEach(ann -> {
+            if (ann.getNameAsString().equals("RolesAllowed")) {
+                if (ann instanceof SingleMemberAnnotationExpr singleAnnot) {
+                    Expression value = singleAnnot.getMemberValue();
+                    if (value instanceof StringLiteralExpr strExpr) {
+                        rolesTarget.add(strExpr.getValue());
+                    } else if (value instanceof ArrayInitializerExpr arrayExpr) {
+                        arrayExpr.getValues().forEach(v -> {
+                            if (v instanceof StringLiteralExpr s) rolesTarget.add(s.getValue());
+                        });
+                    }
+                } else if (ann instanceof NormalAnnotationExpr normalAnnot) {
+                    normalAnnot.getPairs().forEach(pair -> {
+                        if (pair.getNameAsString().equals("value")) {
+                            Expression value = pair.getValue();
+                            if (value instanceof StringLiteralExpr strExpr) {
+                                rolesTarget.add(strExpr.getValue());
+                            } else if (value instanceof ArrayInitializerExpr arrayExpr) {
+                                arrayExpr.getValues().forEach(v -> {
+                                    if (v instanceof StringLiteralExpr s) rolesTarget.add(s.getValue());
+                                });
+                            }
+                        }
+                    });
+                }
+            }
+        });
     }
 
     private boolean isObjectMethod(String name) {
