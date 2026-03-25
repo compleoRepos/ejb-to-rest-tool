@@ -92,8 +92,11 @@ public class SmartCodeEnhancer {
         int score = calculateQualityScore(report);
         report.setQualityScore(score);
 
-        log.info("SmartCodeEnhancer: terminé. {} règles vérifiées, {} appliquées, score: {}/100",
-                report.getTotalRulesChecked(), report.getTotalRulesApplied(), score);
+        // Enrichir chaque règle avec les détails du catalogue (justification, action, référence)
+        RulesCatalog.enrichAll(report);
+
+        log.info("SmartCodeEnhancer: terminé. {} règles vérifiées, {} appliquées, score: {}/100, {} avec détails",
+                report.getTotalRulesChecked(), report.getTotalRulesApplied(), score, report.countWithDetails());
 
         return report;
     }

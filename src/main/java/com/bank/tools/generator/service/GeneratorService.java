@@ -128,6 +128,7 @@ public class GeneratorService {
         sb.append("| Score de qualite | **").append(report.getQualityScore()).append("/100** |\n");
         sb.append("| Regles verifiees | ").append(report.getTotalRulesChecked()).append(" |\n");
         sb.append("| Regles appliquees | ").append(report.getTotalRulesApplied()).append(" |\n");
+        sb.append("| Regles avec details | ").append(report.countWithDetails()).append(" |\n");
         sb.append("| Ameliorations critiques | ").append(report.countBySeverity(EnhancementReport.Severity.CRITICAL)).append(" |\n");
         sb.append("| Avertissements | ").append(report.countBySeverity(EnhancementReport.Severity.WARNING)).append(" |\n");
         sb.append("| Suggestions | ").append(report.countBySeverity(EnhancementReport.Severity.SUGGESTION)).append(" |\n\n");
@@ -150,11 +151,36 @@ public class GeneratorService {
                     }
                 }
                 sb.append("\n");
+
+                // Ajouter les details enrichis pour chaque regle de cette categorie
+                for (EnhancementReport.Enhancement e : report.getEnhancements()) {
+                    if (e.getCategory() == cat && e.hasDetails()) {
+                        sb.append("#### ").append(e.getRuleId()).append(" - ").append(e.getDescription()).append("\n\n");
+                        if (e.getJustification() != null && !e.getJustification().isEmpty()) {
+                            sb.append("**Pourquoi cette regle ?**\n\n");
+                            sb.append("> ").append(e.getJustification()).append("\n\n");
+                        }
+                        if (e.getActionTaken() != null && !e.getActionTaken().isEmpty()) {
+                            sb.append("**Action realisee :** ").append(e.getActionTaken()).append("\n\n");
+                        }
+                        if (e.getBeforeSnippet() != null && !e.getBeforeSnippet().isEmpty()) {
+                            sb.append("**Avant :**\n```java\n").append(e.getBeforeSnippet()).append("\n```\n\n");
+                        }
+                        if (e.getAfterSnippet() != null && !e.getAfterSnippet().isEmpty()) {
+                            sb.append("**Apres :**\n```java\n").append(e.getAfterSnippet()).append("\n```\n\n");
+                        }
+                        if (e.getReference() != null && !e.getReference().isEmpty()) {
+                            sb.append("**Reference :** *").append(e.getReference()).append("*\n\n");
+                        }
+                        sb.append("---\n\n");
+                    }
+                }
             }
         }
 
         Files.writeString(projectRoot.resolve("ENHANCEMENT_REPORT.md"), sb.toString());
-        log.info("Rapport d'amelioration IA genere : ENHANCEMENT_REPORT.md");
+        log.info("Rapport d'amelioration IA genere : ENHANCEMENT_REPORT.md ({} regles avec details)",
+                report.countWithDetails());
     }
 
     // ============================================================

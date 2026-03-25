@@ -7,7 +7,8 @@ import java.util.List;
  * Rapport d'amélioration généré par le moteur IA interne (SmartCodeEnhancer).
  * <p>
  * Contient la liste de toutes les améliorations appliquées au projet généré,
- * organisées par catégorie, avec un score de qualité global.
+ * organisées par catégorie, avec un score de qualité global et le détail
+ * complet de chaque règle : justification, action réalisée, avant/après.
  * </p>
  */
 public class EnhancementReport {
@@ -62,6 +63,8 @@ public class EnhancementReport {
 
     /**
      * Représente une amélioration individuelle appliquée.
+     * Contient le détail complet : justification, action réalisée,
+     * extraits de code avant/après, et référence normative.
      */
     public static class Enhancement {
         private String ruleId;
@@ -70,10 +73,18 @@ public class EnhancementReport {
         private String description;
         private String filePath;
         private boolean applied;
+        private String justification;
+        private String actionTaken;
+        private String beforeSnippet;
+        private String afterSnippet;
+        private String reference;
 
         public Enhancement() {
         }
 
+        /**
+         * Constructeur rétro-compatible (6 paramètres).
+         */
         public Enhancement(String ruleId, Category category, Severity severity,
                            String description, String filePath, boolean applied) {
             this.ruleId = ruleId;
@@ -84,6 +95,27 @@ public class EnhancementReport {
             this.applied = applied;
         }
 
+        /**
+         * Constructeur complet avec détails enrichis.
+         */
+        public Enhancement(String ruleId, Category category, Severity severity,
+                           String description, String filePath, boolean applied,
+                           String justification, String actionTaken,
+                           String beforeSnippet, String afterSnippet, String reference) {
+            this.ruleId = ruleId;
+            this.category = category;
+            this.severity = severity;
+            this.description = description;
+            this.filePath = filePath;
+            this.applied = applied;
+            this.justification = justification;
+            this.actionTaken = actionTaken;
+            this.beforeSnippet = beforeSnippet;
+            this.afterSnippet = afterSnippet;
+            this.reference = reference;
+        }
+
+        // Getters and setters
         public String getRuleId() { return ruleId; }
         public void setRuleId(String ruleId) { this.ruleId = ruleId; }
         public Category getCategory() { return category; }
@@ -96,6 +128,25 @@ public class EnhancementReport {
         public void setFilePath(String filePath) { this.filePath = filePath; }
         public boolean isApplied() { return applied; }
         public void setApplied(boolean applied) { this.applied = applied; }
+        public String getJustification() { return justification; }
+        public void setJustification(String justification) { this.justification = justification; }
+        public String getActionTaken() { return actionTaken; }
+        public void setActionTaken(String actionTaken) { this.actionTaken = actionTaken; }
+        public String getBeforeSnippet() { return beforeSnippet; }
+        public void setBeforeSnippet(String beforeSnippet) { this.beforeSnippet = beforeSnippet; }
+        public String getAfterSnippet() { return afterSnippet; }
+        public void setAfterSnippet(String afterSnippet) { this.afterSnippet = afterSnippet; }
+        public String getReference() { return reference; }
+        public void setReference(String reference) { this.reference = reference; }
+
+        /**
+         * Indique si cette amélioration contient des détails enrichis.
+         */
+        public boolean hasDetails() {
+            return (justification != null && !justification.isEmpty())
+                    || (actionTaken != null && !actionTaken.isEmpty())
+                    || (beforeSnippet != null && !beforeSnippet.isEmpty());
+        }
     }
 
     private List<Enhancement> enhancements = new ArrayList<>();
@@ -130,5 +181,12 @@ public class EnhancementReport {
 
     public long countBySeverity(Severity severity) {
         return enhancements.stream().filter(e -> e.getSeverity() == severity).count();
+    }
+
+    /**
+     * Compte les améliorations appliquées qui ont des détails enrichis.
+     */
+    public long countWithDetails() {
+        return enhancements.stream().filter(e -> e.isApplied() && e.hasDetails()).count();
     }
 }

@@ -6,6 +6,132 @@
     <title>Rapport IA - EJB to REST Generator</title>
     <link rel="stylesheet" th:href="@{/css/style.css}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        /* Enriched report detail styles */
+        .rule-detail-panel {
+            background: #f8f9fc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            margin-top: 0.5rem;
+            display: none;
+            animation: slideDown 0.2s ease-out;
+        }
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .rule-detail-panel.open {
+            display: block;
+        }
+        .rule-detail-section {
+            margin-bottom: 0.75rem;
+        }
+        .rule-detail-section:last-child {
+            margin-bottom: 0;
+        }
+        .rule-detail-label {
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+            margin-bottom: 0.25rem;
+        }
+        .rule-detail-label i {
+            margin-right: 0.35rem;
+            width: 14px;
+            text-align: center;
+        }
+        .rule-detail-text {
+            font-size: 0.875rem;
+            color: #334155;
+            line-height: 1.6;
+        }
+        .rule-detail-reference {
+            font-size: 0.8rem;
+            color: #6366f1;
+            font-style: italic;
+        }
+        .rule-code-block {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .rule-code-before {
+            border-left: 3px solid #ef4444;
+        }
+        .rule-code-after {
+            border-left: 3px solid #22c55e;
+        }
+        .rule-snippets {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+        }
+        @media (max-width: 768px) {
+            .rule-snippets {
+                grid-template-columns: 1fr;
+            }
+        }
+        .rule-row-clickable {
+            cursor: pointer;
+            transition: background-color 0.15s;
+        }
+        .rule-row-clickable:hover {
+            background-color: #f1f5f9 !important;
+        }
+        .rule-row-clickable td:first-child::before {
+            content: '\f078';
+            font-family: 'Font Awesome 6 Free';
+            font-weight: 900;
+            font-size: 0.65rem;
+            color: #94a3b8;
+            margin-right: 0.5rem;
+            transition: transform 0.2s;
+            display: inline-block;
+        }
+        .rule-row-clickable.expanded td:first-child::before {
+            transform: rotate(180deg);
+            color: #6366f1;
+        }
+        .detail-row td {
+            padding: 0 !important;
+            border-top: none !important;
+        }
+        .detail-row td > div {
+            padding: 0 1rem 1rem 1rem;
+        }
+        .rule-detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+        }
+        @media (max-width: 992px) {
+            .rule-detail-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .rule-detail-full {
+            grid-column: 1 / -1;
+        }
+        .has-details-badge {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #6366f1;
+            border-radius: 50%;
+            margin-left: 0.35rem;
+            vertical-align: middle;
+        }
+    </style>
 </head>
 <body>
 <div class="app-layout">
@@ -73,7 +199,7 @@
                     <div class="card-body">
                         <div class="category-grid">
                             <th:block th:each="cat : ${categories}" th:if="${cat.count > 0}">
-                                <div class="category-card">
+                                <div class="category-card" style="cursor:pointer" th:attr="onclick='filterAndScroll(\'' + ${cat.key} + '\')'">
                                     <div class="category-icon" th:classappend="${'cat-' + cat.key}">
                                         <i th:class="${cat.icon}"></i>
                                     </div>
@@ -87,11 +213,17 @@
                     </div>
                 </div>
 
-                <!-- Detailed Rules Table -->
-                <div class="card">
+                <!-- Detailed Rules Table with expandable details -->
+                <div class="card" id="rulesCard">
                     <div class="card-header">
                         <h2 class="card-title"><i class="fas fa-list-check"></i> Detail des regles appliquees</h2>
-                        <div class="card-header-actions">
+                        <div class="card-header-actions" style="display:flex;gap:0.5rem;align-items:center;">
+                            <button class="btn btn-sm btn-outline" onclick="expandAll()" title="Tout deployer">
+                                <i class="fas fa-angles-down"></i> Tout deployer
+                            </button>
+                            <button class="btn btn-sm btn-outline" onclick="collapseAll()" title="Tout replier">
+                                <i class="fas fa-angles-up"></i> Tout replier
+                            </button>
                             <select class="form-select form-select-sm" id="filterCategory" onchange="filterRules(this.value)">
                                 <option value="all">Toutes les categories</option>
                                 <th:block th:each="cat : ${categories}" th:if="${cat.count > 0}">
@@ -114,22 +246,69 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr th:each="e : ${enhancementReport.enhancements}" th:attr="data-category=${e.category.name()}">
-                                        <td><code th:text="${e.ruleId}">R01</code></td>
-                                        <td>
-                                            <span th:if="${e.severity.name() == 'CRITICAL'}" class="severity-badge severity-critical" th:text="${e.severity.label}">Critique</span>
-                                            <span th:if="${e.severity.name() == 'WARNING'}" class="severity-badge severity-warning" th:text="${e.severity.label}">Avertissement</span>
-                                            <span th:if="${e.severity.name() == 'SUGGESTION'}" class="severity-badge severity-suggestion" th:text="${e.severity.label}">Suggestion</span>
-                                            <span th:if="${e.severity.name() == 'INFO'}" class="severity-badge severity-info" th:text="${e.severity.label}">Info</span>
-                                        </td>
-                                        <td><span class="text-muted" th:text="${e.category.label}">Cat</span></td>
-                                        <td th:text="${e.description}">Description</td>
-                                        <td><code class="file-path" th:text="${e.filePath}">file</code></td>
-                                        <td>
-                                            <span th:if="${e.applied}" class="badge badge-success"><i class="fas fa-check"></i> Appliquee</span>
-                                            <span th:if="${!e.applied}" class="badge badge-default">Non appliquee</span>
-                                        </td>
-                                    </tr>
+                                    <th:block th:each="e, iterStat : ${enhancementReport.enhancements}">
+                                        <!-- Main rule row -->
+                                        <tr th:attr="data-category=${e.category.name()}"
+                                            th:classappend="${e.hasDetails() ? 'rule-row-clickable' : ''}"
+                                            th:onclick="${e.hasDetails() ? 'toggleDetail(' + iterStat.index + ')' : ''}">
+                                            <td>
+                                                <code th:text="${e.ruleId}">R01</code>
+                                                <span th:if="${e.hasDetails()}" class="has-details-badge" title="Details disponibles"></span>
+                                            </td>
+                                            <td>
+                                                <span th:if="${e.severity.name() == 'CRITICAL'}" class="severity-badge severity-critical" th:text="${e.severity.label}">Critique</span>
+                                                <span th:if="${e.severity.name() == 'WARNING'}" class="severity-badge severity-warning" th:text="${e.severity.label}">Avertissement</span>
+                                                <span th:if="${e.severity.name() == 'SUGGESTION'}" class="severity-badge severity-suggestion" th:text="${e.severity.label}">Suggestion</span>
+                                                <span th:if="${e.severity.name() == 'INFO'}" class="severity-badge severity-info" th:text="${e.severity.label}">Info</span>
+                                            </td>
+                                            <td><span class="text-muted" th:text="${e.category.label}">Cat</span></td>
+                                            <td th:text="${e.description}">Description</td>
+                                            <td><code class="file-path" th:text="${e.filePath}">file</code></td>
+                                            <td>
+                                                <span th:if="${e.applied}" class="badge badge-success"><i class="fas fa-check"></i> Appliquee</span>
+                                                <span th:if="${!e.applied}" class="badge badge-default">Non appliquee</span>
+                                            </td>
+                                        </tr>
+                                        <!-- Expandable detail row -->
+                                        <tr th:if="${e.hasDetails()}" class="detail-row" th:id="'detail-' + ${iterStat.index}"
+                                            th:attr="data-category=${e.category.name()}" style="display:none;">
+                                            <td colspan="6">
+                                                <div class="rule-detail-panel open">
+                                                    <div class="rule-detail-grid">
+                                                        <!-- Justification -->
+                                                        <div class="rule-detail-section" th:if="${e.justification != null and !e.justification.isEmpty()}">
+                                                            <div class="rule-detail-label"><i class="fas fa-lightbulb"></i> Pourquoi cette regle ?</div>
+                                                            <div class="rule-detail-text" th:text="${e.justification}">Justification</div>
+                                                        </div>
+                                                        <!-- Action taken -->
+                                                        <div class="rule-detail-section" th:if="${e.actionTaken != null and !e.actionTaken.isEmpty()}">
+                                                            <div class="rule-detail-label"><i class="fas fa-wrench"></i> Action realisee</div>
+                                                            <div class="rule-detail-text" th:text="${e.actionTaken}">Action</div>
+                                                        </div>
+                                                        <!-- Reference -->
+                                                        <div class="rule-detail-section rule-detail-full" th:if="${e.reference != null and !e.reference.isEmpty()}">
+                                                            <div class="rule-detail-label"><i class="fas fa-book"></i> Reference normative</div>
+                                                            <div class="rule-detail-reference" th:text="${e.reference}">Reference</div>
+                                                        </div>
+                                                        <!-- Before/After snippets -->
+                                                        <div class="rule-detail-section rule-detail-full" th:if="${e.beforeSnippet != null and !e.beforeSnippet.isEmpty()}">
+                                                            <div class="rule-detail-label"><i class="fas fa-code"></i> Transformation du code</div>
+                                                            <div class="rule-snippets">
+                                                                <div>
+                                                                    <div class="rule-detail-label" style="color:#ef4444;"><i class="fas fa-minus-circle"></i> Avant</div>
+                                                                    <div class="rule-code-block rule-code-before" th:text="${e.beforeSnippet}">before</div>
+                                                                </div>
+                                                                <div th:if="${e.afterSnippet != null and !e.afterSnippet.isEmpty()}">
+                                                                    <div class="rule-detail-label" style="color:#22c55e;"><i class="fas fa-plus-circle"></i> Apres</div>
+                                                                    <div class="rule-code-block rule-code-after" th:text="${e.afterSnippet}">after</div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </th:block>
                                 </tbody>
                             </table>
                         </div>
@@ -146,5 +325,72 @@
     </main>
 </div>
 <script th:src="@{/js/app.js}"></script>
+<script>
+    // Toggle detail panel for a rule row
+    function toggleDetail(index) {
+        var detailRow = document.getElementById('detail-' + index);
+        var mainRow = detailRow.previousElementSibling;
+        if (detailRow.style.display === 'none') {
+            detailRow.style.display = '';
+            mainRow.classList.add('expanded');
+        } else {
+            detailRow.style.display = 'none';
+            mainRow.classList.remove('expanded');
+        }
+    }
+
+    // Expand all detail panels
+    function expandAll() {
+        document.querySelectorAll('.detail-row').forEach(function(row) {
+            if (row.style.display !== 'none' || row.closest('tr[data-category]')) {
+                row.style.display = '';
+            }
+            var mainRow = row.previousElementSibling;
+            if (mainRow) mainRow.classList.add('expanded');
+        });
+        // Only expand visible ones
+        document.querySelectorAll('.detail-row').forEach(function(row) {
+            var mainRow = row.previousElementSibling;
+            if (mainRow && mainRow.style.display !== 'none') {
+                row.style.display = '';
+                mainRow.classList.add('expanded');
+            }
+        });
+    }
+
+    // Collapse all detail panels
+    function collapseAll() {
+        document.querySelectorAll('.detail-row').forEach(function(row) {
+            row.style.display = 'none';
+            var mainRow = row.previousElementSibling;
+            if (mainRow) mainRow.classList.remove('expanded');
+        });
+    }
+
+    // Filter rules by category (override app.js version to handle detail rows)
+    function filterRules(category) {
+        var rows = document.querySelectorAll('#rulesTable tbody tr');
+        rows.forEach(function(row) {
+            if (row.classList.contains('detail-row')) {
+                // Detail rows follow their parent's visibility
+                row.style.display = 'none';
+                return;
+            }
+            var cat = row.getAttribute('data-category');
+            if (category === 'all' || cat === category) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    }
+
+    // Click a category card to filter and scroll
+    function filterAndScroll(category) {
+        document.getElementById('filterCategory').value = category;
+        filterRules(category);
+        document.getElementById('rulesCard').scrollIntoView({ behavior: 'smooth' });
+    }
+</script>
 </body>
 </html>
