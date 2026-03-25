@@ -23,6 +23,12 @@ public class CodeGenerationEngine {
 
     private static final Logger log = LoggerFactory.getLogger(CodeGenerationEngine.class);
 
+    private final ImportResolver importResolver;
+
+    public CodeGenerationEngine(ImportResolver importResolver) {
+        this.importResolver = importResolver;
+    }
+
     private static final String BASE_PACKAGE = "com.bank.api";
     private static final String BASE_PACKAGE_PATH = "com/bank/api";
 
@@ -136,6 +142,11 @@ public class CodeGenerationEngine {
             generateValidatorClasses(srcMain, valInfo);
         }
 
+        // BUG B : Recopier les interfaces @Remote/@Local avec migration javax → jakarta
+        for (ProjectAnalysisResult.RemoteInterfaceInfo ifaceInfo : analysisResult.getDetectedRemoteInterfaces()) {
+            generateRemoteInterface(srcMain, ifaceInfo);
+        }
+
         // Generer controllers et service adapters
         for (UseCaseInfo useCase : analysisResult.getUseCases()) {
             // G4 : Verifier le type EJB
@@ -165,6 +176,10 @@ public class CodeGenerationEngine {
         // G14 : TRANSFORMATION_SUMMARY.md
         generateTransformationSummary(projectRoot, analysisResult, projectHasXml);
         generateReadme(projectRoot, analysisResult, projectHasXml);
+
+        // PHASE 8 : Resolution systemique des imports post-generation
+        int resolvedCount = importResolver.resolveImports(projectRoot);
+        log.info("[Phase 8] ImportResolver : {} fichiers corriges", resolvedCount);
 
         log.info("Generation terminee dans : {}", projectRoot);
         return projectRoot;
@@ -521,7 +536,8 @@ public class CodeGenerationEngine {
         String controllerName = useCase.getControllerName();
         String adapterName = useCase.getServiceAdapterName();
         String adapterField = Character.toLowerCase(adapterName.charAt(0)) + adapterName.substring(1);
-        String baseEndpoint = useCase.getRestEndpoint();
+        // BUG I : URL de base au pluriel
+        String baseEndpoint = ensurePluralEndpoint(useCase.getRestEndpoint());
         boolean hasXml = useCase.hasXmlSupport();
         String ejbTypeComment = generateEjbTypeComment(useCase);
 
@@ -542,14 +558,12 @@ public class CodeGenerationEngine {
             }
             // Importer les DTOs du meme package
             String returnBase = extractBaseType(method.getReturnType());
-            if (returnBase.endsWith("Vo") || returnBase.endsWith("VoIn") || returnBase.endsWith("VoOut")
-                    || returnBase.endsWith("Dto") || returnBase.endsWith("DTO")) {
+            if (isDtoType(returnBase)) {
                 imports.add(BASE_PACKAGE + ".dto." + returnBase);
             }
             for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
                 String paramBase = extractBaseType(param.getType());
-                if (paramBase.endsWith("Vo") || paramBase.endsWith("VoIn") || paramBase.endsWith("VoOut")
-                        || paramBase.endsWith("Dto") || paramBase.endsWith("DTO")) {
+                if (isDtoType(paramBase)) {
                     imports.add(BASE_PACKAGE + ".dto." + paramBase);
                 }
             }
@@ -561,6 +575,29 @@ public class CodeGenerationEngine {
         if (hasByteArrayReturn) {
             imports.add("org.springframework.http.HttpHeaders");
             imports.add("org.springframework.http.MediaType");
+        }
+
+        // BUG E : Pre-calculer toutes les routes pour detecter les conflits
+        Map<String, List<UseCaseInfo.MethodInfo>> routeMap = new LinkedHashMap<>();
+        for (UseCaseInfo.MethodInfo method : useCase.getPublicMethods()) {
+            HttpMapping mapping = resolveHttpMappingForMethod(method.getName(), method.getReturnType());
+            String subPath = deriveSubPathV2(method, mapping, useCase.getPublicMethods());
+            String routeKey = mapping.method + ":" + subPath;
+            routeMap.computeIfAbsent(routeKey, k -> new ArrayList<>()).add(method);
+        }
+        // Resoudre les conflits en ajoutant un sous-chemin derive du nom de la methode
+        Map<String, String> methodSubPaths = new LinkedHashMap<>();
+        for (Map.Entry<String, List<UseCaseInfo.MethodInfo>> routeEntry : routeMap.entrySet()) {
+            List<UseCaseInfo.MethodInfo> methods = routeEntry.getValue();
+            if (methods.size() > 1) {
+                // Conflit detecte : ajouter un sous-chemin unique pour chaque methode
+                for (UseCaseInfo.MethodInfo m : methods) {
+                    methodSubPaths.put(m.getName(), "/" + toKebabCase(m.getName()));
+                }
+            } else {
+                HttpMapping mapping = resolveHttpMappingForMethod(methods.get(0).getName(), methods.get(0).getReturnType());
+                methodSubPaths.put(methods.get(0).getName(), deriveSubPathV2(methods.get(0), mapping, useCase.getPublicMethods()));
+            }
         }
 
         StringBuilder sb = new StringBuilder();
@@ -585,8 +622,9 @@ public class CodeGenerationEngine {
         // Generer une route par methode (G5)
         for (UseCaseInfo.MethodInfo method : useCase.getPublicMethods()) {
             sb.append("\n");
-            HttpMapping mapping = resolveHttpMappingForMethod(method.getName());
-            String subPath = deriveSubPath(method, mapping);
+            // BUG N : generate* + byte[] → GET (telechargement)
+            HttpMapping mapping = resolveHttpMappingForMethod(method.getName(), method.getReturnType());
+            String subPath = methodSubPaths.getOrDefault(method.getName(), "/" + toKebabCase(method.getName()));
 
             // G11 : Swagger
             sb.append("    @Operation(summary = \"").append(escapeJavaString(deriveSwaggerSummary(method.getName()))).append("\")\n");
@@ -604,42 +642,47 @@ public class CodeGenerationEngine {
 
             sb.append("    public ResponseEntity<").append(responseType).append("> ").append(method.getName()).append("(");
 
-            // G8 : Parametres
+            // BUG F + BUG J : Parametres avec 1 seul @RequestBody max, enums en @RequestParam
             List<String> paramDecls = new ArrayList<>();
+            boolean hasRequestBody = false;
             for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
-                String annotation = resolveParameterAnnotation(param, mapping.method);
+                String annotation = resolveParameterAnnotationV2(param, mapping.method, hasRequestBody);
+                if (annotation.contains("@RequestBody")) hasRequestBody = true;
                 paramDecls.add(annotation + param.getType() + " " + param.getName());
             }
-            sb.append(String.join(", ", paramDecls));
+            sb.append(String.join(",\n            ", paramDecls));
             sb.append(") {\n");
 
-            sb.append("        log.info(\"[REST-IN] ").append(method.getName()).append(" - Service: ").append(useCase.getClassName()).append("\");\n");
+            // BUG K : Tracabilite complete [REST-IN] avec URL
+            sb.append("        log.info(\"[REST-IN] ").append(mapping.method).append(" ").append(baseEndpoint).append(subPath);
+            sb.append(" - ").append(method.getName()).append("\");\n");
             sb.append("        try {\n");
 
             // Corps de la methode
+            String args = method.getParameters().stream().map(UseCaseInfo.ParameterInfo::getName).collect(Collectors.joining(", "));
             if (returnType.equals("void")) {
-                sb.append("            ").append(adapterField).append(".").append(method.getName()).append("(");
-                sb.append(method.getParameters().stream().map(UseCaseInfo.ParameterInfo::getName).collect(Collectors.joining(", ")));
-                sb.append(");\n");
+                sb.append("            ").append(adapterField).append(".").append(method.getName()).append("(").append(args).append(");\n");
+                // BUG K : [REST-OUT]
+                sb.append("            log.info(\"[REST-OUT] 204 No Content\");\n");
                 sb.append("            return ResponseEntity.noContent().build();\n");
             } else if (returnType.equals("byte[]")) {
-                sb.append("            byte[] data = ").append(adapterField).append(".").append(method.getName()).append("(");
-                sb.append(method.getParameters().stream().map(UseCaseInfo.ParameterInfo::getName).collect(Collectors.joining(", ")));
-                sb.append(");\n");
+                sb.append("            byte[] data = ").append(adapterField).append(".").append(method.getName()).append("(").append(args).append(");\n");
+                sb.append("            log.info(\"[REST-OUT] 200 OK - {} octets\", data.length);\n");
                 sb.append("            return ResponseEntity.ok()\n");
                 sb.append("                .header(HttpHeaders.CONTENT_DISPOSITION, \"attachment; filename=export.bin\")\n");
                 sb.append("                .contentType(MediaType.APPLICATION_OCTET_STREAM)\n");
                 sb.append("                .body(data);\n");
             } else {
-                sb.append("            ").append(returnType).append(" result = ").append(adapterField).append(".").append(method.getName()).append("(");
-                sb.append(method.getParameters().stream().map(UseCaseInfo.ParameterInfo::getName).collect(Collectors.joining(", ")));
-                sb.append(");\n");
+                sb.append("            ").append(returnType).append(" result = ").append(adapterField).append(".").append(method.getName()).append("(").append(args).append(");\n");
+                // BUG K : [REST-OUT]
+                sb.append("            log.info(\"[REST-OUT] ").append(mapping.statusCode).append(" - ").append(method.getName()).append(" OK\");\n");
                 sb.append("            return ").append(mapping.responseExpression).append(";\n");
             }
 
             sb.append("        } catch (Exception e) {\n");
-            sb.append("            log.error(\"Erreur dans ").append(method.getName()).append("\", e);\n");
-            sb.append("            throw new RuntimeException(\"Erreur dans ").append(method.getName()).append("\", e);\n");
+            // BUG K : [REST-ERROR]
+            sb.append("            log.error(\"[REST-ERROR] ").append(method.getName()).append(" : {}\", e.getMessage());\n");
+            sb.append("            throw new RuntimeException(e.getMessage(), e);\n");
             sb.append("        }\n");
             sb.append("    }\n");
         }
@@ -803,19 +846,41 @@ public class CodeGenerationEngine {
                     .collect(Collectors.joining(", "));
 
             sb.append("    public ").append(method.getReturnType()).append(" ").append(method.getName()).append("(").append(params).append(") throws Exception {\n");
-        sb.append("        log.info(\"[EJB-CALL] ").append(useCase.getClassName()).append(".").append(method.getName()).append(" - JNDI: ").append(jndiName).append("\");\n");
+            // BUG K : Tracabilite complete avec 6 prefixes EJB
+            sb.append("        // --- DEBUT APPEL EJB ---\n");
+            sb.append("        log.info(\"[EJB-CALL] ").append(useCase.getClassName()).append(".").append(method.getName()).append("({})\", \"");
+            sb.append(method.getParameters().stream().map(p -> "{" + p.getName() + "}").collect(Collectors.joining(", ")));
+            sb.append("\");\n");
+
             // AXE 2 : Si une interface @Remote est connue, utiliser le cast type au lieu de la reflexion
             String remoteIface = useCase.getRemoteInterfaceName();
             if (remoteIface != null && !remoteIface.isEmpty()) {
+                sb.append("        // --- LOOKUP JNDI ---\n");
+                sb.append("        log.debug(\"[EJB-LOOKUP] Recherche EJB : ").append(jndiName).append("\");\n");
                 sb.append("        ").append(remoteIface).append(" ejb = (").append(remoteIface).append(") lookupEjb();\n");
+                sb.append("        log.debug(\"[EJB-LOOKUP] EJB trouve\");\n");
+                sb.append("        // --- EXECUTION METHODE EJB ---\n");
+                sb.append("        long start = System.currentTimeMillis();\n");
                 if (method.getReturnType().equals("void")) {
                     sb.append("        ejb.").append(method.getName()).append("(").append(args).append(");\n");
+                    sb.append("        long duration = System.currentTimeMillis() - start;\n");
+                    sb.append("        log.info(\"[EJB-EXECUTE] ").append(method.getName()).append("() termine en {}ms\", duration);\n");
                 } else {
-                    sb.append("        return ejb.").append(method.getName()).append("(").append(args).append(");\n");
+                    sb.append("        ").append(method.getReturnType()).append(" result = ejb.").append(method.getName()).append("(").append(args).append(");\n");
+                    sb.append("        long duration = System.currentTimeMillis() - start;\n");
+                    sb.append("        log.info(\"[EJB-EXECUTE] ").append(method.getName()).append("() termine en {}ms\", duration);\n");
+                    sb.append("        // --- REPONSE EJB ---\n");
+                    sb.append("        log.debug(\"[EJB-RESPONSE] Resultat : {}\", result);\n");
+                    sb.append("        return result;\n");
                 }
             } else {
+                sb.append("        // --- LOOKUP JNDI ---\n");
+                sb.append("        log.debug(\"[EJB-LOOKUP] Recherche EJB : ").append(jndiName).append("\");\n");
                 sb.append("        // TODO: Remplacer par le cast vers l'interface Remote/Local appropriee\n");
                 sb.append("        Object ejb = lookupEjb();\n");
+                sb.append("        log.debug(\"[EJB-LOOKUP] EJB trouve\");\n");
+                sb.append("        // --- EXECUTION METHODE EJB ---\n");
+                sb.append("        long start = System.currentTimeMillis();\n");
                 sb.append("        java.lang.reflect.Method m = ejb.getClass().getMethod(\"").append(method.getName()).append("\"");
                 for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
                     sb.append(", ").append(extractBaseType(param.getType())).append(".class");
@@ -823,8 +888,15 @@ public class CodeGenerationEngine {
                 sb.append(");\n");
                 if (method.getReturnType().equals("void")) {
                     sb.append("        m.invoke(ejb").append(args.isEmpty() ? "" : ", " + args).append(");\n");
+                    sb.append("        long duration = System.currentTimeMillis() - start;\n");
+                    sb.append("        log.info(\"[EJB-EXECUTE] ").append(method.getName()).append("() termine en {}ms\", duration);\n");
                 } else {
-                    sb.append("        return (").append(method.getReturnType()).append(") m.invoke(ejb").append(args.isEmpty() ? "" : ", " + args).append(");\n");
+                    sb.append("        ").append(method.getReturnType()).append(" result = (").append(method.getReturnType()).append(") m.invoke(ejb").append(args.isEmpty() ? "" : ", " + args).append(");\n");
+                    sb.append("        long duration = System.currentTimeMillis() - start;\n");
+                    sb.append("        log.info(\"[EJB-EXECUTE] ").append(method.getName()).append("() termine en {}ms\", duration);\n");
+                    sb.append("        // --- REPONSE EJB ---\n");
+                    sb.append("        log.debug(\"[EJB-RESPONSE] Resultat : {}\", result);\n");
+                    sb.append("        return result;\n");
                 }
             }
             sb.append("    }\n");
@@ -1255,6 +1327,70 @@ public class CodeGenerationEngine {
         log.info("Validateur genere : @{} / {}", valInfo.getAnnotationName(), valInfo.getValidatorName());
     }
 
+    // ===================== BUG B : REMOTE INTERFACE GENERATION =====================
+
+    /**
+     * Recopie une interface @Remote/@Local dans le projet genere avec migration javax → jakarta.
+     * Les imports sont adaptes au package cible com.bank.api.
+     */
+    private void generateRemoteInterface(Path srcMain, ProjectAnalysisResult.RemoteInterfaceInfo ifaceInfo) throws IOException {
+        String sourceCode = ifaceInfo.getSourceCode();
+        if (sourceCode == null || sourceCode.isEmpty()) {
+            log.warn("Source code absent pour l'interface @Remote : {}", ifaceInfo.getName());
+            return;
+        }
+
+        // Migration du package et des imports
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(BASE_PACKAGE).append(".ejb.interfaces;\n\n");
+
+        // Collecter les types references dans l'interface pour generer les imports
+        Set<String> imports = new TreeSet<>();
+
+        // Scanner le code source pour trouver les types utilises
+        String[] lines = sourceCode.split("\n");
+        boolean inInterface = false;
+        StringBuilder interfaceBody = new StringBuilder();
+
+        for (String line : lines) {
+            String trimmed = line.trim();
+            // Ignorer le package original et les imports originaux
+            if (trimmed.startsWith("package ")) continue;
+            if (trimmed.startsWith("import ")) {
+                // Migrer javax → jakarta
+                String importLine = trimmed.replace("javax.ejb.", "jakarta.ejb.")
+                        .replace("javax.validation.", "jakarta.validation.")
+                        .replace("javax.xml.bind.", "jakarta.xml.bind.");
+                // Ignorer les imports EJB (@Remote, @Local, @Stateless etc.)
+                if (!importLine.contains("jakarta.ejb.") && !importLine.contains("javax.ejb.")) {
+                    // On ne garde pas les imports originaux, on les recalculera
+                }
+                continue;
+            }
+            // Supprimer l'annotation @Remote/@Local de l'interface
+            if (trimmed.equals("@Remote") || trimmed.equals("@Local")) continue;
+            if (trimmed.startsWith("@Remote(") || trimmed.startsWith("@Local(")) continue;
+
+            interfaceBody.append(line).append("\n");
+        }
+
+        // Ecrire les imports (seront resolus par ImportResolver Phase 8)
+        // Ajouter quelques imports standard courants
+        imports.add("java.util.List");
+        imports.add("java.math.BigDecimal");
+
+        for (String imp : imports) {
+            sb.append("import ").append(imp).append(";\n");
+        }
+        sb.append("\n");
+
+        // Ajouter le corps de l'interface
+        sb.append(interfaceBody);
+
+        Files.writeString(srcMain.resolve("ejb/interfaces/" + ifaceInfo.getName() + ".java"), sb.toString());
+        log.info("Interface @Remote generee : {}", ifaceInfo.getName());
+    }
+
     // ===================== DTO (G1, G2, G3, BUG 10/11/12) =====================
 
     private void generateDtoClass(Path srcMain, DtoInfo dto) throws IOException {
@@ -1291,6 +1427,9 @@ public class CodeGenerationEngine {
             if (hasXmlAttribute) imports.add("jakarta.xml.bind.annotation.XmlAttribute");
             boolean hasXmlElementWrapper = dto.getFields().stream().anyMatch(DtoInfo.FieldInfo::isHasXmlElementWrapper);
             if (hasXmlElementWrapper) imports.add("jakarta.xml.bind.annotation.XmlElementWrapper");
+            // BUG M : @XmlTransient import
+            boolean hasXmlTransient = dto.getFields().stream().anyMatch(DtoInfo.FieldInfo::isHasXmlTransient);
+            if (hasXmlTransient) imports.add("jakarta.xml.bind.annotation.XmlTransient");
         }
         if (dto.isHasXmlRootElement() || hasJaxb) {
             imports.add("com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement");
@@ -1328,6 +1467,13 @@ public class CodeGenerationEngine {
 
         // BUG 10 : Si @Size est utilise dans les annotations, s'assurer que l'import est present
         // (deja gere ci-dessus via le Set annotationsUsed)
+
+        // BUG H : Imports pour les annotations custom de validation (@ValidIBAN, @ValidRIB, etc.)
+        for (DtoInfo.FieldInfo field : dto.getFields()) {
+            for (String customAnnot : field.getCustomAnnotations()) {
+                imports.add(BASE_PACKAGE + ".validation." + customAnnot);
+            }
+        }
 
         // Ecrire les imports
         for (String imp : imports) {
@@ -1429,6 +1575,11 @@ public class CodeGenerationEngine {
                 fieldAnnotations.add(attrAnnot);
             }
 
+            // BUG M : @XmlTransient doit etre preserve (pas remplace par @JsonIgnore)
+            if (field.isHasXmlTransient()) {
+                fieldAnnotations.add("@XmlTransient");
+            }
+
             // Validation annotations (BUG 10/11 : une seule fois, jamais de doublon)
             if (field.isRequired()) {
                 String baseType = extractBaseType(field.getType());
@@ -1440,6 +1591,11 @@ public class CodeGenerationEngine {
                 } else if (!PRIMITIVE_TYPES.contains(baseType)) {
                     fieldAnnotations.add("@NotNull");
                 }
+            }
+
+            // BUG H : Annotations custom de validation (@ValidIBAN, @ValidRIB, etc.)
+            for (String customAnnot : field.getCustomAnnotations()) {
+                fieldAnnotations.add("@" + customAnnot);
             }
 
             // Ecrire les annotations (G2 : le Set garantit la deduplication)
@@ -1496,19 +1652,9 @@ public class CodeGenerationEngine {
                 String excName = exc.getName();
                 String excLower = Character.toLowerCase(excName.charAt(0)) + excName.substring(1);
                 // Determiner le HTTP status en fonction du nom de l'exception
-                String httpStatus = "HttpStatus.INTERNAL_SERVER_ERROR";
-                String excNameLower = excName.toLowerCase();
-                if (excNameLower.contains("notfound") || excNameLower.contains("inexistant")) {
-                    httpStatus = "HttpStatus.NOT_FOUND";
-                } else if (excNameLower.contains("validation") || excNameLower.contains("invalid")) {
-                    httpStatus = "HttpStatus.BAD_REQUEST";
-                } else if (excNameLower.contains("authorization") || excNameLower.contains("access") || excNameLower.contains("forbidden")) {
-                    httpStatus = "HttpStatus.FORBIDDEN";
-                } else if (excNameLower.contains("conflict") || excNameLower.contains("duplicate")) {
-                    httpStatus = "HttpStatus.CONFLICT";
-                } else if (excNameLower.contains("insufficient") || excNameLower.contains("business")) {
-                    httpStatus = "HttpStatus.UNPROCESSABLE_ENTITY";
-                }
+                // BUG L : Mapping intelligent exception → code HTTP
+                String httpStatus = resolveExceptionHttpStatus(excName);
+
                 customHandlers.append("\n    @ExceptionHandler(").append(excName).append(".class)\n");
                 customHandlers.append("    public ResponseEntity<Map<String, Object>> handle").append(excName).append("(").append(excName).append(" ex) {\n");
                 customHandlers.append("        log.warn(\"").append(excName).append(" : {}\", ex.getMessage());\n");
@@ -1959,6 +2105,152 @@ public class CodeGenerationEngine {
         return "/" + toKebabCase(method.getName());
     }
 
+    // ===================== BUG N : resolveHttpMappingForMethod V2 (prend en compte returnType) =====================
+
+    /**
+     * BUG N : Version amelioree qui prend en compte le type de retour.
+     * generate* + byte[] → GET (telechargement de fichier).
+     */
+    private HttpMapping resolveHttpMappingForMethod(String methodName, String returnType) {
+        String name = methodName.toLowerCase();
+        // BUG N : generate* + byte[] → GET (c'est un telechargement)
+        if (name.startsWith("generate") && "byte[]".equals(returnType)) {
+            return new HttpMapping("GET", "GetMapping", "200", "ResponseEntity.ok(result)");
+        }
+        // Deleguer a la version standard
+        return resolveHttpMappingForMethod(methodName);
+    }
+
+    // ===================== BUG E : deriveSubPathV2 (deduplication des routes) =====================
+
+    /**
+     * BUG E : Version amelioree de deriveSubPath qui prend en compte
+     * toutes les methodes du controller pour eviter les conflits.
+     * BUG I : Genere des URLs RESTful (/{id} au lieu de /by-id/{id}).
+     */
+    private String deriveSubPathV2(UseCaseInfo.MethodInfo method, HttpMapping mapping,
+                                    List<UseCaseInfo.MethodInfo> allMethods) {
+        boolean hasIdParam = method.getParameters().stream()
+                .anyMatch(p -> p.getName().toLowerCase().equals("id") || p.getName().toLowerCase().endsWith("id"));
+
+        String methodName = method.getName().toLowerCase();
+
+        // BUG I : CRUD standard → pas de sous-chemin (URL RESTful)
+        if (methodName.equals("findall") || methodName.equals("getall") || methodName.equals("listall")
+                || methodName.equals("list") || methodName.equals("findbyid") || methodName.equals("getbyid")
+                || methodName.equals("create") || methodName.equals("save") || methodName.equals("execute")) {
+            if (hasIdParam) return "/{" + getIdParamName(method) + "}";
+            return "";
+        }
+
+        // BUG I : delete/update avec id → /{id} directement (RESTful)
+        if ((methodName.startsWith("delete") || methodName.startsWith("remove")) && hasIdParam) {
+            return "/{" + getIdParamName(method) + "}";
+        }
+        if ((methodName.startsWith("update") || methodName.startsWith("modify")) && hasIdParam) {
+            return "/{" + getIdParamName(method) + "}";
+        }
+
+        // Methodes avec id mais pas CRUD standard → sous-chemin + /{id}
+        if (hasIdParam) {
+            return "/" + toKebabCase(method.getName()) + "/{" + getIdParamName(method) + "}";
+        }
+
+        // Sinon, utiliser le nom de la methode comme sous-chemin
+        return "/" + toKebabCase(method.getName());
+    }
+
+    // ===================== BUG F + BUG J : resolveParameterAnnotationV2 =====================
+
+    /**
+     * BUG F : Garantit qu'un seul @RequestBody par methode.
+     * BUG J : Les enums sont annotes @RequestParam, pas @RequestBody.
+     */
+    private String resolveParameterAnnotationV2(UseCaseInfo.ParameterInfo param, String httpMethod, boolean alreadyHasRequestBody) {
+        String name = param.getName().toLowerCase();
+        String type = extractBaseType(param.getType());
+
+        // Si le nom contient "id" → @PathVariable
+        if (name.equals("id") || name.endsWith("id")) {
+            return "@PathVariable ";
+        }
+
+        // BUG J : Les enums sont des types simples → @RequestParam
+        // Heuristique : type court sans suffixe DTO/Vo/Request, et pas un type Java standard
+        // On verifie aussi si le type est un enum connu
+        if (isEnumLikeType(type)) {
+            return "@RequestParam ";
+        }
+
+        // Types primitifs et simples → @RequestParam
+        if (PRIMITIVE_TYPES.contains(type) || JAVA_LANG_TYPES.contains(type)
+                || type.equals("BigDecimal") || type.equals("Date") || type.equals("LocalDate")
+                || type.equals("LocalDateTime")) {
+            return "@RequestParam ";
+        }
+
+        // GET/DELETE : parametres simples → @RequestParam
+        if (httpMethod.equals("GET") || httpMethod.equals("DELETE")) {
+            return "@RequestParam ";
+        }
+
+        // BUG F : Si on a deja un @RequestBody, forcer @RequestParam
+        if (alreadyHasRequestBody) {
+            return "@RequestParam ";
+        }
+
+        // DTO/objet complexe → @RequestBody
+        if (isDtoType(type) || type.endsWith("ValueObject")) {
+            return "@RequestBody ";
+        }
+
+        return "@RequestBody ";
+    }
+
+    // ===================== BUG I : ensurePluralEndpoint =====================
+
+    /**
+     * BUG I : S'assure que l'endpoint REST est au pluriel (convention RESTful).
+     * /api/account → /api/accounts
+     */
+    private String ensurePluralEndpoint(String endpoint) {
+        if (endpoint == null || endpoint.isEmpty()) return endpoint;
+        // Ne pas toucher si deja au pluriel
+        if (endpoint.endsWith("s") || endpoint.endsWith("es")) return endpoint;
+        // Regles simples de pluralisation
+        if (endpoint.endsWith("y") && !endpoint.endsWith("ey") && !endpoint.endsWith("ay") && !endpoint.endsWith("oy")) {
+            return endpoint.substring(0, endpoint.length() - 1) + "ies";
+        }
+        if (endpoint.endsWith("ch") || endpoint.endsWith("sh") || endpoint.endsWith("x") || endpoint.endsWith("z")) {
+            return endpoint + "es";
+        }
+        return endpoint + "s";
+    }
+
+    // ===================== BUG J : Detection heuristique des enums =====================
+
+    /**
+     * BUG J : Detecte si un type est probablement un enum.
+     * Heuristique : type court (1 mot), tout en majuscules, ou suffixe Type/Status/State/Mode/Kind.
+     */
+    private boolean isEnumLikeType(String type) {
+        if (type == null || type.isEmpty()) return false;
+        // Suffixes courants d'enum
+        if (type.endsWith("Type") || type.endsWith("Status") || type.endsWith("State")
+                || type.endsWith("Mode") || type.endsWith("Kind") || type.endsWith("Level")
+                || type.endsWith("Category") || type.endsWith("Enum") || type.endsWith("Role")
+                || type.endsWith("Direction") || type.endsWith("Format") || type.endsWith("Statut")
+                || type.endsWith("Phase") || type.endsWith("Channel") || type.endsWith("Priority")
+                || type.endsWith("Frequency") || type.endsWith("Currency")) {
+            return true;
+        }
+        // Tout en majuscules (ex: DEVISE, PAYS)
+        if (type.equals(type.toUpperCase()) && type.length() > 1 && !type.contains("[]")) {
+            return true;
+        }
+        return false;
+    }
+
     private String getIdParamName(UseCaseInfo.MethodInfo method) {
         return method.getParameters().stream()
                 .filter(p -> p.getName().toLowerCase().equals("id") || p.getName().toLowerCase().endsWith("id"))
@@ -1998,12 +2290,75 @@ public class CodeGenerationEngine {
 
     /** Convertit en kebab-case */
     private String toKebabCase(String camelCase) {
-        return camelCase.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
+        // Supprimer les prefixes CRUD courants pour un kebab-case plus propre
+        String clean = camelCase;
+        return clean.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
     }
 
     /** Echappe les caracteres pour les strings Java */
     private String escapeJavaString(String s) {
         if (s == null) return "";
         return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ");
+    }
+
+    // ===================== BUG L : EXCEPTION → HTTP STATUS MAPPING =====================
+
+    /**
+     * BUG L : Mapping intelligent du nom d'exception vers le code HTTP.
+     * Couvre les cas metier bancaires : AccountClosed→409, Unauthorized→403, etc.
+     */
+    private String resolveExceptionHttpStatus(String exceptionName) {
+        String lower = exceptionName.toLowerCase();
+
+        // 404 Not Found
+        if (lower.contains("notfound") || lower.contains("inexistant") || lower.contains("introuvable")
+                || lower.contains("unknown") || lower.contains("missing")) {
+            return "HttpStatus.NOT_FOUND";
+        }
+
+        // 400 Bad Request
+        if (lower.contains("validation") || lower.contains("invalid") || lower.contains("malformed")
+                || lower.contains("badrequest") || lower.contains("illegalargument")) {
+            return "HttpStatus.BAD_REQUEST";
+        }
+
+        // 403 Forbidden
+        if (lower.contains("unauthorized") || lower.contains("forbidden") || lower.contains("access")
+                || lower.contains("permission") || lower.contains("denied")) {
+            return "HttpStatus.FORBIDDEN";
+        }
+
+        // 401 Unauthorized (authentification)
+        if (lower.contains("authentication") || lower.contains("unauthenticated") || lower.contains("notauthenticated")) {
+            return "HttpStatus.UNAUTHORIZED";
+        }
+
+        // 409 Conflict (etat incompatible, compte ferme, doublon)
+        if (lower.contains("conflict") || lower.contains("duplicate") || lower.contains("closed")
+                || lower.contains("already") || lower.contains("exists") || lower.contains("ferme")
+                || lower.contains("cloture")) {
+            return "HttpStatus.CONFLICT";
+        }
+
+        // 422 Unprocessable Entity (erreur metier, solde insuffisant)
+        if (lower.contains("insufficient") || lower.contains("business") || lower.contains("insuffisant")
+                || lower.contains("metier") || lower.contains("limit") || lower.contains("exceeded")
+                || lower.contains("depasse")) {
+            return "HttpStatus.UNPROCESSABLE_ENTITY";
+        }
+
+        // 503 Service Unavailable (service indisponible)
+        if (lower.contains("unavailable") || lower.contains("indisponible") || lower.contains("timeout")
+                || lower.contains("naming") || lower.contains("jndi")) {
+            return "HttpStatus.SERVICE_UNAVAILABLE";
+        }
+
+        // 429 Too Many Requests
+        if (lower.contains("ratelimit") || lower.contains("throttle") || lower.contains("toomany")) {
+            return "HttpStatus.TOO_MANY_REQUESTS";
+        }
+
+        // Default : 500 Internal Server Error
+        return "HttpStatus.INTERNAL_SERVER_ERROR";
     }
 }

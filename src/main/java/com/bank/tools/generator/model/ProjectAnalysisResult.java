@@ -61,6 +61,9 @@ public class ProjectAnalysisResult {
     /** Validateurs custom detectes dans le projet source (@Constraint + ConstraintValidator) */
     private List<ValidatorInfo> detectedValidators = new ArrayList<>();
 
+    /** Interfaces @Remote/@Local detectees dans le projet source */
+    private List<RemoteInterfaceInfo> detectedRemoteInterfaces = new ArrayList<>();
+
     // ==================== INNER CLASSES ====================
 
     /**
@@ -148,6 +151,27 @@ public class ProjectAnalysisResult {
         public void setValidatorSource(String validatorSource) { this.validatorSource = validatorSource; }
     }
 
+    /**
+     * Information sur une interface @Remote/@Local detectee dans le projet source.
+     */
+    public static class RemoteInterfaceInfo {
+        private String name;
+        private String packageName;
+        private String sourceCode;
+
+        public RemoteInterfaceInfo() {}
+        public RemoteInterfaceInfo(String name, String packageName, String sourceCode) {
+            this.name = name; this.packageName = packageName; this.sourceCode = sourceCode;
+        }
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public String getPackageName() { return packageName; }
+        public void setPackageName(String packageName) { this.packageName = packageName; }
+        public String getSourceCode() { return sourceCode; }
+        public void setSourceCode(String sourceCode) { this.sourceCode = sourceCode; }
+    }
+
     public ProjectAnalysisResult() {}
 
     // ==================== GETTERS/SETTERS ====================
@@ -209,6 +233,9 @@ public class ProjectAnalysisResult {
     public List<ValidatorInfo> getDetectedValidators() { return detectedValidators; }
     public void setDetectedValidators(List<ValidatorInfo> detectedValidators) { this.detectedValidators = detectedValidators; }
 
+    public List<RemoteInterfaceInfo> getDetectedRemoteInterfaces() { return detectedRemoteInterfaces; }
+    public void setDetectedRemoteInterfaces(List<RemoteInterfaceInfo> detectedRemoteInterfaces) { this.detectedRemoteInterfaces = detectedRemoteInterfaces; }
+
     // ==================== UTILITY METHODS ====================
 
     public void addUseCase(UseCaseInfo useCase) { this.useCases.add(useCase); }
@@ -219,4 +246,5 @@ public class ProjectAnalysisResult {
     public void addEnum(EnumInfo enumInfo) { this.detectedEnums.add(enumInfo); }
     public void addException(ExceptionInfo exceptionInfo) { this.detectedExceptions.add(exceptionInfo); }
     public void addValidator(ValidatorInfo validatorInfo) { this.detectedValidators.add(validatorInfo); }
+    public void addRemoteInterface(RemoteInterfaceInfo remoteInterfaceInfo) { this.detectedRemoteInterfaces.add(remoteInterfaceInfo); }
 }

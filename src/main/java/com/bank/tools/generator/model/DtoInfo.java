@@ -220,6 +220,9 @@ public class DtoInfo {
         /** Indique si le champ est requis (@XmlElement(required=true) ou vérifié dans execute()) */
         private boolean required;
 
+        /** Annotations custom de validation detectees sur le champ (ex: @ValidIBAN, @ValidRIB) */
+        private List<String> customAnnotations = new ArrayList<>();
+
         public FieldInfo() {
         }
 
@@ -323,6 +326,14 @@ public class DtoInfo {
 
         public void setRequired(boolean required) {
             this.required = required;
+        }
+
+        public List<String> getCustomAnnotations() {
+            return customAnnotations;
+        }
+
+        public void setCustomAnnotations(List<String> customAnnotations) {
+            this.customAnnotations = customAnnotations;
         }
 
         public boolean hasJaxbAnnotation() {

@@ -308,6 +308,19 @@ public class EjbProjectParser {
                 }
             }
 
+            // BUG B : Detecter les interfaces @Remote/@Local pour les recopier dans le projet genere
+            for (ClassOrInterfaceDeclaration classDecl : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                if (classDecl.isInterface() && (hasAnnotation(classDecl, "Remote") || hasAnnotation(classDecl, "Local"))) {
+                    String ifacePkg = cu.getPackageDeclaration().map(pd -> pd.getNameAsString()).orElse("");
+                    // Capturer le CU complet (imports + interface)
+                    String ifaceSource = cu.toString();
+                    ProjectAnalysisResult.RemoteInterfaceInfo ifaceInfo = new ProjectAnalysisResult.RemoteInterfaceInfo(
+                            classDecl.getNameAsString(), ifacePkg, ifaceSource);
+                    result.addRemoteInterface(ifaceInfo);
+                    log.info("Interface @Remote/@Local detectee : {}", classDecl.getNameAsString());
+                }
+            }
+
             // Detecter les validateurs custom (@Constraint annotation + ConstraintValidator impl)
             // Les annotations custom sont des AnnotationDeclaration (@interface), pas des ClassOrInterfaceDeclaration
             for (com.github.javaparser.ast.body.AnnotationDeclaration annotDecl : cu.findAll(com.github.javaparser.ast.body.AnnotationDeclaration.class)) {
@@ -796,6 +809,12 @@ public class EjbProjectParser {
                     if ("NotNull".equals(fieldAnnotName) || "NotBlank".equals(fieldAnnotName) ||
                         "NotEmpty".equals(fieldAnnotName)) {
                         fieldInfo.setRequired(true);
+                    }
+
+                    // BUG H : Detecter les annotations custom de validation (@ValidIBAN, @ValidRIB, etc.)
+                    if (fieldAnnotName.startsWith("Valid") && !fieldAnnotName.equals("Valid")
+                            && Character.isUpperCase(fieldAnnotName.charAt(5))) {
+                        fieldInfo.getCustomAnnotations().add(fieldAnnotName);
                     }
                 }
 

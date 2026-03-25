@@ -303,7 +303,9 @@ public class SmartCodeEnhancer {
             }
         }
 
-        // AXE 1.3 : @XmlTransient → @JsonIgnore dans les DTOs
+        // AXE 1.3 + BUG M : @XmlTransient → AJOUTER @JsonIgnore en complement (pas remplacer)
+        // Le CodeGenerationEngine genere deja @XmlTransient sur les champs.
+        // Ici on ajoute @JsonIgnore juste avant @XmlTransient si absent.
         for (DtoInfo dto : analysisResult.getDtos()) {
             Path dtoFile = srcMain.resolve("dto/" + dto.getClassName() + ".java");
             if (!Files.exists(dtoFile)) continue;
@@ -316,29 +318,53 @@ public class SmartCodeEnhancer {
 
             for (DtoInfo.FieldInfo field : dto.getFields()) {
                 if (!field.isHasXmlTransient()) continue;
-                // Chercher le champ et ajouter @JsonIgnore avant
+                // BUG M : Chercher @XmlTransient et ajouter @JsonIgnore AVANT (pas remplacer)
+                String xmlTransientDecl = "@XmlTransient";
                 String fieldDecl = "private " + field.getType() + " " + field.getName();
-                int idx = sb.indexOf(fieldDecl);
-                if (idx > 0) {
-                    String before = sb.substring(Math.max(0, idx - 100), idx);
-                    if (!before.contains("@JsonIgnore")) {
-                        sb.insert(idx, "@JsonIgnore\n    ");
+                int fieldIdx = sb.indexOf(fieldDecl);
+                if (fieldIdx > 0) {
+                    String before = sb.substring(Math.max(0, fieldIdx - 200), fieldIdx);
+                    // S'assurer que @XmlTransient est present
+                    if (!before.contains("@XmlTransient")) {
+                        // Ajouter @XmlTransient avant le champ
+                        sb.insert(fieldIdx, "@XmlTransient\n    ");
                         modified = true;
+                        // Recalculer l'index
+                        fieldIdx = sb.indexOf(fieldDecl);
+                        before = sb.substring(Math.max(0, fieldIdx - 200), fieldIdx);
+                    }
+                    // Ajouter @JsonIgnore avant @XmlTransient si absent
+                    if (!before.contains("@JsonIgnore")) {
+                        int xmlTransIdx = sb.lastIndexOf("@XmlTransient", fieldIdx);
+                        if (xmlTransIdx > 0) {
+                            sb.insert(xmlTransIdx, "@JsonIgnore\n    ");
+                            modified = true;
+                        }
                     }
                 }
             }
 
             if (modified) {
                 String result = sb.toString();
-                if (!result.contains("import com.fasterxml.jackson.annotation.JsonIgnore")) {
-                    result = result.replace("import ", "import com.fasterxml.jackson.annotation.JsonIgnore;\nimport ");
-                    // Eviter les doublons d'import
-                    result = result.replaceAll("(import com\\.fasterxml\\.jackson\\.annotation\\.JsonIgnore;\n)+",
-                            "import com.fasterxml.jackson.annotation.JsonIgnore;\n");
+                // Ajouter l'import @JsonIgnore si absent
+                if (!result.contains("import com.fasterxml.jackson.annotation.JsonIgnore;")) {
+                    // Inserer apres le dernier import existant
+                    int lastImportIdx = result.lastIndexOf("import ");
+                    if (lastImportIdx >= 0) {
+                        int endOfLine = result.indexOf("\n", lastImportIdx);
+                        if (endOfLine > 0) {
+                            result = result.substring(0, endOfLine + 1)
+                                    + "import com.fasterxml.jackson.annotation.JsonIgnore;\n"
+                                    + result.substring(endOfLine + 1);
+                        }
+                    }
                 }
+                // BUG D : Toujours dedupliquer les imports @JsonIgnore (peut etre duplique par passages multiples)
+                result = result.replaceAll("(import com\\.fasterxml\\.jackson\\.annotation\\.JsonIgnore;\n)+",
+                        "import com.fasterxml.jackson.annotation.JsonIgnore;\n");
                 Files.writeString(dtoFile, result);
                 report.addEnhancement(new Enhancement("R21", Category.INPUT_VALIDATION, Severity.WARNING,
-                        "@XmlTransient transformé en @JsonIgnore dans " + dto.getClassName(),
+                        "@JsonIgnore ajouté en complément de @XmlTransient dans " + dto.getClassName(),
                         dtoFile.getFileName().toString(), true));
             }
         }
