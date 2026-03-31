@@ -4,8 +4,14 @@ import com.bank.tools.generator.ai.EnhancementReport;
 import com.bank.tools.generator.ai.SmartCodeEnhancer;
 import com.bank.tools.generator.config.AppConfig;
 import com.bank.tools.generator.engine.CodeGenerationEngine;
+import com.bank.tools.generator.engine.OpenApiClientGenerator;
+import com.bank.tools.generator.engine.WsdlClientGenerator;
+import com.bank.tools.generator.model.OpenApiContractInfo;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
+import com.bank.tools.generator.model.WsdlContractInfo;
 import com.bank.tools.generator.parser.EjbProjectParser;
+import com.bank.tools.generator.parser.OpenApiContractParser;
+import com.bank.tools.generator.parser.WsdlContractParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -34,13 +40,23 @@ public class GeneratorService {
     private final EjbProjectParser parser;
     private final CodeGenerationEngine engine;
     private final SmartCodeEnhancer enhancer;
+    private final OpenApiContractParser openApiParser;
+    private final OpenApiClientGenerator openApiGenerator;
+    private final WsdlContractParser wsdlParser;
+    private final WsdlClientGenerator wsdlGenerator;
 
     public GeneratorService(AppConfig appConfig, EjbProjectParser parser,
-                            CodeGenerationEngine engine, SmartCodeEnhancer enhancer) {
+                            CodeGenerationEngine engine, SmartCodeEnhancer enhancer,
+                            OpenApiContractParser openApiParser, OpenApiClientGenerator openApiGenerator,
+                            WsdlContractParser wsdlParser, WsdlClientGenerator wsdlGenerator) {
         this.appConfig = appConfig;
         this.parser = parser;
         this.engine = engine;
         this.enhancer = enhancer;
+        this.openApiParser = openApiParser;
+        this.openApiGenerator = openApiGenerator;
+        this.wsdlParser = wsdlParser;
+        this.wsdlGenerator = wsdlGenerator;
     }
 
     // ============================================================
@@ -211,6 +227,117 @@ public class GeneratorService {
         }
 
         log.info("ZIP de telechargement cree : {}", zipFile);
+        return zipFile;
+    }
+
+    // ============================================================
+    // OpenAPI Client Generation
+    // ============================================================
+
+    /**
+     * Upload et parse un contrat OpenAPI/Swagger, puis genere le client REST Feign.
+     *
+     * @param file fichier JSON OpenAPI/Swagger
+     * @param partnerName nom du partenaire (ex: "MAGIX", "CMI")
+     * @param bianMode activer le mapping BIAN
+     * @return chemin du projet client genere
+     */
+    public Path generateOpenApiClient(MultipartFile file, String partnerName, boolean bianMode) throws IOException {
+        // 1. Sauvegarder le fichier
+        String projectId = "openapi-" + partnerName.toLowerCase() + "-" + UUID.randomUUID().toString().substring(0, 8);
+        Path uploadDir = Path.of(appConfig.getUploadDir(), projectId);
+        Files.createDirectories(uploadDir);
+        Path contractFile = uploadDir.resolve(file.getOriginalFilename());
+        Files.copy(file.getInputStream(), contractFile, StandardCopyOption.REPLACE_EXISTING);
+
+        log.info("[OpenAPI] Contrat uploade : {} (partenaire: {})", contractFile.getFileName(), partnerName);
+
+        // 2. Parser le contrat
+        OpenApiContractInfo contract = openApiParser.parse(contractFile, partnerName);
+
+        // 3. Generer le client
+        Path outputDir = Path.of(appConfig.getOutputDir(), projectId);
+        Files.createDirectories(outputDir);
+        Path clientProject = openApiGenerator.generateClient(contract, outputDir, bianMode);
+
+        log.info("[OpenAPI] Client genere pour {} : {} endpoints, {} schemas",
+                partnerName, contract.getEndpoints().size(), contract.getSchemas().size());
+
+        return clientProject;
+    }
+
+    /**
+     * Parse un contrat OpenAPI deja present sur le filesystem.
+     */
+    public OpenApiContractInfo parseOpenApiContract(Path contractFile, String partnerName) throws IOException {
+        return openApiParser.parse(contractFile, partnerName);
+    }
+
+    // ============================================================
+    // WSDL Client Generation
+    // ============================================================
+
+    /**
+     * Upload et parse un contrat WSDL, puis genere le client SOAP JAX-WS/CXF.
+     *
+     * @param file fichier WSDL
+     * @param partnerName nom du partenaire (ex: "RMA", "HPS")
+     * @param bianMode activer le mapping BIAN + facade REST
+     * @return chemin du projet client genere
+     */
+    public Path generateWsdlClient(MultipartFile file, String partnerName, boolean bianMode) throws IOException {
+        // 1. Sauvegarder le fichier
+        String projectId = "wsdl-" + partnerName.toLowerCase() + "-" + UUID.randomUUID().toString().substring(0, 8);
+        Path uploadDir = Path.of(appConfig.getUploadDir(), projectId);
+        Files.createDirectories(uploadDir);
+        Path contractFile = uploadDir.resolve(file.getOriginalFilename());
+        Files.copy(file.getInputStream(), contractFile, StandardCopyOption.REPLACE_EXISTING);
+
+        log.info("[WSDL] Contrat uploade : {} (partenaire: {})", contractFile.getFileName(), partnerName);
+
+        // 2. Parser le contrat
+        WsdlContractInfo contract = wsdlParser.parse(contractFile, partnerName);
+
+        // 3. Generer le client
+        Path outputDir = Path.of(appConfig.getOutputDir(), projectId);
+        Files.createDirectories(outputDir);
+        Path clientProject = wsdlGenerator.generateClient(contract, outputDir, bianMode);
+
+        log.info("[WSDL] Client genere pour {} : {} operations, {} types complexes",
+                partnerName, contract.getOperations().size(), contract.getComplexTypes().size());
+
+        return clientProject;
+    }
+
+    /**
+     * Parse un contrat WSDL deja present sur le filesystem.
+     */
+    public WsdlContractInfo parseWsdlContract(Path contractFile, String partnerName) throws IOException {
+        return wsdlParser.parse(contractFile, partnerName);
+    }
+
+    /**
+     * Cree un ZIP de telechargement pour un client partenaire genere.
+     */
+    public Path createPartnerClientZip(Path clientProjectDir) throws IOException {
+        Path zipFile = clientProjectDir.getParent().resolve(clientProjectDir.getFileName() + ".zip");
+
+        try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(zipFile))) {
+            Files.walk(clientProjectDir)
+                    .filter(Files::isRegularFile)
+                    .forEach(file -> {
+                        try {
+                            String entryName = clientProjectDir.relativize(file).toString();
+                            zos.putNextEntry(new ZipEntry(entryName));
+                            Files.copy(file, zos);
+                            zos.closeEntry();
+                        } catch (IOException e) {
+                            log.error("Erreur lors de la creation du ZIP partenaire", e);
+                        }
+                    });
+        }
+
+        log.info("ZIP client partenaire cree : {}", zipFile);
         return zipFile;
     }
 

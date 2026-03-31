@@ -40,6 +40,11 @@
             <i class="fas fa-download"></i><span>Telechargement</span>
         </a>
 
+        <div class="sidebar-section">Partenaires</div>
+        <a th:href="@{/partners}" class="sidebar-link" th:classappend="${activePage == 'partners' ? 'active' : ''}">
+            <i class="fas fa-handshake"></i><span>Clients Partenaires</span>
+        </a>
+
         <div class="sidebar-section">Systeme</div>
         <a th:href="@{/logs}" class="sidebar-link" th:classappend="${activePage == 'logs' ? 'active' : ''}">
             <i class="fas fa-terminal"></i><span>Logs</span>

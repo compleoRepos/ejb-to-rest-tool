@@ -1,0 +1,201 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "MAGIX Payment Gateway API",
+    "version": "2.1.0",
+    "description": "API REST du partenaire MAGIX pour les operations de paiement monetique"
+  },
+  "servers": [
+    {
+      "url": "https://api.magix-payment.ma/v2",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/transactions/authorize": {
+      "post": {
+        "operationId": "authorizeTransaction",
+        "summary": "Autoriser une transaction de paiement par carte",
+        "tags": ["Transactions"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorizationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Autorisation traitee",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transactions/{transactionId}": {
+      "get": {
+        "operationId": "getTransaction",
+        "summary": "Consulter le detail d'une transaction",
+        "tags": ["Transactions"],
+        "parameters": [
+          {
+            "name": "transactionId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detail de la transaction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cards/{cardId}/balance": {
+      "get": {
+        "operationId": "getCardBalance",
+        "summary": "Consulter le solde disponible d'une carte",
+        "tags": ["Cards"],
+        "parameters": [
+          {
+            "name": "cardId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Solde de la carte",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardBalance"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cards/{cardId}/block": {
+      "put": {
+        "operationId": "blockCard",
+        "summary": "Bloquer une carte",
+        "tags": ["Cards"],
+        "parameters": [
+          {
+            "name": "cardId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockCardRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Carte bloquee",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockCardResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AuthorizationRequest": {
+        "type": "object",
+        "properties": {
+          "cardNumber": { "type": "string", "description": "Numero de carte masque" },
+          "amount": { "type": "number", "format": "double", "description": "Montant de la transaction" },
+          "currency": { "type": "string", "description": "Code devise ISO 4217" },
+          "merchantId": { "type": "string", "description": "Identifiant du commercant" },
+          "terminalId": { "type": "string", "description": "Identifiant du terminal" },
+          "transactionDate": { "type": "string", "format": "date-time" }
+        },
+        "required": ["cardNumber", "amount", "currency", "merchantId"]
+      },
+      "AuthorizationResponse": {
+        "type": "object",
+        "properties": {
+          "authorizationCode": { "type": "string" },
+          "transactionId": { "type": "string" },
+          "status": { "type": "string", "enum": ["APPROVED", "DECLINED", "PENDING"] },
+          "responseCode": { "type": "string" },
+          "responseMessage": { "type": "string" }
+        }
+      },
+      "TransactionDetail": {
+        "type": "object",
+        "properties": {
+          "transactionId": { "type": "string" },
+          "cardNumber": { "type": "string" },
+          "amount": { "type": "number", "format": "double" },
+          "currency": { "type": "string" },
+          "status": { "type": "string" },
+          "merchantName": { "type": "string" },
+          "transactionDate": { "type": "string", "format": "date-time" },
+          "settlementDate": { "type": "string", "format": "date" }
+        }
+      },
+      "CardBalance": {
+        "type": "object",
+        "properties": {
+          "cardId": { "type": "string" },
+          "availableBalance": { "type": "number", "format": "double" },
+          "currentBalance": { "type": "number", "format": "double" },
+          "currency": { "type": "string" },
+          "lastUpdated": { "type": "string", "format": "date-time" }
+        }
+      },
+      "BlockCardRequest": {
+        "type": "object",
+        "properties": {
+          "reason": { "type": "string", "enum": ["LOST", "STOLEN", "FRAUD", "CUSTOMER_REQUEST"] },
+          "requestedBy": { "type": "string" }
+        },
+        "required": ["reason"]
+      },
+      "BlockCardResponse": {
+        "type": "object",
+        "properties": {
+          "cardId": { "type": "string" },
+          "status": { "type": "string" },
+          "blockedAt": { "type": "string", "format": "date-time" },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  }
+}

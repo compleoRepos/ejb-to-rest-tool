@@ -431,6 +431,153 @@ public class GeneratorController {
     }
 
     // ============================================================
+    // 9. Partner Client Generation (OpenAPI / WSDL)
+    // ============================================================
+
+    /**
+     * Page IHM pour la generation de clients partenaires (OpenAPI/WSDL).
+     */
+    @GetMapping("/partners")
+    public String partnersPage(Model model, HttpSession session) {
+        populateCommon(model, session);
+        return "partners";
+    }
+
+    /**
+     * API : Generer un client REST a partir d'un contrat OpenAPI/Swagger.
+     * Upload le fichier JSON/YAML + nom du partenaire → genere le FeignClient + DTOs.
+     */
+    @PostMapping("/api/generate-openapi-client")
+    @ResponseBody
+    public ResponseEntity<Map<String, Object>> generateOpenApiClient(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam("partnerName") String partnerName,
+            @RequestParam(value = "bianMode", defaultValue = "true") boolean bianMode,
+            HttpSession session) {
+
+        Map<String, Object> response = new HashMap<>();
+
+        if (file.isEmpty()) {
+            response.put("success", false);
+            response.put("error", "Veuillez selectionner un fichier OpenAPI/Swagger.");
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        if (partnerName == null || partnerName.trim().isEmpty()) {
+            response.put("success", false);
+            response.put("error", "Veuillez saisir le nom du partenaire.");
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        try {
+            log.info("[API] Generation client OpenAPI pour : {} (BIAN={})", partnerName, bianMode);
+            Path clientProject = generatorService.generateOpenApiClient(file, partnerName.trim(), bianMode);
+
+            // Stocker en session pour le telechargement
+            session.setAttribute("partnerClientPath", clientProject.toString());
+            session.setAttribute("partnerClientType", "openapi");
+            session.setAttribute("partnerName", partnerName.trim());
+
+            response.put("success", true);
+            response.put("partnerName", partnerName.trim());
+            response.put("clientType", "REST (Feign)");
+            response.put("bianMode", bianMode);
+            response.put("projectPath", clientProject.toString());
+            response.put("message", "Client REST Feign genere pour " + partnerName +
+                    (bianMode ? " avec mapping BIAN" : ""));
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("[API] Erreur generation client OpenAPI", e);
+            response.put("success", false);
+            response.put("error", "Erreur lors de la generation : " + e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
+    /**
+     * API : Generer un client SOAP a partir d'un contrat WSDL.
+     * Upload le fichier WSDL + nom du partenaire → genere le client JAX-WS/CXF + DTOs + facade REST BIAN.
+     */
+    @PostMapping("/api/generate-wsdl-client")
+    @ResponseBody
+    public ResponseEntity<Map<String, Object>> generateWsdlClient(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam("partnerName") String partnerName,
+            @RequestParam(value = "bianMode", defaultValue = "true") boolean bianMode,
+            HttpSession session) {
+
+        Map<String, Object> response = new HashMap<>();
+
+        if (file.isEmpty()) {
+            response.put("success", false);
+            response.put("error", "Veuillez selectionner un fichier WSDL.");
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        if (partnerName == null || partnerName.trim().isEmpty()) {
+            response.put("success", false);
+            response.put("error", "Veuillez saisir le nom du partenaire.");
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        try {
+            log.info("[API] Generation client WSDL pour : {} (BIAN={})", partnerName, bianMode);
+            Path clientProject = generatorService.generateWsdlClient(file, partnerName.trim(), bianMode);
+
+            // Stocker en session pour le telechargement
+            session.setAttribute("partnerClientPath", clientProject.toString());
+            session.setAttribute("partnerClientType", "wsdl");
+            session.setAttribute("partnerName", partnerName.trim());
+
+            response.put("success", true);
+            response.put("partnerName", partnerName.trim());
+            response.put("clientType", "SOAP (JAX-WS/CXF)");
+            response.put("bianMode", bianMode);
+            response.put("projectPath", clientProject.toString());
+            response.put("message", "Client SOAP genere pour " + partnerName +
+                    (bianMode ? " avec facade REST BIAN" : ""));
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("[API] Erreur generation client WSDL", e);
+            response.put("success", false);
+            response.put("error", "Erreur lors de la generation : " + e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
+    /**
+     * Telechargement du client partenaire genere (ZIP).
+     */
+    @GetMapping("/download-partner-client")
+    public ResponseEntity<Resource> downloadPartnerClient(HttpSession session) {
+        String clientPath = (String) session.getAttribute("partnerClientPath");
+        String partnerName = (String) session.getAttribute("partnerName");
+
+        if (clientPath == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        try {
+            Path clientDir = Path.of(clientPath);
+            Path zipPath = generatorService.createPartnerClientZip(clientDir);
+            Resource resource = new FileSystemResource(zipPath.toFile());
+
+            String fileName = "client-" + (partnerName != null ? partnerName.toLowerCase() : "partner") + ".zip";
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .header(HttpHeaders.CONTENT_DISPOSITION,
+                            "attachment; filename=\"" + fileName + "\"")
+                    .body(resource);
+        } catch (Exception e) {
+            log.error("Erreur lors du telechargement client partenaire", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    // ============================================================
     // Logs
     // ============================================================
     @GetMapping("/logs")

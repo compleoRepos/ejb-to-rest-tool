@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+                  xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+                  xmlns:xs="http://www.w3.org/2001/XMLSchema"
+                  xmlns:tns="http://rma.assurance.ma/ws/contrats"
+                  targetNamespace="http://rma.assurance.ma/ws/contrats"
+                  name="RMAContratService">
+
+    <!-- ==================== TYPES ==================== -->
+    <wsdl:types>
+        <xs:schema targetNamespace="http://rma.assurance.ma/ws/contrats">
+
+            <xs:complexType name="RechercheContratRequest">
+                <xs:sequence>
+                    <xs:element name="numeroContrat" type="xs:string" minOccurs="0"/>
+                    <xs:element name="cinClient" type="xs:string" minOccurs="0"/>
+                    <xs:element name="dateDebut" type="xs:date" minOccurs="0"/>
+                    <xs:element name="dateFin" type="xs:date" minOccurs="0"/>
+                </xs:sequence>
+            </xs:complexType>
+
+            <xs:complexType name="RechercheContratResponse">
+                <xs:sequence>
+                    <xs:element name="contrats" type="tns:ContratInfo" minOccurs="0" maxOccurs="unbounded"/>
+                    <xs:element name="totalResultats" type="xs:int"/>
+                    <xs:element name="codeRetour" type="xs:string"/>
+                    <xs:element name="messageRetour" type="xs:string" nillable="true"/>
+                </xs:sequence>
+            </xs:complexType>
+
+            <xs:complexType name="ContratInfo">
+                <xs:sequence>
+                    <xs:element name="numeroContrat" type="xs:string"/>
+                    <xs:element name="typeContrat" type="xs:string"/>
+                    <xs:element name="nomSouscripteur" type="xs:string"/>
+                    <xs:element name="cinSouscripteur" type="xs:string"/>
+                    <xs:element name="dateEffet" type="xs:date"/>
+                    <xs:element name="dateEcheance" type="xs:date"/>
+                    <xs:element name="montantPrime" type="xs:decimal"/>
+                    <xs:element name="statut" type="xs:string"/>
+                </xs:sequence>
+            </xs:complexType>
+
+            <xs:complexType name="SouscriptionRequest">
+                <xs:sequence>
+                    <xs:element name="typeContrat" type="xs:string"/>
+                    <xs:element name="cinClient" type="xs:string"/>
+                    <xs:element name="nomClient" type="xs:string"/>
+                    <xs:element name="prenomClient" type="xs:string"/>
+                    <xs:element name="dateNaissance" type="xs:date"/>
+                    <xs:element name="adresse" type="xs:string" nillable="true"/>
+                    <xs:element name="telephone" type="xs:string" nillable="true"/>
+                    <xs:element name="montantCapital" type="xs:decimal"/>
+                    <xs:element name="dureeContrat" type="xs:int"/>
+                </xs:sequence>
+            </xs:complexType>
+
+            <xs:complexType name="SouscriptionResponse">
+                <xs:sequence>
+                    <xs:element name="numeroContrat" type="xs:string"/>
+                    <xs:element name="dateEffet" type="xs:date"/>
+                    <xs:element name="montantPrime" type="xs:decimal"/>
+                    <xs:element name="codeRetour" type="xs:string"/>
+                    <xs:element name="messageRetour" type="xs:string" nillable="true"/>
+                </xs:sequence>
+            </xs:complexType>
+
+            <xs:complexType name="ResiliationRequest">
+                <xs:sequence>
+                    <xs:element name="numeroContrat" type="xs:string"/>
+                    <xs:element name="motifResiliation" type="xs:string"/>
+                    <xs:element name="dateResiliation" type="xs:date"/>
+                </xs:sequence>
+            </xs:complexType>
+
+            <xs:complexType name="ResiliationResponse">
+                <xs:sequence>
+                    <xs:element name="numeroContrat" type="xs:string"/>
+                    <xs:element name="statut" type="xs:string"/>
+                    <xs:element name="montantRemboursement" type="xs:decimal" nillable="true"/>
+                    <xs:element name="codeRetour" type="xs:string"/>
+                    <xs:element name="messageRetour" type="xs:string" nillable="true"/>
+                </xs:sequence>
+            </xs:complexType>
+
+        </xs:schema>
+    </wsdl:types>
+
+    <!-- ==================== MESSAGES ==================== -->
+    <wsdl:message name="rechercheContratInput">
+        <wsdl:part name="parameters" element="tns:RechercheContratRequest"/>
+    </wsdl:message>
+    <wsdl:message name="rechercheContratOutput">
+        <wsdl:part name="parameters" element="tns:RechercheContratResponse"/>
+    </wsdl:message>
+
+    <wsdl:message name="souscriptionInput">
+        <wsdl:part name="parameters" element="tns:SouscriptionRequest"/>
+    </wsdl:message>
+    <wsdl:message name="souscriptionOutput">
+        <wsdl:part name="parameters" element="tns:SouscriptionResponse"/>
+    </wsdl:message>
+
+    <wsdl:message name="resiliationInput">
+        <wsdl:part name="parameters" element="tns:ResiliationRequest"/>
+    </wsdl:message>
+    <wsdl:message name="resiliationOutput">
+        <wsdl:part name="parameters" element="tns:ResiliationResponse"/>
+    </wsdl:message>
+
+    <!-- ==================== PORT TYPE ==================== -->
+    <wsdl:portType name="RMAContratPortType">
+        <wsdl:operation name="rechercheContrat">
+            <wsdl:documentation>Recherche de contrats d'assurance par criteres</wsdl:documentation>
+            <wsdl:input message="tns:rechercheContratInput"/>
+            <wsdl:output message="tns:rechercheContratOutput"/>
+        </wsdl:operation>
+
+        <wsdl:operation name="souscription">
+            <wsdl:documentation>Souscription d'un nouveau contrat d'assurance</wsdl:documentation>
+            <wsdl:input message="tns:souscriptionInput"/>
+            <wsdl:output message="tns:souscriptionOutput"/>
+        </wsdl:operation>
+
+        <wsdl:operation name="resiliation">
+            <wsdl:documentation>Resiliation d'un contrat d'assurance existant</wsdl:documentation>
+            <wsdl:input message="tns:resiliationInput"/>
+            <wsdl:output message="tns:resiliationOutput"/>
+        </wsdl:operation>
+    </wsdl:portType>
+
+    <!-- ==================== BINDING ==================== -->
+    <wsdl:binding name="RMAContratBinding" type="tns:RMAContratPortType">
+        <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+
+        <wsdl:operation name="rechercheContrat">
+            <soap:operation soapAction="http://rma.assurance.ma/ws/contrats/rechercheContrat"/>
+            <wsdl:input><soap:body use="literal"/></wsdl:input>
+            <wsdl:output><soap:body use="literal"/></wsdl:output>
+        </wsdl:operation>
+
+        <wsdl:operation name="souscription">
+            <soap:operation soapAction="http://rma.assurance.ma/ws/contrats/souscription"/>
+            <wsdl:input><soap:body use="literal"/></wsdl:input>
+            <wsdl:output><soap:body use="literal"/></wsdl:output>
+        </wsdl:operation>
+
+        <wsdl:operation name="resiliation">
+            <soap:operation soapAction="http://rma.assurance.ma/ws/contrats/resiliation"/>
+            <wsdl:input><soap:body use="literal"/></wsdl:input>
+            <wsdl:output><soap:body use="literal"/></wsdl:output>
+        </wsdl:operation>
+    </wsdl:binding>
+
+    <!-- ==================== SERVICE ==================== -->
+    <wsdl:service name="RMAContratService">
+        <wsdl:port name="RMAContratPort" binding="tns:RMAContratBinding">
+            <soap:address location="https://ws.rma.ma/contrats/v1"/>
+        </wsdl:port>
+    </wsdl:service>
+
+</wsdl:definitions>
