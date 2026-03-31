@@ -214,7 +214,7 @@ public class GeneratorController {
 
         try {
             log.info("Generation du projet API pour : {}", projectId);
-            generatorService.generateProject(projectId, analysisResult);
+            generatorService.generateProject(projectId, analysisResult, false);
 
             EnhancementReport report = generatorService.enhanceProject(projectId, analysisResult);
             session.setAttribute("enhancementReport", report);
@@ -240,7 +240,9 @@ public class GeneratorController {
      */
     @PostMapping("/api/generate")
     @ResponseBody
-    public ResponseEntity<Map<String, Object>> generateProjectApi(HttpSession session) {
+    public ResponseEntity<Map<String, Object>> generateProjectApi(
+            @RequestParam(value = "bianMode", defaultValue = "false") boolean bianMode,
+            HttpSession session) {
         String projectId = (String) session.getAttribute("projectId");
         ProjectAnalysisResult analysisResult = (ProjectAnalysisResult) session.getAttribute("analysisResult");
 
@@ -259,8 +261,8 @@ public class GeneratorController {
         }
 
         try {
-            log.info("[API] Generation du projet API pour : {}", projectId);
-            generatorService.generateProject(projectId, analysisResult);
+            log.info("[API] Generation du projet API pour : {} (BIAN={})", projectId, bianMode);
+            generatorService.generateProject(projectId, analysisResult, bianMode);
 
             EnhancementReport report = generatorService.enhanceProject(projectId, analysisResult);
             session.setAttribute("enhancementReport", report);

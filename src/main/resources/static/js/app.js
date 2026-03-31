@@ -215,8 +215,15 @@ function launchTransformation() {
         }
     }, 900);
 
+    // Check BIAN mode
+    var bianToggle = document.getElementById('bianModeToggle');
+    var bianMode = bianToggle ? bianToggle.checked : false;
+    if (bianMode) {
+        addLogEntry('INFO', 'Mode BIAN active - URLs conformes au standard BIAN');
+    }
+
     // Start AJAX call to server
-    fetch('/api/generate', {
+    fetch('/api/generate?bianMode=' + bianMode, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin'
@@ -456,3 +463,17 @@ function escapeHtml(text) {
     div.appendChild(document.createTextNode(text));
     return div.innerHTML;
 }
+
+// ============================================================
+// BIAN Mode Toggle
+// ============================================================
+
+document.addEventListener('DOMContentLoaded', function() {
+    var bianToggle = document.getElementById('bianModeToggle');
+    var bianDesc = document.getElementById('bianDescription');
+    if (bianToggle && bianDesc) {
+        bianToggle.addEventListener('change', function() {
+            bianDesc.style.display = this.checked ? 'block' : 'none';
+        });
+    }
+});

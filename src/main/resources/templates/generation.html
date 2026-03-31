@@ -100,6 +100,32 @@
                     </div>
                 </div>
 
+                <!-- BIAN Mode Option -->
+                <div class="card" id="bianCard" th:if="${!projectGenerated}">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fas fa-university"></i> Options de generation</h2>
+                    </div>
+                    <div class="card-body">
+                        <div style="display:flex; align-items:center; gap:1.5rem; padding: 0.5rem 0;">
+                            <label class="toggle-switch" style="display:flex; align-items:center; gap:0.75rem; cursor:pointer;">
+                                <input type="checkbox" id="bianModeToggle" style="width:20px; height:20px; accent-color:#4f46e5; cursor:pointer;">
+                                <span style="font-weight:600; font-size:1rem;">Mode BIAN (Banking Industry Architecture Network)</span>
+                            </label>
+                        </div>
+                        <div id="bianDescription" style="display:none; margin-top:1rem; padding:1rem; background:#f0f4ff; border-radius:8px; border-left:4px solid #4f46e5;">
+                            <p style="margin:0 0 0.5rem 0; font-weight:600; color:#4f46e5;"><i class="fas fa-info-circle"></i> Conformite BIAN activee</p>
+                            <p style="margin:0; color:#374151; font-size:0.9rem;">Les API REST generees suivront le standard BIAN :</p>
+                            <ul style="margin:0.5rem 0 0 1.5rem; color:#374151; font-size:0.9rem;">
+                                <li><strong>URLs BIAN</strong> : /{service-domain}/{cr-plural}/{cr-id}/{behavior-qualifier}</li>
+                                <li><strong>Action Terms</strong> : Initiate, Retrieve, Update, Execute, Control, Capture</li>
+                                <li><strong>Service Domains</strong> : Current Account, Payment Execution, Party Reference Data, etc.</li>
+                                <li><strong>Behavior Qualifiers</strong> : balances, payments, statements, etc.</li>
+                                <li>Un fichier <strong>BIAN_MAPPING.md</strong> sera genere avec le detail du mapping</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Launch Button -->
                 <div class="card" id="launchCard" th:if="${!projectGenerated}">
                     <div class="card-body" style="text-align:center; padding: 2rem;">

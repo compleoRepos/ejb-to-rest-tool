@@ -93,11 +93,11 @@ public class GeneratorService {
     // Generation
     // ============================================================
 
-    public Path generateProject(String projectId, ProjectAnalysisResult analysisResult) throws IOException {
+    public Path generateProject(String projectId, ProjectAnalysisResult analysisResult, boolean bianMode) throws IOException {
         Path outputDir = Path.of(appConfig.getOutputDir(), projectId);
         Files.createDirectories(outputDir);
 
-        Path projectRoot = engine.generateProject(analysisResult, outputDir);
+        Path projectRoot = engine.generateProject(analysisResult, outputDir, bianMode);
         log.info("Etape 1/2 : Code de base genere dans {}", projectRoot);
 
         EnhancementReport report = enhancer.enhance(projectRoot, analysisResult);

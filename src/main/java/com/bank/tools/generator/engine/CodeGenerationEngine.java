@@ -24,9 +24,11 @@ public class CodeGenerationEngine {
     private static final Logger log = LoggerFactory.getLogger(CodeGenerationEngine.class);
 
     private final ImportResolver importResolver;
+    private final BianServiceDomainMapper bianMapper;
 
-    public CodeGenerationEngine(ImportResolver importResolver) {
+    public CodeGenerationEngine(ImportResolver importResolver, BianServiceDomainMapper bianMapper) {
         this.importResolver = importResolver;
+        this.bianMapper = bianMapper;
     }
 
     private static final String BASE_PACKAGE = "com.bank.api";
@@ -86,8 +88,8 @@ public class CodeGenerationEngine {
 
     // ===================== POINT D'ENTREE =====================
 
-    public Path generateProject(ProjectAnalysisResult analysisResult, Path outputDir) throws IOException {
-        log.info("Debut de la generation du projet API REST (v3 - G1-G14)");
+    public Path generateProject(ProjectAnalysisResult analysisResult, Path outputDir, boolean bianMode) throws IOException {
+        log.info("Debut de la generation du projet API REST (v3 - G1-G14, BIAN={})", bianMode);
 
         Path projectRoot = outputDir.resolve("generated-api");
         Files.createDirectories(projectRoot);
@@ -147,6 +149,9 @@ public class CodeGenerationEngine {
             generateRemoteInterface(srcMain, ifaceInfo);
         }
 
+        // Collecter les mappings BIAN si le mode est active
+        List<BianServiceDomainMapper.BianMapping> bianMappings = new ArrayList<>();
+
         // Generer controllers et service adapters
         for (UseCaseInfo useCase : analysisResult.getUseCases()) {
             // G4 : Verifier le type EJB
@@ -158,12 +163,25 @@ public class CodeGenerationEngine {
                 continue;
             }
 
+            // Mode BIAN : calculer le mapping BIAN pour chaque UseCase
+            BianServiceDomainMapper.BianMapping bianMapping = null;
+            if (bianMode) {
+                bianMapping = bianMapper.mapToBian(useCase);
+                if (bianMapping.isBianCompliant) {
+                    bianMappings.add(bianMapping);
+                }
+            }
+
             // G5 : Pattern multi-methodes ou BaseUseCase
             if (useCase.getEjbPattern() == UseCaseInfo.EjbPattern.BASE_USE_CASE) {
                 generateController(srcMain, useCase);
                 generateServiceAdapter(srcMain, useCase);
             } else {
-                generateMultiMethodController(srcMain, useCase);
+                if (bianMode && bianMapping != null && bianMapping.isBianCompliant) {
+                    generateBianController(srcMain, useCase, bianMapping);
+                } else {
+                    generateMultiMethodController(srcMain, useCase);
+                }
                 generateMultiMethodServiceAdapter(srcMain, useCase);
             }
         }
@@ -176,6 +194,12 @@ public class CodeGenerationEngine {
         // G14 : TRANSFORMATION_SUMMARY.md
         generateTransformationSummary(projectRoot, analysisResult, projectHasXml);
         generateReadme(projectRoot, analysisResult, projectHasXml);
+
+        // BIAN : Generer le rapport de mapping BIAN
+        if (bianMode && !bianMappings.isEmpty()) {
+            generateBianMappingReport(projectRoot, bianMappings, analysisResult);
+            log.info("[BIAN] Rapport BIAN_MAPPING.md genere pour {} Service Domains", bianMappings.size());
+        }
 
         // PHASE 8 : Resolution systemique des imports post-generation
         int resolvedCount = importResolver.resolveImports(projectRoot);
@@ -1947,6 +1971,221 @@ public class CodeGenerationEngine {
 
         Files.writeString(projectRoot.resolve("README.md"), sb.toString());
         log.info("README.md genere");
+    }
+
+    // ===================== BIAN CONTROLLER GENERATION =====================
+
+    /**
+     * Genere un controller REST conforme au standard BIAN.
+     * URLs au format : /{service-domain}/{cr-plural}/{cr-id}/{behavior-qualifier}/{action-suffix}
+     */
+    private void generateBianController(Path srcMain, UseCaseInfo useCase,
+                                         BianServiceDomainMapper.BianMapping bianMapping) throws IOException {
+        String controllerName = useCase.getControllerName();
+        String adapterName = useCase.getServiceAdapterName();
+        String adapterField = Character.toLowerCase(adapterName.charAt(0)) + adapterName.substring(1);
+        String baseEndpoint = bianMapping.baseUrl;
+        String ejbTypeComment = generateEjbTypeComment(useCase);
+
+        Set<String> imports = new TreeSet<>();
+        imports.add(BASE_PACKAGE + ".service." + adapterName);
+        imports.add("org.slf4j.Logger");
+        imports.add("org.slf4j.LoggerFactory");
+        imports.add("org.springframework.http.ResponseEntity");
+        imports.add("org.springframework.http.HttpStatus");
+        imports.add("org.springframework.web.bind.annotation.*");
+        imports.add("io.swagger.v3.oas.annotations.Operation");
+        imports.add("io.swagger.v3.oas.annotations.tags.Tag");
+
+        for (UseCaseInfo.MethodInfo method : useCase.getPublicMethods()) {
+            resolveTypeImports(method.getReturnType(), imports);
+            for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
+                resolveTypeImports(param.getType(), imports);
+            }
+            String returnBase = extractBaseType(method.getReturnType());
+            if (isDtoType(returnBase)) imports.add(BASE_PACKAGE + ".dto." + returnBase);
+            for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
+                String paramBase = extractBaseType(param.getType());
+                if (isDtoType(paramBase)) imports.add(BASE_PACKAGE + ".dto." + paramBase);
+            }
+        }
+
+        boolean hasByteArrayReturn = useCase.getPublicMethods().stream()
+                .anyMatch(m -> m.getReturnType().equals("byte[]"));
+        if (hasByteArrayReturn) {
+            imports.add("org.springframework.http.HttpHeaders");
+            imports.add("org.springframework.http.MediaType");
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(BASE_PACKAGE).append(".controller;\n\n");
+        for (String imp : imports) {
+            sb.append("import ").append(imp).append(";\n");
+        }
+        sb.append("\n");
+        sb.append(ejbTypeComment);
+        sb.append("/**\n");
+        sb.append(" * Controller REST conforme BIAN pour ").append(useCase.getClassName()).append(".\n");
+        sb.append(" * Service Domain : ").append(bianMapping.serviceDomain.displayName).append("\n");
+        sb.append(" * Control Record  : ").append(bianMapping.serviceDomain.controlRecord).append("\n");
+        sb.append(" * Pattern          : ").append(bianMapping.serviceDomain.functionalPattern).append("\n");
+        sb.append(" *\n");
+        sb.append(" * Reference : BIAN Semantic API Practitioner Guide V8.1\n");
+        sb.append(" */\n");
+        sb.append("@RestController\n");
+        sb.append("@RequestMapping(\"" + baseEndpoint + "\")\n");
+        sb.append("@Tag(name = \"" + bianMapping.serviceDomain.displayName + "\", ");
+        sb.append("description = \"BIAN Service Domain - " + bianMapping.serviceDomain.displayName + "\")\n");
+        sb.append("public class ").append(controllerName).append(" {\n\n");
+        sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(controllerName).append(".class);\n\n");
+        sb.append("    private final ").append(adapterName).append(" ").append(adapterField).append(";\n\n");
+        sb.append("    public ").append(controllerName).append("(").append(adapterName).append(" ").append(adapterField).append(") {\n");
+        sb.append("        this.").append(adapterField).append(" = ").append(adapterField).append(";\n");
+        sb.append("    }\n");
+
+        // Generer une route BIAN par methode
+        for (UseCaseInfo.MethodInfo method : useCase.getPublicMethods()) {
+            BianServiceDomainMapper.BianMethodMapping mm = bianMapping.methodMappings.get(method.getName());
+            if (mm == null) continue;
+
+            sb.append("\n");
+            // Swagger avec Action Term BIAN
+            sb.append("    @Operation(summary = \"BIAN ").append(mm.actionTerm.actionTerm);
+            sb.append(" - ").append(deriveSwaggerSummary(method.getName())).append("\")\n");
+
+            // Annotation HTTP BIAN
+            sb.append("    @").append(mm.springAnnotation);
+            if (!mm.fullUrl.isEmpty()) {
+                sb.append("(\"").append(mm.fullUrl).append("\"");
+            }
+            sb.append(")\n");
+
+            // Type de retour
+            String returnType = method.getReturnType();
+            String responseType = mapReturnType(returnType);
+
+            sb.append("    public ResponseEntity<").append(responseType).append("> ").append(method.getName()).append("(");
+
+            // Parametres
+            List<String> paramDecls = new ArrayList<>();
+            boolean hasRequestBody = false;
+            for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
+                // BIAN : les IDs dans l'URL deviennent @PathVariable
+                String paramNameLower = param.getName().toLowerCase();
+                boolean isPathVar = paramNameLower.equals("id") || paramNameLower.endsWith("id")
+                        || paramNameLower.endsWith("number") || paramNameLower.endsWith("code");
+                String annotation;
+                if (isPathVar && mm.fullUrl.contains("{" + param.getName() + "}")) {
+                    annotation = "@PathVariable ";
+                } else {
+                    annotation = resolveParameterAnnotationV2(param, mm.httpMethod, hasRequestBody);
+                    if (annotation.contains("@RequestBody")) hasRequestBody = true;
+                }
+                paramDecls.add(annotation + param.getType() + " " + param.getName());
+            }
+            sb.append(String.join(",\n            ", paramDecls));
+            sb.append(") {\n");
+
+            // Tracabilite BIAN
+            sb.append("        log.info(\"[BIAN-IN] ").append(mm.actionTerm.actionTerm);
+            sb.append(" ").append(baseEndpoint).append(mm.fullUrl);
+            sb.append(" - ").append(method.getName()).append("\");\n");
+            sb.append("        try {\n");
+
+            // Corps
+            String args = method.getParameters().stream().map(UseCaseInfo.ParameterInfo::getName).collect(Collectors.joining(", "));
+            if (returnType.equals("void")) {
+                sb.append("            ").append(adapterField).append(".").append(method.getName()).append("(").append(args).append(");\n");
+                sb.append("            log.info(\"[BIAN-OUT] 204 No Content\");\n");
+                sb.append("            return ResponseEntity.noContent().build();\n");
+            } else if (returnType.equals("byte[]")) {
+                sb.append("            byte[] data = ").append(adapterField).append(".").append(method.getName()).append("(").append(args).append(");\n");
+                sb.append("            log.info(\"[BIAN-OUT] 200 OK - {} octets\", data.length);\n");
+                sb.append("            return ResponseEntity.ok()\n");
+                sb.append("                .header(HttpHeaders.CONTENT_DISPOSITION, \"attachment; filename=export.bin\")\n");
+                sb.append("                .contentType(MediaType.APPLICATION_OCTET_STREAM)\n");
+                sb.append("                .body(data);\n");
+            } else {
+                sb.append("            ").append(returnType).append(" result = ").append(adapterField).append(".").append(method.getName()).append("(").append(args).append(");\n");
+                sb.append("            log.info(\"[BIAN-OUT] 200 OK - ").append(method.getName()).append("\");\n");
+                sb.append("            return ResponseEntity.ok(result);\n");
+            }
+
+            sb.append("        } catch (Exception e) {\n");
+            sb.append("            log.error(\"[BIAN-ERROR] ").append(method.getName()).append(" : {}\", e.getMessage());\n");
+            sb.append("            throw new RuntimeException(e.getMessage(), e);\n");
+            sb.append("        }\n");
+            sb.append("    }\n");
+        }
+
+        sb.append("}\n");
+
+        Files.writeString(srcMain.resolve("controller/" + controllerName + ".java"), sb.toString());
+        log.info("[BIAN] Controller genere : {} ({} routes BIAN)", controllerName, useCase.getPublicMethods().size());
+    }
+
+    // ===================== BIAN MAPPING REPORT =====================
+
+    /**
+     * Genere le fichier BIAN_MAPPING.md avec le detail du mapping EJB → BIAN.
+     */
+    private void generateBianMappingReport(Path projectRoot,
+                                            List<BianServiceDomainMapper.BianMapping> bianMappings,
+                                            ProjectAnalysisResult analysisResult) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("# Rapport de Mapping BIAN\n\n");
+        sb.append("Ce document detaille le mapping entre les EJB source et les Service Domains BIAN.\n");
+        sb.append("Genere automatiquement par l'outil EJB-to-REST Generator en mode BIAN.\n\n");
+        sb.append("**Reference** : BIAN Semantic API Practitioner Guide V8.1\n\n");
+        sb.append("---\n\n");
+
+        // Resume
+        sb.append("## Resume\n\n");
+        sb.append("| Metrique | Valeur |\n");
+        sb.append("|----------|--------|\n");
+        sb.append("| Service Domains identifies | ").append(bianMappings.size()).append(" |\n");
+        int totalRoutes = bianMappings.stream().mapToInt(m -> m.methodMappings.size()).sum();
+        sb.append("| Routes BIAN generees | ").append(totalRoutes).append(" |\n");
+        sb.append("| UseCases totaux | ").append(analysisResult.getUseCases().size()).append(" |\n");
+        sb.append("\n");
+
+        // Detail par Service Domain
+        sb.append("## Detail par Service Domain\n\n");
+        for (BianServiceDomainMapper.BianMapping mapping : bianMappings) {
+            sb.append("### ").append(mapping.serviceDomain.displayName).append("\n\n");
+            sb.append("| Propriete | Valeur |\n");
+            sb.append("|-----------|--------|\n");
+            sb.append("| **Domain Name** | ").append(mapping.serviceDomain.domainName).append(" |\n");
+            sb.append("| **Control Record** | ").append(mapping.serviceDomain.controlRecord).append(" |\n");
+            sb.append("| **Functional Pattern** | ").append(mapping.serviceDomain.functionalPattern).append(" |\n");
+            sb.append("| **Base URL** | `").append(mapping.baseUrl).append("` |\n");
+            sb.append("\n");
+
+            sb.append("#### Routes\n\n");
+            sb.append("| Methode EJB | Action Term | HTTP | URL BIAN | Behavior Qualifier |\n");
+            sb.append("|-------------|-------------|------|----------|-------------------|\n");
+            for (BianServiceDomainMapper.BianMethodMapping mm : mapping.methodMappings.values()) {
+                sb.append("| `").append(mm.methodName).append("` ");
+                sb.append("| ").append(mm.actionTerm.actionTerm).append(" ");
+                sb.append("| ").append(mm.httpMethod).append(" ");
+                sb.append("| `").append(mapping.baseUrl).append(mm.fullUrl).append("` ");
+                sb.append("| ").append(mm.behaviorQualifier != null ? mm.behaviorQualifier : "-").append(" |\n");
+            }
+            sb.append("\n");
+        }
+
+        // Glossaire BIAN
+        sb.append("## Glossaire BIAN\n\n");
+        sb.append("| Terme | Definition |\n");
+        sb.append("|-------|-----------|\n");
+        sb.append("| **Service Domain** | Unite fonctionnelle autonome dans l'architecture BIAN |\n");
+        sb.append("| **Control Record** | Objet metier principal gere par le Service Domain |\n");
+        sb.append("| **Behavior Qualifier** | Sous-aspect du Control Record (ex: balances, payments) |\n");
+        sb.append("| **Action Term** | Verbe standardise BIAN (Initiate, Retrieve, Update, Execute, Control) |\n");
+        sb.append("| **Functional Pattern** | Categorisation du comportement du Service Domain (FULFILL, PROCESS, etc.) |\n");
+        sb.append("\n");
+
+        Files.writeString(projectRoot.resolve("BIAN_MAPPING.md"), sb.toString());
     }
 
     // ===================== UTILITAIRES =====================
