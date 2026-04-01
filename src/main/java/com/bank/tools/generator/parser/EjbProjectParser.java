@@ -1,5 +1,8 @@
 package com.bank.tools.generator.parser;
 
+import com.bank.tools.generator.annotation.AnnotationPropagator;
+import com.bank.tools.generator.annotation.CustomAnnotationRegistry;
+import com.bank.tools.generator.annotation.DetectedAnnotation;
 import com.bank.tools.generator.model.DtoInfo;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
 import com.bank.tools.generator.model.UseCaseInfo;
@@ -135,6 +138,21 @@ public class EjbProjectParser {
 
     private final JavaParser javaParser = new JavaParser();
 
+    /** Module de detection et classification des annotations custom bancaires */
+    private AnnotationPropagator annotationPropagator;
+    private CustomAnnotationRegistry annotationRegistry;
+
+    /** Injection optionnelle (le parseur peut fonctionner sans le module annotations) */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAnnotationPropagator(AnnotationPropagator annotationPropagator) {
+        this.annotationPropagator = annotationPropagator;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAnnotationRegistry(CustomAnnotationRegistry annotationRegistry) {
+        this.annotationRegistry = annotationRegistry;
+    }
+
     // ==================== MAIN ANALYSIS METHOD ====================
 
     /**
@@ -233,6 +251,40 @@ public class EjbProjectParser {
                         // G10 : Collecter les annotations source
                         classDecl.getAnnotations().forEach(ann ->
                                 useCaseInfo.getSourceAnnotations().add(ann.getNameAsString()));
+
+                        // CUSTOM ANNOTATIONS : Detecter et classifier les annotations custom bancaires
+                        if (annotationPropagator != null) {
+                            List<String> annNames = new ArrayList<>();
+                            List<String> annExprs = new ArrayList<>();
+                            classDecl.getAnnotations().forEach(ann -> {
+                                annNames.add(ann.getNameAsString());
+                                annExprs.add(ann.toString());
+                            });
+                            String pkgHint = cu.getPackageDeclaration()
+                                    .map(pd -> pd.getNameAsString()).orElse("");
+                            List<DetectedAnnotation> classAnnotations = annotationPropagator
+                                    .detectAndClassify(annNames, annExprs,
+                                            useCaseInfo.getClassName(), true, pkgHint);
+                            result.addCustomAnnotations(classAnnotations);
+
+                            // Detecter aussi les annotations sur les methodes publiques
+                            for (MethodDeclaration method : classDecl.getMethods()) {
+                                if (method.isPublic()) {
+                                    List<String> mAnnNames = new ArrayList<>();
+                                    List<String> mAnnExprs = new ArrayList<>();
+                                    method.getAnnotations().forEach(ann -> {
+                                        mAnnNames.add(ann.getNameAsString());
+                                        mAnnExprs.add(ann.toString());
+                                    });
+                                    List<DetectedAnnotation> methodAnnotations = annotationPropagator
+                                            .detectAndClassify(mAnnNames, mAnnExprs,
+                                                    useCaseInfo.getClassName(), false, pkgHint);
+                                    methodAnnotations.forEach(da ->
+                                            da.setSourceMethodName(method.getNameAsString()));
+                                    result.addCustomAnnotations(methodAnnotations);
+                                }
+                            }
+                        }
 
                         // G11 : Extraire la Javadoc
                         classDecl.getJavadocComment().ifPresent(jd ->

@@ -1,5 +1,6 @@
 package com.bank.tools.generator.model;
 
+import com.bank.tools.generator.annotation.DetectedAnnotation;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -63,6 +64,9 @@ public class ProjectAnalysisResult {
 
     /** Interfaces @Remote/@Local detectees dans le projet source */
     private List<RemoteInterfaceInfo> detectedRemoteInterfaces = new ArrayList<>();
+
+    /** Annotations custom bancaires detectees dans le projet source */
+    private List<DetectedAnnotation> detectedCustomAnnotations = new ArrayList<>();
 
     // ==================== INNER CLASSES ====================
 
@@ -247,4 +251,9 @@ public class ProjectAnalysisResult {
     public void addException(ExceptionInfo exceptionInfo) { this.detectedExceptions.add(exceptionInfo); }
     public void addValidator(ValidatorInfo validatorInfo) { this.detectedValidators.add(validatorInfo); }
     public void addRemoteInterface(RemoteInterfaceInfo remoteInterfaceInfo) { this.detectedRemoteInterfaces.add(remoteInterfaceInfo); }
+
+    public List<DetectedAnnotation> getDetectedCustomAnnotations() { return detectedCustomAnnotations; }
+    public void setDetectedCustomAnnotations(List<DetectedAnnotation> detectedCustomAnnotations) { this.detectedCustomAnnotations = detectedCustomAnnotations; }
+    public void addCustomAnnotation(DetectedAnnotation annotation) { this.detectedCustomAnnotations.add(annotation); }
+    public void addCustomAnnotations(List<DetectedAnnotation> annotations) { this.detectedCustomAnnotations.addAll(annotations); }
 }

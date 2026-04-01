@@ -1,0 +1,284 @@
+# =============================================================================
+# Custom Annotations Registry - Direction Digitale Factory BMCE Bank
+# =============================================================================
+# Ce fichier declare les annotations internes de la banque que l'outil doit
+# reconnaitre, classifier et propager automatiquement sur les wrappers REST.
+#
+# Categories supportees :
+#   SECURITY    - Annotations de securite / controle d'acces
+#   AUDIT       - Annotations de tracabilite / journalisation
+#   TRANSACTION - Annotations de gestion transactionnelle
+#   CHANNEL     - Annotations de restriction par canal (agence, mobile, web)
+#   RISK        - Annotations de niveau de risque
+#   COMPLIANCE  - Annotations de conformite reglementaire
+#   CACHING     - Annotations de mise en cache
+#   MONITORING  - Annotations de monitoring / metriques
+#   BUSINESS    - Annotations metier specifiques
+#   CUSTOM      - Autres annotations non classifiees
+#
+# Strategies de propagation :
+#   PROPAGATE_CLASS    - Propager sur la classe du controller/service genere
+#   PROPAGATE_METHOD   - Propager sur chaque methode du controller genere
+#   PROPAGATE_BOTH     - Propager sur la classe ET les methodes
+#   TRANSFORM          - Transformer en equivalent Spring (ex: @RolesAllowed -> @PreAuthorize)
+#   COMMENT            - Ajouter en commentaire dans le code genere (pas de propagation directe)
+#   IGNORE             - Ignorer completement (annotation technique EJB sans equivalent REST)
+# =============================================================================
+
+# Prefixes de packages consideres comme "internes banque"
+# Toute annotation dont le package commence par un de ces prefixes est traitee
+internal-packages:
+  - "com.bmce"
+  - "com.bank"
+  - "ma.bmce"
+  - "ma.gbp"
+  - "com.cdm"
+  - "com.bof"
+
+# Prefixes de packages standard a ignorer (pas des annotations custom)
+standard-packages:
+  - "javax."
+  - "jakarta."
+  - "org.springframework."
+  - "org.hibernate."
+  - "com.fasterxml."
+  - "io.swagger."
+  - "lombok."
+  - "java."
+
+# =============================================================================
+# Annotations connues et leur comportement
+# =============================================================================
+annotations:
+
+  # --- SECURITY ---
+  - name: "BmceSecured"
+    category: SECURITY
+    description: "Controle d'acces interne BMCE - verifie le profil utilisateur"
+    propagation: TRANSFORM
+    spring-equivalent: "@PreAuthorize(\"hasAuthority('${value}')\")"
+    attributes:
+      - name: "value"
+        type: "String"
+        description: "Profil requis (ex: AGENT_GUICHET, SUPERVISEUR, ADMIN)"
+    example: "@BmceSecured(\"AGENT_GUICHET\")"
+
+  - name: "ChannelRestricted"
+    category: CHANNEL
+    description: "Restreint l'acces a certains canaux (AGENCE, MOBILE, WEB, API)"
+    propagation: PROPAGATE_METHOD
+    attributes:
+      - name: "channel"
+        type: "String[]"
+        description: "Liste des canaux autorises"
+    example: "@ChannelRestricted(channel={\"AGENCE\", \"WEB\"})"
+
+  - name: "RequiresOTP"
+    category: SECURITY
+    description: "Exige une validation OTP avant execution"
+    propagation: PROPAGATE_METHOD
+    attributes:
+      - name: "type"
+        type: "String"
+        description: "Type d'OTP (SMS, EMAIL, TOKEN)"
+        default: "SMS"
+    example: "@RequiresOTP(type=\"SMS\")"
+
+  - name: "DualControl"
+    category: SECURITY
+    description: "Exige une double validation (maker/checker)"
+    propagation: PROPAGATE_METHOD
+    attributes:
+      - name: "level"
+        type: "int"
+        description: "Nombre de validations requises"
+        default: "2"
+    example: "@DualControl(level=2)"
+
+  # --- AUDIT ---
+  - name: "AuditLog"
+    category: AUDIT
+    description: "Active la journalisation d'audit pour cette operation"
+    propagation: PROPAGATE_METHOD
+    spring-equivalent: "@Audited"
+    attributes:
+      - name: "action"
+        type: "String"
+        description: "Type d'action auditee (CONSULTATION, MODIFICATION, CREATION, SUPPRESSION)"
+      - name: "entity"
+        type: "String"
+        description: "Entite metier concernee"
+    example: "@AuditLog(action=\"MODIFICATION\", entity=\"COMPTE\")"
+
+  - name: "TraceOperation"
+    category: AUDIT
+    description: "Trace l'operation dans le journal des operations bancaires"
+    propagation: PROPAGATE_METHOD
+    attributes:
+      - name: "code"
+        type: "String"
+        description: "Code operation bancaire"
+    example: "@TraceOperation(code=\"VIR_INT\")"
+
+  # --- TRANSACTION ---
+  - name: "TransactionScope"
+    category: TRANSACTION
+    description: "Definit le scope transactionnel bancaire"
+    propagation: TRANSFORM
+    spring-equivalent: "@Transactional(propagation = Propagation.${scope})"
+    attributes:
+      - name: "scope"
+        type: "String"
+        description: "Scope (REQUIRED, REQUIRES_NEW, MANDATORY)"
+        default: "REQUIRED"
+    example: "@TransactionScope(scope=\"REQUIRES_NEW\")"
+
+  - name: "CompensableTransaction"
+    category: TRANSACTION
+    description: "Transaction compensable (saga pattern) pour operations inter-systemes"
+    propagation: PROPAGATE_METHOD
+    attributes:
+      - name: "compensationMethod"
+        type: "String"
+        description: "Methode de compensation en cas d'echec"
+    example: "@CompensableTransaction(compensationMethod=\"rollbackVirement\")"
+
+  # --- RISK ---
+  - name: "RiskLevel"
+    category: RISK
+    description: "Niveau de risque de l'operation (LOW, MEDIUM, HIGH, CRITICAL)"
+    propagation: PROPAGATE_METHOD
+    attributes:
+      - name: "value"
+        type: "String"
+        description: "Niveau de risque"
+    example: "@RiskLevel(\"HIGH\")"
+
+  - name: "AmountThreshold"
+    category: RISK
+    description: "Seuil de montant declenchant une validation supplementaire"
+    propagation: PROPAGATE_METHOD
+    attributes:
+      - name: "max"
+        type: "double"
+        description: "Montant maximum sans validation supplementaire"
+      - name: "currency"
+        type: "String"
+        description: "Devise (MAD, EUR, USD)"
+        default: "MAD"
+    example: "@AmountThreshold(max=100000.0, currency=\"MAD\")"
+
+  # --- COMPLIANCE ---
+  - name: "KYCRequired"
+    category: COMPLIANCE
+    description: "Exige une verification KYC (Know Your Customer) prealable"
+    propagation: PROPAGATE_METHOD
+    attributes:
+      - name: "level"
+        type: "String"
+        description: "Niveau KYC requis (BASIC, ENHANCED, FULL)"
+        default: "BASIC"
+    example: "@KYCRequired(level=\"ENHANCED\")"
+
+  - name: "AMLCheck"
+    category: COMPLIANCE
+    description: "Declenche un controle anti-blanchiment (AML)"
+    propagation: PROPAGATE_METHOD
+    attributes:
+      - name: "threshold"
+        type: "double"
+        description: "Seuil de declenchement"
+    example: "@AMLCheck(threshold=50000.0)"
+
+  - name: "RegulatoryReport"
+    category: COMPLIANCE
+    description: "Operation soumise a reporting reglementaire (BAM, AMMC)"
+    propagation: COMMENT
+    attributes:
+      - name: "authority"
+        type: "String"
+        description: "Autorite de regulation (BAM, AMMC, ACAPS)"
+    example: "@RegulatoryReport(authority=\"BAM\")"
+
+  # --- CACHING ---
+  - name: "BankCache"
+    category: CACHING
+    description: "Mise en cache interne banque avec TTL configurable"
+    propagation: TRANSFORM
+    spring-equivalent: "@Cacheable(value = \"${cacheName}\", key = \"#root.methodName + #root.args\")"
+    attributes:
+      - name: "cacheName"
+        type: "String"
+        description: "Nom du cache"
+      - name: "ttlMinutes"
+        type: "int"
+        description: "Duree de vie en minutes"
+        default: "5"
+    example: "@BankCache(cacheName=\"referentiel-compte\", ttlMinutes=10)"
+
+  # --- MONITORING ---
+  - name: "SLAMonitored"
+    category: MONITORING
+    description: "Operation monitoree avec SLA (temps de reponse max)"
+    propagation: PROPAGATE_METHOD
+    attributes:
+      - name: "maxResponseTimeMs"
+        type: "int"
+        description: "Temps de reponse max en millisecondes"
+      - name: "alertOnBreach"
+        type: "boolean"
+        description: "Declencher une alerte en cas de depassement"
+        default: "true"
+    example: "@SLAMonitored(maxResponseTimeMs=3000, alertOnBreach=true)"
+
+  - name: "MetricsEnabled"
+    category: MONITORING
+    description: "Active les metriques Prometheus/Grafana pour cette operation"
+    propagation: TRANSFORM
+    spring-equivalent: "@Timed(value = \"${metricName}\", description = \"${description}\")"
+    attributes:
+      - name: "metricName"
+        type: "String"
+        description: "Nom de la metrique"
+    example: "@MetricsEnabled(metricName=\"virement.execution.time\")"
+
+  # --- BUSINESS ---
+  - name: "BankingOperation"
+    category: BUSINESS
+    description: "Marque une operation bancaire avec son code et sa famille"
+    propagation: PROPAGATE_BOTH
+    attributes:
+      - name: "code"
+        type: "String"
+        description: "Code operation (ex: VIR_INT, VIR_EXT, OUV_CPT)"
+      - name: "family"
+        type: "String"
+        description: "Famille d'operations (VIREMENT, COMPTE, CARTE, CREDIT)"
+    example: "@BankingOperation(code=\"VIR_INT\", family=\"VIREMENT\")"
+
+  - name: "WorkflowStep"
+    category: BUSINESS
+    description: "Etape d'un workflow bancaire (initiation, validation, execution)"
+    propagation: PROPAGATE_METHOD
+    attributes:
+      - name: "workflow"
+        type: "String"
+        description: "Nom du workflow"
+      - name: "step"
+        type: "String"
+        description: "Etape (INITIATION, VALIDATION, EXECUTION, NOTIFICATION)"
+    example: "@WorkflowStep(workflow=\"virement-international\", step=\"VALIDATION\")"
+
+  - name: "CutoffTime"
+    category: BUSINESS
+    description: "Operation soumise a un horaire de coupure (cut-off)"
+    propagation: COMMENT
+    attributes:
+      - name: "time"
+        type: "String"
+        description: "Heure de coupure (format HH:mm)"
+      - name: "timezone"
+        type: "String"
+        description: "Fuseau horaire"
+        default: "Africa/Casablanca"
+    example: "@CutoffTime(time=\"16:30\", timezone=\"Africa/Casablanca\")"

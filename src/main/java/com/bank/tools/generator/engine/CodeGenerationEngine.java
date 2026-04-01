@@ -1,10 +1,14 @@
 package com.bank.tools.generator.engine;
 
+import com.bank.tools.generator.annotation.AnnotationPropagator;
+import com.bank.tools.generator.annotation.CustomAnnotationRegistry;
+import com.bank.tools.generator.annotation.DetectedAnnotation;
 import com.bank.tools.generator.model.DtoInfo;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
 import com.bank.tools.generator.model.UseCaseInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -26,9 +30,17 @@ public class CodeGenerationEngine {
     private final ImportResolver importResolver;
     private final BianServiceDomainMapper bianMapper;
 
+    /** Module de propagation des annotations custom bancaires */
+    private AnnotationPropagator annotationPropagator;
+
     public CodeGenerationEngine(ImportResolver importResolver, BianServiceDomainMapper bianMapper) {
         this.importResolver = importResolver;
         this.bianMapper = bianMapper;
+    }
+
+    @Autowired(required = false)
+    public void setAnnotationPropagator(AnnotationPropagator annotationPropagator) {
+        this.annotationPropagator = annotationPropagator;
     }
 
     private static final String BASE_PACKAGE = "com.bank.api";
@@ -199,6 +211,20 @@ public class CodeGenerationEngine {
         if (bianMode && !bianMappings.isEmpty()) {
             generateBianMappingReport(projectRoot, bianMappings, analysisResult);
             log.info("[BIAN] Rapport BIAN_MAPPING.md genere pour {} Service Domains", bianMappings.size());
+        }
+
+        // CUSTOM ANNOTATIONS : Generer le rapport d'annotations et propager
+        if (annotationPropagator != null && !analysisResult.getDetectedCustomAnnotations().isEmpty()) {
+            AnnotationPropagator.AnnotationReport annotReport =
+                    annotationPropagator.generateReport(analysisResult.getDetectedCustomAnnotations());
+            generateAnnotationReport(projectRoot, annotReport, analysisResult);
+
+            // Propager les annotations sur les controllers generes
+            propagateAnnotationsToControllers(srcMain, analysisResult);
+
+            log.info("[ANNOTATIONS] Rapport genere : {} detectees, {} connues, {} inconnues internes, {} inconnues externes",
+                    annotReport.totalDetected, annotReport.totalKnown,
+                    annotReport.totalUnknownInternal, annotReport.totalUnknownExternal);
         }
 
         // PHASE 8 : Resolution systemique des imports post-generation
@@ -2599,5 +2625,166 @@ public class CodeGenerationEngine {
 
         // Default : 500 Internal Server Error
         return "HttpStatus.INTERNAL_SERVER_ERROR";
+    }
+
+    // ===================== CUSTOM ANNOTATIONS : RAPPORT =====================
+
+    /**
+     * Genere le rapport CUSTOM_ANNOTATIONS_REPORT.md dans le projet genere.
+     */
+    private void generateAnnotationReport(Path projectRoot,
+                                          AnnotationPropagator.AnnotationReport report,
+                                          ProjectAnalysisResult analysisResult) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append(report.toMarkdown());
+
+        // Ajouter une section avec les actions recommandees
+        sb.append("## Actions Recommandees\n\n");
+
+        if (report.hasUnknownAnnotations()) {
+            sb.append("### Annotations Internes Non Declarees\n\n");
+            sb.append("Les annotations suivantes proviennent de packages internes de la banque ");
+            sb.append("mais ne sont pas declarees dans `custom-annotations.yml`.\n\n");
+            sb.append("Pour chaque annotation, ajoutez une entree dans le fichier YAML avec :\n");
+            sb.append("- `name` : Nom de l'annotation\n");
+            sb.append("- `category` : SECURITY, AUDIT, TRANSACTION, CHANNEL, RISK, COMPLIANCE, CACHING, MONITORING, BUSINESS\n");
+            sb.append("- `propagation` : PROPAGATE_CLASS, PROPAGATE_METHOD, PROPAGATE_BOTH, TRANSFORM, COMMENT, IGNORE\n");
+            sb.append("- `spring-equivalent` : (optionnel) Equivalent Spring Boot\n\n");
+
+            sb.append("```yaml\n");
+            for (DetectedAnnotation da : report.unknownInternal) {
+                sb.append("  - name: \"").append(da.getName()).append("\"\n");
+                sb.append("    category: CUSTOM  # A preciser\n");
+                sb.append("    description: \"Detectee sur ").append(da.getSourceClassName()).append("\"\n");
+                sb.append("    propagation: PROPAGATE_METHOD  # A preciser\n");
+                sb.append("    example: \"").append(da.getFullExpression()).append("\"\n\n");
+            }
+            sb.append("```\n\n");
+        }
+
+        // Synthese des propagations effectuees
+        sb.append("### Propagations Effectuees\n\n");
+        List<DetectedAnnotation> known = analysisResult.getDetectedCustomAnnotations().stream()
+                .filter(DetectedAnnotation::isKnown)
+                .collect(Collectors.toList());
+
+        if (!known.isEmpty()) {
+            sb.append("| Annotation Source | Classe | Strategie | Code Genere |\n");
+            sb.append("|-------------------|--------|-----------|-------------|\n");
+            for (DetectedAnnotation da : known) {
+                String generated = da.toGeneratedCode();
+                sb.append("| `").append(da.getFullExpression()).append("` | ");
+                sb.append(da.getSourceClassName()).append(" | ");
+                sb.append(da.getDefinition().getPropagation()).append(" | ");
+                sb.append("`").append(generated != null ? generated : "IGNORE").append("` |\n");
+            }
+        } else {
+            sb.append("Aucune annotation custom connue detectee.\n");
+        }
+
+        Files.writeString(projectRoot.resolve("CUSTOM_ANNOTATIONS_REPORT.md"), sb.toString());
+        log.info("[ANNOTATIONS] Rapport CUSTOM_ANNOTATIONS_REPORT.md genere");
+    }
+
+    /**
+     * Propage les annotations custom detectees sur les controllers generes.
+     * Injecte les annotations transformees/propagees en tete des fichiers controller.
+     */
+    private void propagateAnnotationsToControllers(Path srcMain,
+                                                   ProjectAnalysisResult analysisResult) throws IOException {
+        if (annotationPropagator == null) return;
+
+        // Grouper les annotations par classe source
+        Map<String, List<DetectedAnnotation>> byClass = analysisResult.getDetectedCustomAnnotations().stream()
+                .collect(Collectors.groupingBy(DetectedAnnotation::getSourceClassName));
+
+        Path controllerDir = srcMain.resolve("controller");
+        if (!Files.exists(controllerDir)) return;
+
+        for (Map.Entry<String, List<DetectedAnnotation>> entry : byClass.entrySet()) {
+            String className = entry.getKey();
+            List<DetectedAnnotation> annotations = entry.getValue();
+
+            // Trouver le fichier controller correspondant
+            String controllerFileName = className + "Controller.java";
+            Path controllerFile = controllerDir.resolve(controllerFileName);
+            if (!Files.exists(controllerFile)) {
+                // Essayer avec le suffixe "RestController"
+                controllerFile = controllerDir.resolve(className.replace("UseCase", "") + "Controller.java");
+                if (!Files.exists(controllerFile)) continue;
+            }
+
+            // Lire le contenu existant
+            String content = Files.readString(controllerFile);
+
+            // Generer les annotations de classe
+            List<String> classAnnotations = annotationPropagator.getClassLevelAnnotations(annotations);
+            List<String> methodAnnotations = annotationPropagator.getMethodLevelAnnotations(annotations);
+            List<String> comments = annotationPropagator.getCommentAnnotations(annotations);
+            List<String> todos = annotationPropagator.getUnknownAnnotationTodos(annotations);
+            Set<String> imports = annotationPropagator.getRequiredImports(annotations);
+
+            // Injecter les imports
+            if (!imports.isEmpty()) {
+                StringBuilder importBlock = new StringBuilder();
+                for (String imp : imports) {
+                    String importLine = "import " + imp + ";";
+                    if (!content.contains(importLine)) {
+                        importBlock.append(importLine).append("\n");
+                    }
+                }
+                if (importBlock.length() > 0) {
+                    // Inserer apres le dernier import existant
+                    int lastImport = content.lastIndexOf("import ");
+                    if (lastImport >= 0) {
+                        int endOfLine = content.indexOf("\n", lastImport);
+                        content = content.substring(0, endOfLine + 1) +
+                                  importBlock +
+                                  content.substring(endOfLine + 1);
+                    }
+                }
+            }
+
+            // Injecter les annotations de classe (avant @RestController ou @Controller)
+            if (!classAnnotations.isEmpty() || !comments.isEmpty() || !todos.isEmpty()) {
+                StringBuilder annotBlock = new StringBuilder();
+                annotBlock.append("\n    // === ANNOTATIONS CUSTOM BANCAIRES (propagees automatiquement) ===\n");
+                for (String comment : comments) {
+                    annotBlock.append("    ").append(comment).append("\n");
+                }
+                for (String todo : todos) {
+                    annotBlock.append("    ").append(todo).append("\n");
+                }
+                for (String ann : classAnnotations) {
+                    annotBlock.append("    ").append(ann).append("\n");
+                }
+
+                // Inserer avant @RestController
+                int restControllerIdx = content.indexOf("@RestController");
+                if (restControllerIdx >= 0) {
+                    content = content.substring(0, restControllerIdx) +
+                              annotBlock +
+                              content.substring(restControllerIdx);
+                }
+            }
+
+            // Injecter les annotations de methode (avant chaque @PostMapping/@GetMapping/etc.)
+            if (!methodAnnotations.isEmpty()) {
+                for (String ann : methodAnnotations) {
+                    // Injecter avant chaque mapping HTTP
+                    for (String mapping : List.of("@PostMapping", "@GetMapping", "@PutMapping",
+                            "@DeleteMapping", "@PatchMapping", "@RequestMapping")) {
+                        content = content.replace(
+                                "    " + mapping,
+                                "    " + ann + "\n    " + mapping
+                        );
+                    }
+                }
+            }
+
+            // Ecrire le fichier modifie
+            Files.writeString(controllerFile, content);
+            log.info("[ANNOTATIONS] Annotations propagees sur : {}", controllerFile.getFileName());
+        }
     }
 }
