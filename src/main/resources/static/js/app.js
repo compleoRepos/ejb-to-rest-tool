@@ -1,5 +1,5 @@
 /**
- * EJB to REST API Generator - Application JavaScript
+ * Direction Digitale Factory - BMCE Bank - Application JavaScript
  * Handles: drag-and-drop upload, file preview, diff viewer, progress bar, log console
  */
 
