@@ -68,6 +68,42 @@ public class ProjectAnalysisResult {
     /** Annotations custom bancaires detectees dans le projet source */
     private List<DetectedAnnotation> detectedCustomAnnotations = new ArrayList<>();
 
+    // ==================== BOA/EAI FRAMEWORK SUPPORT ====================
+
+    /** Parent POM framework (groupId:artifactId:version) */
+    private String parentPomGroupId;
+    private String parentPomArtifactId;
+    private String parentPomVersion;
+    private boolean hasFrameworkParentPom;
+
+    /** Imports framework detectes (ma.eai.*, com.eai.*, etc.) */
+    private List<String> frameworkImports = new ArrayList<>();
+
+    /** Dependances framework detectees dans le pom.xml source */
+    private List<FrameworkDependency> frameworkDependencies = new ArrayList<>();
+
+    /** Version Java du projet source */
+    private String sourceJavaVersion;
+
+    /** Inner class pour stocker une dependance framework */
+    public static class FrameworkDependency {
+        private String groupId;
+        private String artifactId;
+        private String version;
+
+        public FrameworkDependency() {}
+        public FrameworkDependency(String groupId, String artifactId, String version) {
+            this.groupId = groupId; this.artifactId = artifactId; this.version = version;
+        }
+
+        public String getGroupId() { return groupId; }
+        public void setGroupId(String groupId) { this.groupId = groupId; }
+        public String getArtifactId() { return artifactId; }
+        public void setArtifactId(String artifactId) { this.artifactId = artifactId; }
+        public String getVersion() { return version; }
+        public void setVersion(String version) { this.version = version; }
+    }
+
     // ==================== INNER CLASSES ====================
 
     /**
@@ -256,4 +292,35 @@ public class ProjectAnalysisResult {
     public void setDetectedCustomAnnotations(List<DetectedAnnotation> detectedCustomAnnotations) { this.detectedCustomAnnotations = detectedCustomAnnotations; }
     public void addCustomAnnotation(DetectedAnnotation annotation) { this.detectedCustomAnnotations.add(annotation); }
     public void addCustomAnnotations(List<DetectedAnnotation> annotations) { this.detectedCustomAnnotations.addAll(annotations); }
+
+    // ==================== BOA/EAI GETTERS/SETTERS ====================
+
+    public String getParentPomGroupId() { return parentPomGroupId; }
+    public void setParentPomGroupId(String parentPomGroupId) { this.parentPomGroupId = parentPomGroupId; }
+
+    public String getParentPomArtifactId() { return parentPomArtifactId; }
+    public void setParentPomArtifactId(String parentPomArtifactId) { this.parentPomArtifactId = parentPomArtifactId; }
+
+    public String getParentPomVersion() { return parentPomVersion; }
+    public void setParentPomVersion(String parentPomVersion) { this.parentPomVersion = parentPomVersion; }
+
+    public boolean isHasFrameworkParentPom() { return hasFrameworkParentPom; }
+    public void setHasFrameworkParentPom(boolean hasFrameworkParentPom) { this.hasFrameworkParentPom = hasFrameworkParentPom; }
+
+    public List<String> getFrameworkImports() { return frameworkImports; }
+    public void setFrameworkImports(List<String> frameworkImports) { this.frameworkImports = frameworkImports; }
+    public void addFrameworkImport(String importName) {
+        if (!this.frameworkImports.contains(importName)) {
+            this.frameworkImports.add(importName);
+        }
+    }
+
+    public List<FrameworkDependency> getFrameworkDependencies() { return frameworkDependencies; }
+    public void setFrameworkDependencies(List<FrameworkDependency> frameworkDependencies) { this.frameworkDependencies = frameworkDependencies; }
+    public void addFrameworkDependency(String groupId, String artifactId, String version) {
+        this.frameworkDependencies.add(new FrameworkDependency(groupId, artifactId, version));
+    }
+
+    public String getSourceJavaVersion() { return sourceJavaVersion; }
+    public void setSourceJavaVersion(String sourceJavaVersion) { this.sourceJavaVersion = sourceJavaVersion; }
 }

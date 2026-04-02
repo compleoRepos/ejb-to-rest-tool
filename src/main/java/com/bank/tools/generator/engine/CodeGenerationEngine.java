@@ -128,7 +128,7 @@ public class CodeGenerationEngine {
                 .anyMatch(DtoInfo.FieldInfo::isRequired);
 
         // Generer les fichiers de base
-        generatePomXml(projectRoot, projectHasXml, projectHasValidation);
+        generatePomXml(projectRoot, projectHasXml, projectHasValidation, analysisResult);
         generateApplicationClass(srcMain);
         generateApplicationProperties(resourcesDir);
         generateGlobalExceptionHandler(srcMain, analysisResult);   // G9 enrichi + AXE 1.6 exceptions custom
@@ -237,7 +237,8 @@ public class CodeGenerationEngine {
 
     // ===================== POM.XML =====================
 
-    private void generatePomXml(Path projectRoot, boolean includeXml, boolean includeValidation) throws IOException {
+    private void generatePomXml(Path projectRoot, boolean includeXml, boolean includeValidation,
+                                    ProjectAnalysisResult analysisResult) throws IOException {
         StringBuilder deps = new StringBuilder();
         deps.append("""
                         <!-- Spring Boot Web -->
@@ -314,6 +315,55 @@ public class CodeGenerationEngine {
                         </dependency>
                 """);
 
+        // BOA/EAI : Ajouter les dependances framework detectees dans le pom.xml source
+        if (analysisResult != null && !analysisResult.getFrameworkDependencies().isEmpty()) {
+            deps.append("\n            <!-- ========== Dependances Framework EAI (detectees dans le projet source) ========== -->\n");
+            for (ProjectAnalysisResult.FrameworkDependency fwDep : analysisResult.getFrameworkDependencies()) {
+                deps.append("            <dependency>\n");
+                deps.append("                <groupId>").append(fwDep.getGroupId()).append("</groupId>\n");
+                deps.append("                <artifactId>").append(fwDep.getArtifactId()).append("</artifactId>\n");
+                if (fwDep.getVersion() != null && !fwDep.getVersion().isEmpty()) {
+                    deps.append("                <version>").append(fwDep.getVersion()).append("</version>\n");
+                }
+                deps.append("            </dependency>\n");
+            }
+        }
+
+        // BOA/EAI : Determiner le parent POM
+        String parentBlock;
+        if (analysisResult != null && analysisResult.isHasFrameworkParentPom()) {
+            // Conserver le parent POM framework du projet source
+            parentBlock = """
+                        <parent>
+                            <groupId>%s</groupId>
+                            <artifactId>%s</artifactId>
+                            <version>%s</version>
+                        </parent>
+                    """.formatted(
+                    analysisResult.getParentPomGroupId(),
+                    analysisResult.getParentPomArtifactId(),
+                    analysisResult.getParentPomVersion() != null ? analysisResult.getParentPomVersion() : "LATEST"
+            );
+            log.info("[BOA/EAI] pom.xml genere avec parent POM framework : {}:{}",
+                    analysisResult.getParentPomGroupId(), analysisResult.getParentPomArtifactId());
+        } else {
+            parentBlock = """
+                        <parent>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-starter-parent</artifactId>
+                            <version>3.2.5</version>
+                            <relativePath/>
+                        </parent>
+                    """;
+        }
+
+        // BOA/EAI : Determiner la version Java
+        String javaVersion = "21";
+        if (analysisResult != null && analysisResult.getSourceJavaVersion() != null) {
+            javaVersion = analysisResult.getSourceJavaVersion();
+            log.info("[BOA/EAI] Version Java du projet source conservee : {}", javaVersion);
+        }
+
         String pom = """
                 <?xml version="1.0" encoding="UTF-8"?>
                 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -321,12 +371,7 @@ public class CodeGenerationEngine {
                          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
                     <modelVersion>4.0.0</modelVersion>
                 
-                    <parent>
-                        <groupId>org.springframework.boot</groupId>
-                        <artifactId>spring-boot-starter-parent</artifactId>
-                        <version>3.2.5</version>
-                        <relativePath/>
-                    </parent>
+                %s
                 
                     <groupId>com.bank.api</groupId>
                     <artifactId>generated-rest-api</artifactId>
@@ -336,7 +381,7 @@ public class CodeGenerationEngine {
                     <description>API REST generee automatiquement a partir du projet EJB</description>
                 
                     <properties>
-                        <java.version>21</java.version>
+                        <java.version>%s</java.version>
                     </properties>
                 
                     <dependencies>
@@ -353,7 +398,7 @@ public class CodeGenerationEngine {
                     </build>
                 
                 </project>
-                """.formatted(deps.toString());
+                """.formatted(parentBlock, javaVersion, deps.toString());
 
         Files.writeString(projectRoot.resolve("pom.xml"), pom);
         log.info("pom.xml genere (XML: {}, Validation: {}, Swagger: oui)", includeXml, includeValidation);
@@ -1787,6 +1832,29 @@ public class CodeGenerationEngine {
                             log.error("Service EJB indisponible", ex);
                             return buildErrorResponse(HttpStatus.SERVICE_UNAVAILABLE, "Service EJB indisponible");
                         }
+                
+                        // BOA/EAI : FwkRollbackException → 409 Conflict (erreur metier framework)
+                        String exceptionName = ex.getClass().getSimpleName();
+                        if (exceptionName.equals("FwkRollbackException") || exceptionName.contains("FwkRollback")) {
+                            log.error("[BOA/EAI] FwkRollbackException : {}", ex.getMessage());
+                            return buildErrorResponse(HttpStatus.CONFLICT, ex.getMessage());
+                        }
+                
+                        // BOA/EAI : Autres exceptions framework EAI
+                        if (exceptionName.contains("Parsing") || exceptionName.equals("ParsingException")) {
+                            log.error("[BOA/EAI] ParsingException : {}", ex.getMessage());
+                            return buildErrorResponse(HttpStatus.BAD_REQUEST, "Erreur de parsing : " + ex.getMessage());
+                        }
+                
+                        // Analyse du message pour les autres cas
+                        String msg = ex.getMessage() != null ? ex.getMessage().toLowerCase() : "";
+                        if (msg.contains("introuvable") || msg.contains("not found")) {
+                            return buildErrorResponse(HttpStatus.NOT_FOUND, ex.getMessage());
+                        }
+                        if (msg.contains("insuffisant") || msg.contains("insufficient")) {
+                            return buildErrorResponse(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+                        }
+                
                         log.error("Erreur inattendue", ex);
                         return buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Erreur interne du serveur");
                     }

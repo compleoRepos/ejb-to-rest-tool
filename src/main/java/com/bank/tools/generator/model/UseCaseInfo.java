@@ -26,7 +26,8 @@ public class UseCaseInfo {
         STATELESS("@Stateless"),
         STATEFUL("@Stateful"),
         SINGLETON("@Singleton"),
-        MESSAGE_DRIVEN("@MessageDriven");
+        MESSAGE_DRIVEN("@MessageDriven"),
+        USE_CASE_CUSTOM("@UseCase (BOA/EAI)");  // Framework interne BOA — equivalent de @Stateless
         private final String label;
         EjbType(String label) { this.label = label; }
         public String getLabel() { return label; }

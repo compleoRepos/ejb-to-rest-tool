@@ -67,9 +67,23 @@ public class EjbProjectParser {
             "XmlElements", "XmlValue", "XmlList", "XmlAnyElement"
     );
 
-    /** G4 : Annotations EJB reconnues */
+    /** G4 : Annotations EJB reconnues (standard + custom BOA/EAI) */
     private static final Set<String> EJB_ANNOTATIONS = Set.of(
-            "Stateless", "Stateful", "Singleton", "MessageDriven"
+            "Stateless", "Stateful", "Singleton", "MessageDriven",
+            "UseCase",    // Custom BOA/EAI — equivalent de @Stateless dans le framework interne
+            "Service"     // Spring @Service — certains UC utilisent @Service au lieu de @Stateless
+    );
+
+    /** Packages framework EAI connus (dependances Maven, pas code source) */
+    private static final Set<String> FRAMEWORK_PACKAGE_PREFIXES = Set.of(
+            "ma.eai.", "com.eai.", "ma.boa.", "com.boa."
+    );
+
+    /** Types framework EAI connus (resolus par Maven, pas a recopier) */
+    private static final Set<String> FRAMEWORK_TYPES = Set.of(
+            "Envelope", "Parser", "ParsingException", "UtilHash",
+            "SynchroneService", "Services", "Log", "EaiLog",
+            "FwkRollbackException", "BaseUseCase", "ValueObject"
     );
 
     /** G6 : Mapping nom de methode → [HTTP_METHOD, STATUS_CODE] */
@@ -185,8 +199,16 @@ public class EjbProjectParser {
 
                     // G3/G14 : Detecter les imports javax.*
                     cu.getImports().forEach(imp -> {
-                        if (imp.getNameAsString().startsWith("javax.")) {
+                        String importName = imp.getNameAsString();
+                        if (importName.startsWith("javax.")) {
                             result.setHasLegacyJavaxImports(true);
+                        }
+                        // BOA/EAI : Detecter les imports framework (ma.eai.*, com.eai.*, etc.)
+                        for (String prefix : FRAMEWORK_PACKAGE_PREFIXES) {
+                            if (importName.startsWith(prefix)) {
+                                result.addFrameworkImport(importName);
+                                break;
+                            }
                         }
                     });
 
@@ -469,6 +491,20 @@ public class EjbProjectParser {
         if (hasAnnotation(cls, "Stateful")) return UseCaseInfo.EjbType.STATEFUL;
         if (hasAnnotation(cls, "Singleton")) return UseCaseInfo.EjbType.SINGLETON;
         if (hasAnnotation(cls, "MessageDriven")) return UseCaseInfo.EjbType.MESSAGE_DRIVEN;
+
+        // BOA/EAI : @UseCase est l'equivalent de @Stateless dans le framework interne
+        if (hasAnnotation(cls, "UseCase")) return UseCaseInfo.EjbType.USE_CASE_CUSTOM;
+
+        // Spring : @Service sur une classe qui implemente BaseUseCase ou a execute()
+        if (hasAnnotation(cls, "Service")) {
+            boolean implementsBaseUseCase = cls.getImplementedTypes().stream()
+                    .anyMatch(t -> t.getNameAsString().equals(BASE_USE_CASE_INTERFACE));
+            boolean hasExecute = cls.getMethods().stream()
+                    .anyMatch(m -> m.getNameAsString().equals(EXECUTE_METHOD_NAME));
+            if (implementsBaseUseCase || hasExecute) {
+                return UseCaseInfo.EjbType.USE_CASE_CUSTOM;
+            }
+        }
         return null;
     }
 
@@ -958,11 +994,68 @@ public class EjbProjectParser {
         if (Files.exists(pomPath)) {
             try {
                 String pomContent = Files.readString(pomPath);
+
+                // Extraire l'artifactId du projet
                 int start = pomContent.indexOf("<artifactId>");
                 int end = pomContent.indexOf("</artifactId>");
                 if (start >= 0 && end > start) {
                     result.setSourceProjectName(pomContent.substring(start + 12, end).trim());
                 }
+
+                // BOA/EAI : Extraire le parent POM s'il existe
+                int parentStart = pomContent.indexOf("<parent>");
+                int parentEnd = pomContent.indexOf("</parent>");
+                if (parentStart >= 0 && parentEnd > parentStart) {
+                    String parentBlock = pomContent.substring(parentStart, parentEnd + 9);
+                    String parentGroupId = extractXmlTag(parentBlock, "groupId");
+                    String parentArtifactId = extractXmlTag(parentBlock, "artifactId");
+                    String parentVersion = extractXmlTag(parentBlock, "version");
+
+                    if (parentGroupId != null && parentArtifactId != null) {
+                        result.setParentPomGroupId(parentGroupId);
+                        result.setParentPomArtifactId(parentArtifactId);
+                        result.setParentPomVersion(parentVersion);
+
+                        // Detecter si c'est un parent POM framework EAI
+                        boolean isFrameworkParent = FRAMEWORK_PACKAGE_PREFIXES.stream()
+                                .anyMatch(prefix -> parentGroupId.startsWith(prefix.replace(".", "").isEmpty() ? prefix : prefix.substring(0, prefix.length() - 1)));
+                        for (String prefix : FRAMEWORK_PACKAGE_PREFIXES) {
+                            String cleanPrefix = prefix.endsWith(".") ? prefix.substring(0, prefix.length() - 1) : prefix;
+                            if (parentGroupId.startsWith(cleanPrefix)) {
+                                result.setHasFrameworkParentPom(true);
+                                log.info("[BOA/EAI] Parent POM framework detecte : {}:{}:{}",
+                                        parentGroupId, parentArtifactId, parentVersion);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // BOA/EAI : Extraire les dependances framework du pom.xml
+                Pattern depPattern = Pattern.compile(
+                        "<dependency>\\s*<groupId>([^<]+)</groupId>\\s*<artifactId>([^<]+)</artifactId>\\s*<version>([^<]*)</version>",
+                        Pattern.DOTALL);
+                Matcher depMatcher = depPattern.matcher(pomContent);
+                while (depMatcher.find()) {
+                    String groupId = depMatcher.group(1).trim();
+                    String artifactId = depMatcher.group(2).trim();
+                    String version = depMatcher.group(3).trim();
+                    for (String prefix : FRAMEWORK_PACKAGE_PREFIXES) {
+                        String cleanPrefix = prefix.endsWith(".") ? prefix.substring(0, prefix.length() - 1) : prefix;
+                        if (groupId.startsWith(cleanPrefix)) {
+                            result.addFrameworkDependency(groupId, artifactId, version);
+                            log.info("[BOA/EAI] Dependance framework detectee : {}:{}", groupId, artifactId);
+                            break;
+                        }
+                    }
+                }
+
+                // Extraire la version Java
+                String javaVersion = extractXmlTag(pomContent, "java.version");
+                if (javaVersion != null) {
+                    result.setSourceJavaVersion(javaVersion);
+                }
+
             } catch (IOException e) {
                 log.warn("Impossible de lire le pom.xml : {}", e.getMessage());
             }
@@ -970,6 +1063,31 @@ public class EjbProjectParser {
         if (result.getSourceProjectName() == null) {
             result.setSourceProjectName(projectRoot.getFileName().toString());
         }
+    }
+
+    /** Utilitaire pour extraire la valeur d'un tag XML simple */
+    private String extractXmlTag(String xml, String tagName) {
+        String openTag = "<" + tagName + ">";
+        String closeTag = "</" + tagName + ">";
+        int start = xml.indexOf(openTag);
+        int end = xml.indexOf(closeTag);
+        if (start >= 0 && end > start) {
+            return xml.substring(start + openTag.length(), end).trim();
+        }
+        return null;
+    }
+
+    /** BOA/EAI : Verifier si un type est un type framework (resolu par Maven, pas a recopier) */
+    public boolean isFrameworkType(String typeName) {
+        return FRAMEWORK_TYPES.contains(typeName);
+    }
+
+    /** BOA/EAI : Verifier si un import est un import framework */
+    public boolean isFrameworkImport(String importName) {
+        for (String prefix : FRAMEWORK_PACKAGE_PREFIXES) {
+            if (importName.startsWith(prefix)) return true;
+        }
+        return false;
     }
 
     // ==================== DTO DETECTION HELPERS ====================
@@ -1093,12 +1211,70 @@ public class EjbProjectParser {
         String[] suffixes = {"UC", "UseCase", "Bean", "Impl", "EJB", "ServiceBean", "Service", "MDB"};
         // Trier par longueur decroissante pour matcher les plus longs d'abord
         Arrays.sort(suffixes, (a, b) -> b.length() - a.length());
+        String base = className;
         for (String suffix : suffixes) {
             if (className.endsWith(suffix) && className.length() > suffix.length()) {
-                return className.substring(0, className.length() - suffix.length());
+                base = className.substring(0, className.length() - suffix.length());
+                break;
             }
         }
-        return className;
+        // Modification 7 : Garantir PascalCase (premiere lettre majuscule)
+        return ensurePascalCase(base);
+    }
+
+    /**
+     * BOA/EAI Modification 7 : Garantir que le nom est en PascalCase.
+     * Si le nom est tout en minuscules (ex: "activationcartebmcedirect"), essayer de le decouper.
+     * Sinon, juste s'assurer que la premiere lettre est en majuscule.
+     */
+    private String ensurePascalCase(String name) {
+        if (name == null || name.isEmpty()) return name;
+
+        // Si deja en PascalCase (contient des majuscules apres le premier caractere), OK
+        boolean hasMixedCase = false;
+        for (int i = 1; i < name.length(); i++) {
+            if (Character.isUpperCase(name.charAt(i))) {
+                hasMixedCase = true;
+                break;
+            }
+        }
+        if (hasMixedCase) {
+            // Deja en PascalCase ou CamelCase, juste s'assurer de la premiere lettre
+            return Character.toUpperCase(name.charAt(0)) + name.substring(1);
+        }
+
+        // Tout en minuscules : essayer de decouper sur des patterns connus
+        // Ex: "activationcartebmcedirect" → "ActivationCarteBmceDirect"
+        String lower = name.toLowerCase();
+        String[] knownWords = {
+            "activation", "carte", "bmce", "direct", "charger", "client", "data",
+            "receptionner", "virement", "solde", "compte", "agence", "poste",
+            "ebanking", "souscription", "consultation", "transfert", "operation",
+            "authentification", "validation", "annulation", "creation", "modification",
+            "suppression", "recherche", "liste", "detail", "historique", "service",
+            "magix", "rma", "cmi", "hps", "asal", "tsi", "ged", "otp"
+        };
+
+        StringBuilder result = new StringBuilder();
+        int pos = 0;
+        while (pos < lower.length()) {
+            boolean found = false;
+            // Essayer les mots les plus longs d'abord
+            for (String word : knownWords) {
+                if (lower.startsWith(word, pos)) {
+                    result.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+                    pos += word.length();
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                result.append(pos == 0 || result.length() == 0 ?
+                        Character.toUpperCase(lower.charAt(pos)) : lower.charAt(pos));
+                pos++;
+            }
+        }
+        return result.toString();
     }
 
     private String deriveInputDtoName(String className) {

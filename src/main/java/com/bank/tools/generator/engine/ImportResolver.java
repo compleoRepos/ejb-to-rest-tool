@@ -611,20 +611,40 @@ public class ImportResolver {
         return resultStr;
     }
 
+    // BOA/EAI : Prefixes des packages framework internes a conserver
+    private static final List<String> FRAMEWORK_PACKAGE_PREFIXES = List.of(
+            "ma.eai.", "com.eai.", "ma.bmce.", "com.bmce.", "ma.gbp.",
+            "ma.boa.", "com.boa.", "ma.bank."
+    );
+
+    /**
+     * Verifie si un import est un import framework interne (BOA/EAI).
+     */
+    private boolean isFrameworkImport(String fqn) {
+        for (String prefix : FRAMEWORK_PACKAGE_PREFIXES) {
+            if (fqn.startsWith(prefix)) return true;
+        }
+        return false;
+    }
+
     /**
      * Trie les imports par groupe avec une ligne vide entre chaque groupe :
+     * 0. ma.eai.*, com.eai.*, ma.bmce.*, com.bmce.* (framework interne BOA/EAI)
      * 1. java.*
      * 2. javax.*
      * 3. jakarta.*
      * 4. org.*
      * 5. com.*
+     * 6. autres
      */
     private List<String> sortImports(Set<String> imports) {
         Map<Integer, List<String>> groups = new TreeMap<>();
         for (String imp : imports) {
             String fqn = imp.replace("import ", "").replace("import static ", "").replace(";", "").trim();
             int group;
-            if (fqn.startsWith("java.")) group = 1;
+            // BOA/EAI : Priorite aux imports framework internes
+            if (isFrameworkImport(fqn)) group = 0;
+            else if (fqn.startsWith("java.")) group = 1;
             else if (fqn.startsWith("javax.")) group = 2;
             else if (fqn.startsWith("jakarta.")) group = 3;
             else if (fqn.startsWith("org.")) group = 4;
