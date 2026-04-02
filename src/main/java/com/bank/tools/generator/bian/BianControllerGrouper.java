@@ -178,13 +178,21 @@ public class BianControllerGrouper {
             sb.append("    )\n");
 
             // @RequestMapping
-            String springAnnotation = switch (httpMethod.toUpperCase()) {
-                case "GET" -> "@GetMapping";
-                case "PUT" -> "@PutMapping";
-                case "DELETE" -> "@DeleteMapping";
-                case "PATCH" -> "@PatchMapping";
-                default -> "@PostMapping";
-            };
+            // BUG 4 FIX : Si le UseCase prend un VoIn en entree (@RequestBody),
+            // toujours utiliser POST meme si l'action BIAN est retrieval.
+            // Les GET ne doivent jamais avoir de @RequestBody (standard HTTP).
+            String springAnnotation;
+            if (hasInput) {
+                springAnnotation = "@PostMapping";
+            } else {
+                springAnnotation = switch (httpMethod.toUpperCase()) {
+                    case "GET" -> "@GetMapping";
+                    case "PUT" -> "@PutMapping";
+                    case "DELETE" -> "@DeleteMapping";
+                    case "PATCH" -> "@PatchMapping";
+                    default -> "@PostMapping";
+                };
+            }
             sb.append("    ").append(springAnnotation).append("(\"").append(relativeUrl).append("\")\n");
 
             // Methode
@@ -238,8 +246,9 @@ public class BianControllerGrouper {
 
         sb.append("}\n");
 
-        // Ecrire le fichier
-        Path controllerDir = srcMain.resolve(basePackage.replace('.', '/')).resolve("controller");
+        // Ecrire le fichier — srcMain pointe deja vers src/main/java/{basePackage}/
+        // NE PAS re-resoudre le basePackage pour eviter le double prefixe
+        Path controllerDir = srcMain.resolve("controller");
         Files.createDirectories(controllerDir);
         Path controllerFile = controllerDir.resolve(controllerName + ".java");
         Files.writeString(controllerFile, sb.toString());

@@ -202,3 +202,42 @@ bian:
       http-method: "POST"
       http-status: 200
       summary: "Simulation d'un pret bancaire"
+
+    - use-case: "VirementUC"
+      service-domain: "payment-initiation"
+      bian-id: "SD0249"
+      action: "initiation"
+      url: "/payment-initiation/initiation"
+      http-method: "POST"
+      http-status: 201
+      summary: "Initiation d'un virement bancaire"
+
+    - use-case: "VirementInterneUC"
+      service-domain: "payment-initiation"
+      bian-id: "SD0249"
+      behavior-qualifier: "internal-transfer"
+      action: "initiation"
+      url: "/payment-initiation/internal-transfer/initiation"
+      http-method: "POST"
+      http-status: 201
+      summary: "Virement interne entre comptes du meme client"
+
+    - use-case: "VirementExterneUC"
+      service-domain: "payment-initiation"
+      bian-id: "SD0249"
+      behavior-qualifier: "external-transfer"
+      action: "initiation"
+      url: "/payment-initiation/external-transfer/initiation"
+      http-method: "POST"
+      http-status: 201
+      summary: "Virement externe vers un autre etablissement"
+
+    - use-case: "VirementPermanentUC"
+      service-domain: "payment-initiation"
+      bian-id: "SD0249"
+      behavior-qualifier: "standing-order"
+      action: "initiation"
+      url: "/payment-initiation/standing-order/initiation"
+      http-method: "POST"
+      http-status: 201
+      summary: "Mise en place d'un virement permanent"

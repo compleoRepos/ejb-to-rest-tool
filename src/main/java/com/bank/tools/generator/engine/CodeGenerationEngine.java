@@ -205,14 +205,23 @@ public class CodeGenerationEngine {
             }
 
             // G5 : Pattern multi-methodes ou BaseUseCase
+            // BUG 2 FIX : En mode BIAN avec grouper, ne PAS generer les controllers individuels
+            // Les controllers BIAN regroupes par Service Domain sont generes plus bas
+            boolean skipIndividualController = bianMode && bianControllerGrouper != null
+                    && bianMapping != null && bianMapping.isBianCompliant;
+
             if (useCase.getEjbPattern() == UseCaseInfo.EjbPattern.BASE_USE_CASE) {
-                generateController(srcMain, useCase);
+                if (!skipIndividualController) {
+                    generateController(srcMain, useCase);
+                }
                 generateServiceAdapter(srcMain, useCase);
             } else {
-                if (bianMode && bianMapping != null && bianMapping.isBianCompliant) {
-                    generateBianController(srcMain, useCase, bianMapping);
-                } else {
-                    generateMultiMethodController(srcMain, useCase);
+                if (!skipIndividualController) {
+                    if (bianMode && bianMapping != null && bianMapping.isBianCompliant) {
+                        generateBianController(srcMain, useCase, bianMapping);
+                    } else {
+                        generateMultiMethodController(srcMain, useCase);
+                    }
                 }
                 generateMultiMethodServiceAdapter(srcMain, useCase);
             }
@@ -878,7 +887,11 @@ public class CodeGenerationEngine {
         sb.append("    private String jndiFactory;\n\n");
 
         sb.append("    public ").append(outputDto).append(" execute(").append(inputDto).append(" input) throws Exception {\n");
-        sb.append("        log.info(\"[EJB-CALL] Lookup JNDI pour ").append(useCase.getClassName()).append(" - JNDI: ").append(jndiName).append("\");\n\n");
+        // BUG 7 FIX : 6 prefixes [EJB-*] pour tracabilite complete
+        sb.append("        // [EJB-CALL] Debut de l'appel EJB\n");
+        sb.append("        log.info(\"[EJB-CALL] Appel de ").append(useCase.getClassName()).append(".execute() — JNDI: ").append(jndiName).append("\");\n\n");
+        sb.append("        // [EJB-LOOKUP] Recherche JNDI\n");
+        sb.append("        log.debug(\"[EJB-LOOKUP] Recherche EJB : ").append(jndiName).append("\");\n");
         sb.append("        Properties props = new Properties();\n");
         sb.append("        props.put(Context.INITIAL_CONTEXT_FACTORY, jndiFactory);\n");
         sb.append("        props.put(Context.PROVIDER_URL, jndiProviderUrl);\n\n");
@@ -886,11 +899,28 @@ public class CodeGenerationEngine {
         sb.append("        try {\n");
         sb.append("            ctx = new InitialContext(props);\n");
         sb.append("            BaseUseCase useCase = (BaseUseCase) ctx.lookup(\"").append(jndiName).append("\");\n");
+        sb.append("            log.debug(\"[EJB-LOOKUP] EJB trouve avec succes\");\n\n");
+        sb.append("            // [EJB-EXECUTE] Execution de la methode\n");
+        sb.append("            log.debug(\"[EJB-EXECUTE] Execution de execute() avec input : {}\", input);\n");
+        sb.append("            long start = System.currentTimeMillis();\n");
         sb.append("            ValueObject result = useCase.execute(input);\n");
+        sb.append("            long duration = System.currentTimeMillis() - start;\n\n");
+        sb.append("            // [EJB-RESPONSE] Reponse de l'EJB\n");
+        sb.append("            log.info(\"[EJB-RESPONSE] execute() termine en {}ms\", duration);\n");
+        sb.append("            log.debug(\"[EJB-RESPONSE] Resultat : {}\", result);\n");
         sb.append("            return (").append(outputDto).append(") result;\n");
+        sb.append("        } catch (NamingException e) {\n");
+        sb.append("            // [EJB-ERROR] Erreur de lookup\n");
+        sb.append("            log.error(\"[EJB-ERROR] Lookup JNDI echoue pour ").append(jndiName).append(" : {}\", e.getMessage());\n");
+        sb.append("            throw new RuntimeException(\"Service EJB indisponible : ").append(jndiName).append("\", e);\n");
+        sb.append("        } catch (Exception e) {\n");
+        sb.append("            // [EJB-ERROR] Erreur d'execution\n");
+        sb.append("            log.error(\"[EJB-ERROR] Erreur execute() sur ").append(useCase.getClassName()).append(" : {}\", e.getMessage());\n");
+        sb.append("            throw e;\n");
         sb.append("        } finally {\n");
+        sb.append("            // [EJB-CLOSE] Fermeture du contexte JNDI\n");
         sb.append("            if (ctx != null) {\n");
-        sb.append("                try { ctx.close(); } catch (NamingException e) { log.warn(\"Erreur fermeture JNDI\", e); }\n");
+        sb.append("                try { ctx.close(); log.debug(\"[EJB-CLOSE] Contexte JNDI ferme\"); } catch (NamingException e) { log.warn(\"[EJB-CLOSE] Erreur fermeture JNDI\", e); }\n");
         sb.append("            }\n");
         sb.append("        }\n");
         sb.append("    }\n");
@@ -2763,11 +2793,23 @@ public class CodeGenerationEngine {
             return "HttpStatus.UNAUTHORIZED";
         }
 
-        // 409 Conflict (etat incompatible, compte ferme, doublon)
+        // 409 Conflict (etat incompatible, compte ferme, doublon, rollback framework)
         if (lower.contains("conflict") || lower.contains("duplicate") || lower.contains("closed")
                 || lower.contains("already") || lower.contains("exists") || lower.contains("ferme")
-                || lower.contains("cloture")) {
+                || lower.contains("cloture") || lower.contains("fwkrollback") || lower.contains("rollback")) {
             return "HttpStatus.CONFLICT";
+        }
+
+        // BOA/EAI : 400 Bad Request (parsing, technique)
+        if (lower.contains("parsing") || lower.contains("technique") || lower.contains("format")
+                || lower.contains("conversion") || lower.contains("mapping")) {
+            return "HttpStatus.BAD_REQUEST";
+        }
+
+        // BOA/EAI : 422 Unprocessable Entity (fonctionnel, metier, regle)
+        if (lower.contains("fonctionnel") || lower.contains("regle") || lower.contains("controle")
+                || lower.contains("plafond") || lower.contains("seuil")) {
+            return "HttpStatus.UNPROCESSABLE_ENTITY";
         }
 
         // 422 Unprocessable Entity (erreur metier, solde insuffisant)
