@@ -3,6 +3,7 @@ package com.bank.tools.generator.ai;
 import com.bank.tools.generator.ai.EnhancementReport.Category;
 import com.bank.tools.generator.ai.EnhancementReport.Enhancement;
 import com.bank.tools.generator.ai.EnhancementReport.Severity;
+import com.bank.tools.generator.bian.BianMapping;
 import com.bank.tools.generator.model.DtoInfo;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
 import com.bank.tools.generator.model.UseCaseInfo;
@@ -87,6 +88,9 @@ public class SmartCodeEnhancer {
 
         // ===== CATÉGORIE 12 : PERFORMANCE =====
         applyPerformanceRules(report, srcMain, resourcesDir);
+
+        // ===== CATÉGORIE 13 : CONFORMITÉ BIAN =====
+        applyBianComplianceRules(report, srcMain, analysisResult);
 
         // Calcul du score de qualité
         int score = calculateQualityScore(report);
@@ -1267,6 +1271,122 @@ public class SmartCodeEnhancer {
         report.addEnhancement(new Enhancement("R76", Category.PERFORMANCE, Severity.SUGGESTION,
                 "ETag/If-None-Match recommandé pour le caching HTTP (à implémenter selon les besoins)",
                 "Controllers", true));
+    }
+
+    // ==================== CATÉGORIE 13 : CONFORMITÉ BIAN ====================
+
+    private void applyBianComplianceRules(EnhancementReport report, Path srcMain,
+                                           ProjectAnalysisResult analysisResult) throws IOException {
+
+        // Compter les UseCases avec mapping BIAN
+        long bianMapped = analysisResult.getUseCases().stream()
+                .filter(uc -> uc.getBianMapping() != null)
+                .count();
+        long total = analysisResult.getUseCases().size();
+
+        // R80: Couverture du mapping BIAN
+        boolean fullCoverage = bianMapped == total;
+        report.addEnhancement(new Enhancement("R80", Category.BIAN_COMPLIANCE, Severity.CRITICAL,
+                "Mapping BIAN : " + bianMapped + "/" + total + " UseCases mappes vers un Service Domain",
+                "bian-mapping.yml", fullCoverage));
+
+        // R81: Vérifier les URLs BIAN (format /{service-domain}/{cr-reference-id}/{bq}/{action})
+        for (UseCaseInfo uc : analysisResult.getUseCases()) {
+            BianMapping mapping = uc.getBianMapping();
+            if (mapping == null) continue;
+
+            String url = mapping.buildUrl("/api/v1");
+            boolean validUrl = url != null && url.startsWith("/api/v1/")
+                    && url.contains("/") && !url.contains("//");
+            report.addEnhancement(new Enhancement("R81", Category.BIAN_COMPLIANCE, Severity.WARNING,
+                    "URL BIAN valide : " + url + " (" + uc.getClassName() + ")",
+                    uc.getControllerName() + ".java", validUrl));
+        }
+
+        // R82: Vérifier que les actions BIAN sont standard
+        List<String> validActions = List.of(
+                "initiation", "retrieval", "update", "execution",
+                "termination", "evaluation", "notification", "control", "request");
+        for (UseCaseInfo uc : analysisResult.getUseCases()) {
+            BianMapping mapping = uc.getBianMapping();
+            if (mapping == null) continue;
+
+            boolean validAction = mapping.getAction() != null
+                    && validActions.contains(mapping.getAction().toLowerCase());
+            report.addEnhancement(new Enhancement("R82", Category.BIAN_COMPLIANCE, Severity.WARNING,
+                    "Action BIAN '" + mapping.getAction() + "' " + (validAction ? "standard" : "NON STANDARD")
+                            + " (" + uc.getClassName() + ")",
+                    uc.getControllerName() + ".java", validAction));
+        }
+
+        // R83: Vérifier le BianHeaderFilter
+        Path headerFilter = srcMain.resolve("config/BianHeaderFilter.java");
+        boolean hasFilter = Files.exists(headerFilter);
+        report.addEnhancement(new Enhancement("R83", Category.BIAN_COMPLIANCE, Severity.CRITICAL,
+                "BianHeaderFilter present (headers X-BIAN-* injectes automatiquement)",
+                "BianHeaderFilter.java", hasFilter));
+
+        // R84: Vérifier les operationId BIAN (format: {action}{ServiceDomain}{BQ})
+        for (UseCaseInfo uc : analysisResult.getUseCases()) {
+            BianMapping mapping = uc.getBianMapping();
+            if (mapping == null) continue;
+
+            String opId = mapping.buildOperationId();
+            boolean validOpId = opId != null && !opId.isEmpty()
+                    && Character.isLowerCase(opId.charAt(0));
+            report.addEnhancement(new Enhancement("R84", Category.BIAN_COMPLIANCE, Severity.INFO,
+                    "operationId BIAN : " + opId + " (" + uc.getClassName() + ")",
+                    uc.getControllerName() + ".java", validOpId));
+        }
+
+        // R85: Vérifier que les controllers regroupés par Service Domain existent
+        Path controllerDir = srcMain.resolve("controller");
+        if (Files.exists(controllerDir)) {
+            long groupedControllers = Files.list(controllerDir)
+                    .filter(f -> f.getFileName().toString().endsWith("Controller.java"))
+                    .count();
+            report.addEnhancement(new Enhancement("R85", Category.BIAN_COMPLIANCE, Severity.INFO,
+                    groupedControllers + " controllers generes (regroupes par Service Domain BIAN)",
+                    "controller/", groupedControllers > 0));
+        }
+
+        // R86: Vérifier les Swagger @Tag avec le nom du Service Domain BIAN
+        if (Files.exists(controllerDir)) {
+            for (UseCaseInfo uc : analysisResult.getUseCases()) {
+                Path controllerFile = controllerDir.resolve(uc.getControllerName() + ".java");
+                if (!Files.exists(controllerFile)) continue;
+
+                String content = Files.readString(controllerFile);
+                boolean hasTag = content.contains("@Tag(");
+                report.addEnhancement(new Enhancement("R86", Category.BIAN_COMPLIANCE, Severity.SUGGESTION,
+                        "@Tag Swagger " + (hasTag ? "present" : "ABSENT") + " sur " + uc.getControllerName(),
+                        uc.getControllerName() + ".java", hasTag));
+            }
+        }
+
+        // R87: Vérifier les HTTP methods BIAN (GET pour retrieval, POST pour initiation, etc.)
+        for (UseCaseInfo uc : analysisResult.getUseCases()) {
+            BianMapping mapping = uc.getBianMapping();
+            if (mapping == null) continue;
+
+            String action = mapping.getAction() != null ? mapping.getAction().toLowerCase() : "";
+            String httpMethod = mapping.getHttpMethod() != null ? mapping.getHttpMethod() : "POST";
+
+            boolean correctMethod = switch (action) {
+                case "retrieval" -> httpMethod.equals("GET");
+                case "initiation" -> httpMethod.equals("POST");
+                case "update" -> httpMethod.equals("PUT");
+                case "termination" -> httpMethod.equals("PUT") || httpMethod.equals("DELETE");
+                case "execution" -> httpMethod.equals("POST");
+                default -> true;
+            };
+
+            report.addEnhancement(new Enhancement("R87", Category.BIAN_COMPLIANCE, Severity.WARNING,
+                    httpMethod + " pour action '" + action + "' "
+                            + (correctMethod ? "conforme BIAN" : "NON CONFORME BIAN")
+                            + " (" + uc.getClassName() + ")",
+                    uc.getControllerName() + ".java", correctMethod));
+        }
     }
 
     // ==================== CALCUL DU SCORE ====================

@@ -1,5 +1,7 @@
 package com.bank.tools.generator.model;
 
+import com.bank.tools.generator.bian.BianMapping;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -102,9 +104,17 @@ public class UseCaseInfo {
     /** AXE 3: Nom de l'interface @Remote implementee (pour services multi-methodes) */
     private String remoteInterfaceName;
 
+    /** BIAN: Mapping vers le Service Domain BIAN */
+    private BianMapping bianMapping;
+
     // ==================== CONSTRUCTORS ====================
 
     public UseCaseInfo() {}
+
+    // ==================== BIAN ====================
+
+    public BianMapping getBianMapping() { return bianMapping; }
+    public void setBianMapping(BianMapping bianMapping) { this.bianMapping = bianMapping; }
 
     // ==================== GETTERS/SETTERS ====================
 

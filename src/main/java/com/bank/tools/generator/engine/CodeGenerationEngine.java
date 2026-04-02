@@ -3,6 +3,10 @@ package com.bank.tools.generator.engine;
 import com.bank.tools.generator.annotation.AnnotationPropagator;
 import com.bank.tools.generator.annotation.CustomAnnotationRegistry;
 import com.bank.tools.generator.annotation.DetectedAnnotation;
+import com.bank.tools.generator.bian.BianControllerGrouper;
+import com.bank.tools.generator.bian.BianMapping;
+import com.bank.tools.generator.bian.BianMappingConfig;
+import com.bank.tools.generator.bian.BianMappingResolver;
 import com.bank.tools.generator.model.DtoInfo;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
 import com.bank.tools.generator.model.UseCaseInfo;
@@ -33,6 +37,12 @@ public class CodeGenerationEngine {
     /** Module de propagation des annotations custom bancaires */
     private AnnotationPropagator annotationPropagator;
 
+    /** Module de regroupement des controllers par Service Domain BIAN */
+    private BianControllerGrouper bianControllerGrouper;
+
+    /** Module de resolution du mapping BIAN */
+    private BianMappingResolver bianMappingResolver;
+
     public CodeGenerationEngine(ImportResolver importResolver, BianServiceDomainMapper bianMapper) {
         this.importResolver = importResolver;
         this.bianMapper = bianMapper;
@@ -41,6 +51,16 @@ public class CodeGenerationEngine {
     @Autowired(required = false)
     public void setAnnotationPropagator(AnnotationPropagator annotationPropagator) {
         this.annotationPropagator = annotationPropagator;
+    }
+
+    @Autowired(required = false)
+    public void setBianControllerGrouper(BianControllerGrouper bianControllerGrouper) {
+        this.bianControllerGrouper = bianControllerGrouper;
+    }
+
+    @Autowired(required = false)
+    public void setBianMappingResolver(BianMappingResolver bianMappingResolver) {
+        this.bianMappingResolver = bianMappingResolver;
     }
 
     private static final String BASE_PACKAGE = "com.bank.api";
@@ -203,6 +223,26 @@ public class CodeGenerationEngine {
             generateDtoClass(srcMain, dto);
         }
 
+        // BIAN v2 : Generer les controllers regroupes par Service Domain
+        if (bianMode && bianControllerGrouper != null) {
+            List<UseCaseInfo> bianUseCases = analysisResult.getUseCases().stream()
+                    .filter(uc -> uc.getBianMapping() != null)
+                    .collect(Collectors.toList());
+            if (!bianUseCases.isEmpty()) {
+                Map<String, List<UseCaseInfo>> grouped = bianControllerGrouper.groupByServiceDomain(bianUseCases);
+                for (Map.Entry<String, List<UseCaseInfo>> entry : grouped.entrySet()) {
+                    bianControllerGrouper.generateGroupedController(
+                            srcMain, entry.getKey(), entry.getValue(), BASE_PACKAGE);
+                }
+                log.info("[BIAN v2] {} controllers regroupes generes", grouped.size());
+            }
+        }
+
+        // BIAN : Generer le BianHeaderFilter
+        if (bianMode) {
+            generateBianHeaderFilter(srcMain);
+        }
+
         // G14 : TRANSFORMATION_SUMMARY.md
         generateTransformationSummary(projectRoot, analysisResult, projectHasXml);
         generateReadme(projectRoot, analysisResult, projectHasXml);
@@ -210,6 +250,8 @@ public class CodeGenerationEngine {
         // BIAN : Generer le rapport de mapping BIAN
         if (bianMode && !bianMappings.isEmpty()) {
             generateBianMappingReport(projectRoot, bianMappings, analysisResult);
+            // Generer aussi le rapport BIAN v2 avec les nouveaux mappings
+            generateBianV2MappingReport(projectRoot, analysisResult);
             log.info("[BIAN] Rapport BIAN_MAPPING.md genere pour {} Service Domains", bianMappings.size());
         }
 
@@ -2007,11 +2049,66 @@ public class CodeGenerationEngine {
             sb.append("  - Chaque MDB genere : Controller (POST 202 Accepted), Event Spring, EventListener (@Async), ServiceAdapter\n");
             sb.append("  - Les messages JMS sont remplaces par des appels HTTP POST asynchrones\n");
         }
-        sb.append("- Les ServiceAdapters utilisent un lookup JNDI a chaque appel — prevoir un cache si necessaire\n");
-        sb.append("- Les tests unitaires mockent les ServiceAdapters — les tests d'integration necessitent un serveur EJB\n");
+        sb.append("- Les ServiceAdapters utilisent un lookup JNDI a chaque appel — prevoir un cache si necessaire\n");        sb.append("- Les tests unitaires mockent les ServiceAdapters \u2014 les tests d'integration necessitent un serveur EJB\n");
 
-        Files.writeString(projectRoot.resolve("TRANSFORMATION_SUMMARY.md"), sb.toString());
-        log.info("TRANSFORMATION_SUMMARY.md genere");
+        // ===== SECTION BIAN =====
+        long bianMapped = analysisResult.getUseCases().stream()
+                .filter(uc -> uc.getBianMapping() != null).count();
+        if (bianMapped > 0) {
+            sb.append("\n## Conformite BIAN\n\n");
+            sb.append("L'outil a genere des wrappers conformes au standard BIAN v12.0.\n\n");
+
+            sb.append("### Mapping UseCase \u2192 Service Domain BIAN\n\n");
+            sb.append("| UseCase Source | Service Domain | BIAN ID | Action | BQ | HTTP | URL BIAN |\n");
+            sb.append("|---------------|---------------|---------|--------|----|----|----------|\n");
+            for (UseCaseInfo uc : analysisResult.getUseCases()) {
+                BianMapping bm = uc.getBianMapping();
+                if (bm == null) continue;
+                sb.append("| ").append(uc.getClassName());
+                sb.append(" | ").append(bm.getServiceDomainTitle());
+                sb.append(" | ").append(bm.getBianId() != null ? bm.getBianId() : "-");
+                sb.append(" | ").append(bm.getAction());
+                sb.append(" | ").append(bm.getBehaviorQualifier() != null ? bm.getBehaviorQualifier() : "-");
+                sb.append(" | ").append(bm.getHttpMethod()).append(" ").append(bm.getHttpStatus());
+                sb.append(" | `").append(bm.buildUrl("/api/v1")).append("`");
+                sb.append(" |\n");
+            }
+
+            sb.append("\n### Headers HTTP BIAN\n\n");
+            sb.append("Le `BianHeaderFilter` injecte automatiquement les headers suivants sur chaque reponse :\n\n");
+            sb.append("| Header | Description |\n");
+            sb.append("|--------|-------------|\n");
+            sb.append("| `X-BIAN-Version` | Version du standard BIAN (12.0) |\n");
+            sb.append("| `X-BIAN-Service-Domain` | Nom du Service Domain |\n");
+            sb.append("| `X-BIAN-Service-Domain-ID` | Identifiant BIAN officiel (SDxxxx) |\n");
+            sb.append("| `X-BIAN-Action` | Action BIAN executee |\n");
+            sb.append("| `X-BIAN-Behavior-Qualifier` | Behavior Qualifier (si applicable) |\n");
+
+            sb.append("\n### Swagger BIAN\n\n");
+            sb.append("Les endpoints Swagger sont organises par Service Domain BIAN :\n");
+            sb.append("- Chaque controller est annote `@Tag(name = \"Service Domain\")` pour le regroupement Swagger\n");
+            sb.append("- Chaque endpoint a un `operationId` au format BIAN : `{action}{ServiceDomain}{BQ}`\n");
+            sb.append("- Les `@ApiResponse` incluent les codes HTTP BIAN standards\n");
+            sb.append("- Swagger UI : http://localhost:8081/swagger-ui.html\n\n");
+
+            sb.append("### Statistiques BIAN\n\n");
+            sb.append("- UseCases mappes : ").append(bianMapped).append("/").append(analysisResult.getUseCases().size()).append("\n");
+            long explicit = analysisResult.getUseCases().stream()
+                    .filter(uc -> uc.getBianMapping() != null && uc.getBianMapping().isExplicit()).count();
+            sb.append("- Mappings explicites (bian-mapping.yml) : ").append(explicit).append("\n");
+            sb.append("- Mappings automatiques (par mots-cles) : ").append(bianMapped - explicit).append("\n");
+
+            // Regroupement par Service Domain
+            Map<String, Long> domainCount = analysisResult.getUseCases().stream()
+                    .filter(uc -> uc.getBianMapping() != null)
+                    .collect(Collectors.groupingBy(uc -> uc.getBianMapping().getServiceDomainTitle(), Collectors.counting()));
+            sb.append("- Service Domains couverts : ").append(domainCount.size()).append("\n");
+            for (Map.Entry<String, Long> entry : domainCount.entrySet()) {
+                sb.append("  - ").append(entry.getKey()).append(" : ").append(entry.getValue()).append(" endpoints\n");
+            }
+        }
+
+        Files.writeString(projectRoot.resolve("TRANSFORMATION_SUMMARY.md"), sb.toString());     log.info("TRANSFORMATION_SUMMARY.md genere");
     }
 
     // ===================== README =====================
@@ -2854,5 +2951,189 @@ public class CodeGenerationEngine {
             Files.writeString(controllerFile, content);
             log.info("[ANNOTATIONS] Annotations propagees sur : {}", controllerFile.getFileName());
         }
+    }
+
+    // ===================== BIAN v2 : HEADER FILTER =====================
+
+    /**
+     * Genere le BianHeaderFilter : filtre HTTP qui injecte les headers X-BIAN-*
+     * sur chaque reponse REST.
+     */
+    private void generateBianHeaderFilter(Path srcMain) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(BASE_PACKAGE).append(".config;\n\n");
+        sb.append("import jakarta.servlet.*;\n");
+        sb.append("import jakarta.servlet.http.HttpServletRequest;\n");
+        sb.append("import jakarta.servlet.http.HttpServletResponse;\n");
+        sb.append("import org.slf4j.Logger;\n");
+        sb.append("import org.slf4j.LoggerFactory;\n");
+        sb.append("import org.springframework.core.annotation.Order;\n");
+        sb.append("import org.springframework.stereotype.Component;\n\n");
+        sb.append("import java.io.IOException;\n");
+        sb.append("import java.util.Map;\n\n");
+
+        sb.append("/**\n");
+        sb.append(" * Filtre HTTP BIAN — Injecte les headers X-BIAN-* sur chaque reponse.\n");
+        sb.append(" *\n");
+        sb.append(" * Headers injectes :\n");
+        sb.append(" *   X-BIAN-Service-Domain : nom du Service Domain (ex: current-account)\n");
+        sb.append(" *   X-BIAN-Service-Domain-ID : identifiant BIAN (ex: SD0152)\n");
+        sb.append(" *   X-BIAN-Action : action BIAN (ex: retrieval, initiation)\n");
+        sb.append(" *   X-BIAN-Behavior-Qualifier : behavior qualifier (ex: balance, transaction)\n");
+        sb.append(" *   X-BIAN-Version : version du standard BIAN utilise\n");
+        sb.append(" *\n");
+        sb.append(" * @generated par Compleo — Direction Digitale Factory BMCE Bank\n");
+        sb.append(" */\n");
+        sb.append("@Component\n");
+        sb.append("@Order(1)\n");
+        sb.append("public class BianHeaderFilter implements Filter {\n\n");
+
+        sb.append("    private static final Logger log = LoggerFactory.getLogger(BianHeaderFilter.class);\n\n");
+
+        sb.append("    private static final String BIAN_VERSION = \"12.0\";\n\n");
+
+        sb.append("    // Mapping URL prefix → Service Domain\n");
+        sb.append("    private static final Map<String, String[]> DOMAIN_MAP = Map.ofEntries(\n");
+        sb.append("        Map.entry(\"/api/v1/current-account\", new String[]{\"current-account\", \"SD0152\"}),\n");
+        sb.append("        Map.entry(\"/api/v1/savings-account\", new String[]{\"savings-account\", \"SD0155\"}),\n");
+        sb.append("        Map.entry(\"/api/v1/payment-initiation\", new String[]{\"payment-initiation\", \"SD0249\"}),\n");
+        sb.append("        Map.entry(\"/api/v1/card-management\", new String[]{\"card-management\", \"SD0070\"}),\n");
+        sb.append("        Map.entry(\"/api/v1/party\", new String[]{\"party\", \"SD0254\"}),\n");
+        sb.append("        Map.entry(\"/api/v1/loan\", new String[]{\"loan\", \"SD0433\"}),\n");
+        sb.append("        Map.entry(\"/api/v1/customer-notification\", new String[]{\"customer-notification\", \"SD0121\"}),\n");
+        sb.append("        Map.entry(\"/api/v1/document-management\", new String[]{\"document-management\", \"SD0281\"}),\n");
+        sb.append("        Map.entry(\"/api/v1/product-directory\", new String[]{\"product-directory\", \"SD0313\"}),\n");
+        sb.append("        Map.entry(\"/api/v1/currency-exchange\", new String[]{\"currency-exchange\", \"SD0159\"})\n");
+        sb.append("    );\n\n");
+
+        sb.append("    // Mapping action keywords dans l'URL\n");
+        sb.append("    private static final Map<String, String> ACTION_MAP = Map.of(\n");
+        sb.append("        \"initiation\", \"initiation\",\n");
+        sb.append("        \"retrieval\", \"retrieval\",\n");
+        sb.append("        \"update\", \"update\",\n");
+        sb.append("        \"execution\", \"execution\",\n");
+        sb.append("        \"termination\", \"termination\",\n");
+        sb.append("        \"evaluation\", \"evaluation\",\n");
+        sb.append("        \"notification\", \"notification\",\n");
+        sb.append("        \"control\", \"control\"\n");
+        sb.append("    );\n\n");
+
+        sb.append("    @Override\n");
+        sb.append("    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)\n");
+        sb.append("            throws IOException, ServletException {\n\n");
+        sb.append("        HttpServletRequest httpRequest = (HttpServletRequest) request;\n");
+        sb.append("        HttpServletResponse httpResponse = (HttpServletResponse) response;\n");
+        sb.append("        String uri = httpRequest.getRequestURI();\n\n");
+
+        sb.append("        // Injecter les headers BIAN\n");
+        sb.append("        httpResponse.setHeader(\"X-BIAN-Version\", BIAN_VERSION);\n\n");
+
+        sb.append("        for (Map.Entry<String, String[]> entry : DOMAIN_MAP.entrySet()) {\n");
+        sb.append("            if (uri.startsWith(entry.getKey())) {\n");
+        sb.append("                httpResponse.setHeader(\"X-BIAN-Service-Domain\", entry.getValue()[0]);\n");
+        sb.append("                httpResponse.setHeader(\"X-BIAN-Service-Domain-ID\", entry.getValue()[1]);\n\n");
+
+        sb.append("                // Detecter l'action BIAN dans l'URL\n");
+        sb.append("                for (Map.Entry<String, String> actionEntry : ACTION_MAP.entrySet()) {\n");
+        sb.append("                    if (uri.contains(\"/\" + actionEntry.getKey())) {\n");
+        sb.append("                        httpResponse.setHeader(\"X-BIAN-Action\", actionEntry.getValue());\n");
+        sb.append("                        break;\n");
+        sb.append("                    }\n");
+        sb.append("                }\n\n");
+
+        sb.append("                // Detecter le Behavior Qualifier (segment entre le cr-reference-id et l'action)\n");
+        sb.append("                String subPath = uri.substring(entry.getKey().length());\n");
+        sb.append("                String[] segments = subPath.split(\"/\");\n");
+        sb.append("                // Pattern: /{cr-ref-id}/{bq}/{action} → segments[2] = bq\n");
+        sb.append("                if (segments.length >= 3 && !ACTION_MAP.containsKey(segments[2])) {\n");
+        sb.append("                    httpResponse.setHeader(\"X-BIAN-Behavior-Qualifier\", segments[2]);\n");
+        sb.append("                }\n\n");
+
+        sb.append("                break;\n");
+        sb.append("            }\n");
+        sb.append("        }\n\n");
+
+        sb.append("        chain.doFilter(request, response);\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+
+        Path configDir = srcMain.resolve(BASE_PACKAGE_PATH).resolve("config");
+        Files.createDirectories(configDir);
+        Files.writeString(configDir.resolve("BianHeaderFilter.java"), sb.toString());
+        log.info("[BIAN] BianHeaderFilter genere");
+    }
+
+    // ===================== BIAN v2 : RAPPORT DE MAPPING =====================
+
+    /**
+     * Genere le rapport BIAN_MAPPING_V2.md avec le mapping detaille
+     * de chaque UseCase vers son Service Domain, action, URL et operationId.
+     */
+    private void generateBianV2MappingReport(Path projectRoot,
+                                              ProjectAnalysisResult analysisResult) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("# Rapport de Mapping BIAN v2\n\n");
+        sb.append("Ce rapport detaille le mapping BIAN complet genere par Compleo.\n\n");
+
+        // Regrouper par Service Domain
+        Map<String, List<UseCaseInfo>> grouped = new LinkedHashMap<>();
+        for (UseCaseInfo uc : analysisResult.getUseCases()) {
+            BianMapping mapping = uc.getBianMapping();
+            if (mapping != null) {
+                grouped.computeIfAbsent(mapping.getServiceDomain(), k -> new ArrayList<>()).add(uc);
+            }
+        }
+
+        // Tableau de synthese
+        sb.append("## Synthese\n\n");
+        sb.append("| Service Domain | BIAN ID | Nb Endpoints | Controller Genere |\n");
+        sb.append("|----------------|---------|-------------|-------------------|\n");
+        for (Map.Entry<String, List<UseCaseInfo>> entry : grouped.entrySet()) {
+            BianMapping first = entry.getValue().get(0).getBianMapping();
+            sb.append("| ").append(first.getServiceDomainTitle());
+            sb.append(" | ").append(first.getBianId() != null ? first.getBianId() : "-");
+            sb.append(" | ").append(entry.getValue().size());
+            sb.append(" | ").append(first.buildControllerName());
+            sb.append(" |\n");
+        }
+
+        // Detail par Service Domain
+        sb.append("\n## Detail par Service Domain\n\n");
+        for (Map.Entry<String, List<UseCaseInfo>> entry : grouped.entrySet()) {
+            BianMapping first = entry.getValue().get(0).getBianMapping();
+            sb.append("### ").append(first.getServiceDomainTitle());
+            if (first.getBianId() != null && !first.getBianId().isEmpty()) {
+                sb.append(" (").append(first.getBianId()).append(")");
+            }
+            sb.append("\n\n");
+
+            sb.append("| UseCase Source | Action | BQ | HTTP | URL BIAN | operationId |\n");
+            sb.append("|---------------|--------|----|----|----------|-------------|\n");
+            for (UseCaseInfo uc : entry.getValue()) {
+                BianMapping m = uc.getBianMapping();
+                sb.append("| ").append(uc.getClassName());
+                sb.append(" | ").append(m.getAction());
+                sb.append(" | ").append(m.getBehaviorQualifier() != null ? m.getBehaviorQualifier() : "-");
+                sb.append(" | ").append(m.getHttpMethod()).append(" ").append(m.getHttpStatus());
+                sb.append(" | `").append(m.buildUrl("/api/v1")).append("`");
+                sb.append(" | ").append(m.buildOperationId());
+                sb.append(" |\n");
+            }
+            sb.append("\n");
+        }
+
+        // Headers BIAN
+        sb.append("## Headers HTTP BIAN\n\n");
+        sb.append("Le `BianHeaderFilter` injecte automatiquement les headers suivants :\n\n");
+        sb.append("| Header | Description | Exemple |\n");
+        sb.append("|--------|-------------|---------|\n");
+        sb.append("| `X-BIAN-Version` | Version du standard BIAN | `12.0` |\n");
+        sb.append("| `X-BIAN-Service-Domain` | Nom du Service Domain | `current-account` |\n");
+        sb.append("| `X-BIAN-Service-Domain-ID` | Identifiant BIAN officiel | `SD0152` |\n");
+        sb.append("| `X-BIAN-Action` | Action BIAN executee | `retrieval` |\n");
+        sb.append("| `X-BIAN-Behavior-Qualifier` | Behavior Qualifier (si applicable) | `balance` |\n");
+
+        Files.writeString(projectRoot.resolve("BIAN_MAPPING_V2.md"), sb.toString());
+        log.info("[BIAN v2] Rapport BIAN_MAPPING_V2.md genere");
     }
 }

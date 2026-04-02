@@ -1,0 +1,204 @@
+# =============================================================================
+# Configuration BIAN pour Compleo EJB-to-REST
+# Mapping des UseCases/Services vers les Service Domains BIAN
+# Version : 12.0
+# =============================================================================
+
+bian:
+  version: "12.0"
+  base-path: "/api/v1"
+
+  # =========================================================================
+  # Mapping automatique par mots-cles dans le nom du UseCase
+  # =========================================================================
+  auto-mapping:
+
+    # Mots-cles → Service Domain
+    keywords-to-domain:
+      - keywords: ["compte", "account", "solde", "balance"]
+        service-domain: "current-account"
+        bian-id: "SD0152"
+      - keywords: ["epargne", "savings"]
+        service-domain: "savings-account"
+        bian-id: "SD0155"
+      - keywords: ["virement", "transfer", "payment", "paiement"]
+        service-domain: "payment-initiation"
+        bian-id: "SD0249"
+      - keywords: ["carte", "card", "activer", "activation"]
+        service-domain: "card-management"
+        bian-id: "SD0070"
+      - keywords: ["client", "party", "customer", "charger"]
+        service-domain: "party"
+        bian-id: "SD0254"
+      - keywords: ["pret", "loan", "credit", "simulation"]
+        service-domain: "loan"
+        bian-id: "SD0433"
+      - keywords: ["transaction", "historique", "history"]
+        service-domain: "current-account"
+        bian-id: "SD0152"
+        behavior-qualifier: "transaction"
+      - keywords: ["notification", "sms", "email", "notify"]
+        service-domain: "customer-notification"
+        bian-id: "SD0121"
+      - keywords: ["document", "ged", "souscription"]
+        service-domain: "document-management"
+        bian-id: "SD0281"
+      - keywords: ["depot", "deposit"]
+        service-domain: "current-account"
+        bian-id: "SD0152"
+        behavior-qualifier: "deposit"
+      - keywords: ["retrait", "withdrawal"]
+        service-domain: "current-account"
+        bian-id: "SD0152"
+        behavior-qualifier: "withdrawal"
+      - keywords: ["cheque", "check"]
+        service-domain: "current-account"
+        bian-id: "SD0152"
+        behavior-qualifier: "check"
+      - keywords: ["assurance", "insurance"]
+        service-domain: "product-directory"
+        bian-id: "SD0313"
+      - keywords: ["change", "forex", "devise"]
+        service-domain: "currency-exchange"
+        bian-id: "SD0159"
+
+    # Mots-cles → Action BIAN
+    keywords-to-action:
+      - keywords: ["create", "creer", "ouvrir", "open", "souscrire", "initier"]
+        action: "initiation"
+        http-method: "POST"
+        http-status: 201
+      - keywords: ["charger", "get", "find", "consulter", "retrieve", "lire", "read", "search", "list"]
+        action: "retrieval"
+        http-method: "GET"
+        http-status: 200
+      - keywords: ["update", "modifier", "maj", "edit", "change"]
+        action: "update"
+        http-method: "PUT"
+        http-status: 200
+      - keywords: ["activer", "execute", "transfer", "virement", "process", "run", "traiter"]
+        action: "execution"
+        http-method: "POST"
+        http-status: 200
+      - keywords: ["close", "cloturer", "resilier", "terminate", "annuler", "cancel"]
+        action: "termination"
+        http-method: "PUT"
+        http-status: 200
+      - keywords: ["simuler", "simulation", "evaluer", "evaluate", "calculer"]
+        action: "evaluation"
+        http-method: "POST"
+        http-status: 200
+      - keywords: ["notification", "notify", "envoyer", "send"]
+        action: "notification"
+        http-method: "POST"
+        http-status: 200
+      - keywords: ["bloquer", "block", "geler", "freeze"]
+        action: "control"
+        http-method: "PUT"
+        http-status: 200
+      - keywords: ["demander", "request", "approuver", "approve"]
+        action: "request"
+        http-method: "POST"
+        http-status: 200
+      - keywords: ["receptionner", "reception", "receive"]
+        action: "execution"
+        http-method: "POST"
+        http-status: 200
+
+  # =========================================================================
+  # Mapping explicite (override le mapping automatique)
+  # =========================================================================
+  explicit-mapping:
+    - use-case: "ActiverCarteUC"
+      service-domain: "card-management"
+      bian-id: "SD0070"
+      behavior-qualifier: "activation"
+      action: "execution"
+      url: "/card-management/{cr-reference-id}/activation/execution"
+      http-method: "POST"
+      http-status: 200
+      summary: "Activation d'une carte bancaire"
+
+    - use-case: "ReceptionnerCarteUC"
+      service-domain: "card-management"
+      bian-id: "SD0070"
+      behavior-qualifier: "reception"
+      action: "execution"
+      url: "/card-management/{cr-reference-id}/reception/execution"
+      http-method: "POST"
+      http-status: 200
+      summary: "Reception d'une carte bancaire en agence"
+
+    - use-case: "ChargerClientDataUC"
+      service-domain: "party"
+      bian-id: "SD0254"
+      action: "retrieval"
+      url: "/party/{cr-reference-id}/retrieval"
+      http-method: "POST"
+      http-status: 200
+      summary: "Consultation des donnees client"
+
+    - use-case: "CreateAccountUC"
+      service-domain: "current-account"
+      bian-id: "SD0152"
+      action: "initiation"
+      url: "/current-account/initiation"
+      http-method: "POST"
+      http-status: 201
+      summary: "Ouverture d'un nouveau compte bancaire"
+
+    - use-case: "CloseAccountUC"
+      service-domain: "current-account"
+      bian-id: "SD0152"
+      action: "termination"
+      url: "/current-account/{cr-reference-id}/termination"
+      http-method: "PUT"
+      http-status: 200
+      summary: "Cloture d'un compte bancaire"
+
+    - use-case: "AccountBalanceUC"
+      service-domain: "current-account"
+      bian-id: "SD0152"
+      behavior-qualifier: "balance"
+      action: "retrieval"
+      url: "/current-account/{cr-reference-id}/balance/retrieval"
+      http-method: "POST"
+      http-status: 200
+      summary: "Consultation du solde d'un compte"
+
+    - use-case: "TransferMoneyUC"
+      service-domain: "payment-initiation"
+      bian-id: "SD0249"
+      action: "initiation"
+      url: "/payment-initiation/initiation"
+      http-method: "POST"
+      http-status: 201
+      summary: "Initiation d'un virement bancaire"
+
+    - use-case: "TransactionHistoryUC"
+      service-domain: "current-account"
+      bian-id: "SD0152"
+      behavior-qualifier: "transaction"
+      action: "retrieval"
+      url: "/current-account/{cr-reference-id}/transaction/retrieval"
+      http-method: "POST"
+      http-status: 200
+      summary: "Consultation de l'historique des transactions"
+
+    - use-case: "UpdateClientUC"
+      service-domain: "party"
+      bian-id: "SD0254"
+      action: "update"
+      url: "/party/{cr-reference-id}/update"
+      http-method: "PUT"
+      http-status: 200
+      summary: "Mise a jour des donnees client"
+
+    - use-case: "LoanSimulationUC"
+      service-domain: "loan"
+      bian-id: "SD0433"
+      action: "evaluation"
+      url: "/loan/evaluation"
+      http-method: "POST"
+      http-status: 200
+      summary: "Simulation d'un pret bancaire"

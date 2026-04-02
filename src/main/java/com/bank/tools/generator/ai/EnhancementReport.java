@@ -28,7 +28,8 @@ public class EnhancementReport {
         CONTENT_NEGOTIATION("Négociation de contenu"),
         PROJECT_STRUCTURE("Structure du projet et configuration"),
         TESTING("Tests"),
-        PERFORMANCE("Performance");
+        PERFORMANCE("Performance"),
+        BIAN_COMPLIANCE("Conformité BIAN");
 
         private final String label;
 

@@ -1,6 +1,8 @@
 package com.bank.tools.generator.parser;
 
 import com.bank.tools.generator.annotation.AnnotationPropagator;
+import com.bank.tools.generator.bian.BianMapping;
+import com.bank.tools.generator.bian.BianMappingResolver;
 import com.bank.tools.generator.annotation.CustomAnnotationRegistry;
 import com.bank.tools.generator.annotation.DetectedAnnotation;
 import com.bank.tools.generator.model.DtoInfo;
@@ -154,6 +156,9 @@ public class EjbProjectParser {
 
     /** Module de detection et classification des annotations custom bancaires */
     private AnnotationPropagator annotationPropagator;
+
+    /** Module de resolution du mapping BIAN pour chaque UseCase */
+    private BianMappingResolver bianMappingResolver;
     private CustomAnnotationRegistry annotationRegistry;
 
     /** Injection optionnelle (le parseur peut fonctionner sans le module annotations) */
@@ -165,6 +170,11 @@ public class EjbProjectParser {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setAnnotationRegistry(CustomAnnotationRegistry annotationRegistry) {
         this.annotationRegistry = annotationRegistry;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setBianMappingResolver(BianMappingResolver bianMappingResolver) {
+        this.bianMappingResolver = bianMappingResolver;
     }
 
     // ==================== MAIN ANALYSIS METHOD ====================
@@ -477,6 +487,26 @@ public class EjbProjectParser {
         }
         if (result.isHasJaxbAnnotations()) {
             result.addConversion("Annotations JAXB preservees + support Jackson XML");
+        }
+
+        // Phase BIAN : Resoudre le mapping BIAN pour chaque UseCase
+        if (bianMappingResolver != null) {
+            log.info("[BIAN] Resolution du mapping BIAN pour {} UseCases", result.getUseCases().size());
+            for (UseCaseInfo uc : result.getUseCases()) {
+                BianMapping bianMapping = bianMappingResolver.resolve(uc.getClassName());
+                uc.setBianMapping(bianMapping);
+                // Mettre a jour l'URL REST avec l'URL BIAN
+                if (bianMapping.getUrl() != null) {
+                    uc.setRestEndpoint(bianMapping.buildUrl("/api/v1"));
+                }
+                // Mettre a jour la methode HTTP
+                if (bianMapping.getHttpMethod() != null) {
+                    uc.setHttpMethod(bianMapping.getHttpMethod());
+                    uc.setHttpStatusCode(bianMapping.getHttpStatus());
+                }
+                log.debug("[BIAN] {} → {} ({}) [{}]", uc.getClassName(),
+                        bianMapping.getServiceDomain(), bianMapping.getAction(), bianMapping.getUrl());
+            }
         }
 
         log.info("Analyse terminee. EJBs : {}, DTOs : {}, Entites JPA : {}",
