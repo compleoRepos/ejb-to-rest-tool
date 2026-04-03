@@ -918,9 +918,9 @@ public class CodeGenerationEngine {
         sb.append("            log.error(\"[EJB-ERROR] Erreur execute() sur ").append(useCase.getClassName()).append(" : {}\", e.getMessage());\n");
         sb.append("            throw e;\n");
         sb.append("        } finally {\n");
-        sb.append("            // [EJB-CLOSE] Fermeture du contexte JNDI\n");
+        sb.append("            // [EJB-CLEANUP] Fermeture du contexte JNDI\n");
         sb.append("            if (ctx != null) {\n");
-        sb.append("                try { ctx.close(); log.debug(\"[EJB-CLOSE] Contexte JNDI ferme\"); } catch (NamingException e) { log.warn(\"[EJB-CLOSE] Erreur fermeture JNDI\", e); }\n");
+        sb.append("                   try { ctx.close(); log.debug("[EJB-CLEANUP] Contexte JNDI ferme"); } catch (NamingException e) { log.warn("[EJB-CLEANUP] Erreur fermeture JNDI", e); }}\n");
         sb.append("            }\n");
         sb.append("        }\n");
         sb.append("    }\n");
@@ -2788,15 +2788,24 @@ public class CodeGenerationEngine {
             return "HttpStatus.FORBIDDEN";
         }
 
-        // 401 Unauthorized (authentification)
-        if (lower.contains("authentication") || lower.contains("unauthenticated") || lower.contains("notauthenticated")) {
+        // 401 Unauthorized (authentification — FR + EN)
+        if (lower.contains("authentification") || lower.contains("authentication") || lower.contains("unauthenticated")
+                || lower.contains("notauthenticated") || lower.contains("auth") || lower.contains("login")
+                || lower.contains("token") || lower.contains("credentials") || lower.contains("session")) {
             return "HttpStatus.UNAUTHORIZED";
         }
 
-        // 409 Conflict (etat incompatible, compte ferme, doublon, rollback framework)
+        // 403 Forbidden (permission — FR + EN)
+        if (lower.contains("interdit") || lower.contains("nonautorise") || lower.contains("nonhabilite")) {
+            return "HttpStatus.FORBIDDEN";
+        }
+
+        // 409 Conflict (etat incompatible, compte ferme, doublon, rollback framework, deja actif)
         if (lower.contains("conflict") || lower.contains("duplicate") || lower.contains("closed")
                 || lower.contains("already") || lower.contains("exists") || lower.contains("ferme")
-                || lower.contains("cloture") || lower.contains("fwkrollback") || lower.contains("rollback")) {
+                || lower.contains("cloture") || lower.contains("fwkrollback") || lower.contains("rollback")
+                || lower.contains("deja") || lower.contains("doublon") || lower.contains("active")
+                || lower.contains("business") || lower.contains("metier")) {
             return "HttpStatus.CONFLICT";
         }
 
@@ -2812,9 +2821,9 @@ public class CodeGenerationEngine {
             return "HttpStatus.UNPROCESSABLE_ENTITY";
         }
 
-        // 422 Unprocessable Entity (erreur metier, solde insuffisant)
-        if (lower.contains("insufficient") || lower.contains("business") || lower.contains("insuffisant")
-                || lower.contains("metier") || lower.contains("limit") || lower.contains("exceeded")
+        // 422 Unprocessable Entity (solde insuffisant, limite depassee)
+        if (lower.contains("insufficient") || lower.contains("insuffisant")
+                || lower.contains("limit") || lower.contains("exceeded")
                 || lower.contains("depasse")) {
             return "HttpStatus.UNPROCESSABLE_ENTITY";
         }
@@ -3099,7 +3108,7 @@ public class CodeGenerationEngine {
         sb.append("    }\n");
         sb.append("}\n");
 
-        Path configDir = srcMain.resolve(BASE_PACKAGE_PATH).resolve("config");
+        Path configDir = srcMain.resolve("config");
         Files.createDirectories(configDir);
         Files.writeString(configDir.resolve("BianHeaderFilter.java"), sb.toString());
         log.info("[BIAN] BianHeaderFilter genere");
