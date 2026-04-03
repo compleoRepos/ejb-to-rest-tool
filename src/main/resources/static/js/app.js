@@ -229,6 +229,17 @@ function launchTransformation() {
         credentials: 'same-origin'
     })
     .then(function(response) {
+        // Verifier que le serveur a retourne du JSON (pas une page HTML d'erreur)
+        var contentType = response.headers.get('content-type') || '';
+        if (!response.ok || !contentType.includes('application/json')) {
+            return response.text().then(function(text) {
+                // Extraire le message d'erreur du HTML si possible
+                var errorMsg = 'Erreur serveur (HTTP ' + response.status + ')';
+                var match = text.match(/<p[^>]*>(.*?)<\/p>/i);
+                if (match) errorMsg += ' : ' + match[1];
+                throw new Error(errorMsg);
+            });
+        }
         return response.json();
     })
     .then(function(data) {
@@ -238,7 +249,7 @@ function launchTransformation() {
     })
     .catch(function(error) {
         serverDone = true;
-        serverResult = { success: false, error: 'Erreur de connexion : ' + error.message };
+        serverResult = { success: false, error: 'Erreur : ' + error.message };
         checkCompletion();
     });
 

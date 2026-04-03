@@ -216,7 +216,11 @@ public class GeneratorController {
             log.info("Generation du projet API pour : {}", projectId);
             generatorService.generateProject(projectId, analysisResult, false);
 
-            EnhancementReport report = generatorService.enhanceProject(projectId, analysisResult);
+            // Le rapport est deja genere dans generateProject()
+            EnhancementReport report = generatorService.getLastEnhancementReport();
+            if (report == null) {
+                report = generatorService.enhanceProject(projectId, analysisResult);
+            }
             session.setAttribute("enhancementReport", report);
 
             redirectAttributes.addFlashAttribute("success",
@@ -238,7 +242,7 @@ public class GeneratorController {
      * Retourne le resultat en JSON pour permettre au JS de synchroniser
      * l'animation de progression avec la reponse serveur.
      */
-    @PostMapping("/api/generate")
+    @PostMapping(value = "/api/generate", produces = "application/json")
     @ResponseBody
     public ResponseEntity<Map<String, Object>> generateProjectApi(
             @RequestParam(value = "bianMode", defaultValue = "false") boolean bianMode,
@@ -264,7 +268,12 @@ public class GeneratorController {
             log.info("[API] Generation du projet API pour : {} (BIAN={})", projectId, bianMode);
             generatorService.generateProject(projectId, analysisResult, bianMode);
 
-            EnhancementReport report = generatorService.enhanceProject(projectId, analysisResult);
+            // Le rapport est deja genere dans generateProject() — on le recupere directement
+            EnhancementReport report = generatorService.getLastEnhancementReport();
+            if (report == null) {
+                // Fallback : relancer l'enhance si le rapport n'est pas disponible
+                report = generatorService.enhanceProject(projectId, analysisResult);
+            }
             session.setAttribute("enhancementReport", report);
 
             response.put("success", true);
@@ -274,10 +283,14 @@ public class GeneratorController {
             response.put("message", "Projet API REST genere et ameliore par l'IA ! Score qualite : " +
                     report.getQualityScore() + "/100");
             return ResponseEntity.ok(response);
-        } catch (Exception e) {
+        } catch (Throwable e) {
             log.error("[API] Erreur lors de la generation", e);
             response.put("success", false);
             response.put("error", "Erreur lors de la generation : " + e.getMessage());
+            // Retourner le stacktrace racine pour le debug
+            Throwable root = e;
+            while (root.getCause() != null) root = root.getCause();
+            response.put("rootCause", root.getClass().getSimpleName() + ": " + root.getMessage());
             return ResponseEntity.internalServerError().body(response);
         }
     }

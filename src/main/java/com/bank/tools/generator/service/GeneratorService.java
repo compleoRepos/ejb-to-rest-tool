@@ -109,6 +109,13 @@ public class GeneratorService {
     // Generation
     // ============================================================
 
+    // Dernier rapport d'amelioration genere (accessible apres generateProject)
+    private EnhancementReport lastEnhancementReport;
+
+    public EnhancementReport getLastEnhancementReport() {
+        return lastEnhancementReport;
+    }
+
     public Path generateProject(String projectId, ProjectAnalysisResult analysisResult, boolean bianMode) throws IOException {
         Path outputDir = Path.of(appConfig.getOutputDir(), projectId);
         Files.createDirectories(outputDir);
@@ -121,6 +128,7 @@ public class GeneratorService {
                 report.getQualityScore(), report.getTotalRulesApplied(), report.getTotalRulesChecked());
 
         generateEnhancementReportFile(projectRoot, report);
+        this.lastEnhancementReport = report;
         return projectRoot;
     }
 
