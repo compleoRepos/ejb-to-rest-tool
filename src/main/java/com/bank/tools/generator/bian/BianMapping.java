@@ -56,6 +56,11 @@ public class BianMapping {
             sb.append("/{cr-reference-id}");
             if (behaviorQualifier != null && !behaviorQualifier.isEmpty()) {
                 sb.append("/").append(behaviorQualifier);
+                // BIAN standard : {bq-reference-id} apres le behavior qualifier
+                // sauf pour les actions de type retrieval sans ID specifique
+                if (!"retrieval".equals(action)) {
+                    sb.append("/{bq-reference-id}");
+                }
             }
             sb.append("/").append(action);
         }

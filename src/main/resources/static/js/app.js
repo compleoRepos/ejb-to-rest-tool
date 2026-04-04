@@ -231,9 +231,12 @@ function launchTransformation() {
     .then(function(response) {
         // Verifier que le serveur a retourne du JSON (pas une page HTML d'erreur)
         var contentType = response.headers.get('content-type') || '';
-        if (!response.ok || !contentType.includes('application/json')) {
+        if (contentType.includes('application/json')) {
+            // Le serveur a retourne du JSON (meme en cas de 500) — on le parse
+            return response.json();
+        } else if (!response.ok) {
+            // Le serveur a retourne du HTML (page d'erreur Whitelabel)
             return response.text().then(function(text) {
-                // Extraire le message d'erreur du HTML si possible
                 var errorMsg = 'Erreur serveur (HTTP ' + response.status + ')';
                 var match = text.match(/<p[^>]*>(.*?)<\/p>/i);
                 if (match) errorMsg += ' : ' + match[1];

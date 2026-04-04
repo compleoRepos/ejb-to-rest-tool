@@ -366,46 +366,27 @@ public class CodeGenerationEngine {
                         </dependency>
                 """);
 
-        // BOA/EAI : Ajouter les dependances framework detectees dans le pom.xml source
+        // DECOUPLAGE : Les dependances ma.eai.* ne sont plus ajoutees au POM genere.
+        // L'API est 100% autonome et ne depend plus du framework EJB (ma.eai.*).
+        // Le ServiceAdapter utilise la reflection pour appeler l'EJB distant.
         if (analysisResult != null && !analysisResult.getFrameworkDependencies().isEmpty()) {
-            deps.append("\n            <!-- ========== Dependances Framework EAI (detectees dans le projet source) ========== -->\n");
-            for (ProjectAnalysisResult.FrameworkDependency fwDep : analysisResult.getFrameworkDependencies()) {
-                deps.append("            <dependency>\n");
-                deps.append("                <groupId>").append(fwDep.getGroupId()).append("</groupId>\n");
-                deps.append("                <artifactId>").append(fwDep.getArtifactId()).append("</artifactId>\n");
-                if (fwDep.getVersion() != null && !fwDep.getVersion().isEmpty()) {
-                    deps.append("                <version>").append(fwDep.getVersion()).append("</version>\n");
-                }
-                deps.append("            </dependency>\n");
-            }
+            log.info("[DECOUPLAGE] {} dependances framework EAI detectees mais NON ajoutees au POM (API autonome)",
+                    analysisResult.getFrameworkDependencies().size());
         }
 
-        // BOA/EAI : Determiner le parent POM
-        String parentBlock;
+        // DECOUPLAGE : Toujours utiliser Spring Boot comme parent POM
+        // Le parent POM framework EAI n'est plus utilise pour garantir l'autonomie de l'API
+        String parentBlock = """
+                    <parent>
+                        <groupId>org.springframework.boot</groupId>
+                        <artifactId>spring-boot-starter-parent</artifactId>
+                        <version>3.2.5</version>
+                        <relativePath/>
+                    </parent>
+                """;
         if (analysisResult != null && analysisResult.isHasFrameworkParentPom()) {
-            // Conserver le parent POM framework du projet source
-            parentBlock = """
-                        <parent>
-                            <groupId>%s</groupId>
-                            <artifactId>%s</artifactId>
-                            <version>%s</version>
-                        </parent>
-                    """.formatted(
-                    analysisResult.getParentPomGroupId(),
-                    analysisResult.getParentPomArtifactId(),
-                    analysisResult.getParentPomVersion() != null ? analysisResult.getParentPomVersion() : "LATEST"
-            );
-            log.info("[BOA/EAI] pom.xml genere avec parent POM framework : {}:{}",
+            log.info("[DECOUPLAGE] Parent POM framework {}:{} detecte mais NON utilise (Spring Boot parent a la place)",
                     analysisResult.getParentPomGroupId(), analysisResult.getParentPomArtifactId());
-        } else {
-            parentBlock = """
-                        <parent>
-                            <groupId>org.springframework.boot</groupId>
-                            <artifactId>spring-boot-starter-parent</artifactId>
-                            <version>3.2.5</version>
-                            <relativePath/>
-                        </parent>
-                    """;
         }
 
         // BOA/EAI : Determiner la version Java
@@ -491,9 +472,10 @@ public class CodeGenerationEngine {
                 logging.level.com.bank.api=DEBUG
                 logging.pattern.console=%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n
                 
-                # Swagger
-                springdoc.api-docs.path=/api-docs
+                # Swagger / OpenAPI 3
+                springdoc.api-docs.path=/v3/api-docs
                 springdoc.swagger-ui.path=/swagger-ui.html
+                springdoc.swagger-ui.url=/v3/api-docs
                 """;
 
         Files.writeString(resourcesDir.resolve("application.properties"), props);
@@ -501,36 +483,23 @@ public class CodeGenerationEngine {
 
     // ===================== BASE INTERFACES =====================
 
+    /**
+     * DECOUPLAGE : BaseUseCase n'est plus genere.
+     * Le ServiceAdapter utilise la reflection pour appeler l'EJB distant,
+     * ce qui rend l'API 100%% autonome sans dependance ma.eai.*.
+     */
     private void generateBaseUseCaseInterface(Path srcMain) throws IOException {
-        String code = """
-                package %s.ejb.interfaces;
-                
-                /**
-                 * Interface BaseUseCase recopiee depuis le projet EJB source.
-                 * Permet le cast type lors du lookup JNDI des EJB.
-                 */
-                public interface BaseUseCase {
-                    ValueObject execute(ValueObject input) throws Exception;
-                }
-                """.formatted(BASE_PACKAGE);
-
-        Files.writeString(srcMain.resolve("ejb/interfaces/BaseUseCase.java"), code);
+        // Ne plus generer BaseUseCase — l'API est decouplée du framework EJB
+        log.info("[DECOUPLAGE] BaseUseCase non genere — l'API est autonome");
     }
 
+    /**
+     * DECOUPLAGE : ValueObject n'est plus genere.
+     * Les DTOs implementent directement Serializable.
+     */
     private void generateValueObjectInterface(Path srcMain) throws IOException {
-        String code = """
-                package %s.ejb.interfaces;
-                
-                import java.io.Serializable;
-                
-                /**
-                 * Interface ValueObject recopiee depuis le projet EJB source.
-                 */
-                public interface ValueObject extends Serializable {
-                }
-                """.formatted(BASE_PACKAGE);
-
-        Files.writeString(srcMain.resolve("ejb/interfaces/ValueObject.java"), code);
+        // Ne plus generer ValueObject — les DTOs sont des POJOs Serializable
+        log.info("[DECOUPLAGE] ValueObject non genere — les DTOs sont des POJOs Serializable");
     }
 
     // ===================== XML CONFIG =====================
@@ -841,6 +810,12 @@ public class CodeGenerationEngine {
 
     // ===================== SERVICE ADAPTER (Pattern BaseUseCase) =====================
 
+    /**
+     * DECOUPLAGE : ServiceAdapter utilise la reflection pure.
+     * Aucune dependance vers BaseUseCase, ValueObject ou ma.eai.*.
+     * L'EJB est appele via reflection : Object.getClass().getMethod("execute", Object.class).invoke()
+     * Le resultat est converti en DTO via Jackson ObjectMapper.
+     */
     private void generateServiceAdapter(Path srcMain, UseCaseInfo useCase) throws IOException {
         String inputDto = useCase.getInputDtoClassName();
         String outputDto = useCase.getOutputDtoClassName();
@@ -857,8 +832,7 @@ public class CodeGenerationEngine {
         sb.append("package ").append(BASE_PACKAGE).append(".service;\n\n");
         sb.append("import ").append(BASE_PACKAGE).append(".dto.").append(inputDto).append(";\n");
         sb.append("import ").append(BASE_PACKAGE).append(".dto.").append(outputDto).append(";\n");
-        sb.append("import ").append(BASE_PACKAGE).append(".ejb.interfaces.BaseUseCase;\n");
-        sb.append("import ").append(BASE_PACKAGE).append(".ejb.interfaces.ValueObject;\n");
+        sb.append("import com.fasterxml.jackson.databind.ObjectMapper;\n");
         sb.append("import org.slf4j.Logger;\n");
         sb.append("import org.slf4j.LoggerFactory;\n");
         sb.append("import org.springframework.beans.factory.annotation.Value;\n");
@@ -869,25 +843,27 @@ public class CodeGenerationEngine {
         sb.append("\nimport javax.naming.Context;\n");
         sb.append("import javax.naming.InitialContext;\n");
         sb.append("import javax.naming.NamingException;\n");
+        sb.append("import java.lang.reflect.Method;\n");
         sb.append("import java.util.Properties;\n\n");
 
         sb.append("/**\n");
-        sb.append(" * Service adapter pour ").append(useCase.getClassName()).append(".\n");
-        sb.append(" * Lookup JNDI avec cast type vers BaseUseCase.\n");
+        sb.append(" * Service adapter decouple pour ").append(useCase.getClassName()).append(".\n");
+        sb.append(" * Utilise la reflection pour appeler l'EJB distant via JNDI.\n");
+        sb.append(" * Aucune dependance vers le framework EJB (ma.eai.*).\n");
         sb.append(" */\n");
         sb.append("@Service\n");
         if (!scopeAnnotation.isEmpty()) {
             sb.append(scopeAnnotation);
         }
         sb.append("public class ").append(adapterName).append(" {\n\n");
-        sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(adapterName).append(".class);\n\n");
+        sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(adapterName).append(".class);\n");
+        sb.append("    private static final ObjectMapper objectMapper = new ObjectMapper();\n\n");
         sb.append("    @Value(\"${ejb.jndi.provider.url:localhost:1099}\")\n");
         sb.append("    private String jndiProviderUrl;\n\n");
         sb.append("    @Value(\"${ejb.jndi.factory:org.jboss.naming.remote.client.InitialContextFactory}\")\n");
         sb.append("    private String jndiFactory;\n\n");
 
         sb.append("    public ").append(outputDto).append(" execute(").append(inputDto).append(" input) throws Exception {\n");
-        // BUG 7 FIX : 6 prefixes [EJB-*] pour tracabilite complete
         sb.append("        // [EJB-CALL] Debut de l'appel EJB\n");
         sb.append("        log.info(\"[EJB-CALL] Appel de ").append(useCase.getClassName()).append(".execute() — JNDI: ").append(jndiName).append("\");\n\n");
         sb.append("        // [EJB-LOOKUP] Recherche JNDI\n");
@@ -898,17 +874,19 @@ public class CodeGenerationEngine {
         sb.append("        InitialContext ctx = null;\n");
         sb.append("        try {\n");
         sb.append("            ctx = new InitialContext(props);\n");
-        sb.append("            BaseUseCase useCase = (BaseUseCase) ctx.lookup(\"").append(jndiName).append("\");\n");
-        sb.append("            log.debug(\"[EJB-LOOKUP] EJB trouve avec succes\");\n\n");
-        sb.append("            // [EJB-EXECUTE] Execution de la methode\n");
+        sb.append("            Object ejb = ctx.lookup(\"").append(jndiName).append("\");\n");
+        sb.append("            log.debug(\"[EJB-LOOKUP] EJB trouve avec succes : {}\", ejb.getClass().getName());\n\n");
+        sb.append("            // [EJB-EXECUTE] Appel par reflection — decouple du framework EJB\n");
         sb.append("            log.debug(\"[EJB-EXECUTE] Execution de execute() avec input : {}\", input);\n");
         sb.append("            long start = System.currentTimeMillis();\n");
-        sb.append("            ValueObject result = useCase.execute(input);\n");
+        sb.append("            // Trouver la methode 'execute' ou 'process' par reflection\n");
+        sb.append("            Method executeMethod = findExecuteMethod(ejb);\n");
+        sb.append("            Object result = executeMethod.invoke(ejb, input);\n");
         sb.append("            long duration = System.currentTimeMillis() - start;\n\n");
-        sb.append("            // [EJB-RESPONSE] Reponse de l'EJB\n");
+        sb.append("            // [EJB-RESPONSE] Conversion du resultat en DTO via Jackson\n");
         sb.append("            log.info(\"[EJB-RESPONSE] execute() termine en {}ms\", duration);\n");
-        sb.append("            log.debug(\"[EJB-RESPONSE] Resultat : {}\", result);\n");
-        sb.append("            return (").append(outputDto).append(") result;\n");
+        sb.append("            log.debug(\"[EJB-RESPONSE] Resultat brut : {}\", result);\n");
+        sb.append("            return objectMapper.convertValue(result, ").append(outputDto).append(".class);\n");
         sb.append("        } catch (NamingException e) {\n");
         sb.append("            // [EJB-ERROR] Erreur de lookup\n");
         sb.append("            log.error(\"[EJB-ERROR] Lookup JNDI echoue pour ").append(jndiName).append(" : {}\", e.getMessage());\n");
@@ -920,14 +898,32 @@ public class CodeGenerationEngine {
         sb.append("        } finally {\n");
         sb.append("            // [EJB-CLEANUP] Fermeture du contexte JNDI\n");
         sb.append("            if (ctx != null) {\n");
-        sb.append("                   try { ctx.close(); log.debug("[EJB-CLEANUP] Contexte JNDI ferme"); } catch (NamingException e) { log.warn("[EJB-CLEANUP] Erreur fermeture JNDI", e); }}\n");
+        sb.append("                try { ctx.close(); log.debug(\"[EJB-CLEANUP] Contexte JNDI ferme\"); } catch (NamingException e) { log.warn(\"[EJB-CLEANUP] Erreur fermeture JNDI\", e); }\n");
         sb.append("            }\n");
         sb.append("        }\n");
+        sb.append("    }\n\n");
+
+        // Methode utilitaire pour trouver execute() ou process() par reflection
+        sb.append("    /**\n");
+        sb.append("     * Recherche la methode 'execute' ou 'process' sur l'EJB distant par reflection.\n");
+        sb.append("     * Compatible avec les patterns BaseUseCase (execute) et SynchroneService (process).\n");
+        sb.append("     */\n");
+        sb.append("    private Method findExecuteMethod(Object ejb) throws NoSuchMethodException {\n");
+        sb.append("        // Chercher 'execute' d'abord, puis 'process'\n");
+        sb.append("        for (String methodName : new String[]{\"execute\", \"process\"}) {\n");
+        sb.append("            for (Method m : ejb.getClass().getMethods()) {\n");
+        sb.append("                if (m.getName().equals(methodName) && m.getParameterCount() == 1) {\n");
+        sb.append("                    log.debug(\"[EJB-LOOKUP] Methode trouvee : {}({})\", methodName, m.getParameterTypes()[0].getSimpleName());\n");
+        sb.append("                    return m;\n");
+        sb.append("                }\n");
+        sb.append("            }\n");
+        sb.append("        }\n");
+        sb.append("        throw new NoSuchMethodException(\"Aucune methode execute() ou process() trouvee sur \" + ejb.getClass().getName());\n");
         sb.append("    }\n");
         sb.append("}\n");
 
         Files.writeString(srcMain.resolve("service/" + adapterName + ".java"), sb.toString());
-        log.info("Service adapter genere : {}", adapterName);
+        log.info("Service adapter decouple genere : {}", adapterName);
     }
 
     // ===================== SERVICE ADAPTER (Pattern multi-methodes - G5) =====================
@@ -1567,16 +1563,14 @@ public class CodeGenerationEngine {
         // G1 : Collecter TOUS les imports necessaires
         Set<String> imports = new TreeSet<>();
 
-        // BUG 12 : VoIn ET VoOut implementent ValueObject
+        // DECOUPLAGE : Tous les DTOs implementent Serializable (plus de ValueObject)
         boolean isVoIn = dto.getClassName().endsWith("VoIn") || dto.getClassName().endsWith("VOIn")
                 || dto.getClassName().endsWith("Input") || dto.getClassName().endsWith("Request");
         boolean isVoOut = dto.getClassName().endsWith("VoOut") || dto.getClassName().endsWith("VOOut")
                 || dto.getClassName().endsWith("Output") || dto.getClassName().endsWith("Response");
         boolean isDto = isVoIn || isVoOut || dto.getClassName().endsWith("Dto") || dto.getClassName().endsWith("DTO");
 
-        if (isVoIn || isVoOut) {
-            imports.add(BASE_PACKAGE + ".ejb.interfaces.ValueObject");
-        } else if (isDto) {
+        if (isVoIn || isVoOut || isDto) {
             imports.add("java.io.Serializable");
         }
 
@@ -1677,20 +1671,30 @@ public class CodeGenerationEngine {
         // Declaration de la classe
         sb.append("public class ").append(dto.getClassName());
 
-        if (dto.getParentClassName() != null && !dto.getParentClassName().equals("Object")
-                && !dto.getParentClassName().equals("ValueObject")) {
-            sb.append(" extends ").append(dto.getParentClassName());
+        // DECOUPLAGE : Filtrer les classes parentes EJB framework
+        String parentClass = dto.getParentClassName();
+        boolean isEjbFrameworkParent = parentClass == null
+                || parentClass.equals("Object")
+                || parentClass.equals("ValueObject")
+                || parentClass.equals("UCStrategie")
+                || parentClass.equals("BaseUseCase")
+                || parentClass.equals("AbstractUseCase")
+                || parentClass.equals("SynchroneService")
+                || parentClass.equals("AsynchroneService")
+                || parentClass.equals("Envelope")
+                || parentClass.equals("EaiLog")
+                || parentClass.equals("CommonFunction");
+        if (!isEjbFrameworkParent) {
+            sb.append(" extends ").append(parentClass);
         }
 
-        // BUG 12 : VoIn ET VoOut implementent ValueObject
-        if (isVoIn || isVoOut) {
-            sb.append(" implements ValueObject");
-        } else if (isDto) {
+        // DECOUPLAGE : Tous les DTOs implementent Serializable (POJO autonome)
+        if (isVoIn || isVoOut || isDto) {
             sb.append(" implements Serializable");
         }
         sb.append(" {\n\n");
 
-        // BUG 12 : serialVersionUID pour les classes qui implementent Serializable/ValueObject
+        // serialVersionUID pour les classes qui implementent Serializable
         if (isVoIn || isVoOut || isDto) {
             sb.append("    private static final long serialVersionUID = 1L;\n\n");
         }
@@ -1806,7 +1810,7 @@ public class CodeGenerationEngine {
         sb.append("}\n");
 
         Files.writeString(srcMain.resolve("dto/" + dto.getClassName() + ".java"), sb.toString());
-        log.info("DTO genere : {} (JAXB: {}, ValueObject: {})", dto.getClassName(), hasJaxb, isVoIn || isVoOut);
+        log.info("DTO genere : {} (JAXB: {}, Serializable: {})", dto.getClassName(), hasJaxb, isVoIn || isVoOut || isDto);
     }
 
     // ===================== GLOBAL EXCEPTION HANDLER (G9 enrichi) =====================

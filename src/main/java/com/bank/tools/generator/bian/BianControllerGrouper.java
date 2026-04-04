@@ -217,29 +217,48 @@ public class BianControllerGrouper {
             sb.append(String.join(",\n", params));
             sb.append(") {\n");
 
-            // Corps
-            sb.append("        log.info(\"[BIAN] ").append(operationId).append(" — Service Domain: ")
-              .append(firstMapping.getServiceDomain()).append("\");\n");
+            // Corps — Prefixes [REST-IN] / [REST-OUT] / [REST-ERROR]
+            String fullBianUrl = "/api/v1/" + firstMapping.getServiceDomain() + relativeUrl;
+            String httpMethodUpper = hasInput ? "POST" : httpMethod.toUpperCase();
+
+            // [REST-IN] Reception de la requete
+            if (hasPathParam) {
+                sb.append("        log.info(\"[REST-IN] ").append(httpMethodUpper).append(" ").append(fullBianUrl.replace("{cr-reference-id}", "{}")).append("\", crReferenceId);\n");
+            } else {
+                sb.append("        log.info(\"[REST-IN] ").append(httpMethodUpper).append(" ").append(fullBianUrl).append("\");\n");
+            }
+            sb.append("        try {\n");
 
             if (hasOutput && hasInput) {
-                sb.append("        ").append(outputDto).append(" response = ").append(adapterField)
+                sb.append("            ").append(outputDto).append(" response = ").append(adapterField)
                   .append(".execute(request);\n");
                 if (httpStatus == 201) {
-                    sb.append("        return ResponseEntity.status(HttpStatus.CREATED).body(response);\n");
+                    sb.append("            log.info(\"[REST-OUT] 201 Created\");\n");
+                    sb.append("            return ResponseEntity.status(HttpStatus.CREATED).body(response);\n");
                 } else {
-                    sb.append("        return ResponseEntity.ok(response);\n");
+                    sb.append("            log.info(\"[REST-OUT] 200 OK\");\n");
+                    sb.append("            return ResponseEntity.ok(response);\n");
                 }
             } else if (hasOutput) {
-                sb.append("        ").append(outputDto).append(" response = ").append(adapterField)
+                sb.append("            ").append(outputDto).append(" response = ").append(adapterField)
                   .append(".execute();\n");
-                sb.append("        return ResponseEntity.ok(response);\n");
+                sb.append("            log.info(\"[REST-OUT] 200 OK\");\n");
+                sb.append("            return ResponseEntity.ok(response);\n");
             } else if (hasInput) {
-                sb.append("        ").append(adapterField).append(".execute(request);\n");
-                sb.append("        return ResponseEntity.ok().build();\n");
+                sb.append("            ").append(adapterField).append(".execute(request);\n");
+                sb.append("            log.info(\"[REST-OUT] 200 OK\");\n");
+                sb.append("            return ResponseEntity.ok().build();\n");
             } else {
-                sb.append("        ").append(adapterField).append(".execute();\n");
-                sb.append("        return ResponseEntity.ok().build();\n");
+                sb.append("            ").append(adapterField).append(".execute();\n");
+                sb.append("            log.info(\"[REST-OUT] 200 OK\");\n");
+                sb.append("            return ResponseEntity.ok().build();\n");
             }
+
+            // [REST-ERROR]
+            sb.append("        } catch (Exception e) {\n");
+            sb.append("            log.error(\"[REST-ERROR] ").append(operationId).append(" : {}\", e.getMessage());\n");
+            sb.append("            throw new RuntimeException(e.getMessage(), e);\n");
+            sb.append("        }\n");
 
             sb.append("    }\n\n");
         }
