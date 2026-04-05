@@ -950,10 +950,13 @@ public class CodeGenerationEngine {
         }
 
         // Collecter les imports des types
+        boolean hasFrameworkType = false;
         for (UseCaseInfo.MethodInfo method : useCase.getPublicMethods()) {
-            resolveTypeImports(method.getReturnType(), imports);
+            if (isFrameworkType(method.getReturnType())) hasFrameworkType = true;
+            resolveTypeImports(replaceFrameworkType(method.getReturnType()), imports);
             for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
-                resolveTypeImports(param.getType(), imports);
+                if (isFrameworkType(param.getType())) hasFrameworkType = true;
+                resolveTypeImports(replaceFrameworkType(param.getType()), imports);
             }
             // DTOs
             String returnBase = extractBaseType(method.getReturnType());
@@ -1001,14 +1004,18 @@ public class CodeGenerationEngine {
         // Generer chaque methode
         for (UseCaseInfo.MethodInfo method : useCase.getPublicMethods()) {
             sb.append("\n");
+
+            // FIX P0-1b: Remplacer les types framework (Envelope, etc.) par Map<String, Object>
+            // pour eviter les dependances vers ma.eai.*
+            String returnType = replaceFrameworkType(method.getReturnType());
             String params = method.getParameters().stream()
-                    .map(p -> p.getType() + " " + p.getName())
+                    .map(p -> replaceFrameworkType(p.getType()) + " " + p.getName())
                     .collect(Collectors.joining(", "));
             String args = method.getParameters().stream()
                     .map(UseCaseInfo.ParameterInfo::getName)
                     .collect(Collectors.joining(", "));
 
-            sb.append("    public ").append(method.getReturnType()).append(" ").append(method.getName()).append("(").append(params).append(") throws Exception {\n");
+            sb.append("    public ").append(returnType).append(" ").append(method.getName()).append("(").append(params).append(") throws Exception {\n");
             // BUG K : Tracabilite complete avec 6 prefixes EJB
             sb.append("        // --- DEBUT APPEL EJB ---\n");
             sb.append("        log.info(\"[EJB-CALL] ").append(useCase.getClassName()).append(".").append(method.getName()).append("({})\", \"");
@@ -1029,7 +1036,7 @@ public class CodeGenerationEngine {
                     sb.append("        long duration = System.currentTimeMillis() - start;\n");
                     sb.append("        log.info(\"[EJB-EXECUTE] ").append(method.getName()).append("() termine en {}ms\", duration);\n");
                 } else {
-                    sb.append("        ").append(method.getReturnType()).append(" result = ejb.").append(method.getName()).append("(").append(args).append(");\n");
+                    sb.append("        ").append(returnType).append(" result = ejb.").append(method.getName()).append("(").append(args).append(");\n");
                     sb.append("        long duration = System.currentTimeMillis() - start;\n");
                     sb.append("        log.info(\"[EJB-EXECUTE] ").append(method.getName()).append("() termine en {}ms\", duration);\n");
                     sb.append("        // --- REPONSE EJB ---\n");
@@ -1046,7 +1053,14 @@ public class CodeGenerationEngine {
                 sb.append("        long start = System.currentTimeMillis();\n");
                 sb.append("        java.lang.reflect.Method m = ejb.getClass().getMethod(\"").append(method.getName()).append("\"");
                 for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
-                    sb.append(", ").append(extractBaseType(param.getType())).append(".class");
+                    // FIX P0-1b: Pour la reflection, utiliser Object.class quand le type original est un type framework
+                    // car le type exact n'est pas disponible dans le classpath du projet genere
+                    String paramBaseType = extractBaseType(param.getType());
+                    if (FRAMEWORK_TYPES_SET.contains(paramBaseType)) {
+                        sb.append(", Object.class");
+                    } else {
+                        sb.append(", ").append(paramBaseType).append(".class");
+                    }
                 }
                 sb.append(");\n");
                 if (method.getReturnType().equals("void")) {
@@ -1054,7 +1068,7 @@ public class CodeGenerationEngine {
                     sb.append("        long duration = System.currentTimeMillis() - start;\n");
                     sb.append("        log.info(\"[EJB-EXECUTE] ").append(method.getName()).append("() termine en {}ms\", duration);\n");
                 } else {
-                    sb.append("        ").append(method.getReturnType()).append(" result = (").append(method.getReturnType()).append(") m.invoke(ejb").append(args.isEmpty() ? "" : ", " + args).append(");\n");
+                    sb.append("        ").append(returnType).append(" result = (").append(returnType).append(") m.invoke(ejb").append(args.isEmpty() ? "" : ", " + args).append(");\n");
                     sb.append("        long duration = System.currentTimeMillis() - start;\n");
                     sb.append("        log.info(\"[EJB-EXECUTE] ").append(method.getName()).append("() termine en {}ms\", duration);\n");
                     sb.append("        // --- REPONSE EJB ---\n");
@@ -1579,8 +1593,10 @@ public class CodeGenerationEngine {
         // G2 : Utiliser des imports individuels au lieu du wildcard pour eviter les doublons
         if (hasJaxb) {
             if (dto.isHasXmlRootElement()) imports.add("jakarta.xml.bind.annotation.XmlRootElement");
-            if (dto.isHasXmlAccessorType()) imports.add("jakarta.xml.bind.annotation.XmlAccessorType");
-            if (dto.isHasXmlAccessorType()) imports.add("jakarta.xml.bind.annotation.XmlAccessType");
+            // FIX: Toujours importer XmlAccessorType/XmlAccessType quand hasJaxb est true,
+            // car on genere @XmlAccessorType(XmlAccessType.FIELD) par defaut meme si le DTO original ne l'avait pas
+            imports.add("jakarta.xml.bind.annotation.XmlAccessorType");
+            imports.add("jakarta.xml.bind.annotation.XmlAccessType");
             if (dto.isHasXmlType()) imports.add("jakarta.xml.bind.annotation.XmlType");
             boolean hasXmlElement = dto.getFields().stream().anyMatch(DtoInfo.FieldInfo::isHasXmlElement);
             if (hasXmlElement) imports.add("jakarta.xml.bind.annotation.XmlElement");
@@ -2451,6 +2467,30 @@ public class CodeGenerationEngine {
         if (type.contains("<")) return type.substring(0, type.indexOf('<')).trim();
         if (type.endsWith("[]")) return type.substring(0, type.length() - 2).trim();
         return type.trim();
+    }
+
+    /** FIX P0-1b: Liste des types framework EAI qui doivent etre remplaces par Map<String, Object> */
+    private static final Set<String> FRAMEWORK_TYPES_SET = Set.of(
+            "Envelope", "Parser", "ParsingException", "UtilHash",
+            "SynchroneService", "Services", "Log", "EaiLog",
+            "FwkRollbackException", "BaseUseCase", "ValueObject"
+    );
+
+    /** FIX P0-1b: Verifie si un type est un type framework EAI */
+    private boolean isFrameworkType(String type) {
+        if (type == null) return false;
+        String baseType = extractBaseType(type);
+        return FRAMEWORK_TYPES_SET.contains(baseType);
+    }
+
+    /** FIX P0-1b: Remplace les types framework EAI par Map<String, Object> */
+    private String replaceFrameworkType(String type) {
+        if (type == null) return type;
+        String baseType = extractBaseType(type);
+        if (FRAMEWORK_TYPES_SET.contains(baseType)) {
+            return "Map<String, Object>";
+        }
+        return type;
     }
 
     /** Verifie si un champ est un logger */

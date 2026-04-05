@@ -74,6 +74,7 @@ public class BianControllerGrouper {
         sb.append("package ").append(basePackage).append(".controller;\n\n");
 
         // Imports
+        sb.append("import java.util.Map;\n");
         sb.append("import ").append(basePackage).append(".service.*;\n");
         sb.append("import ").append(basePackage).append(".dto.*;\n");
         sb.append("import io.swagger.v3.oas.annotations.Operation;\n");
@@ -154,9 +155,42 @@ public class BianControllerGrouper {
             // URL relative (sans le base path du controller)
             String relativeUrl = buildRelativeUrl(mapping, firstMapping.getServiceDomain());
 
-            // Input/Output
+            // Input/Output — Pour les GENERIC_SERVICE, les DTOs sont null au niveau UseCase.
+            // Il faut les resoudre a partir de la premiere methode publique correspondante.
             String inputDto = uc.getInputDtoClassName();
             String outputDto = uc.getOutputDtoClassName();
+            // FIX P0-4: Resoudre les DTOs depuis les methodes publiques pour les services generiques
+            if ((inputDto == null || inputDto.isEmpty()) && (outputDto == null || outputDto.isEmpty())) {
+                UseCaseInfo.MethodInfo resolvedMethod = resolveMethodForEndpoint(uc);
+                if (resolvedMethod != null) {
+                    // Determiner le DTO d'entree depuis les parametres complexes de la methode
+                    for (UseCaseInfo.ParameterInfo param : resolvedMethod.getParameters()) {
+                        if (param.isComplexType()) {
+                            String paramType = param.getType();
+                            // FIX: Remplacer les types framework par Map<String, Object>
+                            if (isFrameworkType(paramType)) {
+                                inputDto = "Map<String, Object>";
+                            } else {
+                                inputDto = paramType;
+                            }
+                            break;
+                        }
+                    }
+                    // Determiner le DTO de sortie depuis le type de retour
+                    String retType = resolvedMethod.getReturnType();
+                    if (retType != null && !"void".equals(retType) && !"String".equals(retType)
+                            && !"boolean".equals(retType) && !"int".equals(retType)
+                            && !"long".equals(retType) && !"double".equals(retType)
+                            && !"Map".equals(retType) && !retType.startsWith("Map<")) {
+                        // FIX: Remplacer les types framework par Map<String, Object>
+                        if (isFrameworkType(retType)) {
+                            outputDto = "Map<String, Object>";
+                        } else {
+                            outputDto = retType;
+                        }
+                    }
+                }
+            }
             boolean hasInput = inputDto != null && !inputDto.isEmpty() && !"Void".equals(inputDto);
             boolean hasOutput = outputDto != null && !outputDto.isEmpty() && !"Void".equals(outputDto);
 
@@ -229,9 +263,13 @@ public class BianControllerGrouper {
             }
             sb.append("        try {\n");
 
+            // P0-3 FIX: Determiner le vrai nom de methode a appeler sur l'adapter
+            // Pour BaseUseCase → execute(), pour multi-method → nom reel de la methode
+            String adapterMethodName = resolveAdapterMethodName(uc);
+
             if (hasOutput && hasInput) {
                 sb.append("            ").append(outputDto).append(" response = ").append(adapterField)
-                  .append(".execute(request);\n");
+                  .append(".").append(adapterMethodName).append("(request);\n");
                 if (httpStatus == 201) {
                     sb.append("            log.info(\"[REST-OUT] 201 Created\");\n");
                     sb.append("            return ResponseEntity.status(HttpStatus.CREATED).body(response);\n");
@@ -241,15 +279,15 @@ public class BianControllerGrouper {
                 }
             } else if (hasOutput) {
                 sb.append("            ").append(outputDto).append(" response = ").append(adapterField)
-                  .append(".execute();\n");
+                  .append(".").append(adapterMethodName).append("();\n");
                 sb.append("            log.info(\"[REST-OUT] 200 OK\");\n");
                 sb.append("            return ResponseEntity.ok(response);\n");
             } else if (hasInput) {
-                sb.append("            ").append(adapterField).append(".execute(request);\n");
+                sb.append("            ").append(adapterField).append(".").append(adapterMethodName).append("(request);\n");
                 sb.append("            log.info(\"[REST-OUT] 200 OK\");\n");
                 sb.append("            return ResponseEntity.ok().build();\n");
             } else {
-                sb.append("            ").append(adapterField).append(".execute();\n");
+                sb.append("            ").append(adapterField).append(".").append(adapterMethodName).append("();\n");
                 sb.append("            log.info(\"[REST-OUT] 200 OK\");\n");
                 sb.append("            return ResponseEntity.ok().build();\n");
             }
@@ -294,10 +332,63 @@ public class BianControllerGrouper {
     }
 
     /**
-     * Construit l'URL relative par rapport au base path du controller.
-     * Ex: si controller = /api/v1/current-account et URL BIAN = /current-account/{cr-reference-id}/balance/retrieval
-     * → URL relative = /{cr-reference-id}/balance/retrieval
+     * Resout la methode publique correspondant a l'endpoint BIAN.
+     * Utilise le meme nom que resolveAdapterMethodName.
      */
+    private UseCaseInfo.MethodInfo resolveMethodForEndpoint(UseCaseInfo uc) {
+        List<UseCaseInfo.MethodInfo> methods = uc.getPublicMethods();
+        if (methods == null || methods.isEmpty()) return null;
+        // Pour l'instant, on prend la premiere methode publique
+        // (chaque UseCase represente un endpoint dans le grouper)
+        return methods.get(0);
+    }
+
+    /**
+     * Resout le nom de la methode a appeler sur l'adapter.
+     * - Pour BaseUseCase pattern (execute() unique) → "execute"
+     * - Pour multi-method/generic service → nom de la premiere methode publique
+     * - Fallback → "execute" si aucune methode trouvee
+     *
+     * P0-3 FIX: Evite de hardcoder execute() pour tous les use cases.
+     */
+    private String resolveAdapterMethodName(UseCaseInfo uc) {
+        // Si c'est un BaseUseCase classique, la methode est execute()
+        if (uc.isBaseUseCasePattern()) {
+            return "execute";
+        }
+
+        // Pour les multi-method / generic services, utiliser le nom de la premiere methode publique
+        List<UseCaseInfo.MethodInfo> methods = uc.getPublicMethods();
+        if (methods != null && !methods.isEmpty()) {
+            // Prendre la premiere methode (chaque UseCase dans le grouper represente un endpoint)
+            String methodName = methods.get(0).getName();
+            if (methodName != null && !methodName.isEmpty()) {
+                return methodName;
+            }
+        }
+
+        // Fallback: si le className contient un indice du nom de methode
+        // ou si c'est un UseCase simple, utiliser execute()
+        log.warn("[BianGrouper] Impossible de determiner le nom de methode pour {}, fallback sur execute()", uc.getClassName());
+        return "execute";
+    }
+
+    /**
+     * Verifie si un type est un type framework EJB legacy qui ne doit pas etre utilise dans le code genere.
+     */
+    private static final Set<String> FRAMEWORK_TYPES = Set.of(
+            "Envelope", "Parser", "ParsingException", "UtilHash",
+            "SynchroneService", "Services", "Log", "EaiLog",
+            "FwkRollbackException", "BaseUseCase", "ValueObject"
+    );
+
+    private boolean isFrameworkType(String type) {
+        if (type == null) return false;
+        // Extraire le nom simple (sans package)
+        String simpleName = type.contains(".") ? type.substring(type.lastIndexOf('.') + 1) : type;
+        return FRAMEWORK_TYPES.contains(simpleName);
+    }
+
     private String buildRelativeUrl(BianMapping mapping, String serviceDomain) {
         String fullUrl = mapping.getUrl();
         if (fullUrl == null) {
