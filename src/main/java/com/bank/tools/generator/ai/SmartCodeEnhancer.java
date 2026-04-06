@@ -157,26 +157,24 @@ public class SmartCodeEnhancer {
                     continue;
                 }
 
-                // Logique inversée : on détecte les CRÉATIONS (201) et SUPPRESSIONS (204)
-                // Tout le reste (consultation, transfert, etc.) → 200 OK par défaut
-                String ucName = uc.getClassName().toLowerCase();
-                String javadoc = uc.getJavadoc() != null ? uc.getJavadoc().toLowerCase() : "";
-
-                // Détection basée UNIQUEMENT sur le nom de classe (pas le Javadoc car trop ambigu)
-                boolean isCreation = ucName.contains("create") || ucName.contains("creer")
-                        || ucName.contains("souscrire") || ucName.contains("ajouter")
-                        || ucName.contains("inscrire") || ucName.contains("enregistrer")
-                        || ucName.contains("add") || ucName.contains("insert")
-                        || ucName.contains("register") || ucName.contains("open")
-                        || ucName.contains("save") || ucName.contains("nouveau");
-
-                boolean isDeletion = ucName.contains("delete") || ucName.contains("supprimer")
-                        || ucName.contains("remove") || ucName.contains("close")
-                        || ucName.contains("cancel") || ucName.contains("annuler");
-
-                if (isCreation && usesPost) {
-                    // Opération de création : mettre 201 Created
-                    if (!content.contains("HttpStatus.CREATED")) {
+                // BIAN-aware : si un BianMapping existe, respecter son httpStatus
+                BianMapping mapping = uc.getBianMapping();
+                if (mapping != null && mapping.getHttpStatus() > 0) {
+                    // Ne PAS modifier le code — le AclArchitectureGenerator a deja mis le bon status
+                    report.addEnhancement(new Enhancement("R11", Category.HTTP_METHODS, Severity.INFO,
+                            "HTTP " + mapping.getHttpStatus() + " defini par BIAN pour " + uc.getControllerName()
+                                    + " (action=" + mapping.getAction() + ")",
+                            controllerFile.getFileName().toString(), true));
+                } else {
+                    // Fallback heuristique pour les projets non-BIAN
+                    String ucName = uc.getClassName().toLowerCase();
+                    boolean isCreation = ucName.contains("create") || ucName.contains("creer")
+                            || ucName.contains("souscrire") || ucName.contains("ajouter")
+                            || ucName.contains("inscrire") || ucName.contains("enregistrer")
+                            || ucName.contains("add") || ucName.contains("insert")
+                            || ucName.contains("register") || ucName.contains("open")
+                            || ucName.contains("save") || ucName.contains("nouveau");
+                    if (isCreation && usesPost && !content.contains("HttpStatus.CREATED")) {
                         String improved = content.replace(
                                 "return ResponseEntity.ok(",
                                 "return ResponseEntity.status(HttpStatus.CREATED).body(");
@@ -187,29 +185,8 @@ public class SmartCodeEnhancer {
                         }
                         Files.writeString(controllerFile, improved);
                     }
-                    report.addEnhancement(new Enhancement("R11", Category.HTTP_METHODS, Severity.WARNING,
-                            "POST de création retourne 201 Created dans " + uc.getControllerName(),
-                            controllerFile.getFileName().toString(), true));
-                } else if (isDeletion) {
-                    // Opération de suppression : garder 204 si déjà présent
                     report.addEnhancement(new Enhancement("R11", Category.HTTP_METHODS, Severity.INFO,
-                            "Opération de suppression détectée dans " + uc.getControllerName(),
-                            controllerFile.getFileName().toString(), true));
-                } else {
-                    // Tout le reste (consultation, transfert, etc.) → 200 OK
-                    if (content.contains("HttpStatus.CREATED")) {
-                        // Corriger si le code avait été mis à 201 par erreur
-                        String improved = content.replace(
-                                "ResponseEntity.status(HttpStatus.CREATED).body(",
-                                "ResponseEntity.ok(");
-                        // Supprimer l'import HttpStatus s'il n'est plus nécessaire
-                        if (!improved.contains("HttpStatus.")) {
-                            improved = improved.replace("import org.springframework.http.HttpStatus;\n", "");
-                        }
-                        Files.writeString(controllerFile, improved);
-                    }
-                    report.addEnhancement(new Enhancement("R11", Category.HTTP_METHODS, Severity.INFO,
-                            "POST retourne 200 OK dans " + uc.getControllerName() + " (opération non-création)",
+                            "Heuristique HTTP status pour " + uc.getControllerName(),
                             controllerFile.getFileName().toString(), true));
                 }
             }
@@ -1372,12 +1349,11 @@ public class SmartCodeEnhancer {
             String action = mapping.getAction() != null ? mapping.getAction().toLowerCase() : "";
             String httpMethod = mapping.getHttpMethod() != null ? mapping.getHttpMethod() : "POST";
 
+            // Tableau BIAN definitif : retrieval=POST (body requis), control/update/termination=PUT
             boolean correctMethod = switch (action) {
-                case "retrieval" -> httpMethod.equals("GET");
-                case "initiation" -> httpMethod.equals("POST");
-                case "update" -> httpMethod.equals("PUT");
-                case "termination" -> httpMethod.equals("PUT") || httpMethod.equals("DELETE");
-                case "execution" -> httpMethod.equals("POST");
+                case "retrieval" -> httpMethod.equals("POST"); // POST car les UseCases prennent un VoIn
+                case "initiation", "evaluation", "notification", "execution" -> httpMethod.equals("POST");
+                case "update", "control", "termination" -> httpMethod.equals("PUT");
                 default -> true;
             };
 

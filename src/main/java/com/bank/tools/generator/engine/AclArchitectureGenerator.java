@@ -117,6 +117,7 @@ public class AclArchitectureGenerator {
         String name;
         String type;
         boolean required;
+        List<String> customValidators = new ArrayList<>();
 
         RestField(String name, String type, boolean required) {
             this.name = name;
@@ -162,7 +163,7 @@ public class AclArchitectureGenerator {
 
         // 5. Generer les Interfaces Service (couche Domain)
         for (BianControllerGroup group : groups) {
-            generateServiceInterface(srcMain, group);
+            generateServiceInterface(srcMain, group, analysis);
         }
 
         // 6. Generer les EJB Types (couche Infrastructure)
@@ -185,12 +186,12 @@ public class AclArchitectureGenerator {
 
         // 10. Generer les MockAdapters (couche Infrastructure)
         for (BianControllerGroup group : groups) {
-            generateMockAdapter(srcMain, group);
+            generateMockAdapter(srcMain, group, analysis);
         }
 
         // 11. Generer les Controllers BIAN (couche API)
         for (BianControllerGroup group : groups) {
-            generateBianController(srcMain, group);
+            generateBianController(srcMain, group, analysis);
         }
 
         // 12. Generer le GlobalExceptionHandler (Config)
@@ -328,10 +329,8 @@ public class AclArchitectureGenerator {
             ep.requestDtoName = deriveRestDtoName(ep.ejbInputDtoName, "Request", mapping);
             ep.responseDtoName = deriveRestDtoName(ep.ejbOutputDtoName, "Response", mapping);
 
-            // Pour GET (retrieval) sans body, pas de Request DTO
-            if ("GET".equalsIgnoreCase(mapping.getHttpMethod())) {
-                ep.requestDtoName = null;
-            }
+            // BIAN : tous les endpoints ont un body (meme retrieval = POST avec VoIn)
+            // Pas de suppression du requestDtoName
 
             group.endpoints.add(ep);
             log.info("[ACL] Endpoint: {} → {}.{} [{}]",
@@ -420,6 +419,10 @@ public class AclArchitectureGenerator {
                 } else {
                     sb.append("    @NotNull(message = \"Le champ ").append(f.name).append(" est obligatoire\")\n");
                 }
+            }
+            // Correction 4: @ValidRIB/@ValidIBAN
+            for (String validator : f.customValidators) {
+                sb.append("    ").append(validator).append("\n");
             }
             sb.append("    private ").append(f.type).append(" ").append(f.name).append(";\n\n");
         }
@@ -631,7 +634,7 @@ public class AclArchitectureGenerator {
     // COUCHE DOMAIN : Interfaces Service
     // =====================================================================
 
-    private void generateServiceInterface(Path srcMain, BianControllerGroup group) throws IOException {
+    private void generateServiceInterface(Path srcMain, BianControllerGroup group, ProjectAnalysisResult analysis) throws IOException {
         Path dir = resolvePackagePath(srcMain, PKG_DOMAIN_SERVICE);
         Path file = dir.resolve(group.serviceInterfaceName + ".java");
 
@@ -667,6 +670,13 @@ public class AclArchitectureGenerator {
             }
             sb.append(String.join(", ", params));
             sb.append(");\n\n");
+
+            // Methode byte[] supplementaire pour les endpoints byte[]
+            if (isByteArrayResponse(ep, analysis)) {
+                sb.append("    byte[] ").append(ep.methodName).append("Bytes(");
+                sb.append(String.join(", ", params));
+                sb.append(");\n\n");
+            }
         }
 
         sb.append("}\n");
@@ -882,6 +892,7 @@ public class AclArchitectureGenerator {
         imports.add("import " + PKG_INFRA_EJB_EXCEPTION + ".ExceptionTranslator;");
         imports.add("import org.slf4j.Logger;");
         imports.add("import org.slf4j.LoggerFactory;");
+        imports.add("import org.springframework.beans.factory.annotation.Value;");
         imports.add("import org.springframework.context.annotation.Profile;");
         imports.add("import org.springframework.stereotype.Service;");
 
@@ -893,6 +904,12 @@ public class AclArchitectureGenerator {
         sb.append("public class ").append(adapterName).append(" implements ").append(group.serviceInterfaceName).append(" {\n\n");
 
         sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(adapterName).append(".class);\n\n");
+
+        // Champs JNDI
+        sb.append("    @Value(\"${ejb.jndi.factory:org.jboss.naming.remote.client.InitialContextFactory}\")\n");
+        sb.append("    private String jndiFactory;\n\n");
+        sb.append("    @Value(\"${ejb.jndi.provider.url:remote+http://serveur-ejb:8080}\")\n");
+        sb.append("    private String jndiProviderUrl;\n\n");
 
         // Champs injectes : mappers + exception translator
         sb.append("    private final ExceptionTranslator exceptionTranslator;\n");
@@ -920,11 +937,12 @@ public class AclArchitectureGenerator {
         }
         sb.append("    }\n\n");
 
-        // Methodes
+        // Methodes avec code JNDI reel
         for (BianEndpoint ep : group.endpoints) {
             String returnType = ep.responseDtoName != null ? ep.responseDtoName : "void";
             boolean hasReturn = ep.responseDtoName != null;
             String mapperField = toLowerCamel(deriveMapperName(ep));
+            String jndiName = "java:global/bank/" + ep.useCaseName;
 
             sb.append("    @Override\n");
             sb.append("    public ").append(returnType).append(" ").append(ep.methodName).append("(");
@@ -937,28 +955,51 @@ public class AclArchitectureGenerator {
             sb.append(") {\n");
 
             sb.append("        log.info(\"[EJB-CALL] ").append(ep.useCaseName).append("\");\n");
+            sb.append("        javax.naming.InitialContext ctx = null;\n");
             sb.append("        try {\n");
 
+            // Mapper Request → VoIn
             if (ep.requestDtoName != null && ep.ejbInputDtoName != null) {
                 sb.append("            ").append(ep.ejbInputDtoName).append(" voIn = ").append(mapperField).append(".toEjb(request);\n");
-                sb.append("            log.info(\"[EJB-EXECUTE] Appel EJB avec VoIn: {}\", voIn.getClass().getSimpleName());\n");
             }
 
-            sb.append("            // TODO: Appel JNDI reel ici\n");
-            sb.append("            log.info(\"[EJB-LOOKUP] Recherche EJB ").append(ep.useCaseName).append("\");\n");
+            // JNDI lookup
+            sb.append("            java.util.Properties props = new java.util.Properties();\n");
+            sb.append("            props.put(javax.naming.Context.INITIAL_CONTEXT_FACTORY, jndiFactory);\n");
+            sb.append("            props.put(javax.naming.Context.PROVIDER_URL, jndiProviderUrl);\n");
+            sb.append("            ctx = new javax.naming.InitialContext(props);\n");
+            sb.append("            log.info(\"[EJB-LOOKUP] ").append(jndiName).append("\");\n");
+            sb.append("            Object ejbProxy = ctx.lookup(\"").append(jndiName).append("\");\n");
 
+            // Execute
+            sb.append("            log.info(\"[EJB-EXECUTE] ").append(ep.useCaseName).append("\");\n");
             if (hasReturn && ep.ejbOutputDtoName != null) {
-                sb.append("            ").append(ep.ejbOutputDtoName).append(" voOut = new ").append(ep.ejbOutputDtoName).append("(); // TODO: resultat EJB\n");
-                sb.append("            log.info(\"[EJB-RESPONSE] Reponse EJB recue\");\n");
+                sb.append("            ").append(ep.ejbOutputDtoName).append(" voOut = (").append(ep.ejbOutputDtoName).append(") ");
+                sb.append("java.lang.reflect.Method.class.cast(ejbProxy.getClass().getMethod(\"execute\", Object.class)).invoke(ejbProxy, ");
+                if (ep.ejbInputDtoName != null) {
+                    sb.append("voIn");
+                } else {
+                    sb.append("null");
+                }
+                sb.append(");\n");
+                sb.append("            log.info(\"[EJB-RESPONSE] Reponse EJB recue pour ").append(ep.useCaseName).append("\");\n");
                 sb.append("            return ").append(mapperField).append(".toRest(voOut);\n");
             } else {
-                sb.append("            log.info(\"[EJB-RESPONSE] Appel EJB termine\");\n");
+                sb.append("            ejbProxy.getClass().getMethod(\"execute\", Object.class).invoke(ejbProxy, ");
+                if (ep.ejbInputDtoName != null) {
+                    sb.append("voIn");
+                } else {
+                    sb.append("null");
+                }
+                sb.append(");\n");
+                sb.append("            log.info(\"[EJB-RESPONSE] Appel EJB termine pour ").append(ep.useCaseName).append("\");\n");
             }
 
             sb.append("        } catch (Exception e) {\n");
             sb.append("            log.error(\"[EJB-ERROR] Erreur lors de l'appel EJB ").append(ep.useCaseName).append("\", e);\n");
             sb.append("            throw exceptionTranslator.translate(e);\n");
             sb.append("        } finally {\n");
+            sb.append("            if (ctx != null) { try { ctx.close(); } catch (Exception ignored) {} }\n");
             sb.append("            log.info(\"[EJB-CLEANUP] Fin appel ").append(ep.useCaseName).append("\");\n");
             sb.append("        }\n");
             sb.append("    }\n\n");
@@ -974,7 +1015,7 @@ public class AclArchitectureGenerator {
     // COUCHE INFRASTRUCTURE : MockAdapter
     // =====================================================================
 
-    private void generateMockAdapter(Path srcMain, BianControllerGroup group) throws IOException {
+    private void generateMockAdapter(Path srcMain, BianControllerGroup group, ProjectAnalysisResult analysis) throws IOException {
         String adapterName = toPascalCase(group.serviceDomain) + "MockAdapter";
         Path dir = resolvePackagePath(srcMain, PKG_INFRA_MOCK);
         Path file = dir.resolve(adapterName + ".java");
@@ -1020,7 +1061,8 @@ public class AclArchitectureGenerator {
 
             if (hasReturn) {
                 sb.append("        ").append(ep.responseDtoName).append(" response = new ").append(ep.responseDtoName).append("();\n");
-                sb.append("        // TODO: Remplir avec des donnees mock\n");
+                // Remplir avec des donnees mock realistes
+                generateMockFieldValues(sb, ep, analysis);
                 sb.append("        return response;\n");
             }
 
@@ -1033,11 +1075,69 @@ public class AclArchitectureGenerator {
         log.info("[ACL] MockAdapter genere : {}", adapterName);
     }
 
+    private void generateMockFieldValues(StringBuilder sb, BianEndpoint ep, ProjectAnalysisResult analysis) {
+        DtoInfo ejbOut = findDto(analysis, ep.ejbOutputDtoName);
+        if (ejbOut == null) return;
+
+        for (DtoInfo.FieldInfo field : ejbOut.getFields()) {
+            if ("serialVersionUID".equals(field.getName()) || field.isStatic()) continue;
+            if (LEGACY_FIELDS.contains(field.getName())) continue;
+            if (isFrameworkType(field.getType())) continue;
+
+            String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
+            String setter = "set" + capitalize(restName);
+            String type = cleanType(field.getType());
+
+            String mockValue = switch (type) {
+                case "String" -> getMockStringValue(restName);
+                case "BigDecimal" -> "new java.math.BigDecimal(\"15000.00\")";
+                case "int", "Integer" -> "1";
+                case "long", "Long" -> "1L";
+                case "boolean", "Boolean" -> "true";
+                case "double", "Double" -> "0.035";
+                case "byte[]", "byte []", "Byte[]", "Byte []", "bytes" -> "new byte[]{37,80,68,70}";
+                default -> {
+                    if (isEnumType(type, analysis)) {
+                        yield type + ".values()[0]";
+                    }
+                    yield null;
+                }
+            };
+
+            if (mockValue != null) {
+                sb.append("        response.").append(setter).append("(").append(mockValue).append(");\n");
+            }
+        }
+    }
+
+    private String getMockStringValue(String fieldName) {
+        String lower = fieldName.toLowerCase();
+        if (lower.contains("carte") || lower.contains("numero")) return "\"4532111122223333\"";
+        if (lower.contains("rib") || lower.contains("compte") || lower.contains("iban")) return "\"001078045600100000000000\"";
+        if (lower.contains("nom")) return "\"NORDINE\"";
+        if (lower.contains("prenom")) return "\"Hamza\"";
+        if (lower.contains("email")) return "\"hamza.nordine@example.ma\"";
+        if (lower.contains("telephone") || lower.contains("tel")) return "\"+212661234567\"";
+        if (lower.contains("adresse")) return "\"123 Bd Mohammed V, Casablanca\"";
+        if (lower.contains("statut") || lower.contains("status")) return "\"ACTIF\"";
+        if (lower.contains("devise") || lower.contains("currency")) return "\"MAD\"";
+        if (lower.contains("motif")) return "\"Demande client\"";
+        if (lower.contains("date")) return "\"2026-04-06\"";
+        if (lower.contains("identifiant") || lower.contains("corporate") || lower.contains("client")) return "\"CORP-001\"";
+        if (lower.contains("code")) return "\"OK\"";
+        if (lower.contains("message")) return "\"Operation reussie\"";
+        if (lower.contains("reference")) return "\"REF-2026-001\"";
+        if (lower.contains("type")) return "\"STANDARD\"";
+        if (lower.contains("sujet")) return "\"Notification\"";
+        if (lower.contains("contenu")) return "\"Bienvenue chez BOA\"";
+        return "\"MOCK-VALUE\"";
+    }
+
     // =====================================================================
     // COUCHE API : Controllers BIAN
     // =====================================================================
 
-    private void generateBianController(Path srcMain, BianControllerGroup group) throws IOException {
+    private void generateBianController(Path srcMain, BianControllerGroup group, ProjectAnalysisResult analysis) throws IOException {
         Path dir = resolvePackagePath(srcMain, PKG_API_CONTROLLER);
         Path file = dir.resolve(group.controllerName + ".java");
 
@@ -1122,7 +1222,14 @@ public class AclArchitectureGenerator {
                 sb.append("    @ResponseStatus(HttpStatus.CREATED)\n");
             }
 
-            String returnType = ep.responseDtoName != null ? ep.responseDtoName : "Void";
+            // Correction 7: byte[] → Content-Disposition
+            boolean isByteArray = isByteArrayResponse(ep, analysis);
+            String returnType;
+            if (isByteArray) {
+                returnType = "byte[]";
+            } else {
+                returnType = ep.responseDtoName != null ? ep.responseDtoName : "Void";
+            }
             sb.append("    public ResponseEntity<").append(returnType).append("> ").append(ep.methodName).append("(\n");
 
             List<String> methodParams = new ArrayList<>();
@@ -1142,27 +1249,42 @@ public class AclArchitectureGenerator {
             sb.append(String.join(",\n", methodParams));
             sb.append(") {\n\n");
 
-            sb.append("        log.info(\"[REST-IN] ").append(httpMethod).append(" ").append(basePath).append(relativePath).append("\");\n\n");
+            sb.append("        log.info(\"[REST-IN] ").append(httpMethod).append(" ").append(basePath).append(relativePath).append("\");");
+            sb.append("\n");
+
+            // try/catch avec [REST-ERROR]
+            sb.append("        try {\n");
 
             // Appel au service
             List<String> callParams = new ArrayList<>();
             if (hasCrRef) callParams.add("crReferenceId");
             if (ep.requestDtoName != null) callParams.add("request");
 
-            if (ep.responseDtoName != null) {
-                sb.append("        ").append(ep.responseDtoName).append(" response = ").append(serviceField).append(".").append(ep.methodName).append("(").append(String.join(", ", callParams)).append(");\n\n");
-                sb.append("        log.info(\"[REST-OUT] ").append(httpStatus).append(" OK\");\n");
+            if (isByteArray) {
+                sb.append("            byte[] data = ").append(serviceField).append(".").append(ep.methodName).append("Bytes(").append(String.join(", ", callParams)).append(");\n");
+                sb.append("            log.info(\"[REST-OUT] 200 OK (byte[] size={})\", data != null ? data.length : 0);\n");
+                sb.append("            return ResponseEntity.ok()\n");
+                sb.append("                    .header(\"Content-Disposition\", \"attachment; filename=document.pdf\")\n");
+                sb.append("                    .header(\"Content-Type\", \"application/pdf\")\n");
+                sb.append("                    .body(data);\n");
+            } else if (ep.responseDtoName != null) {
+                sb.append("            ").append(ep.responseDtoName).append(" response = ").append(serviceField).append(".").append(ep.methodName).append("(").append(String.join(", ", callParams)).append(");\n");
+                sb.append("            log.info(\"[REST-OUT] ").append(httpStatus).append(" OK\");\n");
                 if (httpStatus == 201) {
-                    sb.append("        return ResponseEntity.status(HttpStatus.CREATED).body(response);\n");
+                    sb.append("            return ResponseEntity.status(HttpStatus.CREATED).body(response);\n");
                 } else {
-                    sb.append("        return ResponseEntity.ok(response);\n");
+                    sb.append("            return ResponseEntity.ok(response);\n");
                 }
             } else {
-                sb.append("        ").append(serviceField).append(".").append(ep.methodName).append("(").append(String.join(", ", callParams)).append(");\n");
-                sb.append("        log.info(\"[REST-OUT] ").append(httpStatus).append(" OK\");\n");
-                sb.append("        return ResponseEntity.ok().build();\n");
+                sb.append("            ").append(serviceField).append(".").append(ep.methodName).append("(").append(String.join(", ", callParams)).append(");\n");
+                sb.append("            log.info(\"[REST-OUT] ").append(httpStatus).append(" OK\");\n");
+                sb.append("            return ResponseEntity.ok().build();\n");
             }
 
+            sb.append("        } catch (Exception e) {\n");
+            sb.append("            log.error(\"[REST-ERROR] ").append(ep.methodName).append(" failed\", e);\n");
+            sb.append("            throw e;\n");
+            sb.append("        }\n");
             sb.append("    }\n\n");
         }
 
@@ -1461,12 +1583,28 @@ public class AclArchitectureGenerator {
             if (field.isStatic()) continue;
             if (LEGACY_FIELDS.contains(field.getName())) continue;
             if (isFrameworkType(field.getType())) continue;
+            // Correction 7: @XmlTransient → exclure du RestDTO
+            if (field.isHasXmlTransient()) continue;
 
             String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
             String restType = cleanType(field.getType());
             boolean required = field.isRequired() && isRequest;
 
-            fields.add(new RestField(restName, restType, required));
+            // Correction 4: @ValidRIB/@ValidIBAN → préserver les validateurs custom
+            List<String> customValidators = new ArrayList<>();
+            if (field.getCustomAnnotations() != null) {
+                for (String ann : field.getCustomAnnotations()) {
+                    if (ann.contains("ValidRIB") || ann.contains("ValidIBAN")) {
+                        String cleaned = ann.replace("javax.", "jakarta.");
+                        if (!cleaned.startsWith("@")) cleaned = "@" + cleaned;
+                        customValidators.add(cleaned);
+                    }
+                }
+            }
+
+            RestField rf = new RestField(restName, restType, required);
+            rf.customValidators = customValidators;
+            fields.add(rf);
         }
 
         return fields;
@@ -1524,5 +1662,29 @@ public class AclArchitectureGenerator {
     private String humanize(String camelCase) {
         if (camelCase == null) return "";
         return camelCase.replaceAll("([a-z])([A-Z])", "$1 $2");
+    }
+
+    /**
+     * Detecte si un UseCase retourne byte[] (ex: GenererDocumentUC).
+     */
+    private boolean isByteArrayResponse(BianEndpoint ep, ProjectAnalysisResult analysis) {
+        // Verifier si le VoOut contient un champ byte[]
+        DtoInfo ejbOut = findDto(analysis, ep.ejbOutputDtoName);
+        if (ejbOut != null) {
+            for (DtoInfo.FieldInfo field : ejbOut.getFields()) {
+                String type = field.getType();
+                if (type != null && (type.contains("byte[]") || type.contains("Byte[]"))) {
+                    return true;
+                }
+            }
+        }
+        // Fallback: detecter par le nom du UseCase
+        if (ep.useCaseName != null) {
+            String lower = ep.useCaseName.toLowerCase();
+            if (lower.contains("document") || lower.contains("generer") || lower.contains("export") || lower.contains("pdf")) {
+                return true;
+            }
+        }
+        return false;
     }
 }

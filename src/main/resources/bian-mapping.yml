@@ -1,7 +1,9 @@
-# =============================================================================
-# Configuration BIAN pour Compleo EJB-to-REST
-# Mapping des UseCases/Services vers les Service Domains BIAN
-# Version : 12.0
+# ============================================================
+# BIAN Mapping Configuration — Compleo EJB-to-REST Generator
+# ============================================================
+#
+# Ce fichier est la propriete de Compleo. Il configure le mapping
+# entre les UseCases EJB legacy et les Service Domains BIAN.
 #
 # Le generateur est AUTONOME : ce fichier embarque dans le classpath
 # contient toutes les regles de mapping. Aucun fichier BIAN n'est
@@ -11,20 +13,114 @@
 # 1. Mapping explicite par nom exact du UseCase
 # 2. Mapping automatique par mots-cles (domain + action + BQ)
 # 3. Fallback : kebab-case du nom + action "execution"
-# =============================================================================
+#
+# Tableau BIAN definitif des 8 actions :
+# | Action       | HTTP | {cr-reference-id} | Code |
+# |-------------|------|-------------------|------|
+# | initiation   | POST | NON               | 201  |
+# | evaluation   | POST | NON               | 200  |
+# | notification | POST | NON               | 201  |
+# | retrieval    | POST | OUI               | 200  |
+# | execution    | POST | OUI               | 200  |
+# | control      | PUT  | OUI               | 200  |
+# | update       | PUT  | OUI               | 200  |
+# | termination  | PUT  | OUI               | 200  |
 
 bian:
   version: "12.0"
   base-path: "/api/v1"
 
-  # =========================================================================
-  # Mapping automatique par mots-cles dans le nom du UseCase
-  # =========================================================================
-  auto-mapping:
+  # ============================================================
+  # EXPLICIT MAPPING — 12 UseCases Compleo
+  # ============================================================
+  explicit-mapping:
+    # --- Card Management (SD0070) ---
+    - use-case: "ActiverCarteUC"
+      service-domain: "card-management"
+      bian-id: "SD0070"
+      behavior-qualifier: "activation"
+      action: "execution"
+      summary: "Activation d'une carte bancaire"
 
-    # Mots-cles → Service Domain
-    # IMPORTANT : les entrees avec behavior-qualifier DOIVENT etre AVANT
-    # les entrees generiques pour le meme service-domain (first match wins)
+    - use-case: "ReceptionnerCarteUC"
+      service-domain: "card-management"
+      bian-id: "SD0070"
+      behavior-qualifier: "reception"
+      action: "execution"
+      summary: "Reception d'une carte en agence"
+
+    - use-case: "BloquerCarteUC"
+      service-domain: "card-management"
+      bian-id: "SD0070"
+      behavior-qualifier: "blocking"
+      action: "control"
+      summary: "Blocage d'une carte bancaire"
+
+    # --- Party (SD0254) ---
+    - use-case: "ChargerClientDataUC"
+      service-domain: "party"
+      bian-id: "SD0254"
+      action: "retrieval"
+      summary: "Consultation des donnees client"
+
+    - use-case: "MajClientUC"
+      service-domain: "party"
+      bian-id: "SD0254"
+      action: "update"
+      summary: "Mise a jour des donnees client"
+
+    # --- Current Account (SD0152) ---
+    - use-case: "ConsulterSoldeUC"
+      service-domain: "current-account"
+      bian-id: "SD0152"
+      behavior-qualifier: "balance"
+      action: "retrieval"
+      summary: "Consultation du solde"
+
+    - use-case: "OuvrirCompteUC"
+      service-domain: "current-account"
+      bian-id: "SD0152"
+      action: "initiation"
+      summary: "Ouverture de compte"
+
+    - use-case: "CloturerCompteUC"
+      service-domain: "current-account"
+      bian-id: "SD0152"
+      action: "termination"
+      summary: "Cloture de compte"
+
+    # --- Payment Initiation (SD0249) ---
+    - use-case: "VirementUC"
+      service-domain: "payment-initiation"
+      bian-id: "SD0249"
+      action: "initiation"
+      summary: "Virement bancaire"
+
+    # --- Loan (SD0433) ---
+    - use-case: "SimulerCreditUC"
+      service-domain: "loan"
+      bian-id: "SD0433"
+      action: "evaluation"
+      summary: "Simulation credit"
+
+    # --- Customer Notification (SD0121) ---
+    - use-case: "EnvoyerNotificationUC"
+      service-domain: "customer-notification"
+      bian-id: "SD0121"
+      action: "notification"
+      summary: "Notification client"
+
+    # --- Document Management (SD0281) ---
+    - use-case: "GenererDocumentUC"
+      service-domain: "document-management"
+      bian-id: "SD0281"
+      action: "retrieval"
+      summary: "Generation document bancaire"
+
+  # ============================================================
+  # AUTO-MAPPING (fallback si pas de match explicite)
+  # ============================================================
+  auto-mapping:
     keywords-to-domain:
       # --- current-account avec BQ specifiques ---
       - keywords: ["solde", "balance"]
@@ -35,25 +131,13 @@ bian:
         service-domain: "current-account"
         bian-id: "SD0152"
         behavior-qualifier: "transaction"
-      - keywords: ["depot", "deposit"]
-        service-domain: "current-account"
-        bian-id: "SD0152"
-        behavior-qualifier: "deposit"
-      - keywords: ["retrait", "withdrawal"]
-        service-domain: "current-account"
-        bian-id: "SD0152"
-        behavior-qualifier: "withdrawal"
-      - keywords: ["cheque", "check"]
-        service-domain: "current-account"
-        bian-id: "SD0152"
-        behavior-qualifier: "check"
-      # --- current-account generique (APRES les BQ specifiques) ---
+      # --- current-account generique ---
       - keywords: ["compte", "account"]
         service-domain: "current-account"
         bian-id: "SD0152"
 
       # --- card-management avec BQ specifiques ---
-      - keywords: ["bloquer", "block", "blocage", "geler", "freeze"]
+      - keywords: ["bloquer", "block", "blocage"]
         service-domain: "card-management"
         bian-id: "SD0070"
         behavior-qualifier: "blocking"
@@ -71,202 +155,59 @@ bian:
         bian-id: "SD0070"
 
       # --- Autres service domains ---
-      - keywords: ["epargne", "savings"]
-        service-domain: "savings-account"
-        bian-id: "SD0155"
       - keywords: ["virement", "transfer", "payment", "paiement"]
         service-domain: "payment-initiation"
         bian-id: "SD0249"
-      - keywords: ["client", "party", "customer", "charger"]
+      - keywords: ["client", "party", "customer", "charger", "maj"]
         service-domain: "party"
         bian-id: "SD0254"
-      - keywords: ["pret", "loan", "credit", "simulation", "simuler"]
+      - keywords: ["pret", "loan", "credit", "simuler"]
         service-domain: "loan"
         bian-id: "SD0433"
-      - keywords: ["notification", "sms", "email", "notify"]
+      - keywords: ["notification", "notifier", "envoyer", "sms", "email"]
         service-domain: "customer-notification"
         bian-id: "SD0121"
-      - keywords: ["document", "ged", "souscription"]
+      - keywords: ["document", "releve", "attestation", "generer"]
         service-domain: "document-management"
         bian-id: "SD0281"
-      - keywords: ["assurance", "insurance"]
-        service-domain: "product-directory"
-        bian-id: "SD0313"
-      - keywords: ["change", "forex", "devise"]
-        service-domain: "currency-exchange"
-        bian-id: "SD0159"
 
-    # Mots-cles → Action BIAN
-    # Le httpMethod et httpStatus sont deduits de l'action par defaut
-    # (voir BianMappingConfig.parseKeywordsToAction)
     keywords-to-action:
-      - keywords: ["create", "creer", "ouvrir", "open", "souscrire", "initier"]
+      - keywords: ["ouvrir", "creer", "create", "open", "initier"]
         action: "initiation"
         http-method: "POST"
         http-status: 201
-      - keywords: ["charger", "get", "find", "consulter", "retrieve", "lire", "read", "search", "list"]
+
+      - keywords: ["consulter", "charger", "lire", "get", "retrieve", "search", "generer"]
         action: "retrieval"
-        http-method: "GET"
+        http-method: "POST"
         http-status: 200
-      - keywords: ["update", "modifier", "maj", "edit", "change"]
+
+      - keywords: ["modifier", "maj", "update", "mettre"]
         action: "update"
         http-method: "PUT"
         http-status: 200
-      - keywords: ["activer", "execute", "transfer", "virement", "process", "run", "traiter"]
+
+      - keywords: ["activer", "executer", "receptionner", "execute"]
         action: "execution"
         http-method: "POST"
-        http-status: 201
-      - keywords: ["close", "cloturer", "resilier", "terminate", "annuler", "cancel"]
-        action: "termination"
-        http-method: "PUT"
         http-status: 200
-      - keywords: ["simuler", "simulation", "evaluer", "evaluate", "calculer"]
-        action: "evaluation"
-        http-method: "POST"
-        http-status: 200
-      - keywords: ["notification", "notify", "envoyer", "send"]
-        action: "notification"
-        http-method: "POST"
-        http-status: 200
-      - keywords: ["bloquer", "block", "geler", "freeze"]
+
+      - keywords: ["bloquer", "control", "verifier"]
         action: "control"
         http-method: "PUT"
         http-status: 200
-      - keywords: ["demander", "request", "approuver", "approve"]
-        action: "request"
+
+      - keywords: ["simuler", "evaluer", "evaluate"]
+        action: "evaluation"
         http-method: "POST"
         http-status: 200
-      - keywords: ["receptionner", "reception", "receive"]
-        action: "execution"
+
+      - keywords: ["cloturer", "fermer", "close", "terminate"]
+        action: "termination"
+        http-method: "PUT"
+        http-status: 200
+
+      - keywords: ["notifier", "envoyer", "notify", "send"]
+        action: "notification"
         http-method: "POST"
         http-status: 201
-
-  # =========================================================================
-  # Mapping explicite (override le mapping automatique)
-  # Catalogue de reference pour les UseCases connus.
-  # Le generateur est autonome : ces mappings couvrent les cas courants
-  # de la banque. Pour les UseCases non listes ici, le mapping automatique
-  # par mots-cles prend le relais.
-  # =========================================================================
-  explicit-mapping:
-    # --- Card Management ---
-    - use-case: "ActiverCarteUC"
-      service-domain: "card-management"
-      bian-id: "SD0070"
-      behavior-qualifier: "activation"
-      action: "execution"
-      summary: "Activation d'une carte bancaire"
-
-    - use-case: "ReceptionnerCarteUC"
-      service-domain: "card-management"
-      bian-id: "SD0070"
-      behavior-qualifier: "reception"
-      action: "execution"
-      summary: "Reception d'une carte bancaire en agence"
-
-    - use-case: "BloquerCarteUC"
-      service-domain: "card-management"
-      bian-id: "SD0070"
-      behavior-qualifier: "blocking"
-      action: "control"
-      summary: "Blocage d'une carte bancaire"
-
-    # --- Party ---
-    - use-case: "ChargerClientDataUC"
-      service-domain: "party"
-      bian-id: "SD0254"
-      action: "retrieval"
-      summary: "Consultation des donnees client"
-
-    - use-case: "UpdateClientUC"
-      service-domain: "party"
-      bian-id: "SD0254"
-      action: "update"
-      summary: "Mise a jour des donnees client"
-
-    # --- Current Account ---
-    - use-case: "ConsulterSoldeUC"
-      service-domain: "current-account"
-      bian-id: "SD0152"
-      behavior-qualifier: "balance"
-      action: "retrieval"
-      summary: "Consultation du solde d'un compte"
-
-    - use-case: "OuvrirCompteUC"
-      service-domain: "current-account"
-      bian-id: "SD0152"
-      action: "initiation"
-      summary: "Ouverture d'un nouveau compte bancaire"
-
-    - use-case: "CreateAccountUC"
-      service-domain: "current-account"
-      bian-id: "SD0152"
-      action: "initiation"
-      summary: "Ouverture d'un nouveau compte bancaire"
-
-    - use-case: "CloseAccountUC"
-      service-domain: "current-account"
-      bian-id: "SD0152"
-      action: "termination"
-      summary: "Cloture d'un compte bancaire"
-
-    - use-case: "AccountBalanceUC"
-      service-domain: "current-account"
-      bian-id: "SD0152"
-      behavior-qualifier: "balance"
-      action: "retrieval"
-      summary: "Consultation du solde d'un compte"
-
-    - use-case: "TransactionHistoryUC"
-      service-domain: "current-account"
-      bian-id: "SD0152"
-      behavior-qualifier: "transaction"
-      action: "retrieval"
-      summary: "Consultation de l'historique des transactions"
-
-    # --- Payment Initiation ---
-    - use-case: "VirementUC"
-      service-domain: "payment-initiation"
-      bian-id: "SD0249"
-      action: "initiation"
-      summary: "Initiation d'un virement bancaire"
-
-    - use-case: "TransferMoneyUC"
-      service-domain: "payment-initiation"
-      bian-id: "SD0249"
-      action: "initiation"
-      summary: "Initiation d'un virement bancaire"
-
-    - use-case: "VirementInterneUC"
-      service-domain: "payment-initiation"
-      bian-id: "SD0249"
-      behavior-qualifier: "internal-transfer"
-      action: "initiation"
-      summary: "Virement interne entre comptes du meme client"
-
-    - use-case: "VirementExterneUC"
-      service-domain: "payment-initiation"
-      bian-id: "SD0249"
-      behavior-qualifier: "external-transfer"
-      action: "initiation"
-      summary: "Virement externe vers un autre etablissement"
-
-    - use-case: "VirementPermanentUC"
-      service-domain: "payment-initiation"
-      bian-id: "SD0249"
-      behavior-qualifier: "standing-order"
-      action: "initiation"
-      summary: "Mise en place d'un virement permanent"
-
-    # --- Loan ---
-    - use-case: "SimulerCreditUC"
-      service-domain: "loan"
-      bian-id: "SD0433"
-      action: "evaluation"
-      summary: "Simulation d'un credit bancaire"
-
-    - use-case: "LoanSimulationUC"
-      service-domain: "loan"
-      bian-id: "SD0433"
-      action: "evaluation"
-      summary: "Simulation d'un pret bancaire"

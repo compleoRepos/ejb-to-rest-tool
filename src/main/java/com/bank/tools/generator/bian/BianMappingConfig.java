@@ -100,6 +100,20 @@ public class BianMappingConfig {
         }
     }
 
+    /**
+     * Parse les keywords-to-action avec le tableau BIAN definitif :
+     *
+     * | Action       | HTTP | {cr-reference-id} | Code |
+     * |-------------|------|-------------------|------|
+     * | initiation   | POST | NON               | 201  |
+     * | evaluation   | POST | NON               | 200  |
+     * | notification | POST | NON               | 201  |
+     * | retrieval    | POST | OUI               | 200  |
+     * | execution    | POST | OUI               | 200  |
+     * | control      | PUT  | OUI               | 200  |
+     * | update       | PUT  | OUI               | 200  |
+     * | termination  | PUT  | OUI               | 200  |
+     */
     @SuppressWarnings("unchecked")
     private void parseKeywordsToAction(Map<String, Object> autoMapping) {
         if (!autoMapping.containsKey("keywords-to-action")) return;
@@ -109,15 +123,11 @@ public class BianMappingConfig {
             kam.keywords = (List<String>) entry.get("keywords");
             kam.action = (String) entry.get("action");
             // Deduire le httpMethod de l'action BIAN
-            String defaultMethod = switch (kam.action) {
-                case "retrieval" -> "GET";
-                case "update", "control", "termination" -> "PUT";
-                default -> "POST";
-            };
+            String defaultMethod = deriveDefaultHttpMethod(kam.action);
             kam.httpMethod = (String) entry.getOrDefault("http-method", defaultMethod);
-            // BIAN: initiation et execution retournent 201 Created par defaut
-            int kamDefaultStatus = ("initiation".equals(kam.action) || "execution".equals(kam.action)) ? 201 : 200;
-            kam.httpStatus = entry.containsKey("http-status") ? ((Number) entry.get("http-status")).intValue() : kamDefaultStatus;
+            // Deduire le httpStatus de l'action BIAN
+            int defaultStatus = deriveDefaultHttpStatus(kam.action);
+            kam.httpStatus = entry.containsKey("http-status") ? ((Number) entry.get("http-status")).intValue() : defaultStatus;
             keywordsToAction.add(kam);
         }
     }
@@ -133,18 +143,40 @@ public class BianMappingConfig {
             em.action = (String) entry.get("action");
             em.url = (String) entry.getOrDefault("url", null);
             // Deduire le httpMethod de l'action BIAN si non specifie
-            String defaultMethod = switch (em.action) {
-                case "retrieval" -> "GET";
-                case "update", "control", "termination" -> "PUT";
-                default -> "POST"; // initiation, execution, evaluation, notification, request
-            };
+            String defaultMethod = deriveDefaultHttpMethod(em.action);
             em.httpMethod = (String) entry.getOrDefault("http-method", defaultMethod);
-            // BIAN: initiation et execution retournent 201 Created par defaut
-            int defaultStatus = ("initiation".equals(em.action) || "execution".equals(em.action)) ? 201 : 200;
+            // Deduire le httpStatus de l'action BIAN
+            int defaultStatus = deriveDefaultHttpStatus(em.action);
             em.httpStatus = entry.containsKey("http-status") ? ((Number) entry.get("http-status")).intValue() : defaultStatus;
             em.summary = (String) entry.getOrDefault("summary", "");
             explicitMappings.add(em);
         }
+    }
+
+    // ===================== DEFAULTS BIAN =====================
+
+    /**
+     * Tableau BIAN definitif des methodes HTTP par action.
+     * retrieval = POST (car les UseCases prennent un VoIn → body requis)
+     */
+    private String deriveDefaultHttpMethod(String action) {
+        if (action == null) return "POST";
+        return switch (action) {
+            case "control", "update", "termination" -> "PUT";
+            default -> "POST"; // initiation, evaluation, notification, retrieval, execution, request, exchange, grant
+        };
+    }
+
+    /**
+     * Tableau BIAN definitif des codes HTTP par action.
+     * initiation = 201, notification = 201, tout le reste = 200
+     */
+    private int deriveDefaultHttpStatus(String action) {
+        if (action == null) return 200;
+        return switch (action) {
+            case "initiation", "notification" -> 201;
+            default -> 200; // evaluation, retrieval, execution, control, update, termination
+        };
     }
 
     // ===================== ACCESSEURS =====================
