@@ -174,13 +174,19 @@ public class CodeGenerationEngine {
         }
 
         // AXE 1.1 : Recopier les enums JAXB
-        for (ProjectAnalysisResult.EnumInfo enumInfo : analysisResult.getDetectedEnums()) {
-            generateEnumClass(srcMain, enumInfo);
+        if (aclArchitectureGenerator == null || !bianMode) {
+            // En mode ACL, les enums sont generes dans dto/enums par l'ACL generator
+            for (ProjectAnalysisResult.EnumInfo enumInfo : analysisResult.getDetectedEnums()) {
+                generateEnumClass(srcMain, enumInfo);
+            }
         }
 
         // AXE 1.6 : Recopier les exceptions custom + enrichir GlobalExceptionHandler
-        for (ProjectAnalysisResult.ExceptionInfo excInfo : analysisResult.getDetectedExceptions()) {
-            generateExceptionClass(srcMain, excInfo);
+        if (aclArchitectureGenerator == null || !bianMode) {
+            // En mode ACL, les exceptions sont dans domain/exception
+            for (ProjectAnalysisResult.ExceptionInfo excInfo : analysisResult.getDetectedExceptions()) {
+                generateExceptionClass(srcMain, excInfo);
+            }
         }
 
         // AXE 1.5 : Recopier les validateurs custom
@@ -278,7 +284,14 @@ public class CodeGenerationEngine {
                 // ACL : Generer l'architecture decouplée (4 couches)
                 if (aclArchitectureGenerator != null) {
                     try {
-                        aclArchitectureGenerator.generateAclArchitecture(srcMain, analysisResult, grouped);
+                        // Construire Map<className, BianMapping> depuis les UseCases
+                        Map<String, BianMapping> bianMappingMap = new LinkedHashMap<>();
+                        for (UseCaseInfo uc : bianUseCases) {
+                            if (uc.getBianMapping() != null) {
+                                bianMappingMap.put(uc.getClassName(), uc.getBianMapping());
+                            }
+                        }
+                        aclArchitectureGenerator.generate(srcMain, analysisResult, bianMappingMap);
                         log.info("[ACL] Architecture decouplée generee avec succes");
                     } catch (Exception e) {
                         log.error("[ACL] Erreur lors de la generation ACL : {}", e.getMessage(), e);

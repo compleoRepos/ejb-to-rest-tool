@@ -104,7 +104,9 @@ public class BianMappingConfig {
             kam.keywords = (List<String>) entry.get("keywords");
             kam.action = (String) entry.get("action");
             kam.httpMethod = (String) entry.get("http-method");
-            kam.httpStatus = entry.containsKey("http-status") ? ((Number) entry.get("http-status")).intValue() : 200;
+            // BIAN: initiation et execution retournent 201 Created par defaut
+            int kamDefaultStatus = ("initiation".equals(kam.action) || "execution".equals(kam.action)) ? 201 : 200;
+            kam.httpStatus = entry.containsKey("http-status") ? ((Number) entry.get("http-status")).intValue() : kamDefaultStatus;
             keywordsToAction.add(kam);
         }
     }
@@ -119,8 +121,16 @@ public class BianMappingConfig {
             em.behaviorQualifier = (String) entry.getOrDefault("behavior-qualifier", null);
             em.action = (String) entry.get("action");
             em.url = (String) entry.getOrDefault("url", null);
-            em.httpMethod = (String) entry.getOrDefault("http-method", "POST");
-            em.httpStatus = entry.containsKey("http-status") ? ((Number) entry.get("http-status")).intValue() : 200;
+            // Deduire le httpMethod de l'action BIAN si non specifie
+            String defaultMethod = switch (em.action) {
+                case "retrieval" -> "GET";
+                case "update", "control", "termination" -> "PUT";
+                default -> "POST"; // initiation, execution, evaluation, notification, request
+            };
+            em.httpMethod = (String) entry.getOrDefault("http-method", defaultMethod);
+            // BIAN: initiation et execution retournent 201 Created par defaut
+            int defaultStatus = ("initiation".equals(em.action) || "execution".equals(em.action)) ? 201 : 200;
+            em.httpStatus = entry.containsKey("http-status") ? ((Number) entry.get("http-status")).intValue() : defaultStatus;
             em.summary = (String) entry.getOrDefault("summary", "");
             explicitMappings.add(em);
         }
