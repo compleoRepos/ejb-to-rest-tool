@@ -43,6 +43,9 @@ public class CodeGenerationEngine {
     /** Module de resolution du mapping BIAN */
     private BianMappingResolver bianMappingResolver;
 
+    /** Module de generation de l'architecture decouplée ACL */
+    private AclArchitectureGenerator aclArchitectureGenerator;
+
     public CodeGenerationEngine(ImportResolver importResolver, BianServiceDomainMapper bianMapper) {
         this.importResolver = importResolver;
         this.bianMapper = bianMapper;
@@ -61,6 +64,11 @@ public class CodeGenerationEngine {
     @Autowired(required = false)
     public void setBianMappingResolver(BianMappingResolver bianMappingResolver) {
         this.bianMappingResolver = bianMappingResolver;
+    }
+
+    @Autowired(required = false)
+    public void setAclArchitectureGenerator(AclArchitectureGenerator aclArchitectureGenerator) {
+        this.aclArchitectureGenerator = aclArchitectureGenerator;
     }
 
     private static final String BASE_PACKAGE = "com.bank.api";
@@ -151,11 +159,15 @@ public class CodeGenerationEngine {
         generatePomXml(projectRoot, projectHasXml, projectHasValidation, analysisResult);
         generateApplicationClass(srcMain);
         generateApplicationProperties(resourcesDir);
-        generateGlobalExceptionHandler(srcMain, analysisResult);   // G9 enrichi + AXE 1.6 exceptions custom
+        if (aclArchitectureGenerator == null || !bianMode) {
+            generateGlobalExceptionHandler(srcMain, analysisResult);   // G9 enrichi + AXE 1.6 exceptions custom
+        }
         generateLoggingAspect(srcMain);
-        generateEjbLookupConfig(srcMain);
-        generateBaseUseCaseInterface(srcMain);
-        generateValueObjectInterface(srcMain);
+        if (aclArchitectureGenerator == null || !bianMode) {
+            generateEjbLookupConfig(srcMain);
+            generateBaseUseCaseInterface(srcMain);
+            generateValueObjectInterface(srcMain);
+        }
 
         if (projectHasXml) {
             generateXmlConfig(srcMain);
@@ -210,11 +222,17 @@ public class CodeGenerationEngine {
             boolean skipIndividualController = bianMode && bianControllerGrouper != null
                     && bianMapping != null && bianMapping.isBianCompliant;
 
+            // En mode ACL, les service adapters et controllers sont remplacés par l'architecture ACL
+            boolean skipServiceAdapter = bianMode && aclArchitectureGenerator != null
+                    && bianMapping != null && bianMapping.isBianCompliant;
+
             if (useCase.getEjbPattern() == UseCaseInfo.EjbPattern.BASE_USE_CASE) {
                 if (!skipIndividualController) {
                     generateController(srcMain, useCase);
                 }
-                generateServiceAdapter(srcMain, useCase);
+                if (!skipServiceAdapter) {
+                    generateServiceAdapter(srcMain, useCase);
+                }
             } else {
                 if (!skipIndividualController) {
                     if (bianMode && bianMapping != null && bianMapping.isBianCompliant) {
@@ -223,13 +241,20 @@ public class CodeGenerationEngine {
                         generateMultiMethodController(srcMain, useCase);
                     }
                 }
-                generateMultiMethodServiceAdapter(srcMain, useCase);
+                if (!skipServiceAdapter) {
+                    generateMultiMethodServiceAdapter(srcMain, useCase);
+                }
             }
         }
 
-        // Generer les DTOs
-        for (DtoInfo dto : analysisResult.getDtos()) {
-            generateDtoClass(srcMain, dto);
+        // Generer les DTOs (en mode ACL, les DTOs legacy sont remplacés par RestDTOs + types EJB)
+        boolean aclActive = bianMode && aclArchitectureGenerator != null;
+        if (!aclActive) {
+            for (DtoInfo dto : analysisResult.getDtos()) {
+                generateDtoClass(srcMain, dto);
+            }
+        } else {
+            log.info("[ACL] DTOs legacy non générés dans dto/ (remplacés par RestDTOs + infrastructure/ejb/types)");
         }
 
         // BIAN v2 : Generer les controllers regroupes par Service Domain
@@ -239,11 +264,26 @@ public class CodeGenerationEngine {
                     .collect(Collectors.toList());
             if (!bianUseCases.isEmpty()) {
                 Map<String, List<UseCaseInfo>> grouped = bianControllerGrouper.groupByServiceDomain(bianUseCases);
-                for (Map.Entry<String, List<UseCaseInfo>> entry : grouped.entrySet()) {
-                    bianControllerGrouper.generateGroupedController(
-                            srcMain, entry.getKey(), entry.getValue(), BASE_PACKAGE);
+                // En mode ACL, ne pas générer les controllers BIAN groupés (remplacés par les controllers ACL)
+                if (aclArchitectureGenerator == null) {
+                    for (Map.Entry<String, List<UseCaseInfo>> entry : grouped.entrySet()) {
+                        bianControllerGrouper.generateGroupedController(
+                                srcMain, entry.getKey(), entry.getValue(), BASE_PACKAGE);
+                    }
+                    log.info("[BIAN v2] {} controllers regroupes generes", grouped.size());
+                } else {
+                    log.info("[ACL] Controllers BIAN groupés non générés (remplacés par controllers ACL)");
                 }
-                log.info("[BIAN v2] {} controllers regroupes generes", grouped.size());
+
+                // ACL : Generer l'architecture decouplée (4 couches)
+                if (aclArchitectureGenerator != null) {
+                    try {
+                        aclArchitectureGenerator.generateAclArchitecture(srcMain, analysisResult, grouped);
+                        log.info("[ACL] Architecture decouplée generee avec succes");
+                    } catch (Exception e) {
+                        log.error("[ACL] Erreur lors de la generation ACL : {}", e.getMessage(), e);
+                    }
+                }
             }
         }
 

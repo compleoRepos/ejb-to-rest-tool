@@ -196,7 +196,8 @@ public class GeneratorController {
     }
 
     @PostMapping("/generate")
-    public String generateProject(RedirectAttributes redirectAttributes, HttpSession session) {
+    public String generateProject(@RequestParam(value = "bianMode", defaultValue = "false") boolean bianMode,
+                                    RedirectAttributes redirectAttributes, HttpSession session) {
         String projectId = (String) session.getAttribute("projectId");
         ProjectAnalysisResult analysisResult = (ProjectAnalysisResult) session.getAttribute("analysisResult");
 
@@ -213,8 +214,8 @@ public class GeneratorController {
         }
 
         try {
-            log.info("Generation du projet API pour : {}", projectId);
-            generatorService.generateProject(projectId, analysisResult, false);
+            log.info("Generation du projet API pour : {} (BIAN={})", projectId, bianMode);
+            generatorService.generateProject(projectId, analysisResult, bianMode);
 
             // Le rapport est deja genere dans generateProject()
             EnhancementReport report = generatorService.getLastEnhancementReport();
