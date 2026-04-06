@@ -159,6 +159,7 @@ public class EjbProjectParser {
 
     /** Module de resolution du mapping BIAN pour chaque UseCase */
     private BianMappingResolver bianMappingResolver;
+
     private CustomAnnotationRegistry annotationRegistry;
 
     /** Injection optionnelle (le parseur peut fonctionner sans le module annotations) */

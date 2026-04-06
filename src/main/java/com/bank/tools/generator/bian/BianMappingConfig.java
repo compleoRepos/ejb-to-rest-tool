@@ -13,6 +13,11 @@ import java.util.*;
 /**
  * Charge et expose la configuration BIAN depuis bian-mapping.yml.
  *
+ * Le generateur est autonome : il embarque son propre bian-mapping.yml
+ * dans le classpath. Le mapping automatique par mots-cles couvre tous
+ * les cas courants, et les explicit-mappings servent de catalogue
+ * de reference pour les UseCases connus.
+ *
  * Fournit :
  * - Le mapping explicite UseCase → Service Domain
  * - Le mapping automatique par mots-cles
@@ -103,7 +108,13 @@ public class BianMappingConfig {
             KeywordActionMapping kam = new KeywordActionMapping();
             kam.keywords = (List<String>) entry.get("keywords");
             kam.action = (String) entry.get("action");
-            kam.httpMethod = (String) entry.get("http-method");
+            // Deduire le httpMethod de l'action BIAN
+            String defaultMethod = switch (kam.action) {
+                case "retrieval" -> "GET";
+                case "update", "control", "termination" -> "PUT";
+                default -> "POST";
+            };
+            kam.httpMethod = (String) entry.getOrDefault("http-method", defaultMethod);
             // BIAN: initiation et execution retournent 201 Created par defaut
             int kamDefaultStatus = ("initiation".equals(kam.action) || "execution".equals(kam.action)) ? 201 : 200;
             kam.httpStatus = entry.containsKey("http-status") ? ((Number) entry.get("http-status")).intValue() : kamDefaultStatus;

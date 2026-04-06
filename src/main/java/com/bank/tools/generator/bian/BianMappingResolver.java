@@ -85,7 +85,8 @@ public class BianMappingResolver {
                 mapping.setHttpStatus(em.httpStatus);
                 mapping.setSummary(em.summary);
                 mapping.setExplicit(true);
-                // Construire les derives
+                // Construire les derives (URL auto-construite si non specifiee dans le YAML)
+                mapping.buildUrl(config.getBasePath());
                 mapping.buildOperationId();
                 mapping.buildTagName();
                 mapping.buildTagDescription();
