@@ -122,14 +122,14 @@ public final class GeneratorConstants {
 
     /** Patterns dans le nom d'exception → code HTTP (ordre de priorité) */
     public static final List<Map.Entry<String, String>> EXCEPTION_HTTP_PATTERNS = List.of(
-            Map.entry("notfound|inexistant|introuvable|unknown|missing", "HttpStatus.NOT_FOUND"),
+            Map.entry("notfound|inexistant|introuvable|missing", "HttpStatus.NOT_FOUND"),
             Map.entry("authentification|authentication|unauthenticated|login|token|credentials", "HttpStatus.UNAUTHORIZED"),
             Map.entry("forbidden|permission|denied|interdit|nonautorise", "HttpStatus.FORBIDDEN"),
             Map.entry("validation|invalid|malformed|badrequest", "HttpStatus.BAD_REQUEST"),
             Map.entry("conflict|duplicate|already|exists|deja|doublon|active|fwkrollback|rollback|business|metier|bloque|cloture|ferme", "HttpStatus.CONFLICT"),
             Map.entry("insufficient|insuffisant|limit|exceeded|depasse|plafond|seuil", "HttpStatus.UNPROCESSABLE_ENTITY"),
             Map.entry("parsing|technique|format|conversion", "HttpStatus.BAD_REQUEST"),
-            Map.entry("unavailable|indisponible|timeout|naming|jndi", "HttpStatus.SERVICE_UNAVAILABLE"),
+            Map.entry("unavailable|indisponible|nondisponible|timeout|naming|jndi", "HttpStatus.SERVICE_UNAVAILABLE"),
             Map.entry("ratelimit|throttle|toomany", "HttpStatus.TOO_MANY_REQUESTS")
     );
 

@@ -50,6 +50,8 @@ class CodeGenerationOrchestratorTest {
         uc.setInputDtoClassName("TestVoIn");
         uc.setOutputDtoClassName("TestVoOut");
         uc.setRestEndpoint("/api/test");
+        uc.setServiceAdapterName("TestServiceAdapter");
+        uc.setControllerName("TestController");
 
         result.setUseCases(List.of(uc));
         result.setDtos(List.of());

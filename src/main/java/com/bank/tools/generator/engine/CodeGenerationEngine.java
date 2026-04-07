@@ -4,6 +4,10 @@ import com.bank.tools.generator.annotation.AnnotationPropagator;
 import com.bank.tools.generator.annotation.CustomAnnotationRegistry;
 import com.bank.tools.generator.annotation.DetectedAnnotation;
 import com.bank.tools.generator.bian.BianControllerGrouper;
+import com.bank.tools.generator.engine.generators.DtoGenerator;
+import com.bank.tools.generator.engine.util.CodeGenUtils;
+import com.bank.tools.generator.engine.generators.ReportGenerator;
+import com.bank.tools.generator.engine.generators.ServiceAdapterGenerator;
 import com.bank.tools.generator.bian.BianMapping;
 import com.bank.tools.generator.bian.BianMappingConfig;
 import com.bank.tools.generator.bian.BianMappingResolver;
@@ -33,6 +37,9 @@ public class CodeGenerationEngine {
 
     private final ImportResolver importResolver;
     private final BianServiceDomainMapper bianMapper;
+    private final DtoGenerator dtoGenerator;
+    private final ReportGenerator reportGenerator;
+    private final ServiceAdapterGenerator serviceAdapterGenerator;
 
     /** Module de propagation des annotations custom bancaires */
     private AnnotationPropagator annotationPropagator;
@@ -46,9 +53,14 @@ public class CodeGenerationEngine {
     /** Module de generation de l'architecture decouplée ACL */
     private AclArchitectureGenerator aclArchitectureGenerator;
 
-    public CodeGenerationEngine(ImportResolver importResolver, BianServiceDomainMapper bianMapper) {
+    public CodeGenerationEngine(ImportResolver importResolver, BianServiceDomainMapper bianMapper,
+                                  DtoGenerator dtoGenerator, ReportGenerator reportGenerator,
+                                  ServiceAdapterGenerator serviceAdapterGenerator) {
         this.importResolver = importResolver;
         this.bianMapper = bianMapper;
+        this.dtoGenerator = dtoGenerator;
+        this.reportGenerator = reportGenerator;
+        this.serviceAdapterGenerator = serviceAdapterGenerator;
     }
 
     @Autowired(required = false)
@@ -196,7 +208,7 @@ public class CodeGenerationEngine {
 
         // BUG B : Recopier les interfaces @Remote/@Local avec migration javax → jakarta
         for (ProjectAnalysisResult.RemoteInterfaceInfo ifaceInfo : analysisResult.getDetectedRemoteInterfaces()) {
-            generateRemoteInterface(srcMain, ifaceInfo);
+            dtoGenerator.generateRemoteInterface(srcMain, ifaceInfo);
         }
 
         // Collecter les mappings BIAN si le mode est active
@@ -209,7 +221,7 @@ public class CodeGenerationEngine {
                 generateMdbController(srcMain, useCase);
                 generateMdbEventClass(srcMain, useCase);
                 generateMdbEventListener(srcMain, useCase);
-                generateMdbServiceAdapter(srcMain, useCase);
+                serviceAdapterGenerator.generateMdbAdapter(srcMain, useCase);
                 continue;
             }
 
@@ -239,7 +251,7 @@ public class CodeGenerationEngine {
                     generateController(srcMain, useCase);
                 }
                 if (!skipServiceAdapter) {
-                    generateServiceAdapter(srcMain, useCase);
+                    serviceAdapterGenerator.generateBaseUseCaseAdapter(srcMain, useCase);
                 }
             } else {
                 if (!skipIndividualController) {
@@ -250,7 +262,7 @@ public class CodeGenerationEngine {
                     }
                 }
                 if (!skipServiceAdapter) {
-                    generateMultiMethodServiceAdapter(srcMain, useCase);
+                    serviceAdapterGenerator.generateMultiMethodAdapter(srcMain, useCase);
                 }
             }
         }
@@ -258,9 +270,7 @@ public class CodeGenerationEngine {
         // Generer les DTOs (en mode ACL, les DTOs legacy sont remplacés par RestDTOs + types EJB)
         boolean aclActive = bianMode && aclArchitectureGenerator != null;
         if (!aclActive) {
-            for (DtoInfo dto : analysisResult.getDtos()) {
-                generateDtoClass(srcMain, dto);
-            }
+            dtoGenerator.generateAll(srcMain, analysisResult);
         } else {
             log.info("[ACL] DTOs legacy non générés dans dto/ (remplacés par RestDTOs + infrastructure/ejb/types)");
         }
@@ -308,12 +318,12 @@ public class CodeGenerationEngine {
         }
 
         // G14 : TRANSFORMATION_SUMMARY.md
-        generateTransformationSummary(projectRoot, analysisResult, projectHasXml);
-        generateReadme(projectRoot, analysisResult, projectHasXml);
+        reportGenerator.generateTransformationSummary(projectRoot, analysisResult, projectHasXml);
+        reportGenerator.generateReadme(projectRoot, analysisResult, projectHasXml);
 
         // BIAN : Generer le rapport de mapping BIAN
         if (bianMode && !bianMappings.isEmpty()) {
-            generateBianMappingReport(projectRoot, bianMappings, analysisResult);
+            reportGenerator.generateBianMappingReport(projectRoot, bianMappings, analysisResult);
             // Generer aussi le rapport BIAN v2 avec les nouveaux mappings
             generateBianV2MappingReport(projectRoot, analysisResult);
             log.info("[BIAN] Rapport BIAN_MAPPING.md genere pour {} Service Domains", bianMappings.size());
@@ -323,7 +333,7 @@ public class CodeGenerationEngine {
         if (annotationPropagator != null && !analysisResult.getDetectedCustomAnnotations().isEmpty()) {
             AnnotationPropagator.AnnotationReport annotReport =
                     annotationPropagator.generateReport(analysisResult.getDetectedCustomAnnotations());
-            generateAnnotationReport(projectRoot, annotReport, analysisResult);
+            reportGenerator.generateAnnotationReport(projectRoot, annotReport, analysisResult);
 
             // Propager les annotations sur les controllers generes
             propagateAnnotationsToControllers(srcMain, analysisResult);
@@ -617,7 +627,7 @@ public class CodeGenerationEngine {
         String ejbTypeComment = generateEjbTypeComment(useCase);
 
         // G11 : Swagger
-        String swaggerSummary = deriveSwaggerSummary(useCase.getClassName());
+        String swaggerSummary = CodeGenUtils.deriveSwaggerSummary(useCase.getClassName());
         String swaggerDescription = useCase.getJavadoc() != null ? useCase.getJavadoc() : swaggerSummary;
 
         // Construire les imports
@@ -671,8 +681,8 @@ public class CodeGenerationEngine {
 
         // G11 : Swagger annotations
         sb.append("    @Operation(\n");
-        sb.append("        summary = \"").append(escapeJavaString(swaggerSummary)).append("\",\n");
-        sb.append("        description = \"").append(escapeJavaString(swaggerDescription)).append("\"\n");
+        sb.append("        summary = \"").append(CodeGenUtils.escapeJavaString(swaggerSummary)).append("\",\n");
+        sb.append("        description = \"").append(CodeGenUtils.escapeJavaString(swaggerDescription)).append("\"\n");
         sb.append("    )\n");
         sb.append("    @ApiResponses(value = {\n");
         sb.append("        @ApiResponse(responseCode = \"").append(httpMapping.statusCode).append("\", description = \"Succes\",\n");
@@ -722,18 +732,18 @@ public class CodeGenerationEngine {
 
         // Collecter les imports des types utilises dans les methodes
         for (UseCaseInfo.MethodInfo method : useCase.getPublicMethods()) {
-            resolveTypeImports(method.getReturnType(), imports);
+            CodeGenUtils.resolveTypeImports(method.getReturnType(), imports);
             for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
-                resolveTypeImports(param.getType(), imports);
+                CodeGenUtils.resolveTypeImports(param.getType(), imports);
             }
             // Importer les DTOs du meme package
-            String returnBase = extractBaseType(method.getReturnType());
-            if (isDtoType(returnBase)) {
+            String returnBase = CodeGenUtils.extractBaseType(method.getReturnType());
+            if (CodeGenUtils.isDtoType(returnBase)) {
                 imports.add(BASE_PACKAGE + ".dto." + returnBase);
             }
             for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
-                String paramBase = extractBaseType(param.getType());
-                if (isDtoType(paramBase)) {
+                String paramBase = CodeGenUtils.extractBaseType(param.getType());
+                if (CodeGenUtils.isDtoType(paramBase)) {
                     imports.add(BASE_PACKAGE + ".dto." + paramBase);
                 }
             }
@@ -762,7 +772,7 @@ public class CodeGenerationEngine {
             if (methods.size() > 1) {
                 // Conflit detecte : ajouter un sous-chemin unique pour chaque methode
                 for (UseCaseInfo.MethodInfo m : methods) {
-                    methodSubPaths.put(m.getName(), "/" + toKebabCase(m.getName()));
+                    methodSubPaths.put(m.getName(), "/" + CodeGenUtils.toKebabCase(m.getName()));
                 }
             } else {
                 HttpMapping mapping = resolveHttpMappingForMethod(methods.get(0).getName(), methods.get(0).getReturnType());
@@ -794,10 +804,10 @@ public class CodeGenerationEngine {
             sb.append("\n");
             // BUG N : generate* + byte[] → GET (telechargement)
             HttpMapping mapping = resolveHttpMappingForMethod(method.getName(), method.getReturnType());
-            String subPath = methodSubPaths.getOrDefault(method.getName(), "/" + toKebabCase(method.getName()));
+            String subPath = methodSubPaths.getOrDefault(method.getName(), "/" + CodeGenUtils.toKebabCase(method.getName()));
 
             // G11 : Swagger
-            sb.append("    @Operation(summary = \"").append(escapeJavaString(deriveSwaggerSummary(method.getName()))).append("\")\n");
+            sb.append("    @Operation(summary = \"").append(CodeGenUtils.escapeJavaString(CodeGenUtils.deriveSwaggerSummary(method.getName()))).append("\")\n");
 
             // G6 : Annotation HTTP
             sb.append("    @").append(mapping.springAnnotation);
@@ -808,7 +818,7 @@ public class CodeGenerationEngine {
 
             // G7 : Type de retour
             String returnType = method.getReturnType();
-            String responseType = mapReturnType(returnType);
+            String responseType = CodeGenUtils.mapReturnType(returnType);
 
             sb.append("    public ResponseEntity<").append(responseType).append("> ").append(method.getName()).append("(");
 
@@ -863,283 +873,6 @@ public class CodeGenerationEngine {
         log.info("Controller multi-methodes genere : {} ({} routes)", controllerName, useCase.getPublicMethods().size());
     }
 
-    // ===================== SERVICE ADAPTER (Pattern BaseUseCase) =====================
-
-    /**
-     * DECOUPLAGE : ServiceAdapter utilise la reflection pure.
-     * Aucune dependance vers BaseUseCase, ValueObject ou ma.eai.*.
-     * L'EJB est appele via reflection : Object.getClass().getMethod("execute", Object.class).invoke()
-     * Le resultat est converti en DTO via Jackson ObjectMapper.
-     */
-    private void generateServiceAdapter(Path srcMain, UseCaseInfo useCase) throws IOException {
-        String inputDto = useCase.getInputDtoClassName();
-        String outputDto = useCase.getOutputDtoClassName();
-        String adapterName = useCase.getServiceAdapterName();
-        String jndiName = useCase.getJndiName();
-
-        // G4 : Scope annotation
-        String scopeAnnotation = "";
-        if (useCase.getEjbType() == UseCaseInfo.EjbType.SINGLETON) {
-            scopeAnnotation = "@Scope(\"singleton\")\n// EJB source @Singleton — le scope singleton est preserve cote Spring\n";
-        }
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".service;\n\n");
-        sb.append("import ").append(BASE_PACKAGE).append(".dto.").append(inputDto).append(";\n");
-        sb.append("import ").append(BASE_PACKAGE).append(".dto.").append(outputDto).append(";\n");
-        sb.append("import com.fasterxml.jackson.databind.ObjectMapper;\n");
-        sb.append("import org.slf4j.Logger;\n");
-        sb.append("import org.slf4j.LoggerFactory;\n");
-        sb.append("import org.springframework.beans.factory.annotation.Value;\n");
-        sb.append("import org.springframework.stereotype.Service;\n");
-        if (!scopeAnnotation.isEmpty()) {
-            sb.append("import org.springframework.context.annotation.Scope;\n");
-        }
-        sb.append("\nimport javax.naming.Context;\n");
-        sb.append("import javax.naming.InitialContext;\n");
-        sb.append("import javax.naming.NamingException;\n");
-        sb.append("import java.lang.reflect.Method;\n");
-        sb.append("import java.util.Properties;\n\n");
-
-        sb.append("/**\n");
-        sb.append(" * Service adapter decouple pour ").append(useCase.getClassName()).append(".\n");
-        sb.append(" * Utilise la reflection pour appeler l'EJB distant via JNDI.\n");
-        sb.append(" * Aucune dependance vers le framework EJB (ma.eai.*).\n");
-        sb.append(" */\n");
-        sb.append("@Service\n");
-        if (!scopeAnnotation.isEmpty()) {
-            sb.append(scopeAnnotation);
-        }
-        sb.append("public class ").append(adapterName).append(" {\n\n");
-        sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(adapterName).append(".class);\n");
-        sb.append("    private static final ObjectMapper objectMapper = new ObjectMapper();\n\n");
-        sb.append("    @Value(\"${ejb.jndi.provider.url:localhost:1099}\")\n");
-        sb.append("    private String jndiProviderUrl;\n\n");
-        sb.append("    @Value(\"${ejb.jndi.factory:org.jboss.naming.remote.client.InitialContextFactory}\")\n");
-        sb.append("    private String jndiFactory;\n\n");
-
-        sb.append("    public ").append(outputDto).append(" execute(").append(inputDto).append(" input) throws Exception {\n");
-        sb.append("        // [EJB-CALL] Debut de l'appel EJB\n");
-        sb.append("        log.info(\"[EJB-CALL] Appel de ").append(useCase.getClassName()).append(".execute() — JNDI: ").append(jndiName).append("\");\n\n");
-        sb.append("        // [EJB-LOOKUP] Recherche JNDI\n");
-        sb.append("        log.debug(\"[EJB-LOOKUP] Recherche EJB : ").append(jndiName).append("\");\n");
-        sb.append("        Properties props = new Properties();\n");
-        sb.append("        props.put(Context.INITIAL_CONTEXT_FACTORY, jndiFactory);\n");
-        sb.append("        props.put(Context.PROVIDER_URL, jndiProviderUrl);\n\n");
-        sb.append("        InitialContext ctx = null;\n");
-        sb.append("        try {\n");
-        sb.append("            ctx = new InitialContext(props);\n");
-        sb.append("            Object ejb = ctx.lookup(\"").append(jndiName).append("\");\n");
-        sb.append("            log.debug(\"[EJB-LOOKUP] EJB trouve avec succes : {}\", ejb.getClass().getName());\n\n");
-        sb.append("            // [EJB-EXECUTE] Appel par reflection — decouple du framework EJB\n");
-        sb.append("            log.debug(\"[EJB-EXECUTE] Execution de execute() avec input : {}\", input);\n");
-        sb.append("            long start = System.currentTimeMillis();\n");
-        sb.append("            // Trouver la methode 'execute' ou 'process' par reflection\n");
-        sb.append("            Method executeMethod = findExecuteMethod(ejb);\n");
-        sb.append("            Object result = executeMethod.invoke(ejb, input);\n");
-        sb.append("            long duration = System.currentTimeMillis() - start;\n\n");
-        sb.append("            // [EJB-RESPONSE] Conversion du resultat en DTO via Jackson\n");
-        sb.append("            log.info(\"[EJB-RESPONSE] execute() termine en {}ms\", duration);\n");
-        sb.append("            log.debug(\"[EJB-RESPONSE] Resultat brut : {}\", result);\n");
-        sb.append("            return objectMapper.convertValue(result, ").append(outputDto).append(".class);\n");
-        sb.append("        } catch (NamingException e) {\n");
-        sb.append("            // [EJB-ERROR] Erreur de lookup\n");
-        sb.append("            log.error(\"[EJB-ERROR] Lookup JNDI echoue pour ").append(jndiName).append(" : {}\", e.getMessage());\n");
-        sb.append("            throw new RuntimeException(\"Service EJB indisponible : ").append(jndiName).append("\", e);\n");
-        sb.append("        } catch (Exception e) {\n");
-        sb.append("            // [EJB-ERROR] Erreur d'execution\n");
-        sb.append("            log.error(\"[EJB-ERROR] Erreur execute() sur ").append(useCase.getClassName()).append(" : {}\", e.getMessage());\n");
-        sb.append("            throw e;\n");
-        sb.append("        } finally {\n");
-        sb.append("            // [EJB-CLEANUP] Fermeture du contexte JNDI\n");
-        sb.append("            if (ctx != null) {\n");
-        sb.append("                try { ctx.close(); log.debug(\"[EJB-CLEANUP] Contexte JNDI ferme\"); } catch (NamingException e) { log.warn(\"[EJB-CLEANUP] Erreur fermeture JNDI\", e); }\n");
-        sb.append("            }\n");
-        sb.append("        }\n");
-        sb.append("    }\n\n");
-
-        // Methode utilitaire pour trouver execute() ou process() par reflection
-        sb.append("    /**\n");
-        sb.append("     * Recherche la methode 'execute' ou 'process' sur l'EJB distant par reflection.\n");
-        sb.append("     * Compatible avec les patterns BaseUseCase (execute) et SynchroneService (process).\n");
-        sb.append("     */\n");
-        sb.append("    private Method findExecuteMethod(Object ejb) throws NoSuchMethodException {\n");
-        sb.append("        // Chercher 'execute' d'abord, puis 'process'\n");
-        sb.append("        for (String methodName : new String[]{\"execute\", \"process\"}) {\n");
-        sb.append("            for (Method m : ejb.getClass().getMethods()) {\n");
-        sb.append("                if (m.getName().equals(methodName) && m.getParameterCount() == 1) {\n");
-        sb.append("                    log.debug(\"[EJB-LOOKUP] Methode trouvee : {}({})\", methodName, m.getParameterTypes()[0].getSimpleName());\n");
-        sb.append("                    return m;\n");
-        sb.append("                }\n");
-        sb.append("            }\n");
-        sb.append("        }\n");
-        sb.append("        throw new NoSuchMethodException(\"Aucune methode execute() ou process() trouvee sur \" + ejb.getClass().getName());\n");
-        sb.append("    }\n");
-        sb.append("}\n");
-
-        Files.writeString(srcMain.resolve("service/" + adapterName + ".java"), sb.toString());
-        log.info("Service adapter decouple genere : {}", adapterName);
-    }
-
-    // ===================== SERVICE ADAPTER (Pattern multi-methodes - G5) =====================
-
-    private void generateMultiMethodServiceAdapter(Path srcMain, UseCaseInfo useCase) throws IOException {
-        String adapterName = useCase.getServiceAdapterName();
-        String jndiName = useCase.getJndiName();
-
-        Set<String> imports = new TreeSet<>();
-        imports.add("org.slf4j.Logger");
-        imports.add("org.slf4j.LoggerFactory");
-        imports.add("org.springframework.beans.factory.annotation.Value");
-        imports.add("org.springframework.stereotype.Service");
-        imports.add("javax.naming.Context");
-        imports.add("javax.naming.InitialContext");
-        imports.add("javax.naming.NamingException");
-        imports.add("java.util.Properties");
-
-        // AXE 2 : Importer l'interface @Remote si connue
-        String remoteIfaceName = useCase.getRemoteInterfaceName();
-        if (remoteIfaceName != null && !remoteIfaceName.isEmpty()) {
-            // L'interface @Remote est dans le package ejb.interfaces
-            imports.add(BASE_PACKAGE + ".ejb.interfaces." + remoteIfaceName);
-        }
-
-        // Collecter les imports des types
-        boolean hasFrameworkType = false;
-        for (UseCaseInfo.MethodInfo method : useCase.getPublicMethods()) {
-            if (isFrameworkType(method.getReturnType())) hasFrameworkType = true;
-            resolveTypeImports(replaceFrameworkType(method.getReturnType()), imports);
-            for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
-                if (isFrameworkType(param.getType())) hasFrameworkType = true;
-                resolveTypeImports(replaceFrameworkType(param.getType()), imports);
-            }
-            // DTOs
-            String returnBase = extractBaseType(method.getReturnType());
-            if (isDtoType(returnBase)) {
-                imports.add(BASE_PACKAGE + ".dto." + returnBase);
-            }
-            for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
-                String paramBase = extractBaseType(param.getType());
-                if (isDtoType(paramBase)) {
-                    imports.add(BASE_PACKAGE + ".dto." + paramBase);
-                }
-            }
-        }
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".service;\n\n");
-        for (String imp : imports) {
-            sb.append("import ").append(imp).append(";\n");
-        }
-        sb.append("\n/**\n");
-        sb.append(" * Service adapter multi-methodes pour ").append(useCase.getClassName()).append(".\n");
-        sb.append(" * Chaque methode effectue un lookup JNDI et delegue a l'EJB.\n");
-        sb.append(" */\n");
-        sb.append("@Service\n");
-        sb.append("public class ").append(adapterName).append(" {\n\n");
-        sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(adapterName).append(".class);\n\n");
-        sb.append("    @Value(\"${ejb.jndi.provider.url:localhost:1099}\")\n");
-        sb.append("    private String jndiProviderUrl;\n\n");
-        sb.append("    @Value(\"${ejb.jndi.factory:org.jboss.naming.remote.client.InitialContextFactory}\")\n");
-        sb.append("    private String jndiFactory;\n\n");
-
-        // Methode utilitaire de lookup
-        sb.append("    private Object lookupEjb() throws Exception {\n");
-        sb.append("        Properties props = new Properties();\n");
-        sb.append("        props.put(Context.INITIAL_CONTEXT_FACTORY, jndiFactory);\n");
-        sb.append("        props.put(Context.PROVIDER_URL, jndiProviderUrl);\n");
-        sb.append("        InitialContext ctx = new InitialContext(props);\n");
-        sb.append("        try {\n");
-        sb.append("            return ctx.lookup(\"").append(jndiName).append("\");\n");
-        sb.append("        } finally {\n");
-        sb.append("            try { ctx.close(); } catch (NamingException e) { log.warn(\"Erreur fermeture JNDI\", e); }\n");
-        sb.append("        }\n");
-        sb.append("    }\n");
-
-        // Generer chaque methode
-        for (UseCaseInfo.MethodInfo method : useCase.getPublicMethods()) {
-            sb.append("\n");
-
-            // FIX P0-1b: Remplacer les types framework (Envelope, etc.) par Map<String, Object>
-            // pour eviter les dependances vers ma.eai.*
-            String returnType = replaceFrameworkType(method.getReturnType());
-            String params = method.getParameters().stream()
-                    .map(p -> replaceFrameworkType(p.getType()) + " " + p.getName())
-                    .collect(Collectors.joining(", "));
-            String args = method.getParameters().stream()
-                    .map(UseCaseInfo.ParameterInfo::getName)
-                    .collect(Collectors.joining(", "));
-
-            sb.append("    public ").append(returnType).append(" ").append(method.getName()).append("(").append(params).append(") throws Exception {\n");
-            // BUG K : Tracabilite complete avec 6 prefixes EJB
-            sb.append("        // --- DEBUT APPEL EJB ---\n");
-            sb.append("        log.info(\"[EJB-CALL] ").append(useCase.getClassName()).append(".").append(method.getName()).append("({})\", \"");
-            sb.append(method.getParameters().stream().map(p -> "{" + p.getName() + "}").collect(Collectors.joining(", ")));
-            sb.append("\");\n");
-
-            // AXE 2 : Si une interface @Remote est connue, utiliser le cast type au lieu de la reflexion
-            String remoteIface = useCase.getRemoteInterfaceName();
-            if (remoteIface != null && !remoteIface.isEmpty()) {
-                sb.append("        // --- LOOKUP JNDI ---\n");
-                sb.append("        log.debug(\"[EJB-LOOKUP] Recherche EJB : ").append(jndiName).append("\");\n");
-                sb.append("        ").append(remoteIface).append(" ejb = (").append(remoteIface).append(") lookupEjb();\n");
-                sb.append("        log.debug(\"[EJB-LOOKUP] EJB trouve\");\n");
-                sb.append("        // --- EXECUTION METHODE EJB ---\n");
-                sb.append("        long start = System.currentTimeMillis();\n");
-                if (method.getReturnType().equals("void")) {
-                    sb.append("        ejb.").append(method.getName()).append("(").append(args).append(");\n");
-                    sb.append("        long duration = System.currentTimeMillis() - start;\n");
-                    sb.append("        log.info(\"[EJB-EXECUTE] ").append(method.getName()).append("() termine en {}ms\", duration);\n");
-                } else {
-                    sb.append("        ").append(returnType).append(" result = ejb.").append(method.getName()).append("(").append(args).append(");\n");
-                    sb.append("        long duration = System.currentTimeMillis() - start;\n");
-                    sb.append("        log.info(\"[EJB-EXECUTE] ").append(method.getName()).append("() termine en {}ms\", duration);\n");
-                    sb.append("        // --- REPONSE EJB ---\n");
-                    sb.append("        log.debug(\"[EJB-RESPONSE] Resultat : {}\", result);\n");
-                    sb.append("        return result;\n");
-                }
-            } else {
-                sb.append("        // --- LOOKUP JNDI ---\n");
-                sb.append("        log.debug(\"[EJB-LOOKUP] Recherche EJB : ").append(jndiName).append("\");\n");
-                sb.append("        // TODO: Remplacer par le cast vers l'interface Remote/Local appropriee\n");
-                sb.append("        Object ejb = lookupEjb();\n");
-                sb.append("        log.debug(\"[EJB-LOOKUP] EJB trouve\");\n");
-                sb.append("        // --- EXECUTION METHODE EJB ---\n");
-                sb.append("        long start = System.currentTimeMillis();\n");
-                sb.append("        java.lang.reflect.Method m = ejb.getClass().getMethod(\"").append(method.getName()).append("\"");
-                for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
-                    // FIX P0-1b: Pour la reflection, utiliser Object.class quand le type original est un type framework
-                    // car le type exact n'est pas disponible dans le classpath du projet genere
-                    String paramBaseType = extractBaseType(param.getType());
-                    if (FRAMEWORK_TYPES_SET.contains(paramBaseType)) {
-                        sb.append(", Object.class");
-                    } else {
-                        sb.append(", ").append(paramBaseType).append(".class");
-                    }
-                }
-                sb.append(");\n");
-                if (method.getReturnType().equals("void")) {
-                    sb.append("        m.invoke(ejb").append(args.isEmpty() ? "" : ", " + args).append(");\n");
-                    sb.append("        long duration = System.currentTimeMillis() - start;\n");
-                    sb.append("        log.info(\"[EJB-EXECUTE] ").append(method.getName()).append("() termine en {}ms\", duration);\n");
-                } else {
-                    sb.append("        ").append(returnType).append(" result = (").append(returnType).append(") m.invoke(ejb").append(args.isEmpty() ? "" : ", " + args).append(");\n");
-                    sb.append("        long duration = System.currentTimeMillis() - start;\n");
-                    sb.append("        log.info(\"[EJB-EXECUTE] ").append(method.getName()).append("() termine en {}ms\", duration);\n");
-                    sb.append("        // --- REPONSE EJB ---\n");
-                    sb.append("        log.debug(\"[EJB-RESPONSE] Resultat : {}\", result);\n");
-                    sb.append("        return result;\n");
-                }
-            }
-            sb.append("    }\n");
-        }
-
-        sb.append("}\n");
-
-        Files.writeString(srcMain.resolve("service/" + adapterName + ".java"), sb.toString());
-        log.info("Service adapter multi-methodes genere : {}", adapterName);
-    }
-
     // ===================== MDB GENERATION (G4 - Event-Driven) =====================
 
     /**
@@ -1151,7 +884,7 @@ public class CodeGenerationEngine {
         String endpoint = useCase.getRestEndpoint();
         String baseName = controllerName.replace("Controller", "");
         String eventClassName = baseName.endsWith("Event") ? baseName : baseName + "Event";
-        String swaggerSummary = deriveSwaggerSummary(useCase.getClassName());
+        String swaggerSummary = CodeGenUtils.deriveSwaggerSummary(useCase.getClassName());
         String swaggerDescription = useCase.getJavadoc() != null ? useCase.getJavadoc() :
                 "Endpoint asynchrone remplacant le MDB " + useCase.getClassName() + ". " +
                 "Recoit un message via HTTP et le traite de maniere asynchrone.";
@@ -1196,8 +929,8 @@ public class CodeGenerationEngine {
 
         // Swagger
         sb.append("    @Operation(\n");
-        sb.append("        summary = \"").append(escapeJavaString(swaggerSummary)).append(" (async)\",\n");
-        sb.append("        description = \"").append(escapeJavaString(swaggerDescription)).append("\"\n");
+        sb.append("        summary = \"").append(CodeGenUtils.escapeJavaString(swaggerSummary)).append(" (async)\",\n");
+        sb.append("        description = \"").append(CodeGenUtils.escapeJavaString(swaggerDescription)).append("\"\n");
         sb.append("    )\n");
         sb.append("    @ApiResponses(value = {\n");
         sb.append("        @ApiResponse(responseCode = \"202\", description = \"Message accepte pour traitement asynchrone\"),\n");
@@ -1314,50 +1047,7 @@ public class CodeGenerationEngine {
         log.info("Event listener MDB genere : {}", listenerName);
     }
 
-    /**
-     * Genere le service adapter pour un MDB.
-     * Contient la logique de pont vers l'EJB legacy.
-     */
-    private void generateMdbServiceAdapter(Path srcMain, UseCaseInfo useCase) throws IOException {
-        String adapterName = useCase.getServiceAdapterName();
-        String jmsDestination = useCase.getJndiName();
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".service;\n\n");
-        sb.append("import org.slf4j.Logger;\n");
-        sb.append("import org.slf4j.LoggerFactory;\n");
-        sb.append("import org.springframework.stereotype.Service;\n");
-        sb.append("import java.util.Map;\n");
-        sb.append("\n");
-        sb.append("/**\n");
-        sb.append(" * Service adapter pour le MDB ").append(useCase.getClassName()).append(".\n");
-        sb.append(" * \n");
-        sb.append(" * Destination JMS source : ").append(jmsDestination).append("\n");
-        sb.append(" * Ce service contient la logique metier qui etait dans onMessage().\n");
-        sb.append(" * TODO: Migrer la logique metier du MDB original ici.\n");
-        sb.append(" */\n");
-        sb.append("@Service\n");
-        sb.append("public class ").append(adapterName).append(" {\n\n");
-        sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(adapterName).append(".class);\n\n");
-        sb.append("    /**\n");
-        sb.append("     * Traite un message recu (equivalent de onMessage du MDB).\n");
-        sb.append("     *\n");
-        sb.append("     * @param payload le contenu du message sous forme de Map\n");
-        sb.append("     */\n");
-        sb.append("    public void processMessage(Map<String, Object> payload) {\n");
-        sb.append("        log.info(\"Traitement du message MDB ").append(useCase.getClassName()).append(" : {}\", payload);\n");
-        sb.append("        // TODO: Implementer la logique metier du MDB ").append(useCase.getClassName()).append("\n");
-        sb.append("        // La logique originale se trouvait dans la methode onMessage()\n");
-        sb.append("        // de l'EJB @MessageDriven ").append(useCase.getClassName()).append("\n");
-        sb.append("    }\n");
-        sb.append("}\n");
-
-        Files.createDirectories(srcMain.resolve("service"));
-        Files.writeString(srcMain.resolve("service/" + adapterName + ".java"), sb.toString());
-        log.info("Service adapter MDB genere : {}", adapterName);
-    }
-
-    // ===================== AXE 1.1 : ENUM GENERATION =====================
+        // ===================== AXE 1.1 : ENUM GENERATION =====================
 
     /**
      * AXE 1.1 : Genere une enum JAXB dans le package enums.
@@ -1559,331 +1249,6 @@ public class CodeGenerationEngine {
         log.info("Validateur genere : @{} / {}", valInfo.getAnnotationName(), valInfo.getValidatorName());
     }
 
-    // ===================== BUG B : REMOTE INTERFACE GENERATION =====================
-
-    /**
-     * Recopie une interface @Remote/@Local dans le projet genere avec migration javax → jakarta.
-     * Les imports sont adaptes au package cible com.bank.api.
-     */
-    private void generateRemoteInterface(Path srcMain, ProjectAnalysisResult.RemoteInterfaceInfo ifaceInfo) throws IOException {
-        String sourceCode = ifaceInfo.getSourceCode();
-        if (sourceCode == null || sourceCode.isEmpty()) {
-            log.warn("Source code absent pour l'interface @Remote : {}", ifaceInfo.getName());
-            return;
-        }
-
-        // Migration du package et des imports
-        StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".ejb.interfaces;\n\n");
-
-        // Collecter les types references dans l'interface pour generer les imports
-        Set<String> imports = new TreeSet<>();
-
-        // Scanner le code source pour trouver les types utilises
-        String[] lines = sourceCode.split("\n");
-        boolean inInterface = false;
-        StringBuilder interfaceBody = new StringBuilder();
-
-        for (String line : lines) {
-            String trimmed = line.trim();
-            // Ignorer le package original et les imports originaux
-            if (trimmed.startsWith("package ")) continue;
-            if (trimmed.startsWith("import ")) {
-                // Migrer javax → jakarta
-                String importLine = trimmed.replace("javax.ejb.", "jakarta.ejb.")
-                        .replace("javax.validation.", "jakarta.validation.")
-                        .replace("javax.xml.bind.", "jakarta.xml.bind.");
-                // Ignorer les imports EJB (@Remote, @Local, @Stateless etc.)
-                if (!importLine.contains("jakarta.ejb.") && !importLine.contains("javax.ejb.")) {
-                    // On ne garde pas les imports originaux, on les recalculera
-                }
-                continue;
-            }
-            // Supprimer l'annotation @Remote/@Local de l'interface
-            if (trimmed.equals("@Remote") || trimmed.equals("@Local")) continue;
-            if (trimmed.startsWith("@Remote(") || trimmed.startsWith("@Local(")) continue;
-
-            interfaceBody.append(line).append("\n");
-        }
-
-        // Ecrire les imports (seront resolus par ImportResolver Phase 8)
-        // Ajouter quelques imports standard courants
-        imports.add("java.util.List");
-        imports.add("java.math.BigDecimal");
-
-        for (String imp : imports) {
-            sb.append("import ").append(imp).append(";\n");
-        }
-        sb.append("\n");
-
-        // Ajouter le corps de l'interface
-        sb.append(interfaceBody);
-
-        Files.writeString(srcMain.resolve("ejb/interfaces/" + ifaceInfo.getName() + ".java"), sb.toString());
-        log.info("Interface @Remote generee : {}", ifaceInfo.getName());
-    }
-
-    // ===================== DTO (G1, G2, G3, BUG 10/11/12) =====================
-
-    private void generateDtoClass(Path srcMain, DtoInfo dto) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".dto;\n\n");
-
-        // G1 : Collecter TOUS les imports necessaires
-        Set<String> imports = new TreeSet<>();
-
-        // DECOUPLAGE : Tous les DTOs implementent Serializable (plus de ValueObject)
-        boolean isVoIn = dto.getClassName().endsWith("VoIn") || dto.getClassName().endsWith("VOIn")
-                || dto.getClassName().endsWith("Input") || dto.getClassName().endsWith("Request");
-        boolean isVoOut = dto.getClassName().endsWith("VoOut") || dto.getClassName().endsWith("VOOut")
-                || dto.getClassName().endsWith("Output") || dto.getClassName().endsWith("Response");
-        boolean isDto = isVoIn || isVoOut || dto.getClassName().endsWith("Dto") || dto.getClassName().endsWith("DTO");
-
-        if (isVoIn || isVoOut || isDto) {
-            imports.add("java.io.Serializable");
-        }
-
-        // JAXB imports
-        boolean hasJaxb = dto.hasJaxbAnnotations();
-        // G2 : Utiliser des imports individuels au lieu du wildcard pour eviter les doublons
-        if (hasJaxb) {
-            if (dto.isHasXmlRootElement()) imports.add("jakarta.xml.bind.annotation.XmlRootElement");
-            // FIX: Toujours importer XmlAccessorType/XmlAccessType quand hasJaxb est true,
-            // car on genere @XmlAccessorType(XmlAccessType.FIELD) par defaut meme si le DTO original ne l'avait pas
-            imports.add("jakarta.xml.bind.annotation.XmlAccessorType");
-            imports.add("jakarta.xml.bind.annotation.XmlAccessType");
-            if (dto.isHasXmlType()) imports.add("jakarta.xml.bind.annotation.XmlType");
-            boolean hasXmlElement = dto.getFields().stream().anyMatch(DtoInfo.FieldInfo::isHasXmlElement);
-            if (hasXmlElement) imports.add("jakarta.xml.bind.annotation.XmlElement");
-            boolean hasXmlAttribute = dto.getFields().stream().anyMatch(DtoInfo.FieldInfo::isHasXmlAttribute);
-            if (hasXmlAttribute) imports.add("jakarta.xml.bind.annotation.XmlAttribute");
-            boolean hasXmlElementWrapper = dto.getFields().stream().anyMatch(DtoInfo.FieldInfo::isHasXmlElementWrapper);
-            if (hasXmlElementWrapper) imports.add("jakarta.xml.bind.annotation.XmlElementWrapper");
-            // BUG M : @XmlTransient import
-            boolean hasXmlTransient = dto.getFields().stream().anyMatch(DtoInfo.FieldInfo::isHasXmlTransient);
-            if (hasXmlTransient) imports.add("jakarta.xml.bind.annotation.XmlTransient");
-        }
-        if (dto.isHasXmlRootElement() || hasJaxb) {
-            imports.add("com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement");
-        }
-
-        // G1 + BUG 10 : Collecter les imports pour les types ET les annotations
-        // G2 : Utiliser un Set pour la deduplication
-        Set<String> annotationsUsed = new LinkedHashSet<>();
-
-        for (DtoInfo.FieldInfo field : dto.getFields()) {
-            if (field.isStatic() && field.isFinal()) continue;
-            if (field.getName().equals("serialVersionUID")) continue;
-            if (isLoggerField(field)) continue;
-
-            // Imports des types
-            resolveTypeImports(field.getType(), imports);
-
-            // BUG 10/11 : Tracking des annotations de validation
-            if (field.isRequired()) {
-                String baseType = extractBaseType(field.getType());
-                if (baseType.equals("String")) {
-                    annotationsUsed.add("NotBlank");
-                    imports.add("jakarta.validation.constraints.NotBlank");
-                } else if (baseType.equals("List") || baseType.equals("Set") || baseType.equals("Collection")) {
-                    annotationsUsed.add("NotNull");
-                    annotationsUsed.add("Size");
-                    imports.add("jakarta.validation.constraints.NotNull");
-                    imports.add("jakarta.validation.constraints.Size");
-                } else if (!PRIMITIVE_TYPES.contains(baseType)) {
-                    annotationsUsed.add("NotNull");
-                    imports.add("jakarta.validation.constraints.NotNull");
-                }
-            }
-        }
-
-        // BUG 10 : Si @Size est utilise dans les annotations, s'assurer que l'import est present
-        // (deja gere ci-dessus via le Set annotationsUsed)
-
-        // BUG H : Imports pour les annotations custom de validation (@ValidIBAN, @ValidRIB, etc.)
-        for (DtoInfo.FieldInfo field : dto.getFields()) {
-            for (String customAnnot : field.getCustomAnnotations()) {
-                imports.add(BASE_PACKAGE + ".validation." + customAnnot);
-            }
-        }
-
-        // Ecrire les imports
-        for (String imp : imports) {
-            sb.append("import ").append(imp).append(";\n");
-        }
-
-        sb.append("\n");
-        sb.append("/**\n");
-        sb.append(" * DTO genere pour ").append(dto.getClassName()).append(".\n");
-        sb.append(" */\n");
-
-        // Annotations JAXB au niveau de la classe
-        if (dto.isHasXmlRootElement()) {
-            String rootName = dto.getXmlRootElementName() != null ? dto.getXmlRootElementName()
-                    : Character.toLowerCase(dto.getClassName().charAt(0)) + dto.getClassName().substring(1);
-            sb.append("@XmlRootElement(name = \"").append(rootName).append("\")\n");
-            sb.append("@JacksonXmlRootElement(localName = \"").append(rootName).append("\")\n");
-        } else if (hasJaxb) {
-            String rootName = Character.toLowerCase(dto.getClassName().charAt(0)) + dto.getClassName().substring(1);
-            sb.append("@XmlRootElement(name = \"").append(rootName).append("\")\n");
-            sb.append("@JacksonXmlRootElement(localName = \"").append(rootName).append("\")\n");
-        }
-
-        if (dto.isHasXmlAccessorType()) {
-            sb.append("@XmlAccessorType(").append(dto.getXmlAccessorTypeValue() != null ? dto.getXmlAccessorTypeValue() : "XmlAccessType.FIELD").append(")\n");
-        } else if (hasJaxb) {
-            sb.append("@XmlAccessorType(XmlAccessType.FIELD)\n");
-        }
-
-        if (dto.isHasXmlType()) {
-            sb.append("@XmlType\n");
-        }
-
-        // Declaration de la classe
-        sb.append("public class ").append(dto.getClassName());
-
-        // DECOUPLAGE : Filtrer les classes parentes EJB framework
-        String parentClass = dto.getParentClassName();
-        boolean isEjbFrameworkParent = parentClass == null
-                || parentClass.equals("Object")
-                || parentClass.equals("ValueObject")
-                || parentClass.equals("UCStrategie")
-                || parentClass.equals("BaseUseCase")
-                || parentClass.equals("AbstractUseCase")
-                || parentClass.equals("SynchroneService")
-                || parentClass.equals("AsynchroneService")
-                || parentClass.equals("Envelope")
-                || parentClass.equals("EaiLog")
-                || parentClass.equals("CommonFunction");
-        if (!isEjbFrameworkParent) {
-            sb.append(" extends ").append(parentClass);
-        }
-
-        // DECOUPLAGE : Tous les DTOs implementent Serializable (POJO autonome)
-        if (isVoIn || isVoOut || isDto) {
-            sb.append(" implements Serializable");
-        }
-        sb.append(" {\n\n");
-
-        // serialVersionUID pour les classes qui implementent Serializable
-        if (isVoIn || isVoOut || isDto) {
-            sb.append("    private static final long serialVersionUID = 1L;\n\n");
-        }
-
-        // Filtrer les champs
-        List<DtoInfo.FieldInfo> instanceFields = new ArrayList<>();
-        List<DtoInfo.FieldInfo> constantFields = new ArrayList<>();
-
-        for (DtoInfo.FieldInfo field : dto.getFields()) {
-            if (field.getName().equals("serialVersionUID")) continue;
-            if (isLoggerField(field)) continue;
-            if (field.isStatic() && field.isFinal()) {
-                constantFields.add(field);
-            } else {
-                instanceFields.add(field);
-            }
-        }
-
-        // Constantes metier
-        for (DtoInfo.FieldInfo field : constantFields) {
-            sb.append("    private static final ").append(field.getType()).append(" ").append(field.getName()).append(";\n");
-        }
-        if (!constantFields.isEmpty()) sb.append("\n");
-
-        // Champs d'instance avec annotations
-        for (DtoInfo.FieldInfo field : instanceFields) {
-            // G2 : Deduplication des annotations via un Set
-            Set<String> fieldAnnotations = new LinkedHashSet<>();
-
-            // JAXB annotations
-            if (field.isHasXmlElementWrapper()) {
-                String wrapperAnnot = field.getXmlElementWrapperName() != null
-                        ? "@XmlElementWrapper(name = \"" + field.getXmlElementWrapperName() + "\")"
-                        : "@XmlElementWrapper";
-                fieldAnnotations.add(wrapperAnnot);
-            }
-            if (field.isHasXmlElement()) {
-                StringBuilder xmlEl = new StringBuilder("@XmlElement");
-                List<String> attrs = new ArrayList<>();
-                if (field.getXmlName() != null) attrs.add("name = \"" + field.getXmlName() + "\"");
-                if (field.isRequired()) attrs.add("required = true");
-                if (!attrs.isEmpty()) xmlEl.append("(").append(String.join(", ", attrs)).append(")");
-                fieldAnnotations.add(xmlEl.toString());
-            }
-            if (field.isHasXmlAttribute()) {
-                String attrAnnot = field.getXmlName() != null
-                        ? "@XmlAttribute(name = \"" + field.getXmlName() + "\")"
-                        : "@XmlAttribute";
-                fieldAnnotations.add(attrAnnot);
-            }
-
-            // BUG M : @XmlTransient doit etre preserve (pas remplace par @JsonIgnore)
-            if (field.isHasXmlTransient()) {
-                fieldAnnotations.add("@XmlTransient");
-            }
-
-            // Validation annotations (BUG 10/11 : une seule fois, jamais de doublon)
-            if (field.isRequired()) {
-                String baseType = extractBaseType(field.getType());
-                if (baseType.equals("String")) {
-                    fieldAnnotations.add("@NotBlank");
-                } else if (baseType.equals("List") || baseType.equals("Set") || baseType.equals("Collection")) {
-                    fieldAnnotations.add("@NotNull");
-                    fieldAnnotations.add("@Size(min = 1)");
-                } else if (!PRIMITIVE_TYPES.contains(baseType)) {
-                    fieldAnnotations.add("@NotNull");
-                }
-            }
-
-            // BUG H : Annotations custom de validation (@ValidIBAN, @ValidRIB, etc.)
-            for (String customAnnot : field.getCustomAnnotations()) {
-                fieldAnnotations.add("@" + customAnnot);
-            }
-
-            // Ecrire les annotations (G2 : le Set garantit la deduplication)
-            for (String annot : fieldAnnotations) {
-                sb.append("    ").append(annot).append("\n");
-            }
-
-            sb.append("    private ").append(field.getType()).append(" ").append(field.getName()).append(";\n");
-        }
-
-        sb.append("\n");
-
-        // Constructeur par defaut
-        sb.append("    public ").append(dto.getClassName()).append("() {\n");
-        sb.append("    }\n\n");
-
-        // Getters et Setters
-        for (DtoInfo.FieldInfo field : instanceFields) {
-            String cap = Character.toUpperCase(field.getName().charAt(0)) + field.getName().substring(1);
-            String prefix = field.getType().equals("boolean") ? "is" : "get";
-
-            sb.append("    public ").append(field.getType()).append(" ").append(prefix).append(cap).append("() {\n");
-            sb.append("        return ").append(field.getName()).append(";\n");
-            sb.append("    }\n\n");
-
-            sb.append("    public void set").append(cap).append("(").append(field.getType()).append(" ").append(field.getName()).append(") {\n");
-            sb.append("        this.").append(field.getName()).append(" = ").append(field.getName()).append(";\n");
-            sb.append("    }\n\n");
-        }
-
-        // toString
-        sb.append("    @Override\n");
-        sb.append("    public String toString() {\n");
-        sb.append("        return \"").append(dto.getClassName()).append("{");
-        for (int i = 0; i < instanceFields.size(); i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(instanceFields.get(i).getName()).append("='\" + ").append(instanceFields.get(i).getName()).append(" + \"'");
-        }
-        sb.append("}\";\n");
-        sb.append("    }\n");
-        sb.append("}\n");
-
-        Files.writeString(srcMain.resolve("dto/" + dto.getClassName() + ".java"), sb.toString());
-        log.info("DTO genere : {} (JAXB: {}, Serializable: {})", dto.getClassName(), hasJaxb, isVoIn || isVoOut || isDto);
-    }
-
     // ===================== GLOBAL EXCEPTION HANDLER (G9 enrichi) =====================
 
     private void generateGlobalExceptionHandler(Path srcMain, ProjectAnalysisResult analysisResult) throws IOException {
@@ -1895,7 +1260,7 @@ public class CodeGenerationEngine {
                 String excLower = Character.toLowerCase(excName.charAt(0)) + excName.substring(1);
                 // Determiner le HTTP status en fonction du nom de l'exception
                 // BUG L : Mapping intelligent exception → code HTTP
-                String httpStatus = resolveExceptionHttpStatus(excName);
+                String httpStatus = CodeGenUtils.resolveExceptionHttpStatus(excName);
 
                 customHandlers.append("\n    @ExceptionHandler(").append(excName).append(".class)\n");
                 customHandlers.append("    public ResponseEntity<Map<String, Object>> handle").append(excName).append("(").append(excName).append(" ex) {\n");
@@ -2101,174 +1466,6 @@ public class CodeGenerationEngine {
         Files.writeString(srcMain.resolve("config/EjbLookupConfig.java"), code);
     }
 
-    // ===================== G14 : TRANSFORMATION_SUMMARY.md =====================
-
-    private void generateTransformationSummary(Path projectRoot, ProjectAnalysisResult analysisResult, boolean hasXml) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        sb.append("# Resume de la transformation EJB → REST API\n\n");
-
-        sb.append("## Projet source\n");
-        sb.append("- Package source : ").append(analysisResult.getSourceBasePackage() != null ? analysisResult.getSourceBasePackage() : "detecte automatiquement").append("\n");
-        sb.append("- EJB detectes : ").append(analysisResult.getUseCases().size()).append("\n");
-        sb.append("- DTOs detectes : ").append(analysisResult.getDtos().size()).append("\n");
-        sb.append("- Entites JPA : ").append(analysisResult.getJpaEntityCount()).append("\n\n");
-
-        sb.append("## Projet genere\n");
-        sb.append("- Framework : Spring Boot 3.2.5\n");
-        sb.append("- Package : ").append(BASE_PACKAGE).append("\n");
-        sb.append("- Java : 21\n");
-        sb.append("- Support XML/JAXB : ").append(hasXml ? "Oui" : "Non").append("\n\n");
-
-        sb.append("## Mapping detaille\n\n");
-        sb.append("| EJB Source | Type | Pattern | Endpoint REST | Methode | Code HTTP |\n");
-        sb.append("|------------|------|---------|---------------|---------|----------|\n");
-        for (UseCaseInfo uc : analysisResult.getUseCases()) {
-            HttpMapping mapping = resolveHttpMappingForUseCase(uc.getClassName());
-            sb.append("| ").append(uc.getClassName())
-              .append(" | @").append(uc.getEjbType() != null ? uc.getEjbType().name() : "Stateless")
-              .append(" | ").append(uc.getEjbPattern() != null ? uc.getEjbPattern().name() : "BASE_USE_CASE")
-              .append(" | ").append(uc.getRestEndpoint())
-              .append(" | ").append(mapping.method)
-              .append(" | ").append(mapping.statusCode)
-              .append(" |\n");
-        }
-
-        sb.append("\n## Conversions appliquees\n\n");
-        sb.append("- javax.xml.bind → jakarta.xml.bind (G3)\n");
-        sb.append("- @EJB → lookup JNDI via ServiceAdapter\n");
-        sb.append("- @XmlRootElement → preserve + ajout @JacksonXmlRootElement\n");
-        sb.append("- serialVersionUID → supprime des DTOs (inutile en REST)\n");
-        sb.append("- Lombok → supprime (getters/setters generes explicitement)\n");
-        sb.append("- Swagger/OpenAPI 3 → ajoute sur tous les endpoints (G11)\n\n");
-
-        sb.append("## Points d'attention\n\n");
-        long statefulCount = analysisResult.getUseCases().stream()
-                .filter(uc -> uc.getEjbType() == UseCaseInfo.EjbType.STATEFUL).count();
-        long mdbCount = analysisResult.getUseCases().stream()
-                .filter(uc -> uc.getEjbType() == UseCaseInfo.EjbType.MESSAGE_DRIVEN).count();
-        if (statefulCount > 0) {
-            sb.append("- ").append(statefulCount).append(" EJB @Stateful detecte(s) — l'etat conversationnel n'est pas reproduit dans la facade REST\n");
-        }
-        if (mdbCount > 0) {
-            sb.append("- ").append(mdbCount).append(" EJB @MessageDriven detecte(s) \u2192 transforme(s) en Controller REST async + EventListener Spring\n");
-            sb.append("  - Chaque MDB genere : Controller (POST 202 Accepted), Event Spring, EventListener (@Async), ServiceAdapter\n");
-            sb.append("  - Les messages JMS sont remplaces par des appels HTTP POST asynchrones\n");
-        }
-        sb.append("- Les ServiceAdapters utilisent un lookup JNDI a chaque appel — prevoir un cache si necessaire\n");        sb.append("- Les tests unitaires mockent les ServiceAdapters \u2014 les tests d'integration necessitent un serveur EJB\n");
-
-        // ===== SECTION BIAN =====
-        long bianMapped = analysisResult.getUseCases().stream()
-                .filter(uc -> uc.getBianMapping() != null).count();
-        if (bianMapped > 0) {
-            sb.append("\n## Conformite BIAN\n\n");
-            sb.append("L'outil a genere des wrappers conformes au standard BIAN v12.0.\n\n");
-
-            sb.append("### Mapping UseCase \u2192 Service Domain BIAN\n\n");
-            sb.append("| UseCase Source | Service Domain | BIAN ID | Action | BQ | HTTP | URL BIAN |\n");
-            sb.append("|---------------|---------------|---------|--------|----|----|----------|\n");
-            for (UseCaseInfo uc : analysisResult.getUseCases()) {
-                BianMapping bm = uc.getBianMapping();
-                if (bm == null) continue;
-                sb.append("| ").append(uc.getClassName());
-                sb.append(" | ").append(bm.getServiceDomainTitle());
-                sb.append(" | ").append(bm.getBianId() != null ? bm.getBianId() : "-");
-                sb.append(" | ").append(bm.getAction());
-                sb.append(" | ").append(bm.getBehaviorQualifier() != null ? bm.getBehaviorQualifier() : "-");
-                sb.append(" | ").append(bm.getHttpMethod()).append(" ").append(bm.getHttpStatus());
-                sb.append(" | `").append(bm.buildUrl("/api/v1")).append("`");
-                sb.append(" |\n");
-            }
-
-            sb.append("\n### Headers HTTP BIAN\n\n");
-            sb.append("Le `BianHeaderFilter` injecte automatiquement les headers suivants sur chaque reponse :\n\n");
-            sb.append("| Header | Description |\n");
-            sb.append("|--------|-------------|\n");
-            sb.append("| `X-BIAN-Version` | Version du standard BIAN (12.0) |\n");
-            sb.append("| `X-BIAN-Service-Domain` | Nom du Service Domain |\n");
-            sb.append("| `X-BIAN-Service-Domain-ID` | Identifiant BIAN officiel (SDxxxx) |\n");
-            sb.append("| `X-BIAN-Action` | Action BIAN executee |\n");
-            sb.append("| `X-BIAN-Behavior-Qualifier` | Behavior Qualifier (si applicable) |\n");
-
-            sb.append("\n### Swagger BIAN\n\n");
-            sb.append("Les endpoints Swagger sont organises par Service Domain BIAN :\n");
-            sb.append("- Chaque controller est annote `@Tag(name = \"Service Domain\")` pour le regroupement Swagger\n");
-            sb.append("- Chaque endpoint a un `operationId` au format BIAN : `{action}{ServiceDomain}{BQ}`\n");
-            sb.append("- Les `@ApiResponse` incluent les codes HTTP BIAN standards\n");
-            sb.append("- Swagger UI : http://localhost:8081/swagger-ui.html\n\n");
-
-            sb.append("### Statistiques BIAN\n\n");
-            sb.append("- UseCases mappes : ").append(bianMapped).append("/").append(analysisResult.getUseCases().size()).append("\n");
-            long explicit = analysisResult.getUseCases().stream()
-                    .filter(uc -> uc.getBianMapping() != null && uc.getBianMapping().isExplicit()).count();
-            sb.append("- Mappings explicites (bian-mapping.yml) : ").append(explicit).append("\n");
-            sb.append("- Mappings automatiques (par mots-cles) : ").append(bianMapped - explicit).append("\n");
-
-            // Regroupement par Service Domain
-            Map<String, Long> domainCount = analysisResult.getUseCases().stream()
-                    .filter(uc -> uc.getBianMapping() != null)
-                    .collect(Collectors.groupingBy(uc -> uc.getBianMapping().getServiceDomainTitle(), Collectors.counting()));
-            sb.append("- Service Domains couverts : ").append(domainCount.size()).append("\n");
-            for (Map.Entry<String, Long> entry : domainCount.entrySet()) {
-                sb.append("  - ").append(entry.getKey()).append(" : ").append(entry.getValue()).append(" endpoints\n");
-            }
-        }
-
-        Files.writeString(projectRoot.resolve("TRANSFORMATION_SUMMARY.md"), sb.toString());     log.info("TRANSFORMATION_SUMMARY.md genere");
-    }
-
-    // ===================== README =====================
-
-    private void generateReadme(Path projectRoot, ProjectAnalysisResult analysisResult, boolean hasXml) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        sb.append("# Generated REST API\n\n");
-        sb.append("API REST generee automatiquement a partir d'un projet EJB.\n\n");
-
-        sb.append("## Prerequis\n\n");
-        sb.append("- Java 21\n- Maven 3.8+\n- Serveur d'applications EJB accessible via JNDI\n\n");
-
-        sb.append("## Compilation et execution\n\n");
-        sb.append("```bash\nmvn clean package\njava -jar target/generated-rest-api-1.0.0-SNAPSHOT.jar\n```\n\n");
-
-        sb.append("## Documentation API (Swagger)\n\n");
-        sb.append("Apres le demarrage, acceder a :\n");
-        sb.append("- Swagger UI : http://localhost:8081/swagger-ui.html\n");
-        sb.append("- OpenAPI JSON : http://localhost:8081/api-docs\n\n");
-
-        sb.append("## Endpoints REST\n\n");
-        sb.append("| UseCase | Endpoint | Methode | Format | HTTP Status |\n");
-        sb.append("|---------|----------|---------|--------|-------------|\n");
-        for (UseCaseInfo uc : analysisResult.getUseCases()) {
-            if (uc.getEjbType() == UseCaseInfo.EjbType.MESSAGE_DRIVEN) {
-                sb.append("| ").append(uc.getClassName()).append(" (MDB)")
-                  .append(" | ").append(uc.getRestEndpoint())
-                  .append(" | POST (async)")
-                  .append(" | JSON")
-                  .append(" | 202 Accepted")
-                  .append(" |\n");
-            } else {
-                HttpMapping mapping = resolveHttpMappingForUseCase(uc.getClassName());
-                sb.append("| ").append(uc.getClassName())
-                  .append(" | ").append(uc.getRestEndpoint())
-                  .append(" | ").append(mapping.method)
-                  .append(" | ").append(uc.getSerializationFormat().getLabel())
-                  .append(" | ").append(mapping.statusCode)
-                  .append(" |\n");
-            }
-        }
-
-        if (hasXml) {
-            sb.append("\n## Negociation de contenu\n\n");
-            sb.append("- En-tete Accept : `application/json` ou `application/xml`\n");
-            sb.append("- Parametre : `?format=json` ou `?format=xml`\n");
-        }
-
-        sb.append("\n## Architecture\n\n");
-        sb.append("```\nClient HTTP → Controller REST → ServiceAdapter → JNDI Lookup → EJB\n```\n");
-
-        Files.writeString(projectRoot.resolve("README.md"), sb.toString());
-        log.info("README.md genere");
-    }
-
     // ===================== BIAN CONTROLLER GENERATION =====================
 
     /**
@@ -2294,15 +1491,15 @@ public class CodeGenerationEngine {
         imports.add("io.swagger.v3.oas.annotations.tags.Tag");
 
         for (UseCaseInfo.MethodInfo method : useCase.getPublicMethods()) {
-            resolveTypeImports(method.getReturnType(), imports);
+            CodeGenUtils.resolveTypeImports(method.getReturnType(), imports);
             for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
-                resolveTypeImports(param.getType(), imports);
+                CodeGenUtils.resolveTypeImports(param.getType(), imports);
             }
-            String returnBase = extractBaseType(method.getReturnType());
-            if (isDtoType(returnBase)) imports.add(BASE_PACKAGE + ".dto." + returnBase);
+            String returnBase = CodeGenUtils.extractBaseType(method.getReturnType());
+            if (CodeGenUtils.isDtoType(returnBase)) imports.add(BASE_PACKAGE + ".dto." + returnBase);
             for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
-                String paramBase = extractBaseType(param.getType());
-                if (isDtoType(paramBase)) imports.add(BASE_PACKAGE + ".dto." + paramBase);
+                String paramBase = CodeGenUtils.extractBaseType(param.getType());
+                if (CodeGenUtils.isDtoType(paramBase)) imports.add(BASE_PACKAGE + ".dto." + paramBase);
             }
         }
 
@@ -2347,7 +1544,7 @@ public class CodeGenerationEngine {
             sb.append("\n");
             // Swagger avec Action Term BIAN
             sb.append("    @Operation(summary = \"BIAN ").append(mm.actionTerm.actionTerm);
-            sb.append(" - ").append(deriveSwaggerSummary(method.getName())).append("\")\n");
+            sb.append(" - ").append(CodeGenUtils.deriveSwaggerSummary(method.getName())).append("\")\n");
 
             // Annotation HTTP BIAN
             sb.append("    @").append(mm.springAnnotation);
@@ -2358,7 +1555,7 @@ public class CodeGenerationEngine {
 
             // Type de retour
             String returnType = method.getReturnType();
-            String responseType = mapReturnType(returnType);
+            String responseType = CodeGenUtils.mapReturnType(returnType);
 
             sb.append("    public ResponseEntity<").append(responseType).append("> ").append(method.getName()).append("(");
 
@@ -2420,111 +1617,7 @@ public class CodeGenerationEngine {
         log.info("[BIAN] Controller genere : {} ({} routes BIAN)", controllerName, useCase.getPublicMethods().size());
     }
 
-    // ===================== BIAN MAPPING REPORT =====================
-
-    /**
-     * Genere le fichier BIAN_MAPPING.md avec le detail du mapping EJB → BIAN.
-     */
-    private void generateBianMappingReport(Path projectRoot,
-                                            List<BianServiceDomainMapper.BianMapping> bianMappings,
-                                            ProjectAnalysisResult analysisResult) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        sb.append("# Rapport de Mapping BIAN\n\n");
-        sb.append("Ce document detaille le mapping entre les EJB source et les Service Domains BIAN.\n");
-        sb.append("Genere automatiquement par l'outil EJB-to-REST Generator en mode BIAN.\n\n");
-        sb.append("**Reference** : BIAN Semantic API Practitioner Guide V8.1\n\n");
-        sb.append("---\n\n");
-
-        // Resume
-        sb.append("## Resume\n\n");
-        sb.append("| Metrique | Valeur |\n");
-        sb.append("|----------|--------|\n");
-        sb.append("| Service Domains identifies | ").append(bianMappings.size()).append(" |\n");
-        int totalRoutes = bianMappings.stream().mapToInt(m -> m.methodMappings.size()).sum();
-        sb.append("| Routes BIAN generees | ").append(totalRoutes).append(" |\n");
-        sb.append("| UseCases totaux | ").append(analysisResult.getUseCases().size()).append(" |\n");
-        sb.append("\n");
-
-        // Detail par Service Domain
-        sb.append("## Detail par Service Domain\n\n");
-        for (BianServiceDomainMapper.BianMapping mapping : bianMappings) {
-            sb.append("### ").append(mapping.serviceDomain.displayName).append("\n\n");
-            sb.append("| Propriete | Valeur |\n");
-            sb.append("|-----------|--------|\n");
-            sb.append("| **Domain Name** | ").append(mapping.serviceDomain.domainName).append(" |\n");
-            sb.append("| **Control Record** | ").append(mapping.serviceDomain.controlRecord).append(" |\n");
-            sb.append("| **Functional Pattern** | ").append(mapping.serviceDomain.functionalPattern).append(" |\n");
-            sb.append("| **Base URL** | `").append(mapping.baseUrl).append("` |\n");
-            sb.append("\n");
-
-            sb.append("#### Routes\n\n");
-            sb.append("| Methode EJB | Action Term | HTTP | URL BIAN | Behavior Qualifier |\n");
-            sb.append("|-------------|-------------|------|----------|-------------------|\n");
-            for (BianServiceDomainMapper.BianMethodMapping mm : mapping.methodMappings.values()) {
-                sb.append("| `").append(mm.methodName).append("` ");
-                sb.append("| ").append(mm.actionTerm.actionTerm).append(" ");
-                sb.append("| ").append(mm.httpMethod).append(" ");
-                sb.append("| `").append(mapping.baseUrl).append(mm.fullUrl).append("` ");
-                sb.append("| ").append(mm.behaviorQualifier != null ? mm.behaviorQualifier : "-").append(" |\n");
-            }
-            sb.append("\n");
-        }
-
-        // Glossaire BIAN
-        sb.append("## Glossaire BIAN\n\n");
-        sb.append("| Terme | Definition |\n");
-        sb.append("|-------|-----------|\n");
-        sb.append("| **Service Domain** | Unite fonctionnelle autonome dans l'architecture BIAN |\n");
-        sb.append("| **Control Record** | Objet metier principal gere par le Service Domain |\n");
-        sb.append("| **Behavior Qualifier** | Sous-aspect du Control Record (ex: balances, payments) |\n");
-        sb.append("| **Action Term** | Verbe standardise BIAN (Initiate, Retrieve, Update, Execute, Control) |\n");
-        sb.append("| **Functional Pattern** | Categorisation du comportement du Service Domain (FULFILL, PROCESS, etc.) |\n");
-        sb.append("\n");
-
-        Files.writeString(projectRoot.resolve("BIAN_MAPPING.md"), sb.toString());
-    }
-
-    // ===================== UTILITAIRES =====================
-
-    /** G1 : Resout les imports necessaires pour un type donne */
-    private void resolveTypeImports(String type, Set<String> imports) {
-        if (type == null || type.isEmpty()) return;
-        String baseType = extractBaseType(type);
-
-        if (TYPE_IMPORT_MAP.containsKey(baseType)) {
-            imports.add(TYPE_IMPORT_MAP.get(baseType));
-        }
-
-        // Generiques : extraire les types parametres entre < et >
-        int openIdx = type.indexOf('<');
-        int closeIdx = type.lastIndexOf('>');
-        if (openIdx >= 0 && closeIdx > openIdx) {
-            String genericPart = type.substring(openIdx + 1, closeIdx);
-            // Split intelligent qui respecte les generiques imbriques
-            int depth = 0;
-            int start = 0;
-            for (int i = 0; i < genericPart.length(); i++) {
-                char c = genericPart.charAt(i);
-                if (c == '<') depth++;
-                else if (c == '>') depth--;
-                else if (c == ',' && depth == 0) {
-                    resolveTypeImports(genericPart.substring(start, i).trim(), imports);
-                    start = i + 1;
-                }
-            }
-            resolveTypeImports(genericPart.substring(start).trim(), imports);
-        }
-    }
-
-    /** Extrait le type de base */
-    private String extractBaseType(String type) {
-        if (type == null) return "";
-        if (type.contains("<")) return type.substring(0, type.indexOf('<')).trim();
-        if (type.endsWith("[]")) return type.substring(0, type.length() - 2).trim();
-        return type.trim();
-    }
-
-    /** FIX P0-1b: Liste des types framework EAI qui doivent etre remplaces par Map<String, Object> */
+        /** FIX P0-1b: Liste des types framework EAI qui doivent etre remplaces par Map<String, Object> */
     private static final Set<String> FRAMEWORK_TYPES_SET = Set.of(
             "Envelope", "Parser", "ParsingException", "UtilHash",
             "SynchroneService", "Services", "Log", "EaiLog",
@@ -2534,37 +1627,21 @@ public class CodeGenerationEngine {
     /** FIX P0-1b: Verifie si un type est un type framework EAI */
     private boolean isFrameworkType(String type) {
         if (type == null) return false;
-        String baseType = extractBaseType(type);
+        String baseType = CodeGenUtils.extractBaseType(type);
         return FRAMEWORK_TYPES_SET.contains(baseType);
     }
 
     /** FIX P0-1b: Remplace les types framework EAI par Map<String, Object> */
     private String replaceFrameworkType(String type) {
         if (type == null) return type;
-        String baseType = extractBaseType(type);
+        String baseType = CodeGenUtils.extractBaseType(type);
         if (FRAMEWORK_TYPES_SET.contains(baseType)) {
             return "Map<String, Object>";
         }
         return type;
     }
 
-    /** Verifie si un champ est un logger */
-    private boolean isLoggerField(DtoInfo.FieldInfo field) {
-        String name = field.getName().toLowerCase();
-        String type = field.getType().toLowerCase();
-        return name.equals("logger") || name.equals("log") || name.equals("log_")
-                || type.contains("logger") || type.contains("log4j");
-    }
-
-    /** Verifie si un type est un DTO */
-    private boolean isDtoType(String type) {
-        return type.endsWith("Vo") || type.endsWith("VoIn") || type.endsWith("VoOut")
-                || type.endsWith("Dto") || type.endsWith("DTO")
-                || type.endsWith("Input") || type.endsWith("Output")
-                || type.endsWith("Request") || type.endsWith("Response");
-    }
-
-    // ===================== G6 : HTTP MAPPING INTELLIGENT =====================
+            // ===================== G6 : HTTP MAPPING INTELLIGENT =====================
 
     private record HttpMapping(String method, String springAnnotation, String statusCode, String responseExpression) {}
 
@@ -2604,10 +1681,10 @@ public class CodeGenerationEngine {
     /** G8 : Resout l'annotation de parametre */
     private String resolveParameterAnnotation(UseCaseInfo.ParameterInfo param, String httpMethod) {
         String name = param.getName().toLowerCase();
-        String type = extractBaseType(param.getType());
+        String type = CodeGenUtils.extractBaseType(param.getType());
 
         // Si c'est un DTO/objet complexe → @RequestBody
-        if (isDtoType(type) || type.endsWith("ValueObject")) {
+        if (CodeGenUtils.isDtoType(type) || type.endsWith("ValueObject")) {
             return "@RequestBody ";
         }
 
@@ -2630,19 +1707,7 @@ public class CodeGenerationEngine {
         return "@RequestBody ";
     }
 
-    /** G7 : Mappe le type de retour pour ResponseEntity */
-    private String mapReturnType(String returnType) {
-        if (returnType.equals("void")) return "Void";
-        if (returnType.equals("int")) return "Integer";
-        if (returnType.equals("long")) return "Long";
-        if (returnType.equals("double")) return "Double";
-        if (returnType.equals("float")) return "Float";
-        if (returnType.equals("boolean")) return "Boolean";
-        if (returnType.equals("byte[]")) return "byte[]";
-        return returnType;
-    }
-
-    /** G5 : Derive le sous-chemin pour une methode multi-methodes */
+        /** G5 : Derive le sous-chemin pour une methode multi-methodes */
     private String deriveSubPath(UseCaseInfo.MethodInfo method, HttpMapping mapping) {
         // Si la methode a un parametre "id" → ajouter /{id}
         boolean hasIdParam = method.getParameters().stream()
@@ -2661,7 +1726,7 @@ public class CodeGenerationEngine {
         }
 
         // Sinon, utiliser le nom de la methode comme sous-chemin
-        return "/" + toKebabCase(method.getName());
+        return "/" + CodeGenUtils.toKebabCase(method.getName());
     }
 
     // ===================== BUG N : resolveHttpMappingForMethod V2 (prend en compte returnType) =====================
@@ -2712,11 +1777,11 @@ public class CodeGenerationEngine {
 
         // Methodes avec id mais pas CRUD standard → sous-chemin + /{id}
         if (hasIdParam) {
-            return "/" + toKebabCase(method.getName()) + "/{" + getIdParamName(method) + "}";
+            return "/" + CodeGenUtils.toKebabCase(method.getName()) + "/{" + getIdParamName(method) + "}";
         }
 
         // Sinon, utiliser le nom de la methode comme sous-chemin
-        return "/" + toKebabCase(method.getName());
+        return "/" + CodeGenUtils.toKebabCase(method.getName());
     }
 
     // ===================== BUG F + BUG J : resolveParameterAnnotationV2 =====================
@@ -2727,7 +1792,7 @@ public class CodeGenerationEngine {
      */
     private String resolveParameterAnnotationV2(UseCaseInfo.ParameterInfo param, String httpMethod, boolean alreadyHasRequestBody) {
         String name = param.getName().toLowerCase();
-        String type = extractBaseType(param.getType());
+        String type = CodeGenUtils.extractBaseType(param.getType());
 
         // Si le nom contient "id" → @PathVariable
         if (name.equals("id") || name.endsWith("id")) {
@@ -2759,7 +1824,7 @@ public class CodeGenerationEngine {
         }
 
         // DTO/objet complexe → @RequestBody
-        if (isDtoType(type) || type.endsWith("ValueObject")) {
+        if (CodeGenUtils.isDtoType(type) || type.endsWith("ValueObject")) {
             return "@RequestBody ";
         }
 
@@ -2836,169 +1901,6 @@ public class CodeGenerationEngine {
                     """;
             default -> "";
         };
-    }
-
-    /** G11 : Derive un resume Swagger depuis le nom */
-    private String deriveSwaggerSummary(String name) {
-        // Retirer les suffixes courants
-        String clean = name.replaceAll("(UC|Bean|Impl|Service|EJB)$", "");
-        // CamelCase → mots separes
-        String[] words = clean.split("(?=[A-Z])");
-        return String.join(" ", words).trim().toLowerCase();
-    }
-
-    /** Convertit en kebab-case */
-    private String toKebabCase(String camelCase) {
-        // Supprimer les prefixes CRUD courants pour un kebab-case plus propre
-        String clean = camelCase;
-        return clean.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
-    }
-
-    /** Echappe les caracteres pour les strings Java */
-    private String escapeJavaString(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ");
-    }
-
-    // ===================== BUG L : EXCEPTION → HTTP STATUS MAPPING =====================
-
-    /**
-     * BUG L : Mapping intelligent du nom d'exception vers le code HTTP.
-     * Couvre les cas metier bancaires : AccountClosed→409, Unauthorized→403, etc.
-     */
-    private String resolveExceptionHttpStatus(String exceptionName) {
-        String lower = exceptionName.toLowerCase();
-
-        // 404 Not Found
-        if (lower.contains("notfound") || lower.contains("inexistant") || lower.contains("introuvable")
-                || lower.contains("unknown") || lower.contains("missing")) {
-            return "HttpStatus.NOT_FOUND";
-        }
-
-        // 400 Bad Request
-        if (lower.contains("validation") || lower.contains("invalid") || lower.contains("malformed")
-                || lower.contains("badrequest") || lower.contains("illegalargument")) {
-            return "HttpStatus.BAD_REQUEST";
-        }
-
-        // 403 Forbidden
-        if (lower.contains("unauthorized") || lower.contains("forbidden") || lower.contains("access")
-                || lower.contains("permission") || lower.contains("denied")) {
-            return "HttpStatus.FORBIDDEN";
-        }
-
-        // 401 Unauthorized (authentification — FR + EN)
-        if (lower.contains("authentification") || lower.contains("authentication") || lower.contains("unauthenticated")
-                || lower.contains("notauthenticated") || lower.contains("auth") || lower.contains("login")
-                || lower.contains("token") || lower.contains("credentials") || lower.contains("session")) {
-            return "HttpStatus.UNAUTHORIZED";
-        }
-
-        // 403 Forbidden (permission — FR + EN)
-        if (lower.contains("interdit") || lower.contains("nonautorise") || lower.contains("nonhabilite")) {
-            return "HttpStatus.FORBIDDEN";
-        }
-
-        // 409 Conflict (etat incompatible, compte ferme, doublon, rollback framework, deja actif)
-        if (lower.contains("conflict") || lower.contains("duplicate") || lower.contains("closed")
-                || lower.contains("already") || lower.contains("exists") || lower.contains("ferme")
-                || lower.contains("cloture") || lower.contains("fwkrollback") || lower.contains("rollback")
-                || lower.contains("deja") || lower.contains("doublon") || lower.contains("active")
-                || lower.contains("business") || lower.contains("metier")) {
-            return "HttpStatus.CONFLICT";
-        }
-
-        // BOA/EAI : 400 Bad Request (parsing, technique)
-        if (lower.contains("parsing") || lower.contains("technique") || lower.contains("format")
-                || lower.contains("conversion") || lower.contains("mapping")) {
-            return "HttpStatus.BAD_REQUEST";
-        }
-
-        // BOA/EAI : 422 Unprocessable Entity (fonctionnel, metier, regle)
-        if (lower.contains("fonctionnel") || lower.contains("regle") || lower.contains("controle")
-                || lower.contains("plafond") || lower.contains("seuil")) {
-            return "HttpStatus.UNPROCESSABLE_ENTITY";
-        }
-
-        // 422 Unprocessable Entity (solde insuffisant, limite depassee)
-        if (lower.contains("insufficient") || lower.contains("insuffisant")
-                || lower.contains("limit") || lower.contains("exceeded")
-                || lower.contains("depasse")) {
-            return "HttpStatus.UNPROCESSABLE_ENTITY";
-        }
-
-        // 503 Service Unavailable (service indisponible)
-        if (lower.contains("unavailable") || lower.contains("indisponible") || lower.contains("timeout")
-                || lower.contains("naming") || lower.contains("jndi")) {
-            return "HttpStatus.SERVICE_UNAVAILABLE";
-        }
-
-        // 429 Too Many Requests
-        if (lower.contains("ratelimit") || lower.contains("throttle") || lower.contains("toomany")) {
-            return "HttpStatus.TOO_MANY_REQUESTS";
-        }
-
-        // Default : 500 Internal Server Error
-        return "HttpStatus.INTERNAL_SERVER_ERROR";
-    }
-
-    // ===================== CUSTOM ANNOTATIONS : RAPPORT =====================
-
-    /**
-     * Genere le rapport CUSTOM_ANNOTATIONS_REPORT.md dans le projet genere.
-     */
-    private void generateAnnotationReport(Path projectRoot,
-                                          AnnotationPropagator.AnnotationReport report,
-                                          ProjectAnalysisResult analysisResult) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        sb.append(report.toMarkdown());
-
-        // Ajouter une section avec les actions recommandees
-        sb.append("## Actions Recommandees\n\n");
-
-        if (report.hasUnknownAnnotations()) {
-            sb.append("### Annotations Internes Non Declarees\n\n");
-            sb.append("Les annotations suivantes proviennent de packages internes de la banque ");
-            sb.append("mais ne sont pas declarees dans `custom-annotations.yml`.\n\n");
-            sb.append("Pour chaque annotation, ajoutez une entree dans le fichier YAML avec :\n");
-            sb.append("- `name` : Nom de l'annotation\n");
-            sb.append("- `category` : SECURITY, AUDIT, TRANSACTION, CHANNEL, RISK, COMPLIANCE, CACHING, MONITORING, BUSINESS\n");
-            sb.append("- `propagation` : PROPAGATE_CLASS, PROPAGATE_METHOD, PROPAGATE_BOTH, TRANSFORM, COMMENT, IGNORE\n");
-            sb.append("- `spring-equivalent` : (optionnel) Equivalent Spring Boot\n\n");
-
-            sb.append("```yaml\n");
-            for (DetectedAnnotation da : report.unknownInternal) {
-                sb.append("  - name: \"").append(da.getName()).append("\"\n");
-                sb.append("    category: CUSTOM  # A preciser\n");
-                sb.append("    description: \"Detectee sur ").append(da.getSourceClassName()).append("\"\n");
-                sb.append("    propagation: PROPAGATE_METHOD  # A preciser\n");
-                sb.append("    example: \"").append(da.getFullExpression()).append("\"\n\n");
-            }
-            sb.append("```\n\n");
-        }
-
-        // Synthese des propagations effectuees
-        sb.append("### Propagations Effectuees\n\n");
-        List<DetectedAnnotation> known = analysisResult.getDetectedCustomAnnotations().stream()
-                .filter(DetectedAnnotation::isKnown)
-                .collect(Collectors.toList());
-
-        if (!known.isEmpty()) {
-            sb.append("| Annotation Source | Classe | Strategie | Code Genere |\n");
-            sb.append("|-------------------|--------|-----------|-------------|\n");
-            for (DetectedAnnotation da : known) {
-                String generated = da.toGeneratedCode();
-                sb.append("| `").append(da.getFullExpression()).append("` | ");
-                sb.append(da.getSourceClassName()).append(" | ");
-                sb.append(da.getDefinition().getPropagation()).append(" | ");
-                sb.append("`").append(generated != null ? generated : "IGNORE").append("` |\n");
-            }
-        } else {
-            sb.append("Aucune annotation custom connue detectee.\n");
-        }
-
-        Files.writeString(projectRoot.resolve("CUSTOM_ANNOTATIONS_REPORT.md"), sb.toString());
-        log.info("[ANNOTATIONS] Rapport CUSTOM_ANNOTATIONS_REPORT.md genere");
     }
 
     /**
