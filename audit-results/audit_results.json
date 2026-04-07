@@ -1,0 +1,2113 @@
+{
+  "date": "2026-04-07T16:30:37.333583",
+  "author": "Hamza NORDINE",
+  "version": "3.0",
+  "summary": {
+    "projects": 8,
+    "total_files": 98,
+    "total_lines": 5883,
+    "total_methods": 577,
+    "technologies": [
+      "Batch",
+      "EJB",
+      "Hibernate",
+      "JDBC",
+      "JMS",
+      "JPA",
+      "JSP",
+      "SOAP",
+      "Servlet",
+      "Struts"
+    ],
+    "total_issues": 118,
+    "avg_legacy_score": 75.6,
+    "avg_modern_score": 88.2
+  },
+  "projects": [
+    {
+      "project_name": "EJB Bancaire Complet",
+      "file_count": 19,
+      "total_lines": 1103,
+      "total_methods": 193,
+      "technologies": [
+        "EJB",
+        "Hibernate",
+        "JPA"
+      ],
+      "ejb_injections": 11,
+      "jndi_lookups": 0,
+      "transactions": 20,
+      "total_issues": 45,
+      "legacy_score": 60,
+      "modern_score": 75,
+      "files": [
+        {
+          "file": "AccountDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/dto/AccountDTO.java",
+          "lines": 23,
+          "methods": 14,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 21,
+              "snippet": "blic Date getCreatedDate() { return createdDat"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "AccountSummaryDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/dto/AccountSummaryDTO.java",
+          "lines": 17,
+          "methods": 14,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 14,
+              "snippet": "public Date getOpenDate() { return openDate;"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "CustomerDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/dto/CustomerDTO.java",
+          "lines": 16,
+          "methods": 14,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "TransferRequestDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/dto/TransferRequestDTO.java",
+          "lines": 14,
+          "methods": 10,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "TransferResultDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/dto/TransferResultDTO.java",
+          "lines": 16,
+          "methods": 12,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 11,
+              "snippet": "ic Date getExecutionDate() { return executionD"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "AccountServiceBean.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/ejb/AccountServiceBean.java",
+          "lines": 309,
+          "methods": 10,
+          "technologies": [
+            "JPA",
+            "EJB",
+            "Hibernate"
+          ],
+          "ejb_injections": 3,
+          "jndi_lookups": 0,
+          "transactions": 9,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 66,
+              "snippet": ".setCreatedDate(new Date());\n        account.s"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 67,
+              "snippet": "astModifiedDate(new Date());\n        account.s"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 79,
+              "snippet": "etOperationDate(new Date());\n        history.s"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 146,
+              "snippet": "astModifiedDate(new Date());\n\n        entityMa"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 156,
+              "snippet": "etOperationDate(new Date());\n        history.s"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 190,
+              "snippet": "astModifiedDate(new Date());\n\n        entityMa"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 200,
+              "snippet": "etOperationDate(new Date());\n        history.s"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 225,
+              "snippet": "astModifiedDate(new Date());\n        entityMan"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 265,
+              "snippet": "e(account.getCreatedDate());\n\n        // Calcu"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 291,
+              "snippet": "e(account.getCreatedDate());\n        return dt"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 66,
+              "snippet": "ount.setCreatedDate(new Date());\n        account.s"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 67,
+              "snippet": "setLastModifiedDate(new Date());\n        account.s"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 79,
+              "snippet": "ry.setOperationDate(new Date());\n        history.s"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 146,
+              "snippet": "setLastModifiedDate(new Date());\n\n        entityMa"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 156,
+              "snippet": "ry.setOperationDate(new Date());\n        history.s"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 190,
+              "snippet": "setLastModifiedDate(new Date());\n\n        entityMa"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 200,
+              "snippet": "ry.setOperationDate(new Date());\n        history.s"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 225,
+              "snippet": "setLastModifiedDate(new Date());\n        entityMan"
+            }
+          ],
+          "issue_count": 18
+        },
+        {
+          "file": "AuditServiceBean.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/ejb/AuditServiceBean.java",
+          "lines": 65,
+          "methods": 4,
+          "technologies": [
+            "JPA",
+            "EJB"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 2,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 32,
+              "snippet": "og.setTimestamp(new Date());\n        log.setUs"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 46,
+              "snippet": "og.setTimestamp(new Date());\n        log.setUs"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 32,
+              "snippet": "log.setTimestamp(new Date());\n        log.setUs"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 46,
+              "snippet": "log.setTimestamp(new Date());\n        log.setUs"
+            }
+          ],
+          "issue_count": 4
+        },
+        {
+          "file": "ComplianceServiceBean.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/ejb/ComplianceServiceBean.java",
+          "lines": 62,
+          "methods": 3,
+          "technologies": [
+            "EJB"
+          ],
+          "ejb_injections": 2,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "CustomerServiceBean.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/ejb/CustomerServiceBean.java",
+          "lines": 83,
+          "methods": 4,
+          "technologies": [
+            "JPA",
+            "EJB",
+            "Hibernate"
+          ],
+          "ejb_injections": 1,
+          "jndi_lookups": 0,
+          "transactions": 5,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 43,
+              "snippet": ".setCreatedDate(new Date());\n        customer."
+            },
+            {
+              "type": "Deprecated API",
+              "line": 77,
+              "snippet": "astModifiedDate(new Date());\n            entit"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 43,
+              "snippet": "omer.setCreatedDate(new Date());\n        customer."
+            },
+            {
+              "type": "Deprecated API",
+              "line": 77,
+              "snippet": "setLastModifiedDate(new Date());\n            entit"
+            }
+          ],
+          "issue_count": 4
+        },
+        {
+          "file": "NotificationServiceBean.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/ejb/NotificationServiceBean.java",
+          "lines": 65,
+          "methods": 6,
+          "technologies": [
+            "EJB"
+          ],
+          "ejb_injections": 1,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "TransferServiceBean.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/ejb/TransferServiceBean.java",
+          "lines": 235,
+          "methods": 8,
+          "technologies": [
+            "JPA",
+            "EJB",
+            "Hibernate"
+          ],
+          "ejb_injections": 4,
+          "jndi_lookups": 0,
+          "transactions": 4,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 103,
+              "snippet": "etExecutionDate(new Date());\n        transfer."
+            },
+            {
+              "type": "Deprecated API",
+              "line": 104,
+              "snippet": ".setCreatedDate(new Date());\n        transfer."
+            },
+            {
+              "type": "Deprecated API",
+              "line": 124,
+              "snippet": "etExecutionDate(new Date());\n        result.se"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 170,
+              "snippet": "astModifiedDate(new Date());\n        entityMan"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 103,
+              "snippet": "er.setExecutionDate(new Date());\n        transfer."
+            },
+            {
+              "type": "Deprecated API",
+              "line": 104,
+              "snippet": "sfer.setCreatedDate(new Date());\n        transfer."
+            },
+            {
+              "type": "Deprecated API",
+              "line": 124,
+              "snippet": "lt.setExecutionDate(new Date());\n        result.se"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 170,
+              "snippet": "setLastModifiedDate(new Date());\n        entityMan"
+            }
+          ],
+          "issue_count": 8
+        },
+        {
+          "file": "Account.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/entity/Account.java",
+          "lines": 58,
+          "methods": 16,
+          "technologies": [
+            "JPA"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 53,
+              "snippet": "blic Date getCreatedDate() { return createdDat"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 55,
+              "snippet": "Date getLastModifiedDate() { return lastModifi"
+            }
+          ],
+          "issue_count": 2
+        },
+        {
+          "file": "AccountHistory.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/entity/AccountHistory.java",
+          "lines": 25,
+          "methods": 14,
+          "technologies": [
+            "JPA"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 22,
+              "snippet": "ic Date getOperationDate() { return operationD"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "AuditLog.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/entity/AuditLog.java",
+          "lines": 26,
+          "methods": 16,
+          "technologies": [
+            "JPA"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "Customer.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/entity/Customer.java",
+          "lines": 34,
+          "methods": 24,
+          "technologies": [
+            "JPA"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 31,
+              "snippet": "blic Date getCreatedDate() { return createdDat"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 32,
+              "snippet": "Date getLastModifiedDate() { return lastModifi"
+            }
+          ],
+          "issue_count": 2
+        },
+        {
+          "file": "Transfer.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/entity/Transfer.java",
+          "lines": 37,
+          "methods": 24,
+          "technologies": [
+            "JPA"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 33,
+              "snippet": "ic Date getExecutionDate() { return executionD"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 34,
+              "snippet": "blic Date getCreatedDate() { return createdDat"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 35,
+              "snippet": "Date getLastModifiedDate() { return lastModifi"
+            }
+          ],
+          "issue_count": 3
+        },
+        {
+          "file": "AccountNotFoundException.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/exception/AccountNotFoundException.java",
+          "lines": 6,
+          "methods": 0,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "InsufficientFundsException.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/exception/InsufficientFundsException.java",
+          "lines": 6,
+          "methods": 0,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "TransferException.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet1-ejb-bancaire/src/main/java/com/bank/exception/TransferException.java",
+          "lines": 6,
+          "methods": 0,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        }
+      ]
+    },
+    {
+      "project_name": "Portail Client Servlet+JSP",
+      "file_count": 11,
+      "total_lines": 648,
+      "total_methods": 46,
+      "technologies": [
+        "Hibernate",
+        "JSP",
+        "Servlet"
+      ],
+      "ejb_injections": 0,
+      "jndi_lookups": 0,
+      "transactions": 0,
+      "total_issues": 3,
+      "legacy_score": 91,
+      "modern_score": 98,
+      "files": [
+        {
+          "file": "AccountServlet.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet2-servlet-jsp/src/main/java/com/bank/controller/AccountServlet.java",
+          "lines": 37,
+          "methods": 1,
+          "technologies": [
+            "Servlet",
+            "JSP"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "LoginServlet.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet2-servlet-jsp/src/main/java/com/bank/controller/LoginServlet.java",
+          "lines": 52,
+          "methods": 2,
+          "technologies": [
+            "Servlet",
+            "JSP",
+            "Hibernate"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "TransactionServlet.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet2-servlet-jsp/src/main/java/com/bank/controller/TransactionServlet.java",
+          "lines": 41,
+          "methods": 1,
+          "technologies": [
+            "Servlet",
+            "JSP"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "AccountViewDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet2-servlet-jsp/src/main/java/com/bank/dto/AccountViewDTO.java",
+          "lines": 65,
+          "methods": 8,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "LoginDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet2-servlet-jsp/src/main/java/com/bank/dto/LoginDTO.java",
+          "lines": 44,
+          "methods": 4,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "AuthenticationException.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet2-servlet-jsp/src/main/java/com/bank/exception/AuthenticationException.java",
+          "lines": 32,
+          "methods": 0,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "AccountFilter.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet2-servlet-jsp/src/main/java/com/bank/filter/AccountFilter.java",
+          "lines": 47,
+          "methods": 3,
+          "technologies": [
+            "Servlet"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "SessionListener.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet2-servlet-jsp/src/main/java/com/bank/listener/SessionListener.java",
+          "lines": 26,
+          "methods": 2,
+          "technologies": [
+            "Servlet",
+            "Hibernate"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "System.out.println",
+              "line": 18,
+              "snippet": "Event se) {\n        System.out.println(\"Session created:"
+            },
+            {
+              "type": "System.out.println",
+              "line": 23,
+              "snippet": "Event se) {\n        System.out.println(\"Session destroye"
+            }
+          ],
+          "issue_count": 2
+        },
+        {
+          "file": "Account.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet2-servlet-jsp/src/main/java/com/bank/model/Account.java",
+          "lines": 113,
+          "methods": 12,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "Transaction.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet2-servlet-jsp/src/main/java/com/bank/model/Transaction.java",
+          "lines": 113,
+          "methods": 13,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 57,
+              "snippet": "public LocalDate getDate() {\n        return da"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "SessionManager.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet2-servlet-jsp/src/main/java/com/bank/util/SessionManager.java",
+          "lines": 78,
+          "methods": 0,
+          "technologies": [
+            "Servlet",
+            "Hibernate"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        }
+      ]
+    },
+    {
+      "project_name": "Gestion Utilisateurs Struts",
+      "file_count": 13,
+      "total_lines": 1014,
+      "total_methods": 87,
+      "technologies": [
+        "Servlet",
+        "Struts"
+      ],
+      "ejb_injections": 0,
+      "jndi_lookups": 0,
+      "transactions": 0,
+      "total_issues": 12,
+      "legacy_score": 76,
+      "modern_score": 91,
+      "files": [
+        {
+          "file": "RoleAction.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet3-struts/src/main/java/com/bank/action/RoleAction.java",
+          "lines": 64,
+          "methods": 3,
+          "technologies": [
+            "Servlet",
+            "Struts"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Tight Coupling",
+              "line": 23,
+              "snippet": "rvice roleService = new RoleService();\n\n    /**\n     * A"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "UserAction.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet3-struts/src/main/java/com/bank/action/UserAction.java",
+          "lines": 90,
+          "methods": 5,
+          "technologies": [
+            "Servlet",
+            "Struts"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Tight Coupling",
+              "line": 24,
+              "snippet": "rvice userService = new UserService();\n\n    @Override"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "RoleDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet3-struts/src/main/java/com/bank/dto/RoleDTO.java",
+          "lines": 61,
+          "methods": 7,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "UserDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet3-struts/src/main/java/com/bank/dto/UserDTO.java",
+          "lines": 118,
+          "methods": 16,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 82,
+              "snippet": "lic Date getCreationDate() {\n        return cr"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "UserNotFoundException.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet3-struts/src/main/java/com/bank/exception/UserNotFoundException.java",
+          "lines": 31,
+          "methods": 0,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "RoleForm.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet3-struts/src/main/java/com/bank/form/RoleForm.java",
+          "lines": 68,
+          "methods": 8,
+          "technologies": [
+            "Servlet",
+            "Struts"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "UserForm.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet3-struts/src/main/java/com/bank/form/UserForm.java",
+          "lines": 116,
+          "methods": 15,
+          "technologies": [
+            "Servlet",
+            "Struts"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "Role.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet3-struts/src/main/java/com/bank/model/Role.java",
+          "lines": 61,
+          "methods": 7,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "User.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet3-struts/src/main/java/com/bank/model/User.java",
+          "lines": 133,
+          "methods": 19,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 29,
+              "snippet": ".creationDate = new Date();\n        this.enabl"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 40,
+              "snippet": ".creationDate = new Date();\n        this.enabl"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 94,
+              "snippet": "lic Date getCreationDate() {\n        return cr"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 29,
+              "snippet": "this.creationDate = new Date();\n        this.enabl"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 40,
+              "snippet": "this.creationDate = new Date();\n        this.enabl"
+            }
+          ],
+          "issue_count": 5
+        },
+        {
+          "file": "AuthenticationService.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet3-struts/src/main/java/com/bank/service/AuthenticationService.java",
+          "lines": 44,
+          "methods": 1,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "RoleService.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet3-struts/src/main/java/com/bank/service/RoleService.java",
+          "lines": 77,
+          "methods": 2,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "UserService.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet3-struts/src/main/java/com/bank/service/UserService.java",
+          "lines": 119,
+          "methods": 4,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 44,
+              "snippet": "setCreationDate(new Date());\n        user.setE"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 113,
+              "snippet": "(), user.getCreationDate(), user.isEnabled());"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 44,
+              "snippet": "ser.setCreationDate(new Date());\n        user.setE"
+            },
+            {
+              "type": "Tight Coupling",
+              "line": 26,
+              "snippet": "rvice roleService = new RoleService(); // En situation r"
+            }
+          ],
+          "issue_count": 4
+        },
+        {
+          "file": "ActionHelper.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet3-struts/src/main/java/com/bank/util/ActionHelper.java",
+          "lines": 32,
+          "methods": 0,
+          "technologies": [
+            "Servlet"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        }
+      ]
+    },
+    {
+      "project_name": "Services SOAP Bancaires",
+      "file_count": 12,
+      "total_lines": 865,
+      "total_methods": 73,
+      "technologies": [
+        "SOAP"
+      ],
+      "ejb_injections": 0,
+      "jndi_lookups": 0,
+      "transactions": 0,
+      "total_issues": 11,
+      "legacy_score": 75,
+      "modern_score": 90,
+      "files": [
+        {
+          "file": "Account.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet4-soap-webservice/src/main/java/Account.java",
+          "lines": 98,
+          "methods": 13,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 32,
+              "snippet": ".creationDate = new Date();\n        this.activ"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 70,
+              "snippet": "lic Date getCreationDate() {\n        return cr"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 32,
+              "snippet": "this.creationDate = new Date();\n        this.activ"
+            }
+          ],
+          "issue_count": 3
+        },
+        {
+          "file": "AccountInfoDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet4-soap-webservice/src/main/java/AccountInfoDTO.java",
+          "lines": 75,
+          "methods": 9,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "AccountWebService.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet4-soap-webservice/src/main/java/AccountWebService.java",
+          "lines": 79,
+          "methods": 2,
+          "technologies": [
+            "SOAP"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "ExchangeRate.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet4-soap-webservice/src/main/java/ExchangeRate.java",
+          "lines": 76,
+          "methods": 9,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 29,
+              "snippet": "s.lastUpdated = new Date();\n    }\n\n    // Gett"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 29,
+              "snippet": "this.lastUpdated = new Date();\n    }\n\n    // Gett"
+            }
+          ],
+          "issue_count": 2
+        },
+        {
+          "file": "RateResponseDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet4-soap-webservice/src/main/java/RateResponseDTO.java",
+          "lines": 76,
+          "methods": 9,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "RateWebService.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet4-soap-webservice/src/main/java/RateWebService.java",
+          "lines": 69,
+          "methods": 1,
+          "technologies": [
+            "SOAP"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 56,
+              "snippet": "BigDecimal.ONE, new Date());\n        }"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 56,
+              "snippet": "cy, BigDecimal.ONE, new Date());\n        }"
+            }
+          ],
+          "issue_count": 2
+        },
+        {
+          "file": "ServiceFault.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet4-soap-webservice/src/main/java/ServiceFault.java",
+          "lines": 42,
+          "methods": 4,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "ServiceFaultException.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet4-soap-webservice/src/main/java/ServiceFaultException.java",
+          "lines": 32,
+          "methods": 1,
+          "technologies": [
+            "SOAP"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "SoapHelper.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet4-soap-webservice/src/main/java/SoapHelper.java",
+          "lines": 40,
+          "methods": 0,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "Transfer.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet4-soap-webservice/src/main/java/Transfer.java",
+          "lines": 111,
+          "methods": 15,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 28,
+              "snippet": "executionDate = new Date();\n        this.statu"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 82,
+              "snippet": "ic Date getExecutionDate() {\n        return ex"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 28,
+              "snippet": "his.executionDate = new Date();\n        this.statu"
+            }
+          ],
+          "issue_count": 3
+        },
+        {
+          "file": "TransferRequestDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet4-soap-webservice/src/main/java/TransferRequestDTO.java",
+          "lines": 75,
+          "methods": 9,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "TransferWebService.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet4-soap-webservice/src/main/java/TransferWebService.java",
+          "lines": 92,
+          "methods": 1,
+          "technologies": [
+            "SOAP"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "System.out.println",
+              "line": 87,
+              "snippet": "t (simulée)\n        System.out.println(\"Transfer execute"
+            }
+          ],
+          "issue_count": 1
+        }
+      ]
+    },
+    {
+      "project_name": "Accès Données JDBC",
+      "file_count": 11,
+      "total_lines": 649,
+      "total_methods": 46,
+      "technologies": [
+        "JDBC"
+      ],
+      "ejb_injections": 0,
+      "jndi_lookups": 0,
+      "transactions": 0,
+      "total_issues": 7,
+      "legacy_score": 86,
+      "modern_score": 98,
+      "files": [
+        {
+          "file": "AccountDAO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet5-jdbc/src/main/java/com/bank/dao/AccountDAO.java",
+          "lines": 75,
+          "methods": 2,
+          "technologies": [
+            "JDBC"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Raw Types",
+              "line": 26,
+              "snippet": "try (ResultSet rs = stmt.executeQuery()"
+            },
+            {
+              "type": "Raw Types",
+              "line": 47,
+              "snippet": "ResultSet rs = stmt.executeQuery()"
+            }
+          ],
+          "issue_count": 2
+        },
+        {
+          "file": "CustomerDAO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet5-jdbc/src/main/java/com/bank/dao/CustomerDAO.java",
+          "lines": 64,
+          "methods": 2,
+          "technologies": [
+            "JDBC"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Raw Types",
+              "line": 30,
+              "snippet": "try (ResultSet rs = stmt.executeQuery()"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "TransactionDAO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet5-jdbc/src/main/java/com/bank/dao/TransactionDAO.java",
+          "lines": 55,
+          "methods": 1,
+          "technologies": [
+            "JDBC"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Raw Types",
+              "line": 24,
+              "snippet": "try (ResultSet rs = stmt.executeQuery()"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 47,
+              "snippet": "ction.getTransactionDate());\n            stmt."
+            }
+          ],
+          "issue_count": 2
+        },
+        {
+          "file": "AccountDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet5-jdbc/src/main/java/com/bank/dto/AccountDTO.java",
+          "lines": 47,
+          "methods": 5,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "TransactionDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet5-jdbc/src/main/java/com/bank/dto/TransactionDTO.java",
+          "lines": 59,
+          "methods": 7,
+          "technologies": [
+            "JDBC"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 34,
+              "snippet": "stamp getTransactionDate() {\n        return tr"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "DatabaseException.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet5-jdbc/src/main/java/com/bank/exception/DatabaseException.java",
+          "lines": 18,
+          "methods": 0,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "Account.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet5-jdbc/src/main/java/com/bank/model/Account.java",
+          "lines": 69,
+          "methods": 9,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "Customer.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet5-jdbc/src/main/java/com/bank/model/Customer.java",
+          "lines": 67,
+          "methods": 9,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "Transaction.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet5-jdbc/src/main/java/com/bank/model/Transaction.java",
+          "lines": 81,
+          "methods": 11,
+          "technologies": [
+            "JDBC"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 54,
+              "snippet": "stamp getTransactionDate() {\n        return tr"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "ConnectionPool.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet5-jdbc/src/main/java/com/bank/util/ConnectionPool.java",
+          "lines": 60,
+          "methods": 0,
+          "technologies": [
+            "JDBC"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "JdbcHelper.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet5-jdbc/src/main/java/com/bank/util/JdbcHelper.java",
+          "lines": 54,
+          "methods": 0,
+          "technologies": [
+            "JDBC"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        }
+      ]
+    },
+    {
+      "project_name": "ORM Hibernate Legacy",
+      "file_count": 10,
+      "total_lines": 522,
+      "total_methods": 44,
+      "technologies": [
+        "Hibernate",
+        "JPA"
+      ],
+      "ejb_injections": 0,
+      "jndi_lookups": 0,
+      "transactions": 0,
+      "total_issues": 3,
+      "legacy_score": 91,
+      "modern_score": 98,
+      "files": [
+        {
+          "file": "AccountDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet6-hibernate/src/main/java/com/bank/dto/AccountDTO.java",
+          "lines": 45,
+          "methods": 6,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "TransactionDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet6-hibernate/src/main/java/com/bank/dto/TransactionDTO.java",
+          "lines": 57,
+          "methods": 8,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 25,
+              "snippet": "public Date getDate() {\n        return da"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "RepositoryException.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet6-hibernate/src/main/java/com/bank/exception/RepositoryException.java",
+          "lines": 17,
+          "methods": 0,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "Account.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet6-hibernate/src/main/java/com/bank/model/Account.java",
+          "lines": 67,
+          "methods": 8,
+          "technologies": [
+            "JPA"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "Customer.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet6-hibernate/src/main/java/com/bank/model/Customer.java",
+          "lines": 64,
+          "methods": 8,
+          "technologies": [
+            "JPA"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "Transaction.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet6-hibernate/src/main/java/com/bank/model/Transaction.java",
+          "lines": 78,
+          "methods": 10,
+          "technologies": [
+            "JPA"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 46,
+              "snippet": "public Date getDate() {\n        return da"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "AccountRepository.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet6-hibernate/src/main/java/com/bank/repository/AccountRepository.java",
+          "lines": 45,
+          "methods": 1,
+          "technologies": [
+            "Hibernate"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "CustomerRepository.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet6-hibernate/src/main/java/com/bank/repository/CustomerRepository.java",
+          "lines": 73,
+          "methods": 3,
+          "technologies": [
+            "Hibernate"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "TransactionRepository.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet6-hibernate/src/main/java/com/bank/repository/TransactionRepository.java",
+          "lines": 42,
+          "methods": 0,
+          "technologies": [
+            "Hibernate"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "HibernateUtil.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet6-hibernate/src/main/java/com/bank/util/HibernateUtil.java",
+          "lines": 34,
+          "methods": 0,
+          "technologies": [
+            "Hibernate"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "System.out.println",
+              "line": 20,
+              "snippet": "Factory\n            System.err.println(\"Initial SessionF"
+            }
+          ],
+          "issue_count": 1
+        }
+      ]
+    },
+    {
+      "project_name": "Messaging JMS Bancaire",
+      "file_count": 11,
+      "total_lines": 588,
+      "total_methods": 48,
+      "technologies": [
+        "EJB",
+        "JMS"
+      ],
+      "ejb_injections": 0,
+      "jndi_lookups": 0,
+      "transactions": 0,
+      "total_issues": 14,
+      "legacy_score": 69,
+      "modern_score": 84,
+      "files": [
+        {
+          "file": "NotificationMessageConsumer.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet7-jms/src/main/java/com/bank/jms/consumer/NotificationMessageConsumer.java",
+          "lines": 49,
+          "methods": 1,
+          "technologies": [
+            "EJB",
+            "JMS"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "System.out.println",
+              "line": 36,
+              "snippet": "System.out.println(\"Received notific"
+            },
+            {
+              "type": "System.out.println",
+              "line": 39,
+              "snippet": "System.err.println(\"Unknown message"
+            },
+            {
+              "type": "System.out.println",
+              "line": 42,
+              "snippet": "e {\n                System.err.println(\"Message is not a"
+            }
+          ],
+          "issue_count": 3
+        },
+        {
+          "file": "AlertDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet7-jms/src/main/java/com/bank/jms/dto/AlertDTO.java",
+          "lines": 38,
+          "methods": 4,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "MessageDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet7-jms/src/main/java/com/bank/jms/dto/MessageDTO.java",
+          "lines": 28,
+          "methods": 2,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "MessageProcessingException.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet7-jms/src/main/java/com/bank/jms/exception/MessageProcessingException.java",
+          "lines": 19,
+          "methods": 0,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "FraudDetectionListener.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet7-jms/src/main/java/com/bank/jms/listener/FraudDetectionListener.java",
+          "lines": 55,
+          "methods": 2,
+          "technologies": [
+            "JMS"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "System.out.println",
+              "line": 33,
+              "snippet": "System.out.println(\"Analyzing transa"
+            },
+            {
+              "type": "System.out.println",
+              "line": 40,
+              "snippet": "System.err.println(\"Unknown message"
+            },
+            {
+              "type": "System.out.println",
+              "line": 43,
+              "snippet": "e {\n                System.err.println(\"Message is not a"
+            },
+            {
+              "type": "Magic Numbers",
+              "line": 52,
+              "snippet": "nt().doubleValue() > 10000;\n    }\n}"
+            }
+          ],
+          "issue_count": 4
+        },
+        {
+          "file": "FraudAlert.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet7-jms/src/main/java/com/bank/jms/model/FraudAlert.java",
+          "lines": 97,
+          "methods": 13,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 61,
+              "snippet": "public Date getAlertDate() {\n        return al"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "NotificationMessage.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet7-jms/src/main/java/com/bank/jms/model/NotificationMessage.java",
+          "lines": 75,
+          "methods": 9,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 57,
+              "snippet": "Date getNotificationDate() {\n        return no"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "TransactionMessage.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet7-jms/src/main/java/com/bank/jms/model/TransactionMessage.java",
+          "lines": 109,
+          "methods": 15,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 72,
+              "snippet": "Date getTransactionDate() {\n        return tr"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "TransactionMessageProducer.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet7-jms/src/main/java/com/bank/jms/producer/TransactionMessageProducer.java",
+          "lines": 52,
+          "methods": 1,
+          "technologies": [
+            "EJB",
+            "JMS"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "System.out.println",
+              "line": 36,
+              "snippet": "sage);\n\n            System.out.println(\"Transaction mess"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "AlertTopicPublisher.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet7-jms/src/main/java/com/bank/jms/publisher/AlertTopicPublisher.java",
+          "lines": 64,
+          "methods": 1,
+          "technologies": [
+            "EJB",
+            "JMS"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "System.out.println",
+              "line": 48,
+              "snippet": "lert);\n\n            System.out.println(\"Fraud alert publ"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 40,
+              "snippet": "new Date(),"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 40,
+              "snippet": "new Date(),"
+            }
+          ],
+          "issue_count": 3
+        },
+        {
+          "file": "JmsHelper.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet7-jms/src/main/java/com/bank/jms/util/JmsHelper.java",
+          "lines": 2,
+          "methods": 0,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        }
+      ]
+    },
+    {
+      "project_name": "Batch Nocturne Bancaire",
+      "file_count": 11,
+      "total_lines": 494,
+      "total_methods": 40,
+      "technologies": [
+        "Batch",
+        "EJB",
+        "Hibernate",
+        "JPA"
+      ],
+      "ejb_injections": 0,
+      "jndi_lookups": 0,
+      "transactions": 0,
+      "total_issues": 23,
+      "legacy_score": 57,
+      "modern_score": 72,
+      "files": [
+        {
+          "file": "BatchStatusDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet8-batch-bancaire/src/main/java/com/bank/batch/dto/BatchStatusDTO.java",
+          "lines": 41,
+          "methods": 6,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "ReportDTO.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet8-batch-bancaire/src/main/java/com/bank/batch/dto/ReportDTO.java",
+          "lines": 42,
+          "methods": 5,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 25,
+              "snippet": "c Date getGenerationDate() {\n        return ge"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "BatchProcessingException.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet8-batch-bancaire/src/main/java/com/bank/batch/exception/BatchProcessingException.java",
+          "lines": 19,
+          "methods": 0,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "InterestCalculationJob.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet8-batch-bancaire/src/main/java/com/bank/batch/job/InterestCalculationJob.java",
+          "lines": 50,
+          "methods": 2,
+          "technologies": [
+            "Batch",
+            "EJB"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "System.out.println",
+              "line": 31,
+              "snippet": "ulation() {\n        System.out.println(\"Début du batch d"
+            },
+            {
+              "type": "System.out.println",
+              "line": 34,
+              "snippet": "// ...\n        System.out.println(\"Fin du batch de"
+            },
+            {
+              "type": "System.out.println",
+              "line": 46,
+              "snippet": "er timer) {\n        System.out.println(\"Timeout du timer"
+            }
+          ],
+          "issue_count": 3
+        },
+        {
+          "file": "BatchJob.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet8-batch-bancaire/src/main/java/com/bank/batch/model/BatchJob.java",
+          "lines": 48,
+          "methods": 6,
+          "technologies": [
+            "JPA"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 39,
+              "snippet": "lic Date getCreationDate() {\n        return cr"
+            }
+          ],
+          "issue_count": 1
+        },
+        {
+          "file": "BatchResult.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet8-batch-bancaire/src/main/java/com/bank/batch/model/BatchResult.java",
+          "lines": 89,
+          "methods": 14,
+          "technologies": [
+            "JPA"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "Deprecated API",
+              "line": 56,
+              "snippet": "public Date getStartDate() {\n        return st"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 64,
+              "snippet": "public Date getEndDate() {\n        return en"
+            }
+          ],
+          "issue_count": 2
+        },
+        {
+          "file": "InterestRate.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet8-batch-bancaire/src/main/java/com/bank/batch/model/InterestRate.java",
+          "lines": 36,
+          "methods": 4,
+          "technologies": [
+            "JPA"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        },
+        {
+          "file": "EndOfDayBatchProcessor.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet8-batch-bancaire/src/main/java/com/bank/batch/processor/EndOfDayBatchProcessor.java",
+          "lines": 55,
+          "methods": 1,
+          "technologies": [
+            "JPA",
+            "Batch",
+            "Hibernate"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "System.out.println",
+              "line": 30,
+              "snippet": "Exception {\n        System.out.println(\"Début du traitem"
+            },
+            {
+              "type": "System.out.println",
+              "line": 41,
+              "snippet": "Items);\n            System.out.println(\"Traitement de fi"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 32,
+              "snippet": "lt.setStartDate(new Date());\n\n        try {"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 48,
+              "snippet": "sult.setEndDate(new Date());\n        }"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 32,
+              "snippet": "result.setStartDate(new Date());\n\n        try {"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 48,
+              "snippet": "result.setEndDate(new Date());\n        }"
+            }
+          ],
+          "issue_count": 6
+        },
+        {
+          "file": "AccountReconciliation.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet8-batch-bancaire/src/main/java/com/bank/batch/service/AccountReconciliation.java",
+          "lines": 38,
+          "methods": 1,
+          "technologies": [
+            "JPA",
+            "EJB",
+            "Hibernate"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "System.out.println",
+              "line": 23,
+              "snippet": "ccounts() {\n        System.out.println(\"Début du rapproc"
+            },
+            {
+              "type": "System.out.println",
+              "line": 29,
+              "snippet": "> 0) {\n            System.out.println(\"Attention: \" + c"
+            },
+            {
+              "type": "System.out.println",
+              "line": 31,
+              "snippet": "else {\n            System.out.println(\"Toutes les trans"
+            },
+            {
+              "type": "System.out.println",
+              "line": 34,
+              "snippet": "}\n\n        System.out.println(\"Fin du rapproche"
+            }
+          ],
+          "issue_count": 4
+        },
+        {
+          "file": "ReportGeneratorBatch.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet8-batch-bancaire/src/main/java/com/bank/batch/service/ReportGeneratorBatch.java",
+          "lines": 49,
+          "methods": 1,
+          "technologies": [
+            "JPA",
+            "EJB"
+          ],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [
+            {
+              "type": "System.out.println",
+              "line": 32,
+              "snippet": "t result) {\n        System.out.println(\"Génération des r"
+            },
+            {
+              "type": "System.out.println",
+              "line": 44,
+              "snippet": "portData);\n\n        System.out.println(\"Rapports quotidi"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 35,
+              "snippet": "tGenerationDate(new Date());\n\n        // Logiq"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 39,
+              "snippet": ".add(\"Date: \" + new Date());\n        reportDat"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 35,
+              "snippet": "t.setGenerationDate(new Date());\n\n        // Logiq"
+            },
+            {
+              "type": "Deprecated API",
+              "line": 39,
+              "snippet": "Data.add(\"Date: \" + new Date());\n        reportDat"
+            }
+          ],
+          "issue_count": 6
+        },
+        {
+          "file": "BatchHelper.java",
+          "path": "/home/ubuntu/ejb-client-modernizer/test-projects/projet8-batch-bancaire/src/main/java/com/bank/batch/util/BatchHelper.java",
+          "lines": 27,
+          "methods": 0,
+          "technologies": [],
+          "ejb_injections": 0,
+          "jndi_lookups": 0,
+          "transactions": 0,
+          "issues": [],
+          "issue_count": 0
+        }
+      ]
+    }
+  ]
+}
