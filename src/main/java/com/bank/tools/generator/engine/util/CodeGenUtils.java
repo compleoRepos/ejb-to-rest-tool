@@ -89,6 +89,25 @@ public final class CodeGenUtils {
         return camelCase.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
     }
 
+    /** Convertit kebab-case ou snake_case en PascalCase */
+    public static String toPascalCase(String input) {
+        if (input == null || input.isEmpty()) return input;
+        StringBuilder sb = new StringBuilder();
+        for (String part : input.split("[-_]")) {
+            if (!part.isEmpty()) {
+                sb.append(Character.toUpperCase(part.charAt(0)));
+                if (part.length() > 1) sb.append(part.substring(1).toLowerCase());
+            }
+        }
+        return sb.toString();
+    }
+
+    /** Met en majuscule la première lettre d'une chaîne */
+    public static String capitalize(String s) {
+        if (s == null || s.isEmpty()) return s;
+        return Character.toUpperCase(s.charAt(0)) + s.substring(1);
+    }
+
     /** Échappe les caractères pour les strings Java */
     public static String escapeJavaString(String s) {
         if (s == null) return "";

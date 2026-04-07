@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import com.bank.tools.generator.engine.util.CodeGenUtils;
 
 /**
  * Resout le mapping BIAN pour chaque UseCase detecte.
@@ -131,7 +132,7 @@ public class BianMappingResolver {
 
         // 3. Fallback
         if (serviceDomain == null) {
-            serviceDomain = toKebabCase(cleanUseCaseName(useCaseName));
+            serviceDomain = CodeGenUtils.toKebabCase(cleanUseCaseName(useCaseName));
             log.warn("[BianResolver] Aucun Service Domain trouve pour {} — fallback: {}", useCaseName, serviceDomain);
         }
         if (action == null) {
@@ -168,7 +169,7 @@ public class BianMappingResolver {
     private BianMapping buildFallback(String useCaseName) {
         BianMapping mapping = new BianMapping();
         mapping.setUseCaseName(useCaseName);
-        mapping.setServiceDomain(toKebabCase(cleanUseCaseName(useCaseName)));
+        mapping.setServiceDomain(CodeGenUtils.toKebabCase(cleanUseCaseName(useCaseName)));
         mapping.setBianId("");
         mapping.setAction("execution");
         mapping.setHttpMethod("POST");
@@ -192,22 +193,7 @@ public class BianMappingResolver {
                    .replaceAll("(UC|Impl|Service|Bean|Remote|Local|EJB)$", ""); // double pass
     }
 
-    /**
-     * Convertit PascalCase en kebab-case.
-     * Ex: "ActiverCarte" → "activer-carte"
-     */
-    private String toKebabCase(String pascalCase) {
-        if (pascalCase == null || pascalCase.isEmpty()) return "";
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < pascalCase.length(); i++) {
-            char c = pascalCase.charAt(i);
-            if (Character.isUpperCase(c) && i > 0) {
-                sb.append('-');
-            }
-            sb.append(Character.toLowerCase(c));
-        }
-        return sb.toString();
-    }
+
 
     /**
      * Genere un resume automatique pour le mapping.

@@ -142,7 +142,7 @@ public class CodeGenerationOrchestrator {
         try {
             aclGenerator.generate(srcMain, analysisResult, bianMappingMap);
             log.info("[ACL] Architecture découplée générée avec succès");
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             log.error("[ACL] ERREUR : {}", e.getMessage(), e);
             throw new IOException("Échec de la génération ACL", e);
         }

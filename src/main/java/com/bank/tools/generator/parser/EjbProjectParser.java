@@ -35,6 +35,7 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import com.bank.tools.generator.engine.util.CodeGenUtils;
 
 /**
  * Parseur statique de projets EJB utilisant JavaParser.
@@ -51,7 +52,21 @@ import java.util.stream.Collectors;
  * - BUG 6 : Detection required=true sur @XmlElement/@XmlAttribute
  */
 @Component
-public class EjbProjectParser {
+/**
+ * Parseur de projets EJB legacy.
+ *
+ * <p>Analyse les fichiers source Java d'un projet EJB pour en extraire
+ * les use cases ({@code @Stateless}, {@code @UseCase}, {@code @Service}),
+ * les DTOs (Value Objects avec annotations JAXB), les exceptions custom,
+ * les enums et les interfaces {@code @Remote}.</p>
+ *
+ * <p>Le resultat est un {@link ProjectAnalysisResult} contenant toutes
+ * les informations necessaires a la generation du wrapper REST.</p>
+ *
+ * @see ProjectAnalysisResult
+ * @see ProjectParser
+ */
+public class EjbProjectParser implements ProjectParser {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private static final Logger log = LoggerFactory.getLogger(EjbProjectParser.class);
@@ -662,7 +677,7 @@ public class EjbProjectParser {
 
         // Noms generes
         String baseName = deriveBaseName(info.getClassName());
-        info.setRestEndpoint("/api/" + toKebabCase(baseName));
+        info.setRestEndpoint("/api/" + CodeGenUtils.toKebabCase(baseName));
         info.setControllerName(baseName + "Controller");
         info.setServiceAdapterName(baseName + "ServiceAdapter");
         info.setJndiName(getJndiPrefix() + info.getClassName());
@@ -755,7 +770,7 @@ public class EjbProjectParser {
 
         // Noms generes
         String baseName = deriveBaseName(info.getClassName());
-        info.setRestEndpoint("/api/" + toKebabCase(baseName));
+        info.setRestEndpoint("/api/" + CodeGenUtils.toKebabCase(baseName));
         info.setControllerName(baseName + "Controller");
         info.setServiceAdapterName(baseName + "ServiceAdapter");
         info.setJndiName(getJndiPrefix() + info.getClassName());
@@ -816,7 +831,7 @@ public class EjbProjectParser {
 
         // Noms generes
         String baseName = deriveBaseName(info.getClassName());
-        info.setRestEndpoint("/api/events/" + toKebabCase(baseName));
+        info.setRestEndpoint("/api/events/" + CodeGenUtils.toKebabCase(baseName));
         info.setControllerName(baseName + "Controller");
         info.setServiceAdapterName(baseName + "ServiceAdapter");
         info.setJndiName(jmsDestination != null ? jmsDestination : "jms/queue/" + baseName);
@@ -1326,11 +1341,6 @@ public class EjbProjectParser {
     private String deriveOutputDtoName(String className) {
         return deriveBaseName(className) + "VoOut";
     }
-
-    private String toKebabCase(String camelCase) {
-        return camelCase.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
-    }
-
     private String getFullyQualifiedName(CompilationUnit cu, ClassOrInterfaceDeclaration classDecl) {
         String packageName = cu.getPackageDeclaration()
                 .map(pd -> pd.getNameAsString()).orElse("");

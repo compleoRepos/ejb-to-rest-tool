@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
+import com.bank.tools.generator.engine.util.CodeGenUtils;
 
 /**
  * Generateur de clients REST Spring Boot a partir de contrats OpenAPI/Swagger.
@@ -67,7 +68,7 @@ public class OpenApiClientGenerator {
     public Path generateClient(OpenApiContractInfo contract, Path outputDir, boolean bianMode) throws IOException {
         String partnerName = contract.getPartnerName();
         String partnerLower = partnerName.toLowerCase();
-        String partnerCapital = capitalize(partnerName.toLowerCase());
+        String partnerCapital = CodeGenUtils.capitalize(partnerName.toLowerCase());
 
         log.info("[OpenAPI-Gen] Generation du client REST pour {} (BIAN={})", partnerName, bianMode);
 
@@ -260,7 +261,7 @@ public class OpenApiClientGenerator {
         // Getters & Setters
         for (SchemaInfo.FieldInfo field : schema.getFields()) {
             String javaType = resolveFieldType(field);
-            String capName = capitalize(field.getName());
+            String capName = CodeGenUtils.capitalize(field.getName());
 
             // Getter
             sb.append("    public ").append(javaType).append(" get").append(capName).append("() {\n");
@@ -711,14 +712,8 @@ public class OpenApiClientGenerator {
         String path = endpoint.getPath().replaceAll("[{}]", "")
                 .replaceAll("/", "_").replaceAll("[^a-zA-Z0-9_]", "");
         if (path.startsWith("_")) path = path.substring(1);
-        return method + capitalize(toCamelCase(path));
+        return method + CodeGenUtils.capitalize(toCamelCase(path));
     }
-
-    private String capitalize(String s) {
-        if (s == null || s.isEmpty()) return s;
-        return s.substring(0, 1).toUpperCase() + s.substring(1);
-    }
-
     private String toCamelCase(String s) {
         if (s == null) return "";
         StringBuilder sb = new StringBuilder();

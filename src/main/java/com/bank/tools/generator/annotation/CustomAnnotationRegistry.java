@@ -10,6 +10,7 @@ import jakarta.annotation.PostConstruct;
 import java.io.InputStream;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.io.IOException;
 
 /**
  * Registre des annotations custom bancaires.
@@ -86,7 +87,7 @@ public class CustomAnnotationRegistry {
                 log.info("Registre d'annotations custom charge : {} annotations en {} categories",
                         totalLoaded, getCategoryCount());
             }
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             log.error("Erreur lors du chargement du registre d'annotations : {}", e.getMessage(), e);
         }
     }
@@ -226,7 +227,7 @@ public class CustomAnnotationRegistry {
             }
 
             return def;
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.warn("Impossible de parser la definition d'annotation : {}", e.getMessage());
             return null;
         }

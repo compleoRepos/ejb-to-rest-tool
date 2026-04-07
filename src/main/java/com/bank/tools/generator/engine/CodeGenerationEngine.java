@@ -31,7 +31,21 @@ import java.util.stream.Collectors;
  * d'un projet EJB. Implemente les regles G1-G14 et corrige les bugs 7/10/11/12.
  */
 @Component
-public class CodeGenerationEngine {
+/**
+ * Moteur principal de generation de code REST a partir d'un projet EJB analyse.
+ *
+ * <p>Genere l'ensemble des artefacts du wrapper REST : POM, controllers,
+ * DTOs, service adapters, configuration Spring Boot, tests d'integration
+ * et rapports de transformation.</p>
+ *
+ * <p>Delegue la generation specialisee aux sous-generateurs :
+ * {@link PomGenerator}, {@link ConfigGenerator}, {@link ControllerGenerator},
+ * {@link DtoGenerator}, {@link ServiceAdapterGenerator}, {@link ReportGenerator}.</p>
+ *
+ * @see CodeGenerator
+ * @see CodeGenerationOrchestrator
+ */
+public class CodeGenerationEngine implements CodeGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(CodeGenerationEngine.class);
 
@@ -177,8 +191,7 @@ public class CodeGenerationEngine {
         generateLoggingAspect(srcMain);
         if (aclArchitectureGenerator == null || !bianMode) {
             generateEjbLookupConfig(srcMain);
-            generateBaseUseCaseInterface(srcMain);
-            generateValueObjectInterface(srcMain);
+            // DECOUPLAGE : BaseUseCase et ValueObject ne sont plus generes
         }
 
         if (projectHasXml) {
@@ -305,7 +318,7 @@ public class CodeGenerationEngine {
                         }
                         aclArchitectureGenerator.generate(srcMain, analysisResult, bianMappingMap);
                         log.info("[ACL] Architecture decouplée generee avec succes");
-                    } catch (Exception e) {
+                    } catch (IOException | RuntimeException e) {
                         log.error("[ACL] Erreur lors de la generation ACL : {}", e.getMessage(), e);
                     }
                 }
@@ -553,19 +566,7 @@ public class CodeGenerationEngine {
      * Le ServiceAdapter utilise la reflection pour appeler l'EJB distant,
      * ce qui rend l'API 100%% autonome sans dependance ma.eai.*.
      */
-    private void generateBaseUseCaseInterface(Path srcMain) throws IOException {
-        // Ne plus generer BaseUseCase — l'API est decouplée du framework EJB
-        log.info("[DECOUPLAGE] BaseUseCase non genere — l'API est autonome");
-    }
 
-    /**
-     * DECOUPLAGE : ValueObject n'est plus genere.
-     * Les DTOs implementent directement Serializable.
-     */
-    private void generateValueObjectInterface(Path srcMain) throws IOException {
-        // Ne plus generer ValueObject — les DTOs sont des POJOs Serializable
-        log.info("[DECOUPLAGE] ValueObject non genere — les DTOs sont des POJOs Serializable");
-    }
 
     // ===================== XML CONFIG =====================
 
@@ -699,7 +700,7 @@ public class CodeGenerationEngine {
         sb.append("            ").append(outputDto).append(" result = ").append(adapterField).append(".execute(input);\n");
         sb.append("            log.info(\"[REST-OUT] UseCase ").append(useCase.getClassName()).append(" execute avec succes\");\n");
         sb.append("            return ").append(httpMapping.responseExpression).append(";\n");
-        sb.append("        } catch (Exception e) {\n");
+        sb.append("        } catch (IOException | RuntimeException e) {\n");
         sb.append("            log.error(\"Erreur lors de l'execution du UseCase ").append(useCase.getClassName()).append("\", e);\n");
         sb.append("            throw new RuntimeException(\"Erreur lors de l'appel au UseCase ").append(useCase.getClassName()).append("\", e);\n");
         sb.append("        }\n");
@@ -859,7 +860,7 @@ public class CodeGenerationEngine {
                 sb.append("            return ").append(mapping.responseExpression).append(";\n");
             }
 
-            sb.append("        } catch (Exception e) {\n");
+            sb.append("        } catch (IOException | RuntimeException e) {\n");
             // BUG K : [REST-ERROR]
             sb.append("            log.error(\"[REST-ERROR] ").append(method.getName()).append(" : {}\", e.getMessage());\n");
             sb.append("            throw new RuntimeException(e.getMessage(), e);\n");
@@ -948,7 +949,7 @@ public class CodeGenerationEngine {
         sb.append("            log.info(\"Evenement publie avec succes [correlationId={}]\", correlationId);\n");
         sb.append("            return ResponseEntity.status(HttpStatus.ACCEPTED)\n");
         sb.append("                    .body(Map.of(\"status\", \"ACCEPTED\", \"correlationId\", correlationId));\n");
-        sb.append("        } catch (Exception e) {\n");
+        sb.append("        } catch (IOException | RuntimeException e) {\n");
         sb.append("            log.error(\"Erreur lors de la publication de l'evenement [correlationId={}]\", correlationId, e);\n");
         sb.append("            throw new RuntimeException(\"Erreur lors du traitement du message MDB ").append(useCase.getClassName()).append("\", e);\n");
         sb.append("        }\n");
@@ -1035,7 +1036,7 @@ public class CodeGenerationEngine {
         sb.append("        try {\n");
         sb.append("            ").append(adapterField).append(".processMessage(event.getPayload());\n");
         sb.append("            log.info(\"Message traite avec succes [correlationId={}]\", event.getCorrelationId());\n");
-        sb.append("        } catch (Exception e) {\n");
+        sb.append("        } catch (IOException | RuntimeException e) {\n");
         sb.append("            log.error(\"Erreur lors du traitement du message [correlationId={}]\", event.getCorrelationId(), e);\n");
         sb.append("            // TODO: Implementer une strategie de retry ou dead-letter\n");
         sb.append("        }\n");
@@ -1604,7 +1605,7 @@ public class CodeGenerationEngine {
                 sb.append("            return ResponseEntity.ok(result);\n");
             }
 
-            sb.append("        } catch (Exception e) {\n");
+            sb.append("        } catch (IOException | RuntimeException e) {\n");
             sb.append("            log.error(\"[BIAN-ERROR] ").append(method.getName()).append(" : {}\", e.getMessage());\n");
             sb.append("            throw new RuntimeException(e.getMessage(), e);\n");
             sb.append("        }\n");
@@ -1631,15 +1632,7 @@ public class CodeGenerationEngine {
         return FRAMEWORK_TYPES_SET.contains(baseType);
     }
 
-    /** FIX P0-1b: Remplace les types framework EAI par Map<String, Object> */
-    private String replaceFrameworkType(String type) {
-        if (type == null) return type;
-        String baseType = CodeGenUtils.extractBaseType(type);
-        if (FRAMEWORK_TYPES_SET.contains(baseType)) {
-            return "Map<String, Object>";
-        }
-        return type;
-    }
+
 
             // ===================== G6 : HTTP MAPPING INTELLIGENT =====================
 
@@ -1678,34 +1671,7 @@ public class CodeGenerationEngine {
         return new HttpMapping("POST", "PostMapping", "200", "ResponseEntity.ok(result)");
     }
 
-    /** G8 : Resout l'annotation de parametre */
-    private String resolveParameterAnnotation(UseCaseInfo.ParameterInfo param, String httpMethod) {
-        String name = param.getName().toLowerCase();
-        String type = CodeGenUtils.extractBaseType(param.getType());
 
-        // Si c'est un DTO/objet complexe → @RequestBody
-        if (CodeGenUtils.isDtoType(type) || type.endsWith("ValueObject")) {
-            return "@RequestBody ";
-        }
-
-        // Si le nom contient "id" → @PathVariable
-        if (name.equals("id") || name.endsWith("id")) {
-            return "@PathVariable ";
-        }
-
-        // GET/DELETE : parametres simples → @RequestParam
-        if (httpMethod.equals("GET") || httpMethod.equals("DELETE")) {
-            return "@RequestParam ";
-        }
-
-        // POST/PUT avec type simple → @RequestParam
-        if (PRIMITIVE_TYPES.contains(type) || JAVA_LANG_TYPES.contains(type)
-                || type.equals("BigDecimal") || type.equals("Date") || type.equals("LocalDate")) {
-            return "@RequestParam ";
-        }
-
-        return "@RequestBody ";
-    }
 
         /** G5 : Derive le sous-chemin pour une methode multi-methodes */
     private String deriveSubPath(UseCaseInfo.MethodInfo method, HttpMapping mapping) {

@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
+import com.bank.tools.generator.engine.util.CodeGenUtils;
 
 /**
  * Generateur de clients SOAP Spring Boot a partir de contrats WSDL.
@@ -67,7 +68,7 @@ public class WsdlClientGenerator {
     public Path generateClient(WsdlContractInfo contract, Path outputDir, boolean bianMode) throws IOException {
         String partnerName = contract.getPartnerName();
         String partnerLower = partnerName.toLowerCase();
-        String partnerCapital = capitalize(partnerName.toLowerCase());
+        String partnerCapital = CodeGenUtils.capitalize(partnerName.toLowerCase());
 
         log.info("[WSDL-Gen] Generation du client SOAP pour {} (BIAN={})", partnerName, bianMode);
 
@@ -269,7 +270,7 @@ public class WsdlClientGenerator {
             String javaType = mapXsdType(elem.getType());
             boolean isList = elem.getMaxOccurs() == -1;
             String fieldName = toCamelCase(elem.getName());
-            String capName = capitalize(fieldName);
+            String capName = CodeGenUtils.capitalize(fieldName);
             String fullType = isList ? "List<" + javaType + ">" : javaType;
 
             // Getter
@@ -352,12 +353,12 @@ public class WsdlClientGenerator {
         sb.append("        private int readTimeout;\n\n");
 
         for (String field : new String[]{"wsdlUrl", "endpointUrl", "username", "password"}) {
-            String cap = capitalize(field);
+            String cap = CodeGenUtils.capitalize(field);
             sb.append("        public String get").append(cap).append("() { return ").append(field).append("; }\n");
             sb.append("        public void set").append(cap).append("(String ").append(field).append(") { this.").append(field).append(" = ").append(field).append("; }\n");
         }
         for (String field : new String[]{"connectTimeout", "readTimeout"}) {
-            String cap = capitalize(field);
+            String cap = CodeGenUtils.capitalize(field);
             sb.append("        public int get").append(cap).append("() { return ").append(field).append("; }\n");
             sb.append("        public void set").append(cap).append("(int ").append(field).append(") { this.").append(field).append(" = ").append(field).append("; }\n");
         }
@@ -758,12 +759,6 @@ public class WsdlClientGenerator {
             default -> "PostMapping";
         };
     }
-
-    private String capitalize(String s) {
-        if (s == null || s.isEmpty()) return s;
-        return s.substring(0, 1).toUpperCase() + s.substring(1);
-    }
-
     private String toCamelCase(String s) {
         if (s == null) return "";
         // Si c'est deja en camelCase, retourner tel quel

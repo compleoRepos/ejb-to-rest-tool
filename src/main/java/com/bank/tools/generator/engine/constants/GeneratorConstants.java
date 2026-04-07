@@ -136,6 +136,44 @@ public final class GeneratorConstants {
             Map.entry("ratelimit|throttle|toomany", "HttpStatus.TOO_MANY_REQUESTS")
     );
 
+    // ===================== SPRING IMPORTS =====================
+
+    /** Import ResponseEntity */
+    public static final String IMPORT_RESPONSE_ENTITY = "org.springframework.http.ResponseEntity";
+    /** Import HttpStatus */
+    public static final String IMPORT_HTTP_STATUS = "org.springframework.http.HttpStatus";
+    /** Import RestController annotations */
+    public static final String IMPORT_WEB_ANNOTATIONS = "org.springframework.web.bind.annotation.*";
+    /** Import Valid */
+    public static final String IMPORT_VALID = "jakarta.validation.Valid";
+    /** Import HttpHeaders */
+    public static final String IMPORT_HTTP_HEADERS = "org.springframework.http.HttpHeaders";
+    /** Import MediaType */
+    public static final String IMPORT_MEDIA_TYPE = "org.springframework.http.MediaType";
+
+    // ===================== STRUCTURE PROJET =====================
+
+    /** Chemin relatif des sources principales */
+    public static final String SRC_MAIN_JAVA = "src/main/java";
+    /** Chemin relatif des ressources */
+    public static final String SRC_MAIN_RESOURCES = "src/main/resources";
+    /** Chemin relatif des sources de test */
+    public static final String SRC_TEST_JAVA = "src/test/java";
+    /** Fichier POM */
+    public static final String POM_XML = "pom.xml";
+    /** Fichier application.properties */
+    public static final String APPLICATION_PROPERTIES = "application.properties";
+
+    // ===================== JAVAX → JAKARTA =====================
+
+    /** Mapping javax → jakarta pour la migration */
+    public static final Map<String, String> JAVAX_TO_JAKARTA = Map.of(
+            "javax.validation", "jakarta.validation",
+            "javax.annotation", "jakarta.annotation",
+            "javax.persistence", "jakarta.persistence",
+            "javax.servlet", "jakarta.servlet"
+    );
+
     // ===================== NOM VALIDATION =====================
 
     /** Pattern regex pour valider un identifiant Java */

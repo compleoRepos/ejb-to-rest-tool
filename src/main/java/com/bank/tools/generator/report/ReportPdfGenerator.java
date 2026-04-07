@@ -34,7 +34,7 @@ import java.time.format.DateTimeFormatter;
  * - Recommandations
  */
 @Component
-public class ReportPdfGenerator {
+public class ReportPdfGenerator implements TransformationReportGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(ReportPdfGenerator.class);
 

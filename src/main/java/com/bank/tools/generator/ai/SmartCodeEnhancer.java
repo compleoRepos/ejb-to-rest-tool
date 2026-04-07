@@ -28,7 +28,20 @@ import java.util.List;
  * </p>
  */
 @Component
-public class SmartCodeEnhancer {
+/**
+ * Ameliorateur de code deterministe base sur 118 regles de qualite.
+ *
+ * <p>Applique des regles de verification et de correction automatique
+ * sur le code genere : conventions REST, nommage, securite, logging,
+ * documentation Swagger, conformite BIAN, et bonnes pratiques Spring Boot.</p>
+ *
+ * <p>Fonctionne sans IA generative : chaque regle est un pattern
+ * deterministe garantissant reproductibilite et absence d'hallucinations.</p>
+ *
+ * @see CodeEnhancer
+ * @see EnhancementReport
+ */
+public class SmartCodeEnhancer implements CodeEnhancer {
 
     private static final Logger log = LoggerFactory.getLogger(SmartCodeEnhancer.class);
     private static final String DEFAULT_BASE_PACKAGE = "com.bank.api";

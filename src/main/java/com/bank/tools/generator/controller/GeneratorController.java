@@ -81,7 +81,7 @@ public class GeneratorController {
                 fileStats.put("totalFiles", fileTree.size());
                 fileStats.put("javaFiles", (int) fileTree.stream().filter(f -> f.endsWith(".java")).count());
                 model.addAttribute("fileStats", fileStats);
-            } catch (Exception e) {
+            } catch (IOException | RuntimeException e) {
                 log.warn("Impossible de lire l'arborescence : {}", e.getMessage());
             }
         }
@@ -113,7 +113,7 @@ public class GeneratorController {
             redirectAttributes.addFlashAttribute("success",
                     "Projet uploade avec succes : " + file.getOriginalFilename());
             log.info("Projet uploade avec l'ID : {}", projectId);
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             log.error("Erreur lors de l'upload", e);
             redirectAttributes.addFlashAttribute("error",
                     "Erreur lors de l'upload : " + e.getMessage());
@@ -153,7 +153,7 @@ public class GeneratorController {
                         result.getUseCases().size() + " UseCase(s) detecte(s), " +
                         result.getDtos().size() + " DTO(s) detecte(s).");
             }
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Erreur lors du scan", e);
             redirectAttributes.addFlashAttribute("error",
                     "Erreur lors de l'analyse : " + e.getMessage());
@@ -229,7 +229,7 @@ public class GeneratorController {
                     report.getQualityScore() + "/100, " +
                     report.getTotalRulesApplied() + "/" + report.getTotalRulesChecked() +
                     " regles appliquees.");
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             log.error("Erreur lors de la generation", e);
             redirectAttributes.addFlashAttribute("error",
                     "Erreur lors de la generation : " + e.getMessage());
@@ -313,7 +313,7 @@ public class GeneratorController {
                         .filter(f -> f.contains("src/test/") && f.endsWith(".java"))
                         .count();
                 model.addAttribute("testCount", testCount);
-            } catch (Exception e) {
+            } catch (IOException | RuntimeException e) {
                 log.warn("Impossible de lire les fichiers generes : {}", e.getMessage());
             }
         }
@@ -333,7 +333,7 @@ public class GeneratorController {
         try {
             String content = generatorService.getGeneratedFileContent(projectId, path);
             return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(content);
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             return ResponseEntity.badRequest().body("Erreur : " + e.getMessage());
         }
     }
@@ -350,7 +350,7 @@ public class GeneratorController {
         try {
             Map<String, String> diff = generatorService.getUseCaseDiff(projectId, useCase);
             return ResponseEntity.ok(diff);
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
@@ -413,7 +413,7 @@ public class GeneratorController {
             try {
                 List<String> generatedFiles = generatorService.getGeneratedFileTree(projectId);
                 model.addAttribute("generatedFiles", generatedFiles);
-            } catch (Exception e) {
+            } catch (IOException | RuntimeException e) {
                 log.warn("Impossible de lire les fichiers generes : {}", e.getMessage());
             }
         }
@@ -438,7 +438,7 @@ public class GeneratorController {
                     .header(HttpHeaders.CONTENT_DISPOSITION,
                             "attachment; filename=\"generated-api.zip\"")
                     .body(resource);
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             log.error("Erreur lors du telechargement", e);
             return ResponseEntity.internalServerError().build();
         }
@@ -501,7 +501,7 @@ public class GeneratorController {
                     (bianMode ? " avec mapping BIAN" : ""));
 
             return ResponseEntity.ok(response);
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             log.error("[API] Erreur generation client OpenAPI", e);
             response.put("success", false);
             response.put("error", "Erreur lors de la generation : " + e.getMessage());
@@ -553,7 +553,7 @@ public class GeneratorController {
                     (bianMode ? " avec facade REST BIAN" : ""));
 
             return ResponseEntity.ok(response);
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             log.error("[API] Erreur generation client WSDL", e);
             response.put("success", false);
             response.put("error", "Erreur lors de la generation : " + e.getMessage());
@@ -585,7 +585,7 @@ public class GeneratorController {
                     .header(HttpHeaders.CONTENT_DISPOSITION,
                             "attachment; filename=\"" + fileName + "\"")
                     .body(resource);
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             log.error("Erreur lors du telechargement client partenaire", e);
             return ResponseEntity.internalServerError().build();
         }

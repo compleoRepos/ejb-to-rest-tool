@@ -77,18 +77,18 @@ public class CliRunner implements CommandLineRunner {
         }
 
         if (inputPath == null) {
-            System.err.println("Usage: java -jar ejb-to-rest-tool.jar --cli --input <path.zip> [--output <dir>] [--bian] [--pdf]");
-            System.err.println("  --input   Chemin vers le ZIP du projet EJB source (obligatoire)");
-            System.err.println("  --output  Repertoire de sortie (defaut: ./output)");
-            System.err.println("  --bian    Active le mode BIAN");
-            System.err.println("  --pdf     Genere un rapport PDF");
+            log.error("Usage: java -jar ejb-to-rest-tool.jar --cli --input <path.zip> [--output <dir>] [--bian] [--pdf]");
+            log.error("  --input   Chemin vers le ZIP du projet EJB source (obligatoire)");
+            log.error("  --output  Repertoire de sortie (defaut: ./output)");
+            log.error("  --bian    Active le mode BIAN");
+            log.error("  --pdf     Genere un rapport PDF");
             System.exit(1);
             return;
         }
 
         Path inputFile = Path.of(inputPath);
         if (!Files.exists(inputFile)) {
-            System.err.println("[CLI] ERREUR : Fichier introuvable : " + inputPath);
+            log.error("[CLI] ERREUR : Fichier introuvable : {}", inputPath);
             System.exit(1);
             return;
         }

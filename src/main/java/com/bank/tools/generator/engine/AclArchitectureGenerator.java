@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
+import com.bank.tools.generator.engine.util.CodeGenUtils;
 
 /**
  * Generateur d'architecture decouplée Anti-Corruption Layer (ACL).
@@ -24,6 +25,19 @@ import java.util.stream.Collectors;
  * - Config     : GlobalExceptionHandler, profils Spring, SecurityConfig
  */
 @Component
+/**
+ * Generateur d'architecture ACL (Anti-Corruption Layer).
+ *
+ * <p>Produit une architecture hexagonale avec couche anti-corruption
+ * entre le legacy EJB et l'API REST moderne. Genere les composants :
+ * Service interfaces, MockAdapters, JndiAdapters, Mappers,
+ * Request/Response DTOs, Controllers BIAN et validation annotations.</p>
+ *
+ * <p>Supporte le mode BIAN v12 avec mapping automatique des actions
+ * (initiation, execution, retrieval, etc.) vers les methodes HTTP.</p>
+ *
+ * @see CodeGenerationEngine
+ */
 public class AclArchitectureGenerator {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -299,8 +313,8 @@ public class AclArchitectureGenerator {
                 BianControllerGroup g = new BianControllerGroup();
                 g.serviceDomain = sd;
                 g.serviceDomainTitle = mapping.getServiceDomainTitle();
-                g.controllerName = toPascalCase(sd) + "Controller";
-                g.serviceInterfaceName = toPascalCase(sd) + "Service";
+                g.controllerName = CodeGenUtils.toPascalCase(sd) + "Controller";
+                g.serviceInterfaceName = CodeGenUtils.toPascalCase(sd) + "Service";
                 g.bianId = mapping.getBianId();
                 return g;
             });
@@ -347,11 +361,11 @@ public class AclArchitectureGenerator {
         String verb = actionToVerb(action);
 
         if (bq != null && !bq.isEmpty()) {
-            return verb + capitalize(toPascalCase(bq));
+            return verb + CodeGenUtils.capitalize(CodeGenUtils.toPascalCase(bq));
         }
 
         // Utiliser le service domain pour les actions sans BQ
-        return verb + toPascalCase(mapping.getServiceDomain());
+        return verb + CodeGenUtils.toPascalCase(mapping.getServiceDomain());
     }
 
     private String actionToVerb(String action) {
@@ -433,7 +447,7 @@ public class AclArchitectureGenerator {
 
         // Getters/Setters
         for (RestField f : fields) {
-            String cap = capitalize(f.name);
+            String cap = CodeGenUtils.capitalize(f.name);
             String getter = ("boolean".equals(f.type) ? "is" : "get") + cap;
             sb.append("    public ").append(f.type).append(" ").append(getter).append("() { return ").append(f.name).append("; }\n");
             sb.append("    public void set").append(cap).append("(").append(f.type).append(" ").append(f.name).append(") { this.").append(f.name).append(" = ").append(f.name).append("; }\n\n");
@@ -487,7 +501,7 @@ public class AclArchitectureGenerator {
         sb.append("    public ").append(ep.responseDtoName).append("() {}\n\n");
 
         for (RestField f : fields) {
-            String cap = capitalize(f.name);
+            String cap = CodeGenUtils.capitalize(f.name);
             String getter = ("boolean".equals(f.type) ? "is" : "get") + cap;
             sb.append("    public ").append(f.type).append(" ").append(getter).append("() { return ").append(f.name).append("; }\n");
             sb.append("    public void set").append(cap).append("(").append(f.type).append(" ").append(f.name).append(") { this.").append(f.name).append(" = ").append(f.name).append("; }\n\n");
@@ -725,7 +739,7 @@ public class AclArchitectureGenerator {
                 if (field.isStatic()) continue;
 
                 String type = cleanType(field.getType());
-                String cap = capitalize(field.getName());
+                String cap = CodeGenUtils.capitalize(field.getName());
                 String getter = ("boolean".equals(type) ? "is" : "get") + cap;
                 sb.append("    public ").append(type).append(" ").append(getter).append("() { return ").append(field.getName()).append("; }\n");
                 sb.append("    public void set").append(cap).append("(").append(type).append(" ").append(field.getName()).append(") { this.").append(field.getName()).append(" = ").append(field.getName()).append("; }\n\n");
@@ -778,8 +792,8 @@ public class AclArchitectureGenerator {
                     if (LEGACY_FIELDS.contains(field.getName())) continue;
 
                     String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
-                    String ejbSetter = "set" + capitalize(field.getName());
-                    String restGetter = ("boolean".equals(field.getType()) ? "is" : "get") + capitalize(restName);
+                    String ejbSetter = "set" + CodeGenUtils.capitalize(field.getName());
+                    String restGetter = ("boolean".equals(field.getType()) ? "is" : "get") + CodeGenUtils.capitalize(restName);
 
                     // Enum conversion : RestEnum → String ou vice versa
                     String restType = cleanType(field.getType());
@@ -804,8 +818,8 @@ public class AclArchitectureGenerator {
                     if (isFrameworkType(field.getType())) continue;
 
                     String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
-                    String restSetter = "set" + capitalize(restName);
-                    String ejbGetter = ("boolean".equals(field.getType()) ? "is" : "get") + capitalize(field.getName());
+                    String restSetter = "set" + CodeGenUtils.capitalize(restName);
+                    String ejbGetter = ("boolean".equals(field.getType()) ? "is" : "get") + CodeGenUtils.capitalize(field.getName());
 
                     sb.append("        response.").append(restSetter).append("(voOut.").append(ejbGetter).append("());\n");
                 }
@@ -873,7 +887,7 @@ public class AclArchitectureGenerator {
     // =====================================================================
 
     private void generateJndiAdapter(Path srcMain, BianControllerGroup group) throws IOException {
-        String adapterName = toPascalCase(group.serviceDomain) + "JndiAdapter";
+        String adapterName = CodeGenUtils.toPascalCase(group.serviceDomain) + "JndiAdapter";
         Path dir = resolvePackagePath(srcMain, PKG_INFRA_EJB_ADAPTER);
         Path file = dir.resolve(adapterName + ".java");
 
@@ -928,7 +942,7 @@ public class AclArchitectureGenerator {
         sb.append("    public ").append(adapterName).append("(\n");
         sb.append("            ExceptionTranslator exceptionTranslator");
         for (String fieldName : mapperFields) {
-            String typeName = capitalize(fieldName);
+            String typeName = CodeGenUtils.capitalize(fieldName);
             sb.append(",\n            ").append(typeName).append(" ").append(fieldName);
         }
         sb.append(") {\n");
@@ -1019,7 +1033,7 @@ public class AclArchitectureGenerator {
     // =====================================================================
 
     private void generateMockAdapter(Path srcMain, BianControllerGroup group, ProjectAnalysisResult analysis) throws IOException {
-        String adapterName = toPascalCase(group.serviceDomain) + "MockAdapter";
+        String adapterName = CodeGenUtils.toPascalCase(group.serviceDomain) + "MockAdapter";
         Path dir = resolvePackagePath(srcMain, PKG_INFRA_MOCK);
         Path file = dir.resolve(adapterName + ".java");
 
@@ -1088,7 +1102,7 @@ public class AclArchitectureGenerator {
             if (isFrameworkType(field.getType())) continue;
 
             String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
-            String setter = "set" + capitalize(restName);
+            String setter = "set" + CodeGenUtils.capitalize(restName);
             String type = cleanType(field.getType());
 
             String mockValue = switch (type) {
@@ -1639,35 +1653,10 @@ public class AclArchitectureGenerator {
         if (type == null) return false;
         return FRAMEWORK_TYPES.contains(type) || type.startsWith("ma.eai.") || type.contains("Envelope");
     }
-
-    private String capitalize(String s) {
-        if (s == null || s.isEmpty()) return s;
-        return s.substring(0, 1).toUpperCase() + s.substring(1);
-    }
-
     private String toLowerCamel(String s) {
         if (s == null || s.isEmpty()) return s;
         return s.substring(0, 1).toLowerCase() + s.substring(1);
-    }
-
-    private String toPascalCase(String kebab) {
-        if (kebab == null || kebab.isEmpty()) return "";
-        StringBuilder sb = new StringBuilder();
-        for (String part : kebab.split("-")) {
-            if (!part.isEmpty()) {
-                sb.append(Character.toUpperCase(part.charAt(0)));
-                if (part.length() > 1) sb.append(part.substring(1));
-            }
-        }
-        return sb.toString();
-    }
-
-    private String toKebabCase(String camelCase) {
-        if (camelCase == null) return "";
-        return camelCase.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
-    }
-
-    private String toSnakeCase(String camelCase) {
+    }    private String toSnakeCase(String camelCase) {
         if (camelCase == null) return "";
         return camelCase.replaceAll("([a-z])([A-Z])", "$1_$2").toLowerCase();
     }
