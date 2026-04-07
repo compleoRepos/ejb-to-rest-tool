@@ -557,9 +557,12 @@ function generateSecurityConfig(proposals: MicroserviceProposal[]): CloudFile {
   content += `import org.springframework.security.config.http.SessionCreationPolicy;\n`;
   content += `import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;\n`;
   content += `import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;\n`;
-  content += `import org.springframework.security.web.SecurityFilterChain;\n\n`;
+  content += `import org.springframework.security.web.SecurityFilterChain;\n`;
+  content += `import org.springframework.security.web.authentication.logout.LogoutSuccessHandler;\n`;
+  content += `import org.springframework.security.oauth2.client.oidc.web.logout.OidcClientInitiatedLogoutSuccessHandler;\n`;
+  content += `import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;\n\n`;
   content += `/**\n`;
-  content += ` * Configuration OAuth2/JWT pour la securite des microservices.\n`;
+  content += ` * Configuration OAuth2/JWT + OpenID Connect pour la securite des microservices.\n`;
   content += ` * Remplace la securite JAAS/container-managed du serveur d'applications legacy.\n`;
   content += ` *\n`;
   content += ` * @author Hamza NORDINE\n`;
@@ -568,6 +571,10 @@ function generateSecurityConfig(proposals: MicroserviceProposal[]): CloudFile {
   content += `@EnableWebSecurity\n`;
   content += `@EnableMethodSecurity\n`;
   content += `public class SecurityConfig {\n\n`;
+  content += `    private final ClientRegistrationRepository clientRegistrationRepository;\n\n`;
+  content += `    public SecurityConfig(ClientRegistrationRepository clientRegistrationRepository) {\n`;
+  content += `        this.clientRegistrationRepository = clientRegistrationRepository;\n`;
+  content += `    }\n\n`;
   content += `    @Bean\n`;
   content += `    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {\n`;
   content += `        http\n`;
@@ -585,8 +592,23 @@ function generateSecurityConfig(proposals: MicroserviceProposal[]): CloudFile {
   content += `                .jwt(jwt -> jwt\n`;
   content += `                    .jwtAuthenticationConverter(jwtAuthenticationConverter())\n`;
   content += `                )\n`;
+  content += `            )\n`;
+  content += `            // OpenID Connect logout\n`;
+  content += `            .logout(logout -> logout\n`;
+  content += `                .logoutSuccessHandler(oidcLogoutSuccessHandler())\n`;
   content += `            );\n`;
   content += `        return http.build();\n`;
+  content += `    }\n\n`;
+  content += `    /**\n`;
+  content += `     * OpenID Connect RP-Initiated Logout.\n`;
+  content += `     * Redirige vers le endpoint de logout du provider OIDC (Keycloak, Azure AD, etc.).\n`;
+  content += `     */\n`;
+  content += `    @Bean\n`;
+  content += `    public LogoutSuccessHandler oidcLogoutSuccessHandler() {\n`;
+  content += `        OidcClientInitiatedLogoutSuccessHandler handler =\n`;
+  content += `                new OidcClientInitiatedLogoutSuccessHandler(clientRegistrationRepository);\n`;
+  content += `        handler.setPostLogoutRedirectUri(\"{baseUrl}\");\n`;
+  content += `        return handler;\n`;
   content += `    }\n\n`;
   content += `    @Bean\n`;
   content += `    public JwtAuthenticationConverter jwtAuthenticationConverter() {\n`;
@@ -607,7 +629,7 @@ function generateSecurityConfig(proposals: MicroserviceProposal[]): CloudFile {
     path: "common/src/main/java/com/bank/modern/config/SecurityConfig.java",
     content,
     type: "security",
-    description: "Configuration OAuth2/JWT commune",
+    description: "Configuration OAuth2/JWT + OpenID Connect commune",
   };
 }
 

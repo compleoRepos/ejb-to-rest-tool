@@ -1,8 +1,8 @@
 # Plan d'Industrialisation Bancaire — Migration EJB vers APIs REST
 
 **Auteur** : Hamza NORDINE
-**Version** : 2.0.0
-**Date** : Mars 2026
+**Version** : 3.0.0
+**Date** : Avril 2026
 **Audience** : Direction des Systèmes d'Information, Comité de Pilotage, Architectes Solutions
 
 ---

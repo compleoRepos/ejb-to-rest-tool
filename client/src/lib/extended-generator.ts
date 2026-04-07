@@ -1316,10 +1316,143 @@ function generateInfrastructure(
     technology: "common",
   });
 
+  // Domain Events (architecture event-driven)
+  files.push(generateDomainEvent(basePackage, packagePath, report.className));
+  files.push(generateDomainEventPublisher(basePackage, packagePath, report.className));
+
   // POM
   files.push(generateExtendedPom(basePackage, techs));
 
   return files;
+}
+
+// ============================================================
+// Domain Events (Event-Driven Architecture)
+// ============================================================
+
+function generateDomainEvent(
+  basePackage: string,
+  packagePath: string,
+  className: string
+): GeneratedFile {
+  const baseName = className.replace(/Bean$|Impl$|Service$/i, "");
+  let code = `package ${basePackage}.event;\n\n`;
+  code += `import java.time.Instant;\n`;
+  code += `import java.util.UUID;\n\n`;
+  code += `/**\n`;
+  code += ` * Evenement de domaine pour ${baseName}.\n`;
+  code += ` * Utilise pour la communication asynchrone entre microservices\n`;
+  code += ` * via Spring ApplicationEvent ou Kafka.\n`;
+  code += ` *\n`;
+  code += ` * @author Hamza NORDINE\n`;
+  code += ` */\n`;
+  code += `public abstract class ${baseName}DomainEvent {\n\n`;
+  code += `    private final String eventId;\n`;
+  code += `    private final String eventType;\n`;
+  code += `    private final Instant occurredAt;\n`;
+  code += `    private final String aggregateId;\n\n`;
+  code += `    protected ${baseName}DomainEvent(String eventType, String aggregateId) {\n`;
+  code += `        this.eventId = UUID.randomUUID().toString();\n`;
+  code += `        this.eventType = eventType;\n`;
+  code += `        this.occurredAt = Instant.now();\n`;
+  code += `        this.aggregateId = aggregateId;\n`;
+  code += `    }\n\n`;
+  code += `    public String getEventId() { return eventId; }\n`;
+  code += `    public String getEventType() { return eventType; }\n`;
+  code += `    public Instant getOccurredAt() { return occurredAt; }\n`;
+  code += `    public String getAggregateId() { return aggregateId; }\n\n`;
+  code += `    // --- Concrete Events ---\n\n`;
+  code += `    public static class ${baseName}CreatedEvent extends ${baseName}DomainEvent {\n`;
+  code += `        private final Object payload;\n`;
+  code += `        public ${baseName}CreatedEvent(String aggregateId, Object payload) {\n`;
+  code += `            super("${baseName.toUpperCase()}_CREATED", aggregateId);\n`;
+  code += `            this.payload = payload;\n`;
+  code += `        }\n`;
+  code += `        public Object getPayload() { return payload; }\n`;
+  code += `    }\n\n`;
+  code += `    public static class ${baseName}UpdatedEvent extends ${baseName}DomainEvent {\n`;
+  code += `        private final Object before;\n`;
+  code += `        private final Object after;\n`;
+  code += `        public ${baseName}UpdatedEvent(String aggregateId, Object before, Object after) {\n`;
+  code += `            super("${baseName.toUpperCase()}_UPDATED", aggregateId);\n`;
+  code += `            this.before = before;\n`;
+  code += `            this.after = after;\n`;
+  code += `        }\n`;
+  code += `        public Object getBefore() { return before; }\n`;
+  code += `        public Object getAfter() { return after; }\n`;
+  code += `    }\n\n`;
+  code += `    public static class ${baseName}DeletedEvent extends ${baseName}DomainEvent {\n`;
+  code += `        public ${baseName}DeletedEvent(String aggregateId) {\n`;
+  code += `            super("${baseName.toUpperCase()}_DELETED", aggregateId);\n`;
+  code += `        }\n`;
+  code += `    }\n`;
+  code += `}\n`;
+
+  return {
+    fileName: `${baseName}DomainEvent.java`,
+    path: `src/main/java/${packagePath}/event/${baseName}DomainEvent.java`,
+    content: code,
+    type: "util",
+    technology: "common",
+  };
+}
+
+function generateDomainEventPublisher(
+  basePackage: string,
+  packagePath: string,
+  className: string
+): GeneratedFile {
+  const baseName = className.replace(/Bean$|Impl$|Service$/i, "");
+  let code = `package ${basePackage}.event;\n\n`;
+  code += `import lombok.RequiredArgsConstructor;\n`;
+  code += `import lombok.extern.slf4j.Slf4j;\n`;
+  code += `import org.springframework.context.ApplicationEventPublisher;\n`;
+  code += `import org.springframework.stereotype.Component;\n\n`;
+  code += `/**\n`;
+  code += ` * Publie les evenements de domaine pour ${baseName}.\n`;
+  code += ` * Utilise Spring ApplicationEventPublisher pour la publication locale,\n`;
+  code += ` * et peut etre etendu pour publier sur Kafka pour la communication inter-services.\n`;
+  code += ` *\n`;
+  code += ` * @author Hamza NORDINE\n`;
+  code += ` */\n`;
+  code += `@Component\n`;
+  code += `@Slf4j\n`;
+  code += `@RequiredArgsConstructor\n`;
+  code += `public class ${baseName}EventPublisher {\n\n`;
+  code += `    private final ApplicationEventPublisher applicationEventPublisher;\n\n`;
+  code += `    /**\n`;
+  code += `     * Publie un evenement de creation.\n`;
+  code += `     */\n`;
+  code += `    public void publishCreated(String aggregateId, Object payload) {\n`;
+  code += `        var event = new ${baseName}DomainEvent.${baseName}CreatedEvent(aggregateId, payload);\n`;
+  code += `        log.info("Publishing event: {} for aggregate: {}", event.getEventType(), aggregateId);\n`;
+  code += `        applicationEventPublisher.publishEvent(event);\n`;
+  code += `    }\n\n`;
+  code += `    /**\n`;
+  code += `     * Publie un evenement de mise a jour.\n`;
+  code += `     */\n`;
+  code += `    public void publishUpdated(String aggregateId, Object before, Object after) {\n`;
+  code += `        var event = new ${baseName}DomainEvent.${baseName}UpdatedEvent(aggregateId, before, after);\n`;
+  code += `        log.info("Publishing event: {} for aggregate: {}", event.getEventType(), aggregateId);\n`;
+  code += `        applicationEventPublisher.publishEvent(event);\n`;
+  code += `    }\n\n`;
+  code += `    /**\n`;
+  code += `     * Publie un evenement de suppression.\n`;
+  code += `     */\n`;
+  code += `    public void publishDeleted(String aggregateId) {\n`;
+  code += `        var event = new ${baseName}DomainEvent.${baseName}DeletedEvent(aggregateId);\n`;
+  code += `        log.info("Publishing event: {} for aggregate: {}", event.getEventType(), aggregateId);\n`;
+  code += `        applicationEventPublisher.publishEvent(event);\n`;
+  code += `    }\n`;
+  code += `}\n`;
+
+  return {
+    fileName: `${baseName}EventPublisher.java`,
+    path: `src/main/java/${packagePath}/event/${baseName}EventPublisher.java`,
+    content: code,
+    type: "util",
+    technology: "common",
+  };
 }
 
 function generateExtendedPom(basePackage: string, techs: LegacyTechnology[]): GeneratedFile {
