@@ -225,8 +225,10 @@ public class CodeGenerationEngine {
             // G5 : Pattern multi-methodes ou BaseUseCase
             // BUG 2 FIX : En mode BIAN avec grouper, ne PAS generer les controllers individuels
             // Les controllers BIAN regroupes par Service Domain sont generes plus bas
-            boolean skipIndividualController = bianMode && bianControllerGrouper != null
-                    && bianMapping != null && bianMapping.isBianCompliant;
+           // En mode ACL, TOUS les controllers individuels sont remplacés par les controllers ACL
+            boolean skipIndividualController = (bianMode && bianControllerGrouper != null
+                    && bianMapping != null && bianMapping.isBianCompliant)
+                    || (bianMode && aclArchitectureGenerator != null);
 
             // En mode ACL, les service adapters et controllers sont remplacés par l'architecture ACL
             boolean skipServiceAdapter = bianMode && aclArchitectureGenerator != null

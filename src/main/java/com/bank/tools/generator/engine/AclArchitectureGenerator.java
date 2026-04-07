@@ -1233,7 +1233,17 @@ public class AclArchitectureGenerator {
             sb.append("    public ResponseEntity<").append(returnType).append("> ").append(ep.methodName).append("(\n");
 
             List<String> methodParams = new ArrayList<>();
-            boolean hasCrRef = url.contains("{cr-reference-id}");
+            // Les actions initiation, evaluation et notification n'ont PAS de {cr-reference-id}
+            String action = m.getAction();
+            boolean isActionWithoutCrRef = "initiation".equals(action) 
+                    || "evaluation".equals(action) 
+                    || "notification".equals(action);
+            boolean hasCrRef = url.contains("{cr-reference-id}") && !isActionWithoutCrRef;
+
+            // Corriger l'URL si elle contient {cr-reference-id} alors qu'elle ne devrait pas
+            if (isActionWithoutCrRef) {
+                relativePath = "/" + action;
+            }
             boolean hasBqRef = url.contains("{bq-reference-id}");
 
             if (hasCrRef) {

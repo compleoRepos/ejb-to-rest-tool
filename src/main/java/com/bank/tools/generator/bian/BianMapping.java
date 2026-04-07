@@ -33,37 +33,29 @@ public class BianMapping {
         this.serviceDomainTitle = toTitleCase(serviceDomain);
     }
 
-    // ===================== BUILDERS =====================
+            // ===================== BUILDERS =====================
 
-    /**
-     * Construit l'URL BIAN a partir du mapping.
-     */
-    public String buildUrl(String basePath) {
-        if (this.url != null && !this.url.isEmpty()) {
-            return basePath + this.url;
-        }
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("/").append(serviceDomain);
-
-        if ("initiation".equals(action) || "evaluation".equals(action)) {
-            // Pas de {cr-reference-id} pour les creations et evaluations
-            if (behaviorQualifier != null && !behaviorQualifier.isEmpty()) {
-                sb.append("/").append(behaviorQualifier);
+            /**
+             * Construit l'URL BIAN a partir du mapping.
+             */
+          public String buildUrl(String basePath) {
+            
+            StringBuilder url = new StringBuilder(basePath);
+            url.append("/").append(serviceDomain);
+            
+            String action = getAction();
+            // Actions sans {cr-reference-id}
+            if ("initiation".equals(action) || "evaluation".equals(action) || "notification".equals(action)) {
+                url.append("/").append(action);
+            } else {
+                url.append("/{cr-reference-id}");
+                if (behaviorQualifier != null && !behaviorQualifier.isEmpty()) {
+                    url.append("/").append(behaviorQualifier);
+                }
+                url.append("/").append(action);
             }
-            sb.append("/").append(action);
-        } else {
-            sb.append("/{cr-reference-id}");
-            if (behaviorQualifier != null && !behaviorQualifier.isEmpty()) {
-                sb.append("/").append(behaviorQualifier);
-            }
-            sb.append("/").append(action);
+            return url.toString();
         }
-
-        this.url = sb.toString();
-        return basePath + this.url;
-    }
-
     /**
      * Construit l'operationId BIAN : {action}{ServiceDomain}{BQ}
      */
