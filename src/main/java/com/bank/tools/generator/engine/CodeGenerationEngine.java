@@ -24,6 +24,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
+import com.bank.tools.generator.config.CompleoConfig;
 
 /**
  * Moteur de generation de code v3.

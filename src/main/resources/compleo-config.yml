@@ -1,0 +1,91 @@
+compleo:
+  client:
+    name: "Bank of Africa"
+    logo: "logo-boa.png"
+
+  output:
+    base-package: "com.bank.api"
+    artifact-id: "generated-rest-api"
+    group-id: "com.bank.api"
+    java-version: "21"
+    spring-boot-version: "3.2.5"
+
+  legacy:
+    use-case-annotations:
+      - "UseCase"
+      - "Stateless"
+      - "Service"
+    base-class-names:
+      - "BaseUseCase"
+      - "AbstractUseCase"
+    execute-method-names:
+      - "execute"
+      - "process"
+      - "handle"
+    framework-packages:
+      - "ma.eai."
+      - "com.framework."
+      - "org.jboss."
+    framework-types:
+      - "Envelope"
+      - "EaiLog"
+      - "SynchroneService"
+      - "BaseUseCase"
+      - "ValueObject"
+      - "FwkRollbackException"
+    excluded-fields:
+      - "codeRetour"
+      - "messageRetour"
+      - "serialVersionUID"
+      - "scoreInterne"
+    field-renames:
+      numCarte: "numeroCarte"
+      numLot: "numeroLot"
+      numToken: "numeroToken"
+      sasCC: "identifiantClient"
+      ribEmetteur: "compteEmetteur"
+      ribBeneficiaire: "compteBeneficiaire"
+      montantDemande: "montant"
+
+  jndi:
+    prefix: "java:global/bank/"
+    factory: "org.jboss.naming.remote.client.InitialContextFactory"
+    provider-url: "remote+http://serveur-ejb:8080"
+
+  bian:
+    enabled: true
+    version: "12.0"
+    base-path: "/api/v1"
+    auto-detect: true
+
+  acl:
+    enabled: true
+    generate-mock-adapters: true
+    generate-http-adapters: false
+
+  report:
+    format: "pdf"
+    include-impact-analysis: true
+    include-bian-mapping: true
+
+  compliance:
+    audit-trail: true
+    data-masking: true
+    security-headers: true
+    sensitive-fields:
+      - "numCarte"
+      - "numeroCarte"
+      - "cin"
+      - "rib"
+      - "iban"
+      - "telephone"
+      - "email"
+      - "motDePasse"
+
+  branding:
+    product-name: "Compleo"
+    logo-url: "/images/logo.png"
+    primary-color: "#1a237e"
+    secondary-color: "#ffffff"
+    accent-color: "#4caf50"
+    footer-text: "© 2026 NEXA-IT — Compleo v2.0"

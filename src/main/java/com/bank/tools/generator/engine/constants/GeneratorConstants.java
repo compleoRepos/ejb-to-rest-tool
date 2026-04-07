@@ -7,6 +7,10 @@ import java.util.*;
  * Remplace les constantes dupliquées dans CodeGenerationEngine,
  * AclArchitectureGenerator et EjbProjectParser.
  */
+/**
+ * Constantes par defaut. En mode multi-tenant, utiliser CompleoConfig.
+ * Ces valeurs sont les fallbacks quand aucune config n'est fournie.
+ */
 public final class GeneratorConstants {
 
     private GeneratorConstants() {}

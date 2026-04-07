@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="content">
+    <div class="row">
+        <!-- Navigation documentation -->
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white">
+                    <h6 class="mb-0"><i class="fas fa-book me-2"></i>Sommaire</h6>
+                </div>
+                <div class="list-group list-group-flush">
+                    <a href="#getting-started" class="list-group-item list-group-item-action">
+                        <i class="fas fa-play-circle me-2 text-primary"></i>Demarrage rapide
+                    </a>
+                    <a href="#patterns" class="list-group-item list-group-item-action">
+                        <i class="fas fa-puzzle-piece me-2 text-success"></i>Patterns supportes
+                    </a>
+                    <a href="#bian" class="list-group-item list-group-item-action">
+                        <i class="fas fa-university me-2 text-warning"></i>Guide BIAN
+                    </a>
+                    <a href="#config" class="list-group-item list-group-item-action">
+                        <i class="fas fa-cogs me-2 text-info"></i>Configuration
+                    </a>
+                    <a href="#cli" class="list-group-item list-group-item-action">
+                        <i class="fas fa-terminal me-2 text-secondary"></i>Mode CLI
+                    </a>
+                    <a href="#api" class="list-group-item list-group-item-action">
+                        <i class="fas fa-plug me-2 text-danger"></i>API REST
+                    </a>
+                    <a href="#devops" class="list-group-item list-group-item-action">
+                        <i class="fas fa-server me-2 text-dark"></i>Installation
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Contenu documentation -->
+        <div class="col-md-9">
+            <!-- Demarrage rapide -->
+            <div class="card border-0 shadow-sm mb-4" id="getting-started">
+                <div class="card-header bg-primary text-white">
+                    <h6 class="mb-0"><i class="fas fa-play-circle me-2"></i>Demarrage rapide</h6>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4 text-center mb-3">
+                            <div class="bg-light rounded p-3">
+                                <i class="fas fa-upload fa-2x text-primary mb-2"></i>
+                                <h6>1. Importer</h6>
+                                <small class="text-muted">Uploadez votre projet EJB (ZIP)</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-center mb-3">
+                            <div class="bg-light rounded p-3">
+                                <i class="fas fa-search fa-2x text-warning mb-2"></i>
+                                <h6>2. Analyser</h6>
+                                <small class="text-muted">Scan automatique du code source</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-center mb-3">
+                            <div class="bg-light rounded p-3">
+                                <i class="fas fa-rocket fa-2x text-success mb-2"></i>
+                                <h6>3. Generer</h6>
+                                <small class="text-muted">Transformation EJB vers REST</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Patterns supportes -->
+            <div class="card border-0 shadow-sm mb-4" id="patterns">
+                <div class="card-header bg-success text-white">
+                    <h6 class="mb-0"><i class="fas fa-puzzle-piece me-2"></i>Patterns EJB supportes</h6>
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr><th>Pattern</th><th>Annotations</th><th>Resultat REST</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>Stateless Session Bean</strong></td>
+                                <td><code>@Stateless</code></td>
+                                <td>Controller REST + Service</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Stateful Session Bean</strong></td>
+                                <td><code>@Stateful</code></td>
+                                <td>Controller + Session management</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Message-Driven Bean</strong></td>
+                                <td><code>@MessageDriven</code></td>
+                                <td>Controller async + JMS listener</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Singleton</strong></td>
+                                <td><code>@Singleton</code></td>
+                                <td>Controller + @Scope("singleton")</td>
+                            </tr>
+                            <tr>
+                                <td><strong>UseCase (custom)</strong></td>
+                                <td><code>@UseCase</code></td>
+                                <td>Controller BIAN / ACL</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Spring Legacy</strong></td>
+                                <td><code>@Service + @Transactional</code></td>
+                                <td>Controller REST multi-methodes</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Java EE Standard</strong></td>
+                                <td><code>@Stateless + @Remote</code></td>
+                                <td>Controller REST multi-methodes</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Guide BIAN -->
+            <div class="card border-0 shadow-sm mb-4" id="bian">
+                <div class="card-header bg-warning text-dark">
+                    <h6 class="mb-0"><i class="fas fa-university me-2"></i>Guide BIAN</h6>
+                </div>
+                <div class="card-body">
+                    <p>Le mode <strong>BIAN</strong> (Banking Industry Architecture Network) genere des APIs conformes au standard bancaire international.</p>
+                    <div class="alert alert-info">
+                        <strong>Actions BIAN supportees :</strong> Initiate, Execute, Request, Retrieve, Update, Control, Exchange, Grant, Notify, Capture
+                    </div>
+                    <p>Les URLs generees suivent le format : <code>/api/v1/{service-domain}/{cr-reference-id}/{behavior-qualifier}/{action}</code></p>
+                </div>
+            </div>
+
+            <!-- Configuration -->
+            <div class="card border-0 shadow-sm mb-4" id="config">
+                <div class="card-header bg-info text-white">
+                    <h6 class="mb-0"><i class="fas fa-cogs me-2"></i>Configuration (compleo-config.yml)</h6>
+                </div>
+                <div class="card-body">
+                    <pre class="bg-dark text-light p-3 rounded"><code>compleo:
+  client:
+    name: "Ma Banque"
+    code: "BANK"
+  generation:
+    base-package: "com.bank.api"
+    spring-boot-version: "3.2.0"
+    java-version: "17"
+  compliance:
+    audit-enabled: true
+    data-masking-enabled: true
+    security-headers-enabled: true</code></pre>
+                </div>
+            </div>
+
+            <!-- Mode CLI -->
+            <div class="card border-0 shadow-sm mb-4" id="cli">
+                <div class="card-header bg-secondary text-white">
+                    <h6 class="mb-0"><i class="fas fa-terminal me-2"></i>Mode CLI</h6>
+                </div>
+                <div class="card-body">
+                    <pre class="bg-dark text-light p-3 rounded"><code>java -jar compleo.jar --cli \
+  --input /path/to/ejb-project.zip \
+  --output /path/to/output \
+  --mode bian \
+  --base-package com.bank.api</code></pre>
+                </div>
+            </div>
+
+            <!-- API REST -->
+            <div class="card border-0 shadow-sm mb-4" id="api">
+                <div class="card-header bg-danger text-white">
+                    <h6 class="mb-0"><i class="fas fa-plug me-2"></i>API REST</h6>
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr><th>Methode</th><th>Endpoint</th><th>Description</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><span class="badge bg-success">POST</span></td><td><code>/upload</code></td><td>Uploader un projet EJB</td></tr>
+                            <tr><td><span class="badge bg-primary">POST</span></td><td><code>/scan</code></td><td>Analyser le projet</td></tr>
+                            <tr><td><span class="badge bg-warning">POST</span></td><td><code>/generate</code></td><td>Generer le projet REST</td></tr>
+                            <tr><td><span class="badge bg-info">GET</span></td><td><code>/api/file-content</code></td><td>Lire un fichier genere</td></tr>
+                            <tr><td><span class="badge bg-info">GET</span></td><td><code>/download</code></td><td>Telecharger le ZIP</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Installation -->
+            <div class="card border-0 shadow-sm mb-4" id="devops">
+                <div class="card-header bg-dark text-white">
+                    <h6 class="mb-0"><i class="fas fa-server me-2"></i>Installation on-premises</h6>
+                </div>
+                <div class="card-body">
+                    <pre class="bg-dark text-light p-3 rounded"><code># Installation
+sudo ./scripts/install.sh /opt/compleo
+
+# Demarrage
+sudo systemctl start compleo
+
+# Mise a jour
+sudo ./scripts/update.sh /opt/compleo</code></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

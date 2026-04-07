@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
+import com.bank.tools.generator.config.CompleoConfig;
 
 /**
  * Genere les ServiceAdapters (JNDI lookup) pour les trois patterns EJB :
@@ -21,7 +22,8 @@ import java.util.stream.Collectors;
 public class ServiceAdapterGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceAdapterGenerator.class);
-    private static final String BASE_PACKAGE = "com.bank.api";
+    private static final String DEFAULT_BASE_PACKAGE = "com.bank.api";
+    // TODO: inject CompleoConfig for multi-tenant support
 
     /**
      * Genere un ServiceAdapter pour un UseCase BaseUseCase.
@@ -32,8 +34,8 @@ public class ServiceAdapterGenerator {
         String adapterName = useCase.getServiceAdapterName();
 
         Set<String> imports = new TreeSet<>();
-        imports.add(BASE_PACKAGE + ".dto." + inputDto);
-        imports.add(BASE_PACKAGE + ".dto." + outputDto);
+        imports.add(DEFAULT_BASE_PACKAGE + ".dto." + inputDto);
+        imports.add(DEFAULT_BASE_PACKAGE + ".dto." + outputDto);
         imports.add("com.fasterxml.jackson.databind.ObjectMapper");
         imports.add("org.slf4j.Logger");
         imports.add("org.slf4j.LoggerFactory");
@@ -45,7 +47,7 @@ public class ServiceAdapterGenerator {
         imports.add("java.util.Properties");
 
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".service;\n\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".service;\n\n");
         for (String imp : imports) {
             sb.append("import ").append(imp).append(";\n");
         }
@@ -110,18 +112,18 @@ public class ServiceAdapterGenerator {
             }
             String returnBase = CodeGenUtils.extractBaseType(method.getReturnType());
             if (CodeGenUtils.isDtoType(returnBase)) {
-                imports.add(BASE_PACKAGE + ".dto." + returnBase);
+                imports.add(DEFAULT_BASE_PACKAGE + ".dto." + returnBase);
             }
             for (UseCaseInfo.ParameterInfo param : method.getParameters()) {
                 String paramBase = CodeGenUtils.extractBaseType(param.getType());
                 if (CodeGenUtils.isDtoType(paramBase)) {
-                    imports.add(BASE_PACKAGE + ".dto." + paramBase);
+                    imports.add(DEFAULT_BASE_PACKAGE + ".dto." + paramBase);
                 }
             }
         }
 
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".service;\n\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".service;\n\n");
         for (String imp : imports) {
             sb.append("import ").append(imp).append(";\n");
         }
@@ -187,8 +189,8 @@ public class ServiceAdapterGenerator {
         String inputDto = useCase.getInputDtoClassName();
 
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".service;\n\n");
-        sb.append("import ").append(BASE_PACKAGE).append(".dto.").append(inputDto).append(";\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".service;\n\n");
+        sb.append("import ").append(DEFAULT_BASE_PACKAGE).append(".dto.").append(inputDto).append(";\n");
         sb.append("import org.slf4j.Logger;\nimport org.slf4j.LoggerFactory;\n");
         sb.append("import org.springframework.stereotype.Service;\n\n");
         sb.append("/**\n * ServiceAdapter MDB pour ").append(useCase.getClassName()).append(".\n */\n");

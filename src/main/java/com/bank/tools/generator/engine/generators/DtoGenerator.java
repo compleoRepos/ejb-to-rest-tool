@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.*;
 
 import static com.bank.tools.generator.engine.constants.GeneratorConstants.*;
+import com.bank.tools.generator.config.CompleoConfig;
 
 /**
  * Genere les classes DTO (VoIn, VoOut, DTO generiques) et les interfaces @Remote.
@@ -30,7 +31,8 @@ import static com.bank.tools.generator.engine.constants.GeneratorConstants.*;
 public class DtoGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(DtoGenerator.class);
-    private static final String BASE_PACKAGE = "com.bank.api";
+    private static final String DEFAULT_BASE_PACKAGE = "com.bank.api";
+    // TODO: inject CompleoConfig for multi-tenant support
 
     /**
      * Genere tous les DTOs du projet.
@@ -49,7 +51,7 @@ public class DtoGenerator {
      */
     public void generateDtoClass(Path srcMain, DtoInfo dto) throws IOException {
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".dto;\n\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".dto;\n\n");
 
         Set<String> imports = new TreeSet<>();
 
@@ -109,7 +111,7 @@ public class DtoGenerator {
 
         for (DtoInfo.FieldInfo field : dto.getFields()) {
             for (String customAnnot : field.getCustomAnnotations()) {
-                imports.add(BASE_PACKAGE + ".validation." + customAnnot);
+                imports.add(DEFAULT_BASE_PACKAGE + ".validation." + customAnnot);
             }
         }
 
@@ -264,7 +266,7 @@ public class DtoGenerator {
         }
 
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".ejb.interfaces;\n\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".ejb.interfaces;\n\n");
 
         Set<String> imports = new TreeSet<>();
         StringBuilder interfaceBody = new StringBuilder();

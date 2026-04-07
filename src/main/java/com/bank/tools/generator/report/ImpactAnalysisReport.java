@@ -421,6 +421,7 @@ public class ImpactAnalysisReport {
             case MESSAGE_DRIVEN -> 1;
             case SINGLETON -> 0;
             case USE_CASE_CUSTOM -> 0;
+            case SPRING_LEGACY -> 0;
         };
     }
 
@@ -432,6 +433,7 @@ public class ImpactAnalysisReport {
             case GENERIC_SERVICE -> 1;
             case LOCAL_INTERFACE -> 1;
             case DAO_REPOSITORY -> 1;
+            case MULTI_METHOD_SERVICE -> 2;
         };
     }
 

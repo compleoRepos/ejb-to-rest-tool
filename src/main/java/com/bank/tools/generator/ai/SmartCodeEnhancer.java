@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.List;
+import com.bank.tools.generator.config.CompleoConfig;
 
 /**
  * Moteur d'intelligence artificielle interne (basé sur des règles).
@@ -31,7 +32,17 @@ import java.util.List;
 public class SmartCodeEnhancer {
 
     private static final Logger log = LoggerFactory.getLogger(SmartCodeEnhancer.class);
-    private static final String BASE_PACKAGE = "com.bank.api";
+    private static final String DEFAULT_BASE_PACKAGE = "com.bank.api";
+    private CompleoConfig compleoConfig;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setCompleoConfig(CompleoConfig compleoConfig) {
+        this.compleoConfig = compleoConfig;
+    }
+
+    private String getBasePackage() {
+        return compleoConfig != null ? compleoConfig.getOutput().getBasePackage() : DEFAULT_BASE_PACKAGE;
+    }
     private static final String BASE_PACKAGE_PATH = "com/bank/api";
 
     /**
@@ -451,7 +462,7 @@ public class SmartCodeEnhancer {
                         public HttpStatus getStatus() { return status; }
                         public String getErrorCode() { return errorCode; }
                     }
-                    """.formatted(BASE_PACKAGE);
+                    """.formatted(getBasePackage());
             Files.writeString(businessExFile, code);
             report.addEnhancement(new Enhancement("R29", Category.ERROR_HANDLING, Severity.WARNING,
                     "Création de BusinessException pour mapper FwkRollbackException (409 Conflict)",
@@ -479,7 +490,7 @@ public class SmartCodeEnhancer {
                             super(message, cause);
                         }
                     }
-                    """.formatted(BASE_PACKAGE);
+                    """.formatted(getBasePackage());
             Files.writeString(serviceUnavailFile, code);
             report.addEnhancement(new Enhancement("R30", Category.ERROR_HANDLING, Severity.WARNING,
                     "Création de ServiceUnavailableException pour les erreurs JNDI (503)",
@@ -540,7 +551,7 @@ public class SmartCodeEnhancer {
                                     .build();
                         }
                     }
-                    """.formatted(BASE_PACKAGE);
+                    """.formatted(getBasePackage());
             Files.writeString(securityFile, code);
             report.addEnhancement(new Enhancement("R32", Category.SECURITY, Severity.CRITICAL,
                     "Création de SecurityConfig avec SecurityFilterChain (stateless, CSRF désactivé, headers sécurité)",
@@ -590,7 +601,7 @@ public class SmartCodeEnhancer {
                             return source;
                         }
                     }
-                    """.formatted(BASE_PACKAGE);
+                    """.formatted(getBasePackage());
             Files.writeString(corsFile, code);
             report.addEnhancement(new Enhancement("R33", Category.SECURITY, Severity.CRITICAL,
                     "Création de CorsConfig avec origines explicites (pas de wildcard *)",
@@ -769,7 +780,7 @@ public class SmartCodeEnhancer {
                             }
                         }
                     }
-                    """.formatted(BASE_PACKAGE);
+                    """.formatted(getBasePackage());
             Files.writeString(correlationFilter, code);
             report.addEnhancement(new Enhancement("R48", Category.OBSERVABILITY, Severity.CRITICAL,
                     "Création du filtre CorrelationIdFilter (X-Request-ID via MDC)",
@@ -1191,10 +1202,10 @@ public class SmartCodeEnhancer {
                             }
                         }
                         """.formatted(
-                        BASE_PACKAGE,
-                        BASE_PACKAGE, uc.getInputDtoClassName(),
-                        BASE_PACKAGE, uc.getOutputDtoClassName(),
-                        BASE_PACKAGE, uc.getServiceAdapterName(),
+                        getBasePackage(),
+                        getBasePackage(), uc.getInputDtoClassName(),
+                        getBasePackage(), uc.getOutputDtoClassName(),
+                        getBasePackage(), uc.getServiceAdapterName(),
                         uc.getControllerName(),
                         uc.getControllerName(),
                         uc.getControllerName(),

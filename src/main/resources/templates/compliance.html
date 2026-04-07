@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="content">
+    <!-- Score de conformite -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center">
+                    <div class="position-relative d-inline-block">
+                        <svg viewBox="0 0 36 36" width="80" height="80">
+                            <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                  fill="none" stroke="#e9ecef" stroke-width="3"/>
+                            <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                  fill="none" stroke-width="3"
+                                  th:stroke="${complianceScore >= 80 ? '#198754' : (complianceScore >= 50 ? '#ffc107' : '#dc3545')}"
+                                  th:attr="stroke-dasharray=${complianceScore + ', 100'}"/>
+                            <text x="18" y="20.35" class="text-center" font-size="8" fill="#333" text-anchor="middle"
+                                  th:text="${complianceScore ?: 0} + '%'">0%</text>
+                        </svg>
+                    </div>
+                    <h6 class="mt-2">Score Global</h6>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center">
+                    <i class="fas fa-check-circle fa-2x text-success mb-2"></i>
+                    <h3 class="mb-0" th:text="${passedRules ?: 0}">0</h3>
+                    <small class="text-muted">Regles conformes</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center">
+                    <i class="fas fa-times-circle fa-2x text-danger mb-2"></i>
+                    <h3 class="mb-0" th:text="${failedRules ?: 0}">0</h3>
+                    <small class="text-muted">Non conformes</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center">
+                    <i class="fas fa-list-check fa-2x text-primary mb-2"></i>
+                    <h3 class="mb-0" th:text="${totalRules ?: 0}">0</h3>
+                    <small class="text-muted">Total regles</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Composants de securite -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white">
+            <h6 class="mb-0"><i class="fas fa-shield-alt me-2"></i>Composants de securite generes</h6>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <div class="d-flex align-items-center p-3 bg-light rounded">
+                        <i class="fas fa-clipboard-list fa-lg text-primary me-3"></i>
+                        <div>
+                            <strong>Audit Trail</strong>
+                            <br><small class="text-muted">Journal d'audit des appels REST</small>
+                        </div>
+                        <span class="badge bg-success ms-auto" th:if="${hasAuditTrail}">Actif</span>
+                        <span class="badge bg-secondary ms-auto" th:unless="${hasAuditTrail}">Inactif</span>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <div class="d-flex align-items-center p-3 bg-light rounded">
+                        <i class="fas fa-mask fa-lg text-warning me-3"></i>
+                        <div>
+                            <strong>Data Masker</strong>
+                            <br><small class="text-muted">Masquage RGPD / Loi 09-08</small>
+                        </div>
+                        <span class="badge bg-success ms-auto" th:if="${hasDataMasker}">Actif</span>
+                        <span class="badge bg-secondary ms-auto" th:unless="${hasDataMasker}">Inactif</span>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <div class="d-flex align-items-center p-3 bg-light rounded">
+                        <i class="fas fa-lock fa-lg text-danger me-3"></i>
+                        <div>
+                            <strong>Security Headers</strong>
+                            <br><small class="text-muted">OWASP / HSTS / CSP</small>
+                        </div>
+                        <span class="badge bg-success ms-auto" th:if="${hasSecurityHeaders}">Actif</span>
+                        <span class="badge bg-secondary ms-auto" th:unless="${hasSecurityHeaders}">Inactif</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Detail des regles -->
+    <div class="card border-0 shadow-sm" th:if="${checks != null}">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="fas fa-tasks me-2"></i>Detail des verifications</h6>
+            <a th:href="@{/api/compliance/report}" class="btn btn-sm btn-outline-primary">
+                <i class="fas fa-file-pdf me-1"></i>Exporter PDF
+            </a>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>#</th>
+                            <th>Categorie</th>
+                            <th>Regle</th>
+                            <th>Statut</th>
+                            <th>Commentaire</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr th:each="check, iter : ${checks}">
+                            <td th:text="${iter.count}">1</td>
+                            <td><span class="badge bg-secondary" th:text="${check.category}">Cat</span></td>
+                            <td th:text="${check.rule}">Regle</td>
+                            <td>
+                                <span class="badge bg-success" th:if="${check.passed}">
+                                    <i class="fas fa-check me-1"></i>Conforme
+                                </span>
+                                <span class="badge bg-danger" th:unless="${check.passed}">
+                                    <i class="fas fa-times me-1"></i>Non conforme
+                                </span>
+                            </td>
+                            <td><small th:text="${check.comment}">Commentaire</small></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div th:if="${projectId == null}" class="text-center py-5 text-muted">
+        <i class="fas fa-shield-alt fa-3x mb-3"></i>
+        <p>Importez et generez un projet pour voir le rapport de conformite</p>
+        <a th:href="@{/import}" class="btn btn-primary">
+            <i class="fas fa-upload me-1"></i>Importer un projet
+        </a>
+    </div>
+</div>
+</body>
+</html>

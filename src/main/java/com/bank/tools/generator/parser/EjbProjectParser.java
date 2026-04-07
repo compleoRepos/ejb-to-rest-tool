@@ -35,6 +35,7 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import com.bank.tools.generator.config.CompleoConfig;
 
 /**
  * Parseur statique de projets EJB utilisant JavaParser.
@@ -52,6 +53,13 @@ import java.util.stream.Collectors;
  */
 @Component
 public class EjbProjectParser {
+
+    private CompleoConfig compleoConfig;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setCompleoConfig(CompleoConfig compleoConfig) {
+        this.compleoConfig = compleoConfig;
+    }
 
     private static final Logger log = LoggerFactory.getLogger(EjbProjectParser.class);
 
@@ -535,7 +543,27 @@ public class EjbProjectParser {
             if (implementsBaseUseCase || hasExecute) {
                 return UseCaseInfo.EjbType.USE_CASE_CUSTOM;
             }
+            // Spring Legacy : @Service + @Transactional sans BaseUseCase
+            if (hasAnnotation(cls, "Transactional")) {
+                return UseCaseInfo.EjbType.SPRING_LEGACY;
+            }
         }
+
+        // Spring Legacy : @Component + @Transactional
+        if (hasAnnotation(cls, "Component") && hasAnnotation(cls, "Transactional")) {
+            return UseCaseInfo.EjbType.SPRING_LEGACY;
+        }
+
+        // Detection configurable : annotations supplementaires depuis CompleoConfig
+        if (compleoConfig != null) {
+            for (String annotation : compleoConfig.getLegacy().getUseCaseAnnotations()) {
+                if (hasAnnotation(cls, annotation) && !"UseCase".equals(annotation)
+                        && !"Stateless".equals(annotation) && !"Service".equals(annotation)) {
+                    return UseCaseInfo.EjbType.USE_CASE_CUSTOM;
+                }
+            }
+        }
+
         return null;
     }
 
@@ -654,7 +682,7 @@ public class EjbProjectParser {
         info.setRestEndpoint("/api/" + toKebabCase(baseName));
         info.setControllerName(baseName + "Controller");
         info.setServiceAdapterName(baseName + "ServiceAdapter");
-        info.setJndiName("java:global/bank/" + info.getClassName());
+        info.setJndiName(getJndiPrefix() + info.getClassName());
 
         return info;
     }
@@ -747,7 +775,7 @@ public class EjbProjectParser {
         info.setRestEndpoint("/api/" + toKebabCase(baseName));
         info.setControllerName(baseName + "Controller");
         info.setServiceAdapterName(baseName + "ServiceAdapter");
-        info.setJndiName("java:global/bank/" + info.getClassName());
+        info.setJndiName(getJndiPrefix() + info.getClassName());
 
         return info;
     }
@@ -1396,4 +1424,12 @@ public class EjbProjectParser {
         }
         return javaFiles;
     }
+
+    private String getJndiPrefix() {
+        if (compleoConfig != null) {
+            return compleoConfig.getJndi().getPrefix();
+        }
+        return "java:global/bank/";
+    }
+
 }
