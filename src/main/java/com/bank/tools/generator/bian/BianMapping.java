@@ -46,8 +46,8 @@ public class BianMapping {
         StringBuilder sb = new StringBuilder();
         sb.append("/").append(serviceDomain);
 
-        if ("initiation".equals(action) || "evaluation".equals(action)) {
-            // Pas de {cr-reference-id} pour les creations et evaluations
+        if ("initiation".equals(action) || "evaluation".equals(action) || "notification".equals(action)) {
+            // Pas de {cr-reference-id} pour les creations, evaluations et notifications
             if (behaviorQualifier != null && !behaviorQualifier.isEmpty()) {
                 sb.append("/").append(behaviorQualifier);
             }

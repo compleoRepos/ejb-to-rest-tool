@@ -44,6 +44,7 @@ public class AclArchitectureGenerator {
     private String PKG_INFRA_EJB_TYPES;
     private String PKG_INFRA_MOCK;
     private String PKG_CONFIG;
+    private String PKG_API_DTO_VALIDATION;
 
     // =====================================================================
     // CONSTANTES
@@ -158,6 +159,9 @@ public class AclArchitectureGenerator {
             }
         }
 
+        // 3b. Generer les annotations de validation (@ValidRIB, @ValidIBAN)
+        generateValidationAnnotations(srcMain);
+
         // 4. Generer les Exceptions (couche Domain)
         generateDomainExceptions(srcMain, analysis);
 
@@ -181,7 +185,7 @@ public class AclArchitectureGenerator {
 
         // 9. Generer les JndiAdapters (couche Infrastructure)
         for (BianControllerGroup group : groups) {
-            generateJndiAdapter(srcMain, group);
+            generateJndiAdapter(srcMain, group, analysis);
         }
 
         // 10. Generer les MockAdapters (couche Infrastructure)
@@ -234,6 +238,7 @@ public class AclArchitectureGenerator {
         PKG_INFRA_EJB_TYPES = PKG_BASE + ".infrastructure.ejb.types";
         PKG_INFRA_MOCK = PKG_BASE + ".infrastructure.mock";
         PKG_CONFIG = PKG_BASE + ".config";
+        PKG_API_DTO_VALIDATION = PKG_BASE + ".dto.validation";
     }
 
     private void createDirectories(Path srcMain) throws IOException {
@@ -243,7 +248,7 @@ public class AclArchitectureGenerator {
                 PKG_DOMAIN_SERVICE, PKG_DOMAIN_EXCEPTION,
                 PKG_INFRA_EJB_ADAPTER, PKG_INFRA_EJB_MAPPER, PKG_INFRA_EJB_EXCEPTION,
                 PKG_INFRA_EJB_TYPES, PKG_INFRA_MOCK,
-                PKG_CONFIG
+                PKG_CONFIG, PKG_API_DTO_VALIDATION
         };
         for (String pkg : packages) {
             Files.createDirectories(javaRoot.resolve(pkg.replace(".", "/")));
@@ -403,6 +408,11 @@ public class AclArchitectureGenerator {
                 sb.append("import ").append(PKG_API_ENUM).append(".").append(f.type).append(";\n");
             }
         }
+        // Import @ValidRIB/@ValidIBAN si necessaire
+        boolean hasValidRIB = fields.stream().anyMatch(f -> f.customValidators.stream().anyMatch(v -> v.contains("ValidRIB")));
+        boolean hasValidIBAN = fields.stream().anyMatch(f -> f.customValidators.stream().anyMatch(v -> v.contains("ValidIBAN")));
+        if (hasValidRIB) sb.append("import ").append(PKG_API_DTO_VALIDATION).append(".ValidRIB;\n");
+        if (hasValidIBAN) sb.append("import ").append(PKG_API_DTO_VALIDATION).append(".ValidIBAN;\n");
         sb.append("\n");
 
         sb.append("/**\n");
@@ -692,6 +702,22 @@ public class AclArchitectureGenerator {
     private void generateEjbTypes(Path srcMain, ProjectAnalysisResult analysis) throws IOException {
         Path dir = resolvePackagePath(srcMain, PKG_INFRA_EJB_TYPES);
 
+        // Generer BaseUseCase.java
+        Files.writeString(dir.resolve("BaseUseCase.java"),
+                "package " + PKG_INFRA_EJB_TYPES + ";\n\n" +
+                "public interface BaseUseCase {\n" +
+                "    ValueObject execute(ValueObject voIn) throws Exception;\n" +
+                "}\n");
+        log.info("[ACL] EJB Type genere : BaseUseCase");
+
+        // Generer ValueObject.java
+        Files.writeString(dir.resolve("ValueObject.java"),
+                "package " + PKG_INFRA_EJB_TYPES + ";\n\n" +
+                "import java.io.Serializable;\n\n" +
+                "public interface ValueObject extends Serializable {\n" +
+                "}\n");
+        log.info("[ACL] EJB Type genere : ValueObject");
+
         for (DtoInfo dto : analysis.getDtos()) {
             Path file = dir.resolve(dto.getClassName() + ".java");
 
@@ -707,7 +733,7 @@ public class AclArchitectureGenerator {
             sb.append(" * Copie du DTO EJB ").append(dto.getClassName()).append(" dans la couche infrastructure.\n");
             sb.append(" * Aucun import ma.eai.* — type autonome.\n");
             sb.append(" */\n");
-            sb.append("public class ").append(dto.getClassName()).append(" implements Serializable {\n\n");
+            sb.append("public class ").append(dto.getClassName()).append(" implements ValueObject {\n\n");
             sb.append("    private static final long serialVersionUID = 1L;\n\n");
 
             for (DtoInfo.FieldInfo field : dto.getFields()) {
@@ -775,6 +801,8 @@ public class AclArchitectureGenerator {
                 for (DtoInfo.FieldInfo field : ejbIn.getFields()) {
                     if ("serialVersionUID".equals(field.getName()) || field.isStatic()) continue;
                     if (LEGACY_FIELDS.contains(field.getName())) continue;
+                    // Correction: exclure les champs @XmlTransient du Mapper
+                    if (field.isHasXmlTransient()) continue;
 
                     String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
                     String ejbSetter = "set" + capitalize(field.getName());
@@ -801,6 +829,8 @@ public class AclArchitectureGenerator {
                     if ("serialVersionUID".equals(field.getName()) || field.isStatic()) continue;
                     if (LEGACY_FIELDS.contains(field.getName())) continue;
                     if (isFrameworkType(field.getType())) continue;
+                    // Correction: exclure les champs @XmlTransient du Mapper
+                    if (field.isHasXmlTransient()) continue;
 
                     String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
                     String restSetter = "set" + capitalize(restName);
@@ -871,7 +901,7 @@ public class AclArchitectureGenerator {
     // COUCHE INFRASTRUCTURE : JndiAdapter
     // =====================================================================
 
-    private void generateJndiAdapter(Path srcMain, BianControllerGroup group) throws IOException {
+    private void generateJndiAdapter(Path srcMain, BianControllerGroup group, ProjectAnalysisResult analysis) throws IOException {
         String adapterName = toPascalCase(group.serviceDomain) + "JndiAdapter";
         Path dir = resolvePackagePath(srcMain, PKG_INFRA_EJB_ADAPTER);
         Path file = dir.resolve(adapterName + ".java");
@@ -888,6 +918,8 @@ public class AclArchitectureGenerator {
             if (ep.ejbOutputDtoName != null) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
             imports.add("import " + PKG_INFRA_EJB_MAPPER + "." + deriveMapperName(ep) + ";");
         }
+        imports.add("import " + PKG_INFRA_EJB_TYPES + ".BaseUseCase;");
+        imports.add("import " + PKG_INFRA_EJB_TYPES + ".ValueObject;");
         imports.add("import " + PKG_DOMAIN_SERVICE + "." + group.serviceInterfaceName + ";");
         imports.add("import " + PKG_INFRA_EJB_EXCEPTION + ".ExceptionTranslator;");
         imports.add("import org.slf4j.Logger;");
@@ -968,31 +1000,33 @@ public class AclArchitectureGenerator {
             sb.append("            props.put(javax.naming.Context.INITIAL_CONTEXT_FACTORY, jndiFactory);\n");
             sb.append("            props.put(javax.naming.Context.PROVIDER_URL, jndiProviderUrl);\n");
             sb.append("            ctx = new javax.naming.InitialContext(props);\n");
-            sb.append("            log.info(\"[EJB-LOOKUP] ").append(jndiName).append("\");\n");
-            sb.append("            Object ejbProxy = ctx.lookup(\"").append(jndiName).append("\");\n");
+            sb.append("            log.debug(\"[EJB-LOOKUP] ").append(jndiName).append("\");\n");
+            sb.append("            BaseUseCase useCase = (BaseUseCase) ctx.lookup(\"").append(jndiName).append("\");\n");
 
-            // Execute
-            sb.append("            log.info(\"[EJB-EXECUTE] ").append(ep.useCaseName).append("\");\n");
+            // Execute avec cast type
+            sb.append("            long start = System.currentTimeMillis();\n");
             if (hasReturn && ep.ejbOutputDtoName != null) {
-                sb.append("            ").append(ep.ejbOutputDtoName).append(" voOut = (").append(ep.ejbOutputDtoName).append(") ");
-                sb.append("java.lang.reflect.Method.class.cast(ejbProxy.getClass().getMethod(\"execute\", Object.class)).invoke(ejbProxy, ");
+                sb.append("            ValueObject result = useCase.execute(");
                 if (ep.ejbInputDtoName != null) {
                     sb.append("voIn");
                 } else {
                     sb.append("null");
                 }
                 sb.append(");\n");
-                sb.append("            log.info(\"[EJB-RESPONSE] Reponse EJB recue pour ").append(ep.useCaseName).append("\");\n");
+                sb.append("            log.info(\"[EJB-EXECUTE] ").append(ep.useCaseName).append(" en {}ms\", System.currentTimeMillis() - start);\n");
+                sb.append("            ").append(ep.ejbOutputDtoName).append(" voOut = (").append(ep.ejbOutputDtoName).append(") result;\n");
+                sb.append("            log.debug(\"[EJB-RESPONSE] Reponse EJB recue pour ").append(ep.useCaseName).append("\");\n");
                 sb.append("            return ").append(mapperField).append(".toRest(voOut);\n");
             } else {
-                sb.append("            ejbProxy.getClass().getMethod(\"execute\", Object.class).invoke(ejbProxy, ");
+                sb.append("            useCase.execute(");
                 if (ep.ejbInputDtoName != null) {
                     sb.append("voIn");
                 } else {
                     sb.append("null");
                 }
                 sb.append(");\n");
-                sb.append("            log.info(\"[EJB-RESPONSE] Appel EJB termine pour ").append(ep.useCaseName).append("\");\n");
+                sb.append("            log.info(\"[EJB-EXECUTE] ").append(ep.useCaseName).append(" en {}ms\", System.currentTimeMillis() - start);\n");
+                sb.append("            log.debug(\"[EJB-RESPONSE] Appel EJB termine pour ").append(ep.useCaseName).append("\");\n");
             }
 
             sb.append("        } catch (Exception e) {\n");
@@ -1003,6 +1037,39 @@ public class AclArchitectureGenerator {
             sb.append("            log.info(\"[EJB-CLEANUP] Fin appel ").append(ep.useCaseName).append("\");\n");
             sb.append("        }\n");
             sb.append("    }\n\n");
+
+            // Methode Bytes supplementaire pour les endpoints byte[]
+            if (isByteArrayResponse(ep, analysis)) {
+                sb.append("    @Override\n");
+                sb.append("    public byte[] ").append(ep.methodName).append("Bytes(");
+                List<String> bytesParams = new ArrayList<>();
+                if (hasCrRef) bytesParams.add("String crReferenceId");
+                if (ep.requestDtoName != null) bytesParams.add(ep.requestDtoName + " request");
+                sb.append(String.join(", ", bytesParams));
+                sb.append(") {\n");
+                sb.append("        log.info(\"[EJB-CALL] ").append(ep.useCaseName).append(" (bytes)\");\n");
+                sb.append("        ").append(ep.responseDtoName).append(" response = ").append(ep.methodName).append("(");
+                List<String> callArgs = new ArrayList<>();
+                if (hasCrRef) callArgs.add("crReferenceId");
+                if (ep.requestDtoName != null) callArgs.add("request");
+                sb.append(String.join(", ", callArgs));
+                sb.append(");\n");
+                // Trouver le champ byte[] dans le VoOut
+                sb.append("        // Extraire le champ byte[] de la reponse\n");
+                DtoInfo ejbOutDto = findDto(analysis, ep.ejbOutputDtoName);
+                String byteFieldGetter = "null";
+                if (ejbOutDto != null) {
+                    for (DtoInfo.FieldInfo bf : ejbOutDto.getFields()) {
+                        if (bf.getType() != null && bf.getType().contains("byte")) {
+                            String restByteName = FIELD_RENAME.getOrDefault(bf.getName(), bf.getName());
+                            byteFieldGetter = "response.get" + capitalize(restByteName) + "()";
+                            break;
+                        }
+                    }
+                }
+                sb.append("        return response != null ? ").append(byteFieldGetter).append(" : null;\n");
+                sb.append("    }\n\n");
+            }
         }
 
         sb.append("}\n");
@@ -1063,10 +1130,49 @@ public class AclArchitectureGenerator {
                 sb.append("        ").append(ep.responseDtoName).append(" response = new ").append(ep.responseDtoName).append("();\n");
                 // Remplir avec des donnees mock realistes
                 generateMockFieldValues(sb, ep, analysis);
+
+                // Echo : recopier les champs de la request dans la response (ecrase les mocks)
+                if (ep.requestDtoName != null) {
+                    sb.append("        // Echo : recopier les champs de la request dans la response\n");
+                    DtoInfo reqDto = findDto(analysis, ep.ejbInputDtoName);
+                    DtoInfo resDto = findDto(analysis, ep.ejbOutputDtoName);
+                    if (reqDto != null && resDto != null) {
+                        Set<String> resFields = new HashSet<>();
+                        for (DtoInfo.FieldInfo f : resDto.getFields()) resFields.add(f.getName());
+                        for (DtoInfo.FieldInfo f : reqDto.getFields()) {
+                            if ("serialVersionUID".equals(f.getName()) || f.isStatic()) continue;
+                            if (LEGACY_FIELDS.contains(f.getName())) continue;
+                            if (isFrameworkType(f.getType())) continue;
+                            // Correction: exclure les champs @XmlTransient de l'echo
+                            if (f.isHasXmlTransient()) continue;
+                            if (resFields.contains(f.getName())) {
+                                String restReqName = FIELD_RENAME.getOrDefault(f.getName(), f.getName());
+                                String restResName = FIELD_RENAME.getOrDefault(f.getName(), f.getName());
+                                String getter = ("boolean".equals(f.getType()) ? "is" : "get") + capitalize(restReqName);
+                                String setter = "set" + capitalize(restResName);
+                                sb.append("        if (request.").append(getter).append("() != null) ");
+                                sb.append("response.").append(setter).append("(request.").append(getter).append("());\n");
+                            }
+                        }
+                    }
+                }
+
                 sb.append("        return response;\n");
             }
 
             sb.append("    }\n\n");
+
+            // Methode Bytes supplementaire pour les endpoints byte[]
+            if (isByteArrayResponse(ep, analysis)) {
+                sb.append("    @Override\n");
+                sb.append("    public byte[] ").append(ep.methodName).append("Bytes(");
+                sb.append(String.join(", ", params));
+                sb.append(") {\n");
+                sb.append("        log.info(\"[MOCK] ").append(ep.methodName).append("Bytes appele\");\n");
+                sb.append("        // Mock PDF : %PDF-1.4 header\n");
+                sb.append("        return new byte[]{37, 80, 68, 70, 45, 49, 46, 52};\n");
+                sb.append("    }\n\n");
+            }
         }
 
         sb.append("}\n");
@@ -1083,6 +1189,8 @@ public class AclArchitectureGenerator {
             if ("serialVersionUID".equals(field.getName()) || field.isStatic()) continue;
             if (LEGACY_FIELDS.contains(field.getName())) continue;
             if (isFrameworkType(field.getType())) continue;
+            // Correction: exclure les champs @XmlTransient du MockAdapter aussi
+            if (field.isHasXmlTransient()) continue;
 
             String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
             String setter = "set" + capitalize(restName);
@@ -1161,6 +1269,14 @@ public class AclArchitectureGenerator {
         imports.add("import org.springframework.http.ResponseEntity;");
         imports.add("import org.springframework.web.bind.annotation.*;");
 
+        // BUG 4: @PreAuthorize si @RolesAllowed detecte
+        boolean hasRoles = group.endpoints.stream()
+                .anyMatch(ep -> ep.useCaseInfo != null && ep.useCaseInfo.getRolesAllowed() != null
+                        && !ep.useCaseInfo.getRolesAllowed().isEmpty());
+        if (hasRoles) {
+            imports.add("import org.springframework.security.access.prepost.PreAuthorize;");
+        }
+
         for (String imp : imports) sb.append(imp).append("\n");
         sb.append("\n");
 
@@ -1206,6 +1322,16 @@ public class AclArchitectureGenerator {
 
             sb.append("    @Operation(operationId = \"").append(operationId).append("\",\n");
             sb.append("               summary = \"").append(summary).append("\")\n");
+
+            // BUG 4: @PreAuthorize si @RolesAllowed detecte sur le UseCase
+            if (ep.useCaseInfo != null && ep.useCaseInfo.getRolesAllowed() != null
+                    && !ep.useCaseInfo.getRolesAllowed().isEmpty()) {
+                List<String> roles = ep.useCaseInfo.getRolesAllowed();
+                String rolesExpr = roles.stream()
+                        .map(r -> "'" + r + "'")
+                        .collect(Collectors.joining(", "));
+                sb.append("    @PreAuthorize(\"hasAnyRole(").append(rolesExpr).append(")\")").append("\n");
+            }
 
             // Annotation HTTP method
             String mappingAnnotation = switch (httpMethod) {
@@ -1686,5 +1812,81 @@ public class AclArchitectureGenerator {
             }
         }
         return false;
+    }
+
+    // =====================================================================
+    // COUCHE API : Annotations de validation (@ValidRIB, @ValidIBAN)
+    // =====================================================================
+
+    private void generateValidationAnnotations(Path srcMain) throws IOException {
+        Path dir = resolvePackagePath(srcMain, PKG_API_DTO_VALIDATION);
+
+        // ValidRIB.java
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(PKG_API_DTO_VALIDATION).append(";\n\n");
+        sb.append("import jakarta.validation.Constraint;\n");
+        sb.append("import jakarta.validation.Payload;\n");
+        sb.append("import java.lang.annotation.*;\n\n");
+        sb.append("@Documented\n");
+        sb.append("@Constraint(validatedBy = ValidRIBValidator.class)\n");
+        sb.append("@Target({ElementType.FIELD, ElementType.PARAMETER})\n");
+        sb.append("@Retention(RetentionPolicy.RUNTIME)\n");
+        sb.append("public @interface ValidRIB {\n");
+        sb.append("    String message() default \"RIB invalide\";\n");
+        sb.append("    Class<?>[] groups() default {};\n");
+        sb.append("    Class<? extends Payload>[] payload() default {};\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("ValidRIB.java"), sb.toString());
+        log.info("[ACL] Validation generee : ValidRIB");
+
+        // ValidRIBValidator.java
+        sb = new StringBuilder();
+        sb.append("package ").append(PKG_API_DTO_VALIDATION).append(";\n\n");
+        sb.append("import jakarta.validation.ConstraintValidator;\n");
+        sb.append("import jakarta.validation.ConstraintValidatorContext;\n\n");
+        sb.append("public class ValidRIBValidator implements ConstraintValidator<ValidRIB, String> {\n\n");
+        sb.append("    @Override\n");
+        sb.append("    public boolean isValid(String value, ConstraintValidatorContext context) {\n");
+        sb.append("        if (value == null || value.isBlank()) return true; // @NotBlank gere le cas null\n");
+        sb.append("        // RIB marocain : 24 chiffres\n");
+        sb.append("        return value.matches(\"^[0-9]{24}$\");\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("ValidRIBValidator.java"), sb.toString());
+        log.info("[ACL] Validation generee : ValidRIBValidator");
+
+        // ValidIBAN.java
+        sb = new StringBuilder();
+        sb.append("package ").append(PKG_API_DTO_VALIDATION).append(";\n\n");
+        sb.append("import jakarta.validation.Constraint;\n");
+        sb.append("import jakarta.validation.Payload;\n");
+        sb.append("import java.lang.annotation.*;\n\n");
+        sb.append("@Documented\n");
+        sb.append("@Constraint(validatedBy = ValidIBANValidator.class)\n");
+        sb.append("@Target({ElementType.FIELD, ElementType.PARAMETER})\n");
+        sb.append("@Retention(RetentionPolicy.RUNTIME)\n");
+        sb.append("public @interface ValidIBAN {\n");
+        sb.append("    String message() default \"IBAN invalide\";\n");
+        sb.append("    Class<?>[] groups() default {};\n");
+        sb.append("    Class<? extends Payload>[] payload() default {};\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("ValidIBAN.java"), sb.toString());
+        log.info("[ACL] Validation generee : ValidIBAN");
+
+        // ValidIBANValidator.java
+        sb = new StringBuilder();
+        sb.append("package ").append(PKG_API_DTO_VALIDATION).append(";\n\n");
+        sb.append("import jakarta.validation.ConstraintValidator;\n");
+        sb.append("import jakarta.validation.ConstraintValidatorContext;\n\n");
+        sb.append("public class ValidIBANValidator implements ConstraintValidator<ValidIBAN, String> {\n\n");
+        sb.append("    @Override\n");
+        sb.append("    public boolean isValid(String value, ConstraintValidatorContext context) {\n");
+        sb.append("        if (value == null || value.isBlank()) return true; // @NotBlank gere le cas null\n");
+        sb.append("        // IBAN : 2 lettres + 2 chiffres + BBAN (max 30 chars)\n");
+        sb.append("        return value.matches(\"^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$\");\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("ValidIBANValidator.java"), sb.toString());
+        log.info("[ACL] Validation generee : ValidIBANValidator");
     }
 }

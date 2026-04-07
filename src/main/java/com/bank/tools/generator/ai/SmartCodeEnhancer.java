@@ -111,17 +111,29 @@ public class SmartCodeEnhancer {
                                   ProjectAnalysisResult analysisResult) {
         // R01: Endpoints en kebab-case (déjà appliqué par le parser)
         for (UseCaseInfo uc : analysisResult.getUseCases()) {
-            boolean isKebab = uc.getRestEndpoint() != null && uc.getRestEndpoint().matches("/api/[a-z0-9-]+");
+            String ep = uc.getRestEndpoint() != null ? uc.getRestEndpoint() : "";
+            // Accepter les URLs BIAN multi-segments : /api/v1/service-domain/{ref}/bq/action
+            boolean isKebab = ep.matches("/api(/v[0-9]+)?(/[a-z0-9{}:-]+)+");
             report.addEnhancement(new Enhancement("R01", Category.NAMING, Severity.INFO,
-                    "Endpoint '" + uc.getRestEndpoint() + "' utilise le format kebab-case",
+                    "Endpoint '" + ep + "' utilise le format kebab-case",
                     uc.getControllerName() + ".java", isKebab));
         }
 
         // R02: Endpoints avec noms de ressources (pas de verbes)
+        // Les actions BIAN standard (initiation, update, execution, termination, retrieval, control, etc.) sont acceptées
+        java.util.Set<String> bianActions = java.util.Set.of(
+                "initiation", "update", "execution", "termination", "retrieval",
+                "control", "exchange", "capture", "grant", "request",
+                "notification", "evaluation", "registration", "feedback");
         for (UseCaseInfo uc : analysisResult.getUseCases()) {
             String ep = uc.getRestEndpoint() != null ? uc.getRestEndpoint() : "";
-            boolean noVerbs = !ep.contains("get") && !ep.contains("create") && !ep.contains("delete")
-                    && !ep.contains("update") && !ep.contains("fetch");
+            // Retirer les segments BIAN avant la vérification des verbes
+            String epCleaned = ep;
+            for (String action : bianActions) {
+                epCleaned = epCleaned.replace("/" + action, "");
+            }
+            boolean noVerbs = !epCleaned.contains("get") && !epCleaned.contains("create") && !epCleaned.contains("delete")
+                    && !epCleaned.contains("update") && !epCleaned.contains("fetch");
             report.addEnhancement(new Enhancement("R03", Category.NAMING, Severity.INFO,
                     "Endpoint '" + ep + "' n'utilise pas de verbes dans l'URL",
                     uc.getControllerName() + ".java", noVerbs));
@@ -357,13 +369,26 @@ public class SmartCodeEnhancer {
     // ==================== CATÉGORIE 4 : ERROR HANDLING ====================
 
     private void applyErrorHandlingRules(EnhancementReport report, Path srcMain) throws IOException {
-        Path exceptionDir = srcMain.resolve("exception");
+        // En mode ACL, les exceptions sont dans domain/exception/
+        Path aclExceptionDir = srcMain.resolve("domain/exception");
+        Path legacyExceptionDir = srcMain.resolve("exception");
+        Path exceptionDir = Files.isDirectory(aclExceptionDir) ? aclExceptionDir : legacyExceptionDir;
+        if (!Files.isDirectory(exceptionDir)) {
+            Files.createDirectories(exceptionDir);
+        }
 
         // R26: Vérifier que le GlobalExceptionHandler existe
+        // En mode ACL, le GlobalExceptionHandler est dans config/ ; en mode legacy, dans exception/
         Path handlerFile = exceptionDir.resolve("GlobalExceptionHandler.java");
+        Path aclConfigHandler = srcMain.resolve("config/GlobalExceptionHandler.java");
+        boolean handlerExists = Files.exists(handlerFile) || Files.exists(aclConfigHandler);
+        // Si trouvé dans config/, utiliser ce chemin pour les règles suivantes
+        if (!Files.exists(handlerFile) && Files.exists(aclConfigHandler)) {
+            handlerFile = aclConfigHandler;
+        }
         report.addEnhancement(new Enhancement("R26", Category.ERROR_HANDLING, Severity.INFO,
                 "GlobalExceptionHandler @ControllerAdvice présent",
-                "GlobalExceptionHandler.java", Files.exists(handlerFile)));
+                "GlobalExceptionHandler.java", handlerExists));
 
         // R27: Améliorer la structure d'erreur standardisée
         if (Files.exists(handlerFile)) {
@@ -412,11 +437,15 @@ public class SmartCodeEnhancer {
                     "GlobalExceptionHandler.java", true));
         }
 
+        // Déterminer le package des exceptions selon le mode (ACL vs legacy)
+        String exceptionPackage = Files.isDirectory(srcMain.resolve("domain/exception"))
+                ? BASE_PACKAGE + ".domain.exception" : BASE_PACKAGE + ".exception";
+
         // R29: Créer BusinessException pour les erreurs métier
         Path businessExFile = exceptionDir.resolve("BusinessException.java");
         if (!Files.exists(businessExFile)) {
             String code = """
-                    package %s.exception;
+                    package %s;
 
                     import org.springframework.http.HttpStatus;
 
@@ -451,7 +480,7 @@ public class SmartCodeEnhancer {
                         public HttpStatus getStatus() { return status; }
                         public String getErrorCode() { return errorCode; }
                     }
-                    """.formatted(BASE_PACKAGE);
+                    """.formatted(exceptionPackage);
             Files.writeString(businessExFile, code);
             report.addEnhancement(new Enhancement("R29", Category.ERROR_HANDLING, Severity.WARNING,
                     "Création de BusinessException pour mapper FwkRollbackException (409 Conflict)",
@@ -462,7 +491,7 @@ public class SmartCodeEnhancer {
         Path serviceUnavailFile = exceptionDir.resolve("ServiceUnavailableException.java");
         if (!Files.exists(serviceUnavailFile)) {
             String code = """
-                    package %s.exception;
+                    package %s;
 
                     /**
                      * Exception levee lorsque le service EJB distant est indisponible.
@@ -479,7 +508,7 @@ public class SmartCodeEnhancer {
                             super(message, cause);
                         }
                     }
-                    """.formatted(BASE_PACKAGE);
+                    """.formatted(exceptionPackage);
             Files.writeString(serviceUnavailFile, code);
             report.addEnhancement(new Enhancement("R30", Category.ERROR_HANDLING, Severity.WARNING,
                     "Création de ServiceUnavailableException pour les erreurs JNDI (503)",
@@ -776,11 +805,68 @@ public class SmartCodeEnhancer {
                     "CorrelationIdFilter.java", true));
         }
 
-        // R49: Vérifier le LoggingAspect
+        // R49: Vérifier le LoggingAspect - chercher dans logging/ ou config/
         Path loggingAspect = srcMain.resolve("logging/LoggingAspect.java");
+        Path aclLoggingAspect = srcMain.resolve("config/LoggingAspect.java");
+        boolean hasLoggingAspect = Files.exists(loggingAspect) || Files.exists(aclLoggingAspect);
+        if (!hasLoggingAspect) {
+            // Générer le LoggingAspect dans config/ (mode ACL) ou logging/ (mode legacy)
+            Path targetDir = Files.isDirectory(srcMain.resolve("config")) ? srcMain.resolve("config") : srcMain.resolve("logging");
+            Files.createDirectories(targetDir);
+            Path targetFile = targetDir.resolve("LoggingAspect.java");
+            String pkg = Files.isDirectory(srcMain.resolve("config")) ? BASE_PACKAGE + ".config" : BASE_PACKAGE + ".logging";
+            String aspectCode = """
+                    package %s;
+
+                    import org.aspectj.lang.ProceedingJoinPoint;
+                    import org.aspectj.lang.annotation.Around;
+                    import org.aspectj.lang.annotation.Aspect;
+                    import org.aspectj.lang.annotation.Pointcut;
+                    import org.slf4j.Logger;
+                    import org.slf4j.LoggerFactory;
+                    import org.springframework.stereotype.Component;
+
+                    /**
+                     * Aspect de logging pour tracer les appels aux controllers et services.
+                     * Mesure le temps d'execution et log les entrees/sorties.
+                     */
+                    @Aspect
+                    @Component
+                    public class LoggingAspect {
+
+                        private static final Logger log = LoggerFactory.getLogger(LoggingAspect.class);
+
+                        @Pointcut("within(@org.springframework.web.bind.annotation.RestController *)")
+                        public void controllerMethods() {}
+
+                        @Pointcut("within(@org.springframework.stereotype.Service *)")
+                        public void serviceMethods() {}
+
+                        @Around("controllerMethods() || serviceMethods()")
+                        public Object logAround(ProceedingJoinPoint joinPoint) throws Throwable {
+                            String className = joinPoint.getSignature().getDeclaringTypeName();
+                            String methodName = joinPoint.getSignature().getName();
+                            log.info("[ENTER] {}.{}()", className, methodName);
+                            long start = System.currentTimeMillis();
+                            try {
+                                Object result = joinPoint.proceed();
+                                long duration = System.currentTimeMillis() - start;
+                                log.info("[EXIT] {}.{}() - {}ms", className, methodName, duration);
+                                return result;
+                            } catch (Throwable ex) {
+                                long duration = System.currentTimeMillis() - start;
+                                log.error("[ERROR] {}.{}() - {}ms - {}", className, methodName, duration, ex.getMessage());
+                                throw ex;
+                            }
+                        }
+                    }
+                    """.formatted(pkg);
+            Files.writeString(targetFile, aspectCode);
+            hasLoggingAspect = true;
+        }
         report.addEnhancement(new Enhancement("R49", Category.OBSERVABILITY, Severity.INFO,
                 "LoggingAspect présent pour le logging des requêtes/réponses",
-                "LoggingAspect.java", Files.exists(loggingAspect)));
+                "LoggingAspect.java", hasLoggingAspect));
 
         // R50-R51: Améliorer la configuration de logging
         Path propsFile = resourcesDir.resolve("application.properties");
@@ -1124,7 +1210,7 @@ public class SmartCodeEnhancer {
                         import org.junit.jupiter.api.Test;
                         import org.springframework.beans.factory.annotation.Autowired;
                         import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-                        import org.springframework.boot.test.mock.bean.MockBean;
+                        import org.springframework.boot.test.mock.mockito.MockBean;
                         import org.springframework.http.MediaType;
                         import org.springframework.test.web.servlet.MockMvc;
 
@@ -1299,6 +1385,49 @@ public class SmartCodeEnhancer {
         // R83: Vérifier le BianHeaderFilter
         Path headerFilter = srcMain.resolve("config/BianHeaderFilter.java");
         boolean hasFilter = Files.exists(headerFilter);
+        if (!hasFilter) {
+            // Générer le BianHeaderFilter
+            Path configDir = srcMain.resolve("config");
+            Files.createDirectories(configDir);
+            String filterCode = """
+                    package %s.config;
+
+                    import jakarta.servlet.Filter;
+                    import jakarta.servlet.FilterChain;
+                    import jakarta.servlet.ServletException;
+                    import jakarta.servlet.ServletRequest;
+                    import jakarta.servlet.ServletResponse;
+                    import jakarta.servlet.http.HttpServletResponse;
+                    import org.springframework.core.annotation.Order;
+                    import org.springframework.stereotype.Component;
+
+                    import java.io.IOException;
+                    import java.time.Instant;
+
+                    /**
+                     * Filtre HTTP injectant les headers BIAN standards dans chaque réponse.
+                     * Conforme au standard BIAN v12 pour l'interopérabilité bancaire.
+                     */
+                    @Component
+                    @Order(1)
+                    public class BianHeaderFilter implements Filter {
+
+                        private static final String BIAN_VERSION = "12.0.0";
+
+                        @Override
+                        public void doFilter(ServletRequest request, ServletResponse response,
+                                             FilterChain chain) throws IOException, ServletException {
+                            HttpServletResponse httpResponse = (HttpServletResponse) response;
+                            httpResponse.setHeader("X-BIAN-Version", BIAN_VERSION);
+                            httpResponse.setHeader("X-BIAN-Timestamp", Instant.now().toString());
+                            httpResponse.setHeader("X-BIAN-Service-Provider", "BMCE-Bank-Of-Africa");
+                            chain.doFilter(request, response);
+                        }
+                    }
+                    """.formatted(BASE_PACKAGE);
+            Files.writeString(headerFilter, filterCode);
+            hasFilter = true;
+        }
         report.addEnhancement(new Enhancement("R83", Category.BIAN_COMPLIANCE, Severity.CRITICAL,
                 "BianHeaderFilter present (headers X-BIAN-* injectes automatiquement)",
                 "BianHeaderFilter.java", hasFilter));

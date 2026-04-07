@@ -135,15 +135,24 @@ public class CodeGenerationEngine {
         Files.createDirectories(projectRoot);
 
         Path srcMain = projectRoot.resolve("src/main/java/" + BASE_PACKAGE_PATH);
-        Files.createDirectories(srcMain.resolve("controller"));
-        Files.createDirectories(srcMain.resolve("service"));
-        Files.createDirectories(srcMain.resolve("dto"));
-        Files.createDirectories(srcMain.resolve("config"));
-        Files.createDirectories(srcMain.resolve("exception"));
-        Files.createDirectories(srcMain.resolve("logging"));
-        Files.createDirectories(srcMain.resolve("ejb/interfaces"));
-        Files.createDirectories(srcMain.resolve("enums"));
-        Files.createDirectories(srcMain.resolve("validation"));
+        boolean aclActive = bianMode && aclArchitectureGenerator != null;
+
+        if (!aclActive) {
+            // Mode legacy : creer les repertoires legacy
+            Files.createDirectories(srcMain.resolve("controller"));
+            Files.createDirectories(srcMain.resolve("service"));
+            Files.createDirectories(srcMain.resolve("dto"));
+            Files.createDirectories(srcMain.resolve("config"));
+            Files.createDirectories(srcMain.resolve("exception"));
+            Files.createDirectories(srcMain.resolve("logging"));
+            Files.createDirectories(srcMain.resolve("ejb/interfaces"));
+            Files.createDirectories(srcMain.resolve("enums"));
+            Files.createDirectories(srcMain.resolve("validation"));
+        } else {
+            // Mode ACL : seuls les repertoires ACL sont crees par l'AclArchitectureGenerator
+            Files.createDirectories(srcMain);
+            log.info("[ACL] Mode ACL actif : aucun repertoire legacy cree");
+        }
 
         Path resourcesDir = projectRoot.resolve("src/main/resources");
         Files.createDirectories(resourcesDir);
@@ -159,149 +168,126 @@ public class CodeGenerationEngine {
         generatePomXml(projectRoot, projectHasXml, projectHasValidation, analysisResult);
         generateApplicationClass(srcMain);
         generateApplicationProperties(resourcesDir);
-        if (aclArchitectureGenerator == null || !bianMode) {
-            generateGlobalExceptionHandler(srcMain, analysisResult);   // G9 enrichi + AXE 1.6 exceptions custom
-        }
-        generateLoggingAspect(srcMain);
-        if (aclArchitectureGenerator == null || !bianMode) {
+
+        if (!aclActive) {
+            // Mode legacy uniquement
+            generateGlobalExceptionHandler(srcMain, analysisResult);
+            generateLoggingAspect(srcMain);
             generateEjbLookupConfig(srcMain);
             generateBaseUseCaseInterface(srcMain);
             generateValueObjectInterface(srcMain);
-        }
 
-        if (projectHasXml) {
-            generateXmlConfig(srcMain);
-        }
+            if (projectHasXml) {
+                generateXmlConfig(srcMain);
+            }
 
-        // AXE 1.1 : Recopier les enums JAXB
-        if (aclArchitectureGenerator == null || !bianMode) {
-            // En mode ACL, les enums sont generes dans dto/enums par l'ACL generator
             for (ProjectAnalysisResult.EnumInfo enumInfo : analysisResult.getDetectedEnums()) {
                 generateEnumClass(srcMain, enumInfo);
             }
-        }
 
-        // AXE 1.6 : Recopier les exceptions custom + enrichir GlobalExceptionHandler
-        if (aclArchitectureGenerator == null || !bianMode) {
-            // En mode ACL, les exceptions sont dans domain/exception
             for (ProjectAnalysisResult.ExceptionInfo excInfo : analysisResult.getDetectedExceptions()) {
                 generateExceptionClass(srcMain, excInfo);
             }
-        }
 
-        // AXE 1.5 : Recopier les validateurs custom
-        for (ProjectAnalysisResult.ValidatorInfo valInfo : analysisResult.getDetectedValidators()) {
-            generateValidatorClasses(srcMain, valInfo);
-        }
+            for (ProjectAnalysisResult.ValidatorInfo valInfo : analysisResult.getDetectedValidators()) {
+                generateValidatorClasses(srcMain, valInfo);
+            }
 
-        // BUG B : Recopier les interfaces @Remote/@Local avec migration javax → jakarta
-        for (ProjectAnalysisResult.RemoteInterfaceInfo ifaceInfo : analysisResult.getDetectedRemoteInterfaces()) {
-            generateRemoteInterface(srcMain, ifaceInfo);
+            for (ProjectAnalysisResult.RemoteInterfaceInfo ifaceInfo : analysisResult.getDetectedRemoteInterfaces()) {
+                generateRemoteInterface(srcMain, ifaceInfo);
+            }
+        } else {
+            log.info("[ACL] Fichiers legacy (GlobalExceptionHandler, LoggingAspect, EjbLookupConfig, enums, exceptions, validators, remote interfaces) non generes - remplaces par l'architecture ACL");
         }
 
         // Collecter les mappings BIAN si le mode est active
         List<BianServiceDomainMapper.BianMapping> bianMappings = new ArrayList<>();
 
-        // Generer controllers et service adapters
-        for (UseCaseInfo useCase : analysisResult.getUseCases()) {
-            // G4 : Verifier le type EJB
-            if (useCase.getEjbType() == UseCaseInfo.EjbType.MESSAGE_DRIVEN) {
-                generateMdbController(srcMain, useCase);
-                generateMdbEventClass(srcMain, useCase);
-                generateMdbEventListener(srcMain, useCase);
-                generateMdbServiceAdapter(srcMain, useCase);
-                continue;
-            }
+        if (aclActive) {
+            // ===================== MODE ACL EXCLUSIF =====================
+            // Seul le pipeline ACL genere les fichiers (0 fichier legacy)
+            log.info("[ACL] Mode ACL exclusif : aucun controller/service/dto legacy genere");
 
-            // Mode BIAN : calculer le mapping BIAN pour chaque UseCase
-            BianServiceDomainMapper.BianMapping bianMapping = null;
-            if (bianMode) {
-                bianMapping = bianMapper.mapToBian(useCase);
-                if (bianMapping.isBianCompliant) {
-                    bianMappings.add(bianMapping);
-                }
-            }
-
-            // G5 : Pattern multi-methodes ou BaseUseCase
-            // BUG 2 FIX : En mode BIAN avec grouper, ne PAS generer les controllers individuels
-            // Les controllers BIAN regroupes par Service Domain sont generes plus bas
-            boolean skipIndividualController = bianMode && bianControllerGrouper != null
-                    && bianMapping != null && bianMapping.isBianCompliant;
-
-            // En mode ACL, les service adapters et controllers sont remplacés par l'architecture ACL
-            boolean skipServiceAdapter = bianMode && aclArchitectureGenerator != null
-                    && bianMapping != null && bianMapping.isBianCompliant;
-
-            if (useCase.getEjbPattern() == UseCaseInfo.EjbPattern.BASE_USE_CASE) {
-                if (!skipIndividualController) {
-                    generateController(srcMain, useCase);
-                }
-                if (!skipServiceAdapter) {
-                    generateServiceAdapter(srcMain, useCase);
-                }
-            } else {
-                if (!skipIndividualController) {
-                    if (bianMode && bianMapping != null && bianMapping.isBianCompliant) {
-                        generateBianController(srcMain, useCase, bianMapping);
-                    } else {
-                        generateMultiMethodController(srcMain, useCase);
-                    }
-                }
-                if (!skipServiceAdapter) {
-                    generateMultiMethodServiceAdapter(srcMain, useCase);
-                }
-            }
-        }
-
-        // Generer les DTOs (en mode ACL, les DTOs legacy sont remplacés par RestDTOs + types EJB)
-        boolean aclActive = bianMode && aclArchitectureGenerator != null;
-        if (!aclActive) {
-            for (DtoInfo dto : analysisResult.getDtos()) {
-                generateDtoClass(srcMain, dto);
-            }
-        } else {
-            log.info("[ACL] DTOs legacy non générés dans dto/ (remplacés par RestDTOs + infrastructure/ejb/types)");
-        }
-
-        // BIAN v2 : Generer les controllers regroupes par Service Domain
-        if (bianMode && bianControllerGrouper != null) {
             List<UseCaseInfo> bianUseCases = analysisResult.getUseCases().stream()
                     .filter(uc -> uc.getBianMapping() != null)
                     .collect(Collectors.toList());
+
             if (!bianUseCases.isEmpty()) {
-                Map<String, List<UseCaseInfo>> grouped = bianControllerGrouper.groupByServiceDomain(bianUseCases);
-                // En mode ACL, ne pas générer les controllers BIAN groupés (remplacés par les controllers ACL)
-                if (aclArchitectureGenerator == null) {
+                Map<String, BianMapping> bianMappingMap = new LinkedHashMap<>();
+                for (UseCaseInfo uc : bianUseCases) {
+                    bianMappingMap.put(uc.getClassName(), uc.getBianMapping());
+                }
+                try {
+                    aclArchitectureGenerator.generate(srcMain, analysisResult, bianMappingMap);
+                    log.info("[ACL] Architecture decouplée generee avec succes ({} UseCases)", bianUseCases.size());
+                } catch (Exception e) {
+                    log.error("[ACL] Erreur lors de la generation ACL : {}", e.getMessage(), e);
+                }
+            }
+
+            // Collecter les mappings BIAN pour le rapport
+            for (UseCaseInfo useCase : analysisResult.getUseCases()) {
+                if (useCase.getEjbType() == UseCaseInfo.EjbType.MESSAGE_DRIVEN) continue;
+                BianServiceDomainMapper.BianMapping bm = bianMapper.mapToBian(useCase);
+                if (bm.isBianCompliant) bianMappings.add(bm);
+            }
+
+        } else {
+            // ===================== MODE LEGACY =====================
+            for (UseCaseInfo useCase : analysisResult.getUseCases()) {
+                if (useCase.getEjbType() == UseCaseInfo.EjbType.MESSAGE_DRIVEN) {
+                    generateMdbController(srcMain, useCase);
+                    generateMdbEventClass(srcMain, useCase);
+                    generateMdbEventListener(srcMain, useCase);
+                    generateMdbServiceAdapter(srcMain, useCase);
+                    continue;
+                }
+
+                BianServiceDomainMapper.BianMapping bianMapping = null;
+                if (bianMode) {
+                    bianMapping = bianMapper.mapToBian(useCase);
+                    if (bianMapping.isBianCompliant) bianMappings.add(bianMapping);
+                }
+
+                boolean skipIndividualController = bianMode && bianControllerGrouper != null
+                        && bianMapping != null && bianMapping.isBianCompliant;
+
+                if (useCase.getEjbPattern() == UseCaseInfo.EjbPattern.BASE_USE_CASE) {
+                    if (!skipIndividualController) generateController(srcMain, useCase);
+                    generateServiceAdapter(srcMain, useCase);
+                } else {
+                    if (!skipIndividualController) {
+                        if (bianMode && bianMapping != null && bianMapping.isBianCompliant) {
+                            generateBianController(srcMain, useCase, bianMapping);
+                        } else {
+                            generateMultiMethodController(srcMain, useCase);
+                        }
+                    }
+                    generateMultiMethodServiceAdapter(srcMain, useCase);
+                }
+            }
+
+            for (DtoInfo dto : analysisResult.getDtos()) {
+                generateDtoClass(srcMain, dto);
+            }
+
+            if (bianMode && bianControllerGrouper != null) {
+                List<UseCaseInfo> bianUseCases = analysisResult.getUseCases().stream()
+                        .filter(uc -> uc.getBianMapping() != null)
+                        .collect(Collectors.toList());
+                if (!bianUseCases.isEmpty()) {
+                    Map<String, List<UseCaseInfo>> grouped = bianControllerGrouper.groupByServiceDomain(bianUseCases);
                     for (Map.Entry<String, List<UseCaseInfo>> entry : grouped.entrySet()) {
                         bianControllerGrouper.generateGroupedController(
                                 srcMain, entry.getKey(), entry.getValue(), BASE_PACKAGE);
                     }
                     log.info("[BIAN v2] {} controllers regroupes generes", grouped.size());
-                } else {
-                    log.info("[ACL] Controllers BIAN groupés non générés (remplacés par controllers ACL)");
-                }
-
-                // ACL : Generer l'architecture decouplée (4 couches)
-                if (aclArchitectureGenerator != null) {
-                    try {
-                        // Construire Map<className, BianMapping> depuis les UseCases
-                        Map<String, BianMapping> bianMappingMap = new LinkedHashMap<>();
-                        for (UseCaseInfo uc : bianUseCases) {
-                            if (uc.getBianMapping() != null) {
-                                bianMappingMap.put(uc.getClassName(), uc.getBianMapping());
-                            }
-                        }
-                        aclArchitectureGenerator.generate(srcMain, analysisResult, bianMappingMap);
-                        log.info("[ACL] Architecture decouplée generee avec succes");
-                    } catch (Exception e) {
-                        log.error("[ACL] Erreur lors de la generation ACL : {}", e.getMessage(), e);
-                    }
                 }
             }
         }
 
         // BIAN : Generer le BianHeaderFilter
-        if (bianMode) {
+        if (bianMode && !aclActive) {
             generateBianHeaderFilter(srcMain);
         }
 
@@ -1645,7 +1631,9 @@ public class CodeGenerationEngine {
         boolean hasJaxb = dto.hasJaxbAnnotations();
         // G2 : Utiliser des imports individuels au lieu du wildcard pour eviter les doublons
         if (hasJaxb) {
-            if (dto.isHasXmlRootElement()) imports.add("jakarta.xml.bind.annotation.XmlRootElement");
+            // FIX: Toujours importer XmlRootElement quand hasJaxb est true,
+            // car on genere @XmlRootElement meme si le DTO original ne l'avait pas (branche else if hasJaxb, ligne ~1710)
+            imports.add("jakarta.xml.bind.annotation.XmlRootElement");
             // FIX: Toujours importer XmlAccessorType/XmlAccessType quand hasJaxb est true,
             // car on genere @XmlAccessorType(XmlAccessType.FIELD) par defaut meme si le DTO original ne l'avait pas
             imports.add("jakarta.xml.bind.annotation.XmlAccessorType");

@@ -99,6 +99,9 @@ public class ImportResolver {
         STANDARD_TYPE_MAP.put("OutputStream", "java.io.OutputStream");
         STANDARD_TYPE_MAP.put("IOException", "java.io.IOException");
 
+        // jakarta.xml.bind
+        STANDARD_TYPE_MAP.put("XmlAccessType", "jakarta.xml.bind.annotation.XmlAccessType");
+
         // javax.naming
         STANDARD_TYPE_MAP.put("InitialContext", "javax.naming.InitialContext");
         STANDARD_TYPE_MAP.put("NamingException", "javax.naming.NamingException");
@@ -126,6 +129,16 @@ public class ImportResolver {
         ANNOTATION_IMPORT_MAP.put("Future", "jakarta.validation.constraints.Future");
         ANNOTATION_IMPORT_MAP.put("Pattern", "jakarta.validation.constraints.Pattern");
         ANNOTATION_IMPORT_MAP.put("Digits", "jakarta.validation.constraints.Digits");
+
+        // JAXB (Jakarta XML Binding)
+        ANNOTATION_IMPORT_MAP.put("XmlRootElement", "jakarta.xml.bind.annotation.XmlRootElement");
+        ANNOTATION_IMPORT_MAP.put("XmlAccessorType", "jakarta.xml.bind.annotation.XmlAccessorType");
+        ANNOTATION_IMPORT_MAP.put("XmlType", "jakarta.xml.bind.annotation.XmlType");
+        ANNOTATION_IMPORT_MAP.put("XmlElement", "jakarta.xml.bind.annotation.XmlElement");
+        ANNOTATION_IMPORT_MAP.put("XmlAttribute", "jakarta.xml.bind.annotation.XmlAttribute");
+        ANNOTATION_IMPORT_MAP.put("XmlElementWrapper", "jakarta.xml.bind.annotation.XmlElementWrapper");
+        ANNOTATION_IMPORT_MAP.put("XmlTransient", "jakarta.xml.bind.annotation.XmlTransient");
+        ANNOTATION_IMPORT_MAP.put("JacksonXmlRootElement", "com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement");
 
         // Jackson
         ANNOTATION_IMPORT_MAP.put("JsonIgnore", "com.fasterxml.jackson.annotation.JsonIgnore");
