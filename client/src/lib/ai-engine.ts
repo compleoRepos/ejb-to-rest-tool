@@ -43,7 +43,10 @@ export type RuleCategory =
   | "Gestion d'erreurs"
   | "Transactions"
   | "JMS/MQ"
-  | "Qualité";
+  | "Qualité"
+  | "Concurrence"
+  | "Sérialisation"
+  | "Architecture";
 
 export interface AiSuggestion {
   id: string;
@@ -772,6 +775,352 @@ const RULES: Rule[] = [
     impact: "Violation des conventions de nommage Java.",
     fix: "Les constantes doivent être en UPPER_SNAKE_CASE : static final int MAX_SIZE = 100;",
     reference: "https://checkstyle.sourceforge.io/checks/naming/index.html",
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // SQL Injection Avancée (HQL, JPQL, Criteria)
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: "SEC-SQL-HQL-001",
+    category: "Security",
+    severity: "critical",
+    title: "Injection HQL/JPQL par concaténation",
+    pattern: /createQuery\s*\(\s*["'][^"']*["']\s*\+/,
+    description: "Concaténation de chaînes dans une requête HQL/JPQL (EntityManager.createQuery).",
+    impact: "Risque d'injection HQL permettant l'accès non autorisé aux entités JPA.",
+    fix: "Utiliser des named parameters : em.createQuery(\"FROM User u WHERE u.name = :name\").setParameter(\"name\", input);",
+    reference: "https://cheatsheetseries.owasp.org/cheatsheets/Injection_Prevention_Cheat_Sheet.html",
+  },
+  {
+    id: "SEC-SQL-NATIVE-001",
+    category: "Security",
+    severity: "critical",
+    title: "Injection SQL native via createNativeQuery",
+    pattern: /createNativeQuery\s*\(\s*["'][^"']*["']\s*\+/,
+    description: "Concaténation dans createNativeQuery() — injection SQL directe.",
+    impact: "Exécution de requêtes SQL arbitraires sur la base de données.",
+    fix: "Utiliser des paramètres positionnels : em.createNativeQuery(\"SELECT * FROM users WHERE id = ?\").setParameter(1, id);",
+    reference: "https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html",
+  },
+  {
+    id: "SEC-SQL-CRITERIA-001",
+    category: "Security",
+    severity: "warning",
+    title: "Criteria API avec littéral non sécurisé",
+    pattern: /cb\.literal\s*\(\s*\w+\s*\)/,
+    description: "Utilisation de CriteriaBuilder.literal() avec une variable — risque d'injection.",
+    impact: "La valeur est insérée directement dans la requête sans paramétrage.",
+    fix: "Utiliser cb.parameter() avec query.setParameter() pour les valeurs dynamiques.",
+    reference: "https://docs.oracle.com/javaee/7/tutorial/persistence-criteria.htm",
+  },
+  {
+    id: "SEC-SQL-SPRING-001",
+    category: "Security",
+    severity: "critical",
+    title: "@Query Spring Data avec concaténation",
+    pattern: /@Query\s*\(\s*["'][^"']*["']\s*\+/,
+    description: "Concaténation dans une annotation @Query Spring Data.",
+    impact: "Injection SQL/JPQL via les paramètres de la requête.",
+    fix: "Utiliser :paramName ou ?1 dans @Query et les paramètres de méthode annotés @Param.",
+    reference: "https://docs.spring.io/spring-data/jpa/reference/jpa/query-methods.html",
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // Couplage (Afférent/Efférent, Dépendances circulaires)
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: "COUP-IMPORT-001",
+    category: "Couplage",
+    severity: "warning",
+    title: "Trop d'imports — couplage efférent élevé",
+    pattern: /^import\s/gm,
+    description: "Classe avec un nombre excessif d'imports (>20), indiquant un couplage efférent élevé.",
+    impact: "Classe difficile à tester et à maintenir, effet domino lors des changements.",
+    fix: "Appliquer le principe ISP (Interface Segregation) et décomposer la classe.",
+    reference: "https://en.wikipedia.org/wiki/Coupling_(computer_programming)",
+    countThreshold: 20,
+  },
+  {
+    id: "COUP-CIRCULAR-001",
+    category: "Couplage",
+    severity: "warning",
+    title: "Dépendance circulaire potentielle",
+    pattern: /import\s+[\w.]+\.(?:service|controller|manager)\.[A-Z]\w*;[\s\S]*?import\s+[\w.]+\.(?:dao|repository|model)\.[A-Z]\w*;/,
+    description: "Imports croisés entre couches (service↔dao, controller↔service) suggérant une dépendance circulaire.",
+    impact: "Cycles de dépendances empêchant la compilation modulaire et les tests isolés.",
+    fix: "Introduire des interfaces ou un event bus pour casser les cycles.",
+    reference: "https://en.wikipedia.org/wiki/Circular_dependency",
+  },
+  {
+    id: "COUP-STATIC-001",
+    category: "Couplage",
+    severity: "info",
+    title: "Appel statique — couplage fort",
+    pattern: /[A-Z]\w+\.(?:getInstance|getDefault|create)\s*\(/,
+    description: "Appel à une méthode statique factory créant un couplage fort.",
+    impact: "Impossible de substituer l'implémentation dans les tests (mocking).",
+    fix: "Injecter l'instance via le constructeur ou utiliser un @Bean Spring.",
+    reference: "https://refactoring.guru/smells/inappropriate-intimacy",
+  },
+  {
+    id: "COUP-FIELD-INJ-001",
+    category: "Couplage",
+    severity: "warning",
+    title: "Injection par champ (@Autowired sur field)",
+    pattern: /@Autowired\s+(?:private|protected)\s/,
+    description: "Injection de dépendance par champ au lieu du constructeur.",
+    impact: "Impossible de créer l'objet sans le conteneur Spring, tests unitaires difficiles.",
+    fix: "Utiliser l'injection par constructeur (recommandé par Spring) : private final MyService service;",
+    reference: "https://docs.spring.io/spring-framework/reference/core/beans/dependencies/factory-collaborators.html",
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // Transactions Avancées
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: "TX-PROPAGATION-001",
+    category: "Transactions",
+    severity: "warning",
+    title: "@Transactional sans propagation explicite",
+    pattern: /@Transactional\s*(?:\(\s*\))?\s*\n/,
+    description: "Annotation @Transactional sans propagation explicite — utilise REQUIRED par défaut.",
+    impact: "Comportement transactionnel implicite, risque de transactions imbriquées non souhaitées.",
+    fix: "Spécifier la propagation : @Transactional(propagation = Propagation.REQUIRED).",
+    reference: "https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/annotations.html",
+  },
+  {
+    id: "TX-READONLY-001",
+    category: "Transactions",
+    severity: "info",
+    title: "Méthode de lecture sans readOnly=true",
+    pattern: /@Transactional[^)]*\)\s*\n\s*public\s+(?:List|Set|Collection|Optional|\w+DTO)\s+(?:get|find|list|search|fetch)/,
+    description: "Méthode de lecture annotée @Transactional sans readOnly=true.",
+    impact: "Transaction en écriture inutile, verrouillage DB plus agressif.",
+    fix: "Ajouter readOnly=true : @Transactional(readOnly = true).",
+    reference: "https://vladmihalcea.com/spring-transactional-annotation/",
+  },
+  {
+    id: "TX-TIMEOUT-001",
+    category: "Transactions",
+    severity: "warning",
+    title: "Transaction sans timeout",
+    pattern: /@Transactional\s*\([^)]*(?!timeout)[^)]*\)/,
+    description: "Transaction sans timeout explicite — risque de transaction bloquée indéfiniment.",
+    impact: "Connexion DB bloquée, pool de connexions épuisé, indisponibilité.",
+    fix: "Ajouter un timeout : @Transactional(timeout = 30).",
+    reference: "https://docs.spring.io/spring-framework/reference/data-access/transaction.html",
+  },
+  {
+    id: "TX-ROLLBACK-001",
+    category: "Transactions",
+    severity: "warning",
+    title: "@Transactional sans rollbackFor",
+    pattern: /@Transactional\s*\([^)]*(?!rollbackFor)[^)]*\)/,
+    description: "@Transactional sans rollbackFor — ne rollback que sur RuntimeException par défaut.",
+    impact: "Les checked exceptions (IOException, SQLException) ne déclenchent pas de rollback.",
+    fix: "Ajouter rollbackFor : @Transactional(rollbackFor = Exception.class).",
+    reference: "https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/rolling-back.html",
+  },
+  {
+    id: "TX-SELF-INVOKE-001",
+    category: "Transactions",
+    severity: "critical",
+    title: "Auto-invocation @Transactional (proxy bypass)",
+    pattern: /this\.\w+\(.*\).*\/\/.*(?:transactional|@Transactional)/i,
+    description: "Appel interne (this.method()) contournant le proxy Spring @Transactional.",
+    impact: "La transaction n'est pas démarrée — données incohérentes possibles.",
+    fix: "Extraire la méthode dans un autre @Service ou utiliser AopContext.currentProxy().",
+    reference: "https://docs.spring.io/spring-framework/reference/core/aop/proxying.html",
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // Concurrence & Thread Safety
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: "CONC-CME-001",
+    category: "Concurrence",
+    severity: "critical",
+    title: "Modification de collection pendant itération",
+    pattern: /for\s*\([^)]*:\s*\w+\)\s*\{[^}]*\.(?:remove|add)\s*\(/,
+    description: "Modification d'une collection pendant son itération (for-each).",
+    impact: "ConcurrentModificationException en runtime.",
+    fix: "Utiliser Iterator.remove(), removeIf(), ou copier la collection avant modification.",
+    reference: "https://docs.oracle.com/javase/8/docs/api/java/util/ConcurrentModificationException.html",
+  },
+  {
+    id: "CONC-DCL-001",
+    category: "Concurrence",
+    severity: "warning",
+    title: "Double-checked locking sans volatile",
+    pattern: /if\s*\(\s*\w+\s*==\s*null\s*\)\s*\{\s*synchronized/,
+    description: "Pattern double-checked locking détecté — nécessite volatile.",
+    impact: "Race condition : l'instance peut être partiellement construite.",
+    fix: "Déclarer le champ volatile ou utiliser un holder pattern (Bill Pugh Singleton).",
+    reference: "https://en.wikipedia.org/wiki/Double-checked_locking",
+  },
+  {
+    id: "CONC-HASHMAP-001",
+    category: "Concurrence",
+    severity: "warning",
+    title: "HashMap dans un contexte concurrent",
+    pattern: /(?:static|shared|volatile)\s+(?:final\s+)?(?:Map|HashMap)\s*</,
+    description: "HashMap utilisée dans un contexte potentiellement concurrent (champ static/shared).",
+    impact: "Corruption de données et boucles infinies possibles en multi-thread.",
+    fix: "Utiliser ConcurrentHashMap ou Collections.synchronizedMap().",
+    reference: "https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ConcurrentHashMap.html",
+  },
+  {
+    id: "CONC-SINGLETON-001",
+    category: "Concurrence",
+    severity: "info",
+    title: "Singleton avec état mutable",
+    pattern: /@(?:Singleton|Component|Service)\s[\s\S]*?private\s+(?!final|static)\w+\s+\w+\s*[=;]/,
+    description: "Bean singleton Spring avec un champ mutable non-final.",
+    impact: "État partagé entre requêtes — race conditions et fuites de données.",
+    fix: "Rendre le champ final, utiliser ThreadLocal, ou changer le scope à @RequestScope.",
+    reference: "https://docs.spring.io/spring-framework/reference/core/beans/factory-scopes.html",
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // Sérialisation
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: "SERIAL-UID-001",
+    category: "Sérialisation",
+    severity: "warning",
+    title: "Serializable sans serialVersionUID",
+    pattern: /implements\s+[\w,\s]*Serializable(?![\s\S]*?serialVersionUID)/,
+    description: "Classe implémentant Serializable sans déclarer serialVersionUID.",
+    impact: "Incompatibilité de désérialisation entre versions de la classe.",
+    fix: "Ajouter : private static final long serialVersionUID = 1L;",
+    reference: "https://rules.sonarsource.com/java/RSPEC-2057",
+  },
+  {
+    id: "SERIAL-TRANSIENT-001",
+    category: "Sérialisation",
+    severity: "info",
+    title: "Champ sensible non transient dans Serializable",
+    pattern: /implements\s+[\w,\s]*Serializable[\s\S]*?private\s+(?:String|char\[\])\s+(?:password|secret|token|apiKey)/i,
+    description: "Champ sensible (password, secret, token) dans une classe Serializable.",
+    impact: "Le champ sera inclus dans la sérialisation, exposant des données sensibles.",
+    fix: "Marquer le champ comme transient : private transient String password;",
+    reference: "https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html",
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // Logging Avancé
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: "LOG-SENSITIVE-001",
+    category: "Security",
+    severity: "critical",
+    title: "Données sensibles dans les logs",
+    pattern: /(?:log|logger|LOG)\.\w+\s*\([^)]*(?:password|secret|token|creditCard|ssn|apiKey)/i,
+    description: "Données sensibles (mot de passe, token, carte de crédit) loguées en clair.",
+    impact: "Exposition de données sensibles dans les fichiers de logs.",
+    fix: "Ne jamais loguer de données sensibles. Masquer : log.info(\"Token: {}***\", token.substring(0,4));",
+    reference: "https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html",
+  },
+  {
+    id: "LOG-LEVEL-001",
+    category: "Qualité",
+    severity: "info",
+    title: "Log.debug() sans vérification isDebugEnabled",
+    pattern: /(?:log|logger)\.debug\s*\([^)]*\+/,
+    description: "Concaténation dans un appel log.debug() sans vérifier isDebugEnabled().",
+    impact: "Coût de construction de la chaîne même quand le debug est désactivé.",
+    fix: "Utiliser des placeholders SLF4J : log.debug(\"Value: {}\", value); ou vérifier if(log.isDebugEnabled()).",
+    reference: "https://www.slf4j.org/faq.html#logging_performance",
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // Architecture & Design Patterns
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: "ARCH-LAYER-001",
+    category: "Architecture",
+    severity: "warning",
+    title: "Violation de couche — Controller accède au DAO",
+    pattern: /(?:@Controller|@RestController)[\s\S]*?(?:@Autowired|private\s+final)\s+\w*(?:Dao|Repository)\s/,
+    description: "Un Controller accède directement au DAO/Repository sans passer par le Service.",
+    impact: "Violation de l'architecture en couches, logique métier dispersée.",
+    fix: "Introduire un @Service entre le Controller et le Repository.",
+    reference: "https://www.baeldung.com/spring-boot-clean-architecture",
+  },
+  {
+    id: "ARCH-ANEMIC-001",
+    category: "Architecture",
+    severity: "info",
+    title: "Modèle anémique — Entity sans logique métier",
+    pattern: /@Entity[\s\S]*?(?:private\s+\w+\s+\w+;\s*){5,}[\s\S]*?(?:public\s+\w+\s+get\w+\s*\(\s*\)\s*\{\s*return)/,
+    description: "Entité JPA avec uniquement des getters/setters — modèle anémique.",
+    impact: "Logique métier dispersée dans les services au lieu d'être encapsulée.",
+    fix: "Ajouter des méthodes métier dans l'entité (DDD Rich Domain Model).",
+    reference: "https://martinfowler.com/bliki/AnemicDomainModel.html",
+  },
+  {
+    id: "ARCH-GOD-SVC-001",
+    category: "Architecture",
+    severity: "warning",
+    title: "God Service — trop de dépendances injectées",
+    pattern: /(?:@Autowired|private\s+final)\s+\w+\s+\w+;/g,
+    description: "Service avec plus de 7 dépendances injectées — God Service.",
+    impact: "Classe avec trop de responsabilités, difficile à tester et maintenir.",
+    fix: "Décomposer en services plus petits avec des responsabilités distinctes.",
+    reference: "https://en.wikipedia.org/wiki/God_object",
+    countThreshold: 7,
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // Error Handling Avancé
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: "ERR-SWALLOW-001",
+    category: "Gestion d'erreurs",
+    severity: "warning",
+    title: "Exception avalée avec return null",
+    pattern: /catch\s*\([^)]+\)\s*\{[^}]*return\s+null\s*;\s*\}/,
+    description: "Exception attrapée et remplacée par un return null.",
+    impact: "L'erreur est masquée, le code appelant reçoit null sans savoir pourquoi.",
+    fix: "Loguer l'exception et retourner Optional.empty() ou relancer une exception métier.",
+    reference: "https://rules.sonarsource.com/java/RSPEC-1166",
+  },
+  {
+    id: "ERR-GENERIC-THROW-001",
+    category: "Gestion d'erreurs",
+    severity: "warning",
+    title: "Throw Exception générique",
+    pattern: /throws\s+(?:Exception|Throwable)\s/,
+    description: "Méthode déclarant throws Exception au lieu d'exceptions spécifiques.",
+    impact: "L'appelant ne peut pas distinguer les types d'erreurs.",
+    fix: "Déclarer des exceptions spécifiques : throws IOException, ValidationException.",
+    reference: "https://rules.sonarsource.com/java/RSPEC-112",
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // JPA / Hibernate Avancé
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: "JPA-CASCADE-001",
+    category: "Performance",
+    severity: "warning",
+    title: "CascadeType.ALL sur relation",
+    pattern: /cascade\s*=\s*CascadeType\.ALL/,
+    description: "CascadeType.ALL propage toutes les opérations y compris REMOVE.",
+    impact: "Suppression en cascade non intentionnelle, perte de données.",
+    fix: "Spécifier les cascades nécessaires : cascade = {CascadeType.PERSIST, CascadeType.MERGE}.",
+    reference: "https://vladmihalcea.com/a-beginners-guide-to-jpa-and-hibernate-cascade-types/",
+  },
+  {
+    id: "JPA-NPLUSONE-001",
+    category: "Performance",
+    severity: "warning",
+    title: "@ManyToOne sans fetch explicite",
+    pattern: /@ManyToOne\s*(?:\(\s*\))?\s*\n/,
+    description: "@ManyToOne sans fetch explicite — EAGER par défaut.",
+    impact: "Chargement automatique de l'entité parente à chaque requête.",
+    fix: "Spécifier fetch = FetchType.LAZY : @ManyToOne(fetch = FetchType.LAZY).",
+    reference: "https://vladmihalcea.com/manytoone-jpa-hibernate/",
   },
 ];
 

@@ -95,7 +95,7 @@ function addFooter(doc: jsPDF, pageNum: number, totalPages: number) {
   doc.setFontSize(7);
   doc.setTextColor(...COLORS.text);
   doc.text("Hamza NORDINE — EJB Client Modernizer v3.0", 14, pageHeight - 10);
-  doc.text(`Moteur IA v2.0 — 55+ regles (OWASP, SonarQube, SOLID, Clean Code, PMD)`, pageWidth / 2, pageHeight - 10, { align: "center" });
+  doc.text(`Moteur IA v3.0 — 83+ regles (OWASP, SonarQube, SOLID, Clean Code, PMD, Couplage, Transactions)`, pageWidth / 2, pageHeight - 10, { align: "center" });
   doc.text(`Page ${pageNum} / ${totalPages}`, pageWidth - 14, pageHeight - 10, { align: "right" });
 }
 
@@ -262,13 +262,13 @@ export function exportAiReportPdf(aiResult: AiAnalysisResult, projectName?: stri
     doc.setFont("helvetica", "bold");
     doc.setFontSize(13);
     doc.setTextColor(...COLORS.textDark);
-    doc.text("Moteur de regles IA v2.0", margin, y);
+    doc.text("Moteur de regles IA v3.0", margin, y);
     y += 3;
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(...COLORS.text);
-    doc.text("Sources : OWASP, SonarQube, SOLID, Clean Code, PMD, SpotBugs, Checkstyle", margin, y + 4);
+    doc.text("Sources : OWASP, SonarQube, SOLID, Clean Code, PMD, SpotBugs, Checkstyle, Couplage, Transactions, Concurrence", margin, y + 4);
     y += 10;
 
     const rulesData: string[][] = [

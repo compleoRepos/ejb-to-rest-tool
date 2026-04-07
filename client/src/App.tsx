@@ -5,11 +5,32 @@ import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
+import ProjectsPage from "./pages/Projects";
+import ProjectDetail from "./pages/ProjectDetail";
+import ArchitecturePage from "./pages/Architecture";
+import MigrationPage from "./pages/Migration";
+import CollaborationPage from "./pages/Collaboration";
+import ApiDocsPage from "./pages/ApiDocs";
+import AppLayout from "./components/AppLayout";
 
 function Router() {
   return (
     <Switch>
       <Route path={"/"} component={Home} />
+      <Route path={"/projects"} component={ProjectsPage} />
+      <Route path={"/projects/:id"}>
+        {(params) => <ProjectDetail id={Number(params.id)} />}
+      </Route>
+      <Route path={"/architecture/:projectId"}>
+        {(params) => <ArchitecturePage projectId={Number(params.projectId)} />}
+      </Route>
+      <Route path={"/migration/:projectId"}>
+        {(params) => <MigrationPage projectId={Number(params.projectId)} />}
+      </Route>
+      <Route path={"/collaboration/:projectId"}>
+        {(params) => <CollaborationPage projectId={Number(params.projectId)} />}
+      </Route>
+      <Route path={"/api-docs"} component={ApiDocsPage} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
     </Switch>
@@ -31,7 +52,9 @@ function App() {
               },
             }}
           />
-          <Router />
+          <AppLayout>
+            <Router />
+          </AppLayout>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>
