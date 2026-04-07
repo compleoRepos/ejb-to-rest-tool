@@ -53,6 +53,12 @@ import { runAiAnalysis, runMultiFileAiAnalysis } from "@/lib/ai-engine";
 import type { AiAnalysisResult, AiSuggestion, Severity } from "@/lib/ai-engine";
 import { exportAiReportPdf } from "@/lib/pdf-exporter";
 
+// Web Workers — Parallel analysis
+import { WorkerPool, createWorkerPool } from "@/lib/worker-pool";
+import type { PoolProgress, PoolStats } from "@/lib/worker-pool";
+import type { FilePayload, FileAnalysisResult } from "@/lib/analysis-worker";
+import AnalysisProgress, { AnalysisSummary } from "@/components/AnalysisProgress";
+
 // ============================================================
 // Types
 // ============================================================
@@ -149,6 +155,12 @@ export default function ProjectDetail({ id }: { id: number }) {
 
   // AI engine
   const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(null);
+
+  // Web Workers — Parallel analysis
+  const [workerProgress, setWorkerProgress] = useState<PoolProgress | null>(null);
+  const [workerStats, setWorkerStats] = useState<PoolStats | null>(null);
+  const [isParallelAnalyzing, setIsParallelAnalyzing] = useState(false);
+  const workerPoolRef = useRef<WorkerPool | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -429,6 +441,83 @@ export default function ProjectDetail({ id }: { id: number }) {
     }, 400);
   }, [sourceFiles, addStatus]);
 
+  // ---- Parallel Analysis (Web Workers) ----
+
+  const handleParallelAnalyze = useCallback(async () => {
+    if (sourceFiles.length < 2) {
+      handleAnalyze();
+      return;
+    }
+    setIsParallelAnalyzing(true);
+    setWorkerStats(null);
+    setWorkerProgress(null);
+    addStatus(`Analyse parallèle : ${sourceFiles.length} fichier(s) via Web Workers...`);
+
+    const pool = createWorkerPool({
+      onProgress: (p) => setWorkerProgress({ ...p }),
+      onFileComplete: (result) => {
+        addStatus(`✓ ${result.fileName} (${result.technologiesDetected.length} techs, ${result.issueCount} issues, ${Math.round(result.processingTimeMs)}ms)`);
+      },
+      onComplete: (results, totalTimeMs) => {
+        addStatus(`Analyse parallèle terminée : ${results.length} fichier(s) en ${Math.round(totalTimeMs)}ms`);
+      },
+      onError: (err) => {
+        addStatus(`✗ Erreur: ${err.fileName} — ${err.error}`);
+      },
+    });
+    workerPoolRef.current = pool;
+
+    try {
+      const payloads: FilePayload[] = sourceFiles.map(sf => ({
+        id: sf.id,
+        name: sf.name,
+        content: sf.content,
+      }));
+
+      const workerResults = await pool.analyze(payloads);
+      const stats = pool.getStats();
+      setWorkerStats(stats);
+
+      // Now run the full analysis on main thread for complete reports
+      // (the worker gave us fast stats, now we need the detailed reports)
+      const reports: AnalysisReport[] = [];
+      const extReports: ExtendedAnalysisReport[] = [];
+      const updatedFiles = sourceFiles.map((sf) => {
+        const r = analyzeJavaCode(sf.content);
+        reports.push(r);
+        const er = analyzeJavaLegacy(sf.content, sf.name);
+        extReports.push(er);
+        return { ...sf, report: r, extendedReport: er };
+      });
+      setSourceFiles(updatedFiles);
+      const merged = mergeReports(reports);
+      setMergedReport(merged);
+      setExtendedReports(extReports);
+      if (reports.length === 1) {
+        setMarkdownReport(generateMarkdownReport(reports[0]));
+      } else {
+        setMarkdownReport(generateMultiFileMarkdownReport(reports, merged));
+      }
+
+      const allTechs = new Set<string>();
+      extReports.forEach((er) => er.summary.technologiesDetected.forEach((t) => allTechs.add(t)));
+      toast.success(`Analyse parallèle terminée : ${stats.technologiesDetected.length} technologie(s), ${stats.filesPerSecond} fichiers/s`);
+    } catch (err) {
+      addStatus("Erreur lors de l'analyse parallèle");
+      toast.error("Erreur lors de l'analyse parallèle.");
+    }
+    setIsParallelAnalyzing(false);
+    workerPoolRef.current = null;
+  }, [sourceFiles, addStatus, handleAnalyze]);
+
+  const handleAbortParallel = useCallback(() => {
+    workerPoolRef.current?.abort();
+    setIsParallelAnalyzing(false);
+    setWorkerProgress(null);
+    addStatus("Analyse parallèle annulée.");
+    toast.info("Analyse parallèle annulée.");
+  }, [addStatus]);
+
   // ---- Generate ----
 
   const handleGenerate = useCallback(() => {
@@ -653,9 +742,9 @@ export default function ProjectDetail({ id }: { id: number }) {
 
         <div className="w-px h-5 bg-border mx-1" />
 
-        <Button size="sm" className="h-7 text-[11px] gap-1 bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleAnalyze} disabled={isAnalyzing}>
-          {isAnalyzing ? <Clock className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
-          Analyser
+        <Button size="sm" className="h-7 text-[11px] gap-1 bg-primary text-primary-foreground hover:bg-primary/90" onClick={sourceFiles.length >= 10 ? handleParallelAnalyze : handleAnalyze} disabled={isAnalyzing || isParallelAnalyzing}>
+          {(isAnalyzing || isParallelAnalyzing) ? <Clock className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+          {sourceFiles.length >= 10 ? "Analyser //" : "Analyser"}
         </Button>
         <Button size="sm" className="h-7 text-[11px] gap-1 bg-accent text-accent-foreground hover:bg-accent/90" onClick={handleGenerate} disabled={isGenerating || !mergedReport}>
           {isGenerating ? <Clock className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
@@ -669,6 +758,20 @@ export default function ProjectDetail({ id }: { id: number }) {
           </Button>
         )}
       </div>
+
+      {/* Worker parallel analysis progress */}
+      {(isParallelAnalyzing && workerProgress) && (
+        <div className="border-b border-border shrink-0">
+          <AnalysisProgress progress={workerProgress} onAbort={handleAbortParallel} compact />
+        </div>
+      )}
+
+      {/* Worker analysis summary */}
+      {workerStats && !isParallelAnalyzing && (
+        <div className="border-b border-border shrink-0 px-3 py-2">
+          <AnalysisSummary stats={workerStats} />
+        </div>
+      )}
 
       {/* Project progress bar */}
       {projectProgress && (
