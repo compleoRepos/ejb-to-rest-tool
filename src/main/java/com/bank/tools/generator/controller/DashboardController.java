@@ -1,6 +1,5 @@
 package com.bank.tools.generator.controller;
 
-import com.bank.tools.generator.config.CompleoConfig;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -16,8 +15,6 @@ import jakarta.servlet.http.HttpSession;
 public class DashboardController {
 
     @Autowired(required = false)
-    private CompleoConfig compleoConfig;
-
     @GetMapping("/cartography")
     public String cartography(Model model, HttpSession session) {
         model.addAttribute("pageTitle", "Cartographie Legacy");

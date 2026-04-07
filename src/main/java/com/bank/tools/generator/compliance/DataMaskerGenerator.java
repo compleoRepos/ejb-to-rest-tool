@@ -1,6 +1,5 @@
 package com.bank.tools.generator.compliance;
 
-import com.bank.tools.generator.config.CompleoConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,13 +18,6 @@ import java.util.List;
 public class DataMaskerGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(DataMaskerGenerator.class);
-
-    private CompleoConfig compleoConfig;
-
-    @Autowired(required = false)
-    public void setCompleoConfig(CompleoConfig compleoConfig) {
-        this.compleoConfig = compleoConfig;
-    }
 
     /**
      * Genere DataMasker.java dans le projet cible.
@@ -105,9 +97,6 @@ public class DataMaskerGenerator {
     }
 
     private List<String> getSensitiveFields() {
-        if (compleoConfig != null) {
-            return compleoConfig.getCompliance().getSensitiveFields();
-        }
         return List.of("rib", "iban", "carte", "card", "pan", "cvv", "password", "secret", "token", "ssn", "cin");
     }
 }

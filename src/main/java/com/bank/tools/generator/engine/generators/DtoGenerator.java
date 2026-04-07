@@ -13,7 +13,6 @@ import java.nio.file.Path;
 import java.util.*;
 
 import static com.bank.tools.generator.engine.constants.GeneratorConstants.*;
-import com.bank.tools.generator.config.CompleoConfig;
 
 /**
  * Genere les classes DTO (VoIn, VoOut, DTO generiques) et les interfaces @Remote.
@@ -32,7 +31,6 @@ public class DtoGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(DtoGenerator.class);
     private static final String DEFAULT_BASE_PACKAGE = "com.bank.api";
-    // TODO: inject CompleoConfig for multi-tenant support
 
     /**
      * Genere tous les DTOs du projet.

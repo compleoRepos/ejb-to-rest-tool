@@ -10,7 +10,6 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
-import com.bank.tools.generator.config.CompleoConfig;
 
 /**
  * Generateur de clients REST Spring Boot a partir de contrats OpenAPI/Swagger.

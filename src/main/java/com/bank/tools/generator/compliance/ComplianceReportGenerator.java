@@ -1,6 +1,5 @@
 package com.bank.tools.generator.compliance;
 
-import com.bank.tools.generator.config.CompleoConfig;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,13 +21,6 @@ import java.util.*;
 public class ComplianceReportGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(ComplianceReportGenerator.class);
-
-    private CompleoConfig compleoConfig;
-
-    @Autowired(required = false)
-    public void setCompleoConfig(CompleoConfig compleoConfig) {
-        this.compleoConfig = compleoConfig;
-    }
 
     /**
      * Genere le rapport de conformite dans le projet cible.
@@ -155,9 +147,6 @@ public class ComplianceReportGenerator {
     }
 
     private String getClientName() {
-        if (compleoConfig != null) {
-            return compleoConfig.getClient().getName();
-        }
         return "Banque";
     }
 

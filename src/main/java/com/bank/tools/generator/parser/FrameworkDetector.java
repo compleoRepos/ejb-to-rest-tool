@@ -1,6 +1,5 @@
 package com.bank.tools.generator.parser;
 
-import com.bank.tools.generator.config.CompleoConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,13 +24,6 @@ import java.util.stream.Stream;
 public class FrameworkDetector {
 
     private static final Logger log = LoggerFactory.getLogger(FrameworkDetector.class);
-
-    private CompleoConfig compleoConfig;
-
-    @Autowired(required = false)
-    public void setCompleoConfig(CompleoConfig compleoConfig) {
-        this.compleoConfig = compleoConfig;
-    }
 
     public enum FrameworkType {
         EJB_USECASE("EJB UseCase (BOA Pattern)"),
@@ -216,9 +208,6 @@ public class FrameworkDetector {
     }
 
     private List<String> getUseCaseAnnotations() {
-        if (compleoConfig != null) {
-            return compleoConfig.getLegacy().getUseCaseAnnotations();
-        }
         return List.of("UseCase", "Stateless", "Service");
     }
 }

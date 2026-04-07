@@ -13,7 +13,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
-import com.bank.tools.generator.config.CompleoConfig;
 
 /**
  * Generateur d'architecture decouplée Anti-Corruption Layer (ACL).
@@ -27,13 +26,7 @@ import com.bank.tools.generator.config.CompleoConfig;
 @Component
 public class AclArchitectureGenerator {
 
-    private CompleoConfig compleoConfig;
-
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setCompleoConfig(CompleoConfig compleoConfig) {
-        this.compleoConfig = compleoConfig;
-    }
-
     private static final Logger log = LoggerFactory.getLogger(AclArchitectureGenerator.class);
 
     // =====================================================================
@@ -226,7 +219,7 @@ public class AclArchitectureGenerator {
             String pkg = fullPath.substring(idx + "src/main/java/".length());
             return pkg.replace("/", ".");
         }
-        return compleoConfig != null ? compleoConfig.getOutput().getBasePackage() : "com.bank.api";
+        return "com.bank.api";
     }
 
     private void initPackages() {
@@ -950,7 +943,6 @@ public class AclArchitectureGenerator {
             String returnType = ep.responseDtoName != null ? ep.responseDtoName : "void";
             boolean hasReturn = ep.responseDtoName != null;
             String mapperField = toLowerCamel(deriveMapperName(ep));
-            String jndiName = (compleoConfig != null ? compleoConfig.getJndi().getPrefix() : "java:global/bank/") + ep.useCaseName;
 
             sb.append("    @Override\n");
             sb.append("    public ").append(returnType).append(" ").append(ep.methodName).append("(");
@@ -970,6 +962,9 @@ public class AclArchitectureGenerator {
             if (ep.requestDtoName != null && ep.ejbInputDtoName != null) {
                 sb.append("            ").append(ep.ejbInputDtoName).append(" voIn = ").append(mapperField).append(".toEjb(request);\n");
             }
+
+            // JNDI name par defaut
+            String jndiName = "ejb:/" + ep.useCaseName + "Bean/" + ep.useCaseName + "Remote";
 
             // JNDI lookup
             sb.append("            java.util.Properties props = new java.util.Properties();\n");

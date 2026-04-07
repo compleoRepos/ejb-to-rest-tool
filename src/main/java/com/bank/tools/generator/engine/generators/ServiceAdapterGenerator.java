@@ -11,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
-import com.bank.tools.generator.config.CompleoConfig;
 
 /**
  * Genere les ServiceAdapters (JNDI lookup) pour les trois patterns EJB :
@@ -23,7 +22,6 @@ public class ServiceAdapterGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceAdapterGenerator.class);
     private static final String DEFAULT_BASE_PACKAGE = "com.bank.api";
-    // TODO: inject CompleoConfig for multi-tenant support
 
     /**
      * Genere un ServiceAdapter pour un UseCase BaseUseCase.

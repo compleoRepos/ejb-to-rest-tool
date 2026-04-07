@@ -35,7 +35,6 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import com.bank.tools.generator.config.CompleoConfig;
 
 /**
  * Parseur statique de projets EJB utilisant JavaParser.
@@ -54,13 +53,7 @@ import com.bank.tools.generator.config.CompleoConfig;
 @Component
 public class EjbProjectParser {
 
-    private CompleoConfig compleoConfig;
-
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setCompleoConfig(CompleoConfig compleoConfig) {
-        this.compleoConfig = compleoConfig;
-    }
-
     private static final Logger log = LoggerFactory.getLogger(EjbProjectParser.class);
 
     private static final String BASE_USE_CASE_INTERFACE = "BaseUseCase";
@@ -552,16 +545,6 @@ public class EjbProjectParser {
         // Spring Legacy : @Component + @Transactional
         if (hasAnnotation(cls, "Component") && hasAnnotation(cls, "Transactional")) {
             return UseCaseInfo.EjbType.SPRING_LEGACY;
-        }
-
-        // Detection configurable : annotations supplementaires depuis CompleoConfig
-        if (compleoConfig != null) {
-            for (String annotation : compleoConfig.getLegacy().getUseCaseAnnotations()) {
-                if (hasAnnotation(cls, annotation) && !"UseCase".equals(annotation)
-                        && !"Stateless".equals(annotation) && !"Service".equals(annotation)) {
-                    return UseCaseInfo.EjbType.USE_CASE_CUSTOM;
-                }
-            }
         }
 
         return null;
@@ -1426,9 +1409,6 @@ public class EjbProjectParser {
     }
 
     private String getJndiPrefix() {
-        if (compleoConfig != null) {
-            return compleoConfig.getJndi().getPrefix();
-        }
         return "java:global/bank/";
     }
 

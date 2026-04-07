@@ -14,7 +14,6 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.List;
-import com.bank.tools.generator.config.CompleoConfig;
 
 /**
  * Moteur d'intelligence artificielle interne (basé sur des règles).
@@ -33,15 +32,8 @@ public class SmartCodeEnhancer {
 
     private static final Logger log = LoggerFactory.getLogger(SmartCodeEnhancer.class);
     private static final String DEFAULT_BASE_PACKAGE = "com.bank.api";
-    private CompleoConfig compleoConfig;
-
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setCompleoConfig(CompleoConfig compleoConfig) {
-        this.compleoConfig = compleoConfig;
-    }
-
     private String getBasePackage() {
-        return compleoConfig != null ? compleoConfig.getOutput().getBasePackage() : DEFAULT_BASE_PACKAGE;
+        return DEFAULT_BASE_PACKAGE;
     }
     private static final String BASE_PACKAGE_PATH = "com/bank/api";
 

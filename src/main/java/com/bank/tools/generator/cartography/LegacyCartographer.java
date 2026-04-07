@@ -1,6 +1,5 @@
 package com.bank.tools.generator.cartography;
 
-import com.bank.tools.generator.config.CompleoConfig;
 import com.bank.tools.generator.cartography.CartographyReport.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,13 +28,6 @@ public class LegacyCartographer {
     private static final Pattern CLASS_PATTERN = Pattern.compile("(?:public|protected|private)?\\s*(?:abstract\\s+)?(?:class|interface|enum)\\s+(\\w+)");
     private static final Pattern ANNOTATION_PATTERN = Pattern.compile("@(\\w+)");
     private static final Pattern FIELD_INJECTION_PATTERN = Pattern.compile("(?:@Inject|@Autowired|@EJB|@Resource)\\s+.*?\\s+(\\w+)\\s+(\\w+)");
-
-    private CompleoConfig compleoConfig;
-
-    @Autowired(required = false)
-    public void setCompleoConfig(CompleoConfig compleoConfig) {
-        this.compleoConfig = compleoConfig;
-    }
 
     /**
      * Analyse un projet et produit un rapport de cartographie complet.
