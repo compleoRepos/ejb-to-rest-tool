@@ -14,7 +14,10 @@ import {
   GitBranch, Play, Clock, CheckCircle2, AlertTriangle, Layers,
   ArrowRight, Shield, Zap, Target, TrendingUp, Loader2,
   ChevronDown, ChevronRight, Calendar, Server, Database,
+  FileDown, FileSpreadsheet,
 } from "lucide-react";
+import { exportMigrationPlanPdf } from "@/lib/migration-pdf-exporter";
+import { exportMigrationPlanExcel } from "@/lib/migration-excel-exporter";
 
 // ============================================================
 // Types
@@ -228,6 +231,32 @@ export default function MigrationPage({ projectId }: { projectId: number }) {
         <span className="text-sm font-semibold">Plan de Migration — {project?.name || "Projet"}</span>
         <Badge className="text-[10px] bg-emerald-500/20 text-emerald-400 border-0">Strangler Fig</Badge>
         <div className="ml-auto flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px] gap-1"
+            onClick={() => {
+              if (plan) {
+                exportMigrationPlanPdf(plan, project?.name);
+                toast.success("PDF du plan de migration exporté");
+              }
+            }}
+          >
+            <FileDown className="w-3 h-3" />Export PDF
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px] gap-1"
+            onClick={() => {
+              if (plan) {
+                exportMigrationPlanExcel(plan, project?.name);
+                toast.success("Excel du plan de migration exporté");
+              }
+            }}
+          >
+            <FileSpreadsheet className="w-3 h-3" />Export Excel
+          </Button>
           <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={handleGenerate}>
             <Zap className="w-3 h-3" />Régénérer
           </Button>
