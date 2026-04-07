@@ -1,7 +1,8 @@
 /**
- * EJB Client Modernizer — Page principale.
- * Interface IDE-like avec panneaux redimensionnables, Monaco Editor,
- * support multi-fichiers avec onglets, rapport d'analyse et code généré.
+ * EJB Client Modernizer — Page principale v3.0.
+ * Plateforme complète de modernisation Java legacy.
+ * Support multi-technologies : EJB, Servlets, JSP, Struts, SOAP, JDBC, Hibernate, JMS, Batch.
+ * Extraction de microservices, génération cloud-native (Docker, K8s, Helm).
  *
  * Design: "Terminal Craft" — Esthétique IDE/Terminal haut de gamme.
  * @author Hamza NORDINE
@@ -18,49 +19,39 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import {
-  Play,
-  Zap,
-  Download,
-  FileDown,
-  Upload,
-  FolderOpen,
-  FileCode2,
-  BarChart3,
-  Code2,
-  Terminal,
-  ChevronRight,
-  AlertTriangle,
-  CheckCircle2,
-  Clock,
-  Layers,
-  GitBranch,
-  Copy,
-  X,
-  Plus,
-  FilePlus2,
-  FolderGit2,
-  Loader2,
-  PackageOpen,
-  Brain,
-  ShieldAlert,
-  Gauge,
-  Lightbulb,
-  ArrowUpRight,
-  CircleDot,
-  Wrench,
-  TrendingUp,
+  Play, Zap, Download, FileDown, Upload, FolderOpen, FileCode2,
+  BarChart3, Code2, Terminal, ChevronRight, AlertTriangle, CheckCircle2,
+  Clock, Layers, GitBranch, Copy, X, Plus, FilePlus2, FolderGit2,
+  Loader2, PackageOpen, Brain, ShieldAlert, Gauge, Lightbulb,
+  ArrowUpRight, CircleDot, Wrench, TrendingUp, Cloud, Network,
+  Database, Globe, Server, Container, Shield, Activity, Box,
 } from "lucide-react";
 import { Streamdown } from "streamdown";
 
 import Editor from "@monaco-editor/react";
+
+// Original analyzers (kept for backward compat)
 import { analyzeJavaCode, generateMarkdownReport } from "@/lib/ejb-analyzer";
 import type { AnalysisReport } from "@/lib/ejb-analyzer";
 import { mergeReports, generateMultiFileMarkdownReport } from "@/lib/ejb-analyzer-merge";
 import { generateModernCode } from "@/lib/code-generator";
 import type { GeneratedFile, GenerationResult } from "@/lib/code-generator";
+
+// Extended modules
+import { analyzeJavaLegacy } from "@/lib/legacy-analyzer";
+import type { ExtendedAnalysisReport, LegacyTechnology } from "@/lib/legacy-analyzer";
+import { generateExtendedModernCode } from "@/lib/extended-generator";
+import type { ExtendedGenerationResult } from "@/lib/extended-generator";
+import { extractMicroservices } from "@/lib/microservice-extractor";
+import type { MicroserviceExtractionResult, MicroserviceProposal } from "@/lib/microservice-extractor";
+import { generateCloudNativeInfra } from "@/lib/cloud-generator";
+import type { CloudGenerationResult } from "@/lib/cloud-generator";
+type CloudFileWithCategory = { fileName: string; path: string; content: string; type: string; description: string; category: string };
+
 import { SAMPLE_CODES } from "@/lib/sample-code";
 import { exportToZip } from "@/lib/zip-exporter";
 import type { GeneratedFile as ZipFile } from "@/lib/zip-exporter";
+// @ts-ignore - webkitdirectory is a non-standard attribute
 import { runAiAnalysis, runMultiFileAiAnalysis } from "@/lib/ai-engine";
 import type { AiAnalysisResult, AiSuggestion, Severity } from "@/lib/ai-engine";
 import { exportAiReportPdf } from "@/lib/pdf-exporter";
@@ -74,12 +65,52 @@ interface SourceFile {
   name: string;
   content: string;
   report?: AnalysisReport;
+  extendedReport?: ExtendedAnalysisReport;
 }
 
 let fileIdCounter = 1;
 function nextFileId(): string {
   return `file-${fileIdCounter++}`;
 }
+
+const TECH_ICONS: Record<string, typeof Database> = {
+  ejb: Box,
+  servlet: Globe,
+  soap: Globe,
+  jdbc: Database,
+  hibernate: Database,
+  jms: Activity,
+  struts: Globe,
+  jsp: Globe,
+  batch: Server,
+  transactions: Shield,
+};
+
+const TECH_COLORS: Record<string, string> = {
+  ejb: "text-blue-400 bg-blue-500/10 border-blue-500/20",
+  servlet: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+  soap: "text-purple-400 bg-purple-500/10 border-purple-500/20",
+  jdbc: "text-orange-400 bg-orange-500/10 border-orange-500/20",
+  hibernate: "text-amber-400 bg-amber-500/10 border-amber-500/20",
+  jms: "text-red-400 bg-red-500/10 border-red-500/20",
+  struts: "text-cyan-400 bg-cyan-500/10 border-cyan-500/20",
+  jsp: "text-lime-400 bg-lime-500/10 border-lime-500/20",
+  batch: "text-indigo-400 bg-indigo-500/10 border-indigo-500/20",
+  transactions: "text-pink-400 bg-pink-500/10 border-pink-500/20",
+};
+
+const TECH_TARGETS: Record<string, string> = {
+  ejb: "Spring WebClient",
+  servlet: "Spring REST Controller",
+  soap: "REST API + OpenAPI",
+  jdbc: "Spring Data JPA",
+  hibernate: "Spring Data JPA",
+  jms: "Spring Kafka",
+  struts: "Spring MVC",
+  jsp: "React / Thymeleaf",
+  batch: "Spring Batch",
+  transactions: "Spring @Transactional",
+};
 
 // ============================================================
 // Composant principal
@@ -92,7 +123,7 @@ export default function Home() {
   ]);
   const [activeFileId, setActiveFileId] = useState<string>(sourceFiles[0].id);
 
-  // Analysis & generation
+  // Original analysis & generation
   const [mergedReport, setMergedReport] = useState<AnalysisReport | null>(null);
   const [generationResult, setGenerationResult] = useState<GenerationResult | null>(null);
   const [markdownReport, setMarkdownReport] = useState<string>("");
@@ -101,6 +132,18 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeRightTab, setActiveRightTab] = useState("code");
   const [statusMessages, setStatusMessages] = useState<string[]>([]);
+
+  // Extended analysis
+  const [extendedReports, setExtendedReports] = useState<ExtendedAnalysisReport[]>([]);
+  const [extendedGenResult, setExtendedGenResult] = useState<ExtendedGenerationResult | null>(null);
+  const [selectedExtFile, setSelectedExtFile] = useState<{ path: string; content: string } | null>(null);
+
+  // Microservices
+  const [microserviceResult, setMicroserviceResult] = useState<MicroserviceExtractionResult | null>(null);
+
+  // Cloud
+  const [cloudResult, setCloudResult] = useState<CloudGenerationResult | null>(null);
+  const [selectedCloudFile, setSelectedCloudFile] = useState<CloudFileWithCategory | null>(null);
 
   // AI engine state
   const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(null);
@@ -113,6 +156,9 @@ export default function Home() {
   const [isProjectMode, setIsProjectMode] = useState(false);
   const [projectName, setProjectName] = useState<string>("");
   const [projectProgress, setProjectProgress] = useState<{ current: number; total: number; phase: string } | null>(null);
+
+  // Export state
+  const [isExporting, setIsExporting] = useState(false);
 
   const activeFile = useMemo(
     () => sourceFiles.find((f) => f.id === activeFileId) || sourceFiles[0],
@@ -178,25 +224,14 @@ export default function Home() {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (!files || files.length === 0) return;
-
       const javaFiles = Array.from(files).filter((f) => f.name.endsWith(".java"));
-      if (javaFiles.length === 0) {
-        toast.error("Aucun fichier .java trouvé.");
-        return;
-      }
-
+      if (javaFiles.length === 0) { toast.error("Aucun fichier .java trouvé."); return; }
       let loaded = 0;
       const newFiles: SourceFile[] = [];
-
       for (const file of javaFiles) {
         const reader = new FileReader();
         reader.onload = (ev) => {
-          const content = ev.target?.result as string;
-          newFiles.push({
-            id: nextFileId(),
-            name: file.name,
-            content,
-          });
+          newFiles.push({ id: nextFileId(), name: file.name, content: ev.target?.result as string });
           loaded++;
           if (loaded === javaFiles.length) {
             setSourceFiles((prev) => [...prev, ...newFiles]);
@@ -207,8 +242,6 @@ export default function Home() {
         };
         reader.readAsText(file);
       }
-
-      // Reset input so the same file can be re-uploaded
       e.target.value = "";
     },
     [addStatus]
@@ -218,25 +251,14 @@ export default function Home() {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (!files || files.length === 0) return;
-
       const javaFiles = Array.from(files).filter((f) => f.name.endsWith(".java"));
-      if (javaFiles.length === 0) {
-        toast.error("Aucun fichier .java trouvé dans le dossier.");
-        return;
-      }
-
+      if (javaFiles.length === 0) { toast.error("Aucun fichier .java trouvé dans le dossier."); return; }
       let loaded = 0;
       const newFiles: SourceFile[] = [];
-
       for (const file of javaFiles) {
         const reader = new FileReader();
         reader.onload = (ev) => {
-          const content = ev.target?.result as string;
-          newFiles.push({
-            id: nextFileId(),
-            name: file.name,
-            content,
-          });
+          newFiles.push({ id: nextFileId(), name: file.name, content: ev.target?.result as string });
           loaded++;
           if (loaded === javaFiles.length) {
             setSourceFiles((prev) => [...prev, ...newFiles]);
@@ -247,216 +269,145 @@ export default function Home() {
         };
         reader.readAsText(file);
       }
-
       e.target.value = "";
     },
     [addStatus]
   );
 
-  // ---- Project mode: load entire project ----
+  // ---- Project mode ----
 
   const handleProjectUpload = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (!files || files.length === 0) return;
-
       const allFiles = Array.from(files);
       const javaFiles = allFiles.filter(
         (f) => f.name.endsWith(".java") && !f.name.endsWith("package-info.java")
       );
-
-      if (javaFiles.length === 0) {
-        toast.error("Aucun fichier .java trouvé dans le projet.");
-        e.target.value = "";
-        return;
-      }
-
-      // Detect project name from common root
+      if (javaFiles.length === 0) { toast.error("Aucun fichier .java trouvé dans le projet."); e.target.value = ""; return; }
       const firstPath = (allFiles[0] as any).webkitRelativePath || allFiles[0].name;
       const detectedName = firstPath.split("/")[0] || "Projet";
       setProjectName(detectedName);
       setIsProjectMode(true);
       setProjectProgress({ current: 0, total: javaFiles.length, phase: "Chargement des fichiers..." });
       addStatus(`Projet "${detectedName}" : ${javaFiles.length} fichier(s) .java détecté(s)`);
-
       let loaded = 0;
       const newFiles: SourceFile[] = [];
-
       for (const file of javaFiles) {
         const reader = new FileReader();
         reader.onload = (ev) => {
-          const content = ev.target?.result as string;
           const relativePath = (file as any).webkitRelativePath || file.name;
-          newFiles.push({
-            id: nextFileId(),
-            name: relativePath.split("/").pop() || file.name,
-            content,
-          });
+          newFiles.push({ id: nextFileId(), name: relativePath.split("/").pop() || file.name, content: ev.target?.result as string });
           loaded++;
           setProjectProgress({ current: loaded, total: javaFiles.length, phase: "Chargement des fichiers..." });
-
           if (loaded === javaFiles.length) {
-            // Replace all tabs with project files
             setSourceFiles(newFiles);
             setActiveFileId(newFiles[0].id);
             setMergedReport(null);
             setGenerationResult(null);
             setSelectedGenFile(null);
-            addStatus(`${newFiles.length} fichier(s) chargé(s) depuis "${detectedName}"`);
-            toast.success(`Projet "${detectedName}" chargé : ${newFiles.length} fichier(s) Java`);
-
-            // Auto-analyze after loading
-            setProjectProgress({ current: 0, total: newFiles.length, phase: "Analyse en cours..." });
+            setExtendedReports([]);
+            setExtendedGenResult(null);
+            setMicroserviceResult(null);
+            setCloudResult(null);
+            setAiResult(null);
+            toast.success(`${newFiles.length} fichier(s) Java chargé(s) depuis le projet "${detectedName}"`);
+            addStatus(`Projet chargé : ${newFiles.length} fichier(s)`);
+            // Auto-analyze
             setTimeout(() => {
-              runProjectBatch(newFiles);
+              setProjectProgress({ current: 0, total: newFiles.length, phase: "Analyse en cours..." });
+              const reports: AnalysisReport[] = [];
+              const extReports: ExtendedAnalysisReport[] = [];
+              newFiles.forEach((sf, idx) => {
+                const r = analyzeJavaCode(sf.content);
+                reports.push(r);
+                const er = analyzeJavaLegacy(sf.content, sf.name);
+                extReports.push(er);
+                sf.report = r;
+                sf.extendedReport = er;
+                setProjectProgress({ current: idx + 1, total: newFiles.length, phase: "Analyse en cours..." });
+              });
+              setSourceFiles([...newFiles]);
+              const merged = mergeReports(reports);
+              setMergedReport(merged);
+              setExtendedReports(extReports);
+              setMarkdownReport(generateMultiFileMarkdownReport(reports, merged));
+              addStatus(`Analyse terminée : ${reports.length} fichier(s) analysé(s)`);
+              // Auto-generate
+              setProjectProgress({ current: 0, total: 3, phase: "Génération du code..." });
+              try {
+                const result = generateModernCode(merged);
+                setGenerationResult(result);
+                if (result.files.length > 0) setSelectedGenFile(result.files[0]);
+                setProjectProgress({ current: 1, total: 3, phase: "Génération étendue..." });
+                // Extended generation
+                if (extReports.length > 0) {
+                  const extResult = generateExtendedModernCode(extReports[0]);
+                  setExtendedGenResult(extResult);
+                }
+                setProjectProgress({ current: 2, total: 3, phase: "Extraction microservices..." });
+                // Microservices
+                const msResult = extractMicroservices(extReports);
+                setMicroserviceResult(msResult);
+                // Cloud
+                const cResult = generateCloudNativeInfra(msResult);
+                setCloudResult(cResult);
+                setProjectProgress({ current: 3, total: 3, phase: "Analyse IA..." });
+                // AI
+                try {
+                  const ai = runMultiFileAiAnalysis(
+                    newFiles.map((f, i) => ({ code: f.content, fileName: f.name, report: reports[i] })),
+                    undefined
+                  );
+                  setAiResult(ai);
+                } catch { /* non-blocking */ }
+                addStatus(`Projet "${detectedName}" : transformation complète`);
+                toast.success("Projet analysé et transformé avec succès !");
+              } catch (err) {
+                addStatus("Erreur lors de la transformation du projet");
+                toast.error("Erreur lors de la transformation.");
+              }
+              setProjectProgress(null);
             }, 300);
           }
         };
         reader.readAsText(file);
       }
-
       e.target.value = "";
     },
     [addStatus]
   );
 
-  const runProjectBatch = useCallback(
-    (files: SourceFile[]) => {
-      setIsAnalyzing(true);
-      addStatus(`Analyse batch de ${files.length} fichier(s)...`);
-
-      const reports: AnalysisReport[] = [];
-      const updatedFiles: SourceFile[] = [];
-      let analyzed = 0;
-
-      // Process files in chunks to avoid blocking the UI
-      const chunkSize = 5;
-      const processChunk = (startIdx: number) => {
-        const endIdx = Math.min(startIdx + chunkSize, files.length);
-
-        for (let i = startIdx; i < endIdx; i++) {
-          const sf = files[i];
-          if (sf.content.trim()) {
-            try {
-              const report = analyzeJavaCode(sf.content, sf.name);
-              reports.push(report);
-              updatedFiles.push({ ...sf, report });
-            } catch {
-              updatedFiles.push(sf);
-            }
-          } else {
-            updatedFiles.push(sf);
-          }
-          analyzed++;
-        }
-
-        setProjectProgress({ current: analyzed, total: files.length, phase: "Analyse en cours..." });
-
-        if (endIdx < files.length) {
-          // Process next chunk
-          setTimeout(() => processChunk(endIdx), 10);
-        } else {
-          // All files analyzed, now merge and generate
-          setSourceFiles(updatedFiles);
-
-          const merged = mergeReports(reports);
-          setMergedReport(merged);
-
-          let md: string;
-          if (reports.length === 1) {
-            md = generateMarkdownReport(reports[0]);
-          } else {
-            md = generateMultiFileMarkdownReport(reports, merged);
-          }
-          setMarkdownReport(md);
-          setIsAnalyzing(false);
-
-          addStatus(
-            `Analyse terminée : ${merged.summary.totalEjbInjections} @EJB, ${merged.summary.totalJndiLookups} JNDI, ${merged.summary.totalMethodCalls} appels`
-          );
-          toast.success(
-            `Analyse terminée : ${merged.summary.servicesDetected.length} service(s) dans ${reports.length} fichier(s)`
-          );
-
-          // Auto-generate
-          setProjectProgress({ current: 0, total: 1, phase: "Génération du code..." });
-          setIsGenerating(true);
-          addStatus("Génération du code API Client moderne...");
-
-          setTimeout(() => {
-            try {
-              const result = generateModernCode(merged);
-              setGenerationResult(result);
-              if (result.files.length > 0) {
-                setSelectedGenFile(result.files[0]);
-              }
-              setActiveRightTab("code");
-              addStatus(`Génération terminée : ${result.files.length} fichier(s) généré(s)`);
-              toast.success(
-                `Projet "${projectName || 'Projet'}" traité : ${result.files.length} fichier(s) générés à partir de ${reports.length} source(s)`
-              );
-            } catch {
-              addStatus("Erreur lors de la génération");
-              toast.error("Erreur lors de la génération du code.");
-            }
-            setIsGenerating(false);
-            setProjectProgress(null);
-          }, 300);
-        }
-      };
-
-      // Start processing
-      setTimeout(() => processChunk(0), 10);
-    },
-    [addStatus, projectName]
-  );
-
-  // ---- Analysis ----
+  // ---- Analyze ----
 
   const handleAnalyze = useCallback(() => {
-    if (sourceFiles.every((f) => !f.content.trim())) {
-      toast.error("Aucun code Java à analyser.");
-      return;
-    }
     setIsAnalyzing(true);
-    addStatus(`Analyse de ${sourceFiles.length} fichier(s) en cours...`);
-
+    addStatus("Analyse multi-technologies en cours...");
     setTimeout(() => {
       try {
         const reports: AnalysisReport[] = [];
+        const extReports: ExtendedAnalysisReport[] = [];
         const updatedFiles = sourceFiles.map((sf) => {
-          if (sf.content.trim()) {
-            const report = analyzeJavaCode(sf.content, sf.name);
-            reports.push(report);
-            return { ...sf, report };
-          }
-          return sf;
+          const r = analyzeJavaCode(sf.content);
+          reports.push(r);
+          const er = analyzeJavaLegacy(sf.content, sf.name);
+          extReports.push(er);
+          return { ...sf, report: r, extendedReport: er };
         });
         setSourceFiles(updatedFiles);
-
         const merged = mergeReports(reports);
         setMergedReport(merged);
-
-        // Generate markdown
-        let md: string;
+        setExtendedReports(extReports);
         if (reports.length === 1) {
-          md = generateMarkdownReport(reports[0]);
+          setMarkdownReport(generateMarkdownReport(reports[0]));
         } else {
-          md = generateMultiFileMarkdownReport(reports, merged);
+          setMarkdownReport(generateMultiFileMarkdownReport(reports, merged));
         }
-        setMarkdownReport(md);
-        setActiveRightTab("report");
-
-        addStatus(
-          `Analyse terminée : ${merged.summary.totalEjbInjections} injections EJB, ${merged.summary.totalJndiLookups} lookups JNDI, ${merged.summary.totalMethodCalls} appels de méthodes`
-        );
-        if (merged.summary.totalTransactions > 0) {
-          addStatus(`⚠ ${merged.summary.totalTransactions} transaction(s) détectée(s) — vérification manuelle recommandée`);
-        }
-        if (merged.summary.totalJmsElements > 0) {
-          addStatus(`⚠ ${merged.summary.totalJmsElements} élément(s) JMS/MQ/Batch détecté(s)`);
-        }
-        toast.success(`Analyse terminée : ${merged.summary.servicesDetected.length} service(s) détecté(s) dans ${reports.length} fichier(s)`);
+        // Count detected technologies
+        const allTechs = new Set<string>();
+        extReports.forEach((er) => er.summary.technologiesDetected.forEach((t) => allTechs.add(t)));
+        addStatus(`Analyse terminée : ${reports.length} fichier(s), ${allTechs.size} technologie(s) détectée(s)`);
+        toast.success(`Analyse terminée : ${allTechs.size} technologie(s) legacy détectée(s)`);
       } catch (e) {
         addStatus("Erreur lors de l'analyse");
         toast.error("Erreur lors de l'analyse du code.");
@@ -465,80 +416,85 @@ export default function Home() {
     }, 400);
   }, [sourceFiles, addStatus]);
 
-  // ---- Generation ----
+  // ---- Generate ----
 
   const handleGenerate = useCallback(() => {
-    if (!mergedReport) {
-      toast.error("Veuillez d'abord analyser le code.");
-      return;
-    }
+    if (!mergedReport) return;
     setIsGenerating(true);
-    addStatus("Génération du code API Client moderne...");
-
+    addStatus("Génération multi-technologies en cours...");
     setTimeout(() => {
       try {
+        // Original generation
         const result = generateModernCode(mergedReport);
         setGenerationResult(result);
-        if (result.files.length > 0) {
-          setSelectedGenFile(result.files[0]);
+        if (result.files.length > 0) setSelectedGenFile(result.files[0]);
+
+        // Extended generation
+        if (extendedReports.length > 0) {
+          const extResult = generateExtendedModernCode(extendedReports[0]);
+          setExtendedGenResult(extResult);
         }
+
+        // Microservices extraction
+        if (extendedReports.length > 0) {
+          const msResult = extractMicroservices(extendedReports);
+          setMicroserviceResult(msResult);
+          // Cloud generation
+          const cResult = generateCloudNativeInfra(msResult);
+          setCloudResult(cResult);
+        }
+
         setActiveRightTab("code");
 
-        // Run AI analysis (deterministic, no hallucination)
+        // AI analysis
         try {
-          const filesForAi = sourceFiles
-            .filter((sf) => sf.report)
-            .map((sf) => ({ code: sf.content, fileName: sf.name, report: sf.report! }));
-          const aiRes = filesForAi.length > 1
-            ? runMultiFileAiAnalysis(filesForAi, result)
-            : filesForAi.length === 1
-            ? runAiAnalysis(filesForAi[0].code, filesForAi[0].report, result, filesForAi[0].fileName)
-            : null;
-          setAiResult(aiRes);
-          if (aiRes) {
-            addStatus(`IA : ${aiRes.summary.totalSuggestions} suggestion(s), score legacy ${aiRes.legacyScore.overall}/100`);
+          if (sourceFiles.length === 1) {
+            const ai = runAiAnalysis(sourceFiles[0].content, mergedReport);
+            setAiResult(ai);
+          } else {
+            const ai = runMultiFileAiAnalysis(
+              sourceFiles.map((f) => ({ code: f.content, fileName: f.name, report: f.report! })),
+              undefined
+            );
+            setAiResult(ai);
           }
-        } catch {
-          // AI analysis is non-blocking
-        }
+        } catch { /* non-blocking */ }
 
-        addStatus(`Génération terminée : ${result.files.length} fichier(s) généré(s)`);
-        toast.success(`${result.files.length} fichier(s) généré(s) avec succès`);
+        addStatus(`Génération terminée : ${result.files.length} fichier(s) + microservices + cloud`);
+        toast.success("Transformation complète : code, microservices et cloud générés");
       } catch (e) {
         addStatus("Erreur lors de la génération");
         toast.error("Erreur lors de la génération du code.");
       }
       setIsGenerating(false);
     }, 600);
-  }, [mergedReport, addStatus]);
+  }, [mergedReport, extendedReports, sourceFiles, addStatus]);
 
   // ---- Download ZIP ----
-
-  const [isExporting, setIsExporting] = useState(false);
 
   const handleDownload = useCallback(async () => {
     if (!generationResult) return;
     setIsExporting(true);
     addStatus("Export ZIP Maven en cours...");
-
     try {
-      // Adapter les fichiers au format attendu par zip-exporter
       const zipFiles: ZipFile[] = generationResult.files.map((f) => ({
-        path: f.path,
-        content: f.content,
-        category: f.type.toUpperCase(),
+        path: f.path, content: f.content, category: f.type.toUpperCase(),
       }));
-
+      // Add cloud files if available
+      if (cloudResult) {
+        cloudResult.files.forEach((cf) => {
+          zipFiles.push({ path: `cloud/${cf.path}`, content: cf.content, category: cf.type.toUpperCase() });
+        });
+      }
       await exportToZip(zipFiles, "ejb-client-modernized", markdownReport || undefined);
-
-      addStatus(`Export ZIP terminé : ${generationResult.files.length} fichier(s)`);
+      addStatus(`Export ZIP terminé : ${zipFiles.length} fichier(s)`);
       toast.success("Archive ZIP Maven téléchargée avec succès");
     } catch (e) {
       addStatus("Erreur lors de l'export ZIP");
       toast.error("Erreur lors de la génération du ZIP.");
     }
     setIsExporting(false);
-  }, [generationResult, markdownReport, addStatus]);
+  }, [generationResult, cloudResult, markdownReport, addStatus]);
 
   // ---- Copy ----
 
@@ -565,6 +521,11 @@ export default function Home() {
         setMergedReport(null);
         setGenerationResult(null);
         setSelectedGenFile(null);
+        setExtendedReports([]);
+        setExtendedGenResult(null);
+        setMicroserviceResult(null);
+        setCloudResult(null);
+        setAiResult(null);
         addStatus(`Exemple chargé : ${sample.name}`);
       }
     },
@@ -593,6 +554,17 @@ export default function Home() {
       jms: mergedReport.summary.totalJmsElements,
     };
   }, [mergedReport]);
+
+  // Detected technologies across all files
+  const detectedTechs = useMemo(() => {
+    const techs = new Map<string, number>();
+    extendedReports.forEach((er) => {
+      er.summary.technologiesDetected.forEach((t) => {
+        techs.set(t, (techs.get(t) || 0) + (er.summary.technologyCounts[t] || 1));
+      });
+    });
+    return techs;
+  }, [extendedReports]);
 
   // ---- Inline rename ----
 
@@ -628,6 +600,7 @@ export default function Home() {
           <div className="flex items-center gap-2">
             <Terminal className="w-5 h-5 text-primary" />
             <span className="font-semibold text-sm tracking-wide">EJB Client Modernizer</span>
+            <Badge variant="outline" className="text-[9px] h-4 border-primary/30 text-primary">v3.0</Badge>
           </div>
           <span className="text-muted-foreground text-xs">par Hamza NORDINE</span>
         </div>
@@ -639,114 +612,42 @@ export default function Home() {
             </SelectTrigger>
             <SelectContent>
               {SAMPLE_CODES.map((s) => (
-                <SelectItem key={s.name} value={s.name}>
-                  {s.name}
-                </SelectItem>
+                <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".java"
-            multiple
-            className="hidden"
-            onChange={handleFileUpload}
-          />
-          <input
-            ref={folderInputRef}
-            type="file"
-            /* @ts-expect-error webkitdirectory is valid */
-            webkitdirectory=""
-            multiple
-            className="hidden"
-            onChange={handleFolderUpload}
-          />
-          <input
-            ref={projectInputRef}
-            type="file"
-            /* @ts-expect-error webkitdirectory is valid */
-            webkitdirectory=""
-            multiple
-            className="hidden"
-            onChange={handleProjectUpload}
-          />
+          <input ref={fileInputRef} type="file" accept=".java" multiple className="hidden" onChange={handleFileUpload} />
+          {/* @ts-ignore */}
+          <input ref={folderInputRef} type="file" webkitdirectory="" multiple className="hidden" onChange={handleFolderUpload} />
+          {/* @ts-ignore */}
+          <input ref={projectInputRef} type="file" webkitdirectory="" multiple className="hidden" onChange={handleProjectUpload} />
 
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs gap-1.5"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Upload className="w-3.5 h-3.5" />
-            Fichier(s)
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={() => fileInputRef.current?.click()}>
+            <Upload className="w-3.5 h-3.5" />Fichier(s)
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs gap-1.5"
-            onClick={() => folderInputRef.current?.click()}
-          >
-            <FolderOpen className="w-3.5 h-3.5" />
-            Dossier
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={() => folderInputRef.current?.click()}>
+            <FolderOpen className="w-3.5 h-3.5" />Dossier
           </Button>
-          <Button
-            size="sm"
-            className="h-8 text-xs gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700"
-            onClick={() => projectInputRef.current?.click()}
-            disabled={!!projectProgress}
-          >
-            {projectProgress ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <FolderGit2 className="w-3.5 h-3.5" />
-            )}
+          <Button size="sm" className="h-8 text-xs gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => projectInputRef.current?.click()} disabled={!!projectProgress}>
+            {projectProgress ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FolderGit2 className="w-3.5 h-3.5" />}
             Projet entier
           </Button>
 
           <div className="w-px h-6 bg-border mx-1" />
 
-          <Button
-            size="sm"
-            className="h-8 text-xs gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90"
-            onClick={handleAnalyze}
-            disabled={isAnalyzing}
-          >
-            {isAnalyzing ? (
-              <Clock className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Play className="w-3.5 h-3.5" />
-            )}
+          <Button size="sm" className="h-8 text-xs gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleAnalyze} disabled={isAnalyzing}>
+            {isAnalyzing ? <Clock className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
             Analyser
           </Button>
-          <Button
-            size="sm"
-            className="h-8 text-xs gap-1.5 bg-accent text-accent-foreground hover:bg-accent/90"
-            onClick={handleGenerate}
-            disabled={isGenerating || !mergedReport}
-          >
-            {isGenerating ? (
-              <Clock className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Zap className="w-3.5 h-3.5" />
-            )}
+          <Button size="sm" className="h-8 text-xs gap-1.5 bg-accent text-accent-foreground hover:bg-accent/90" onClick={handleGenerate} disabled={isGenerating || !mergedReport}>
+            {isGenerating ? <Clock className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
             Transformer
           </Button>
 
           {generationResult && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-xs gap-1.5"
-              onClick={handleDownload}
-              disabled={isExporting}
-            >
-              {isExporting ? (
-                <Clock className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Download className="w-3.5 h-3.5" />
-              )}
+            <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={handleDownload} disabled={isExporting}>
+              {isExporting ? <Clock className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
               {isExporting ? "Export..." : "ZIP Maven"}
             </Button>
           )}
@@ -757,20 +658,29 @@ export default function Home() {
       {projectProgress && (
         <div className="h-8 border-b border-border flex items-center px-4 gap-3 bg-emerald-950/30 shrink-0">
           <FolderGit2 className="w-4 h-4 text-emerald-400" />
-          <span className="text-xs text-emerald-300 font-medium">
-            {projectName ? `Projet : ${projectName}` : "Projet"}
-          </span>
+          <span className="text-xs text-emerald-300 font-medium">{projectName ? `Projet : ${projectName}` : "Projet"}</span>
           <div className="flex-1 h-2 bg-secondary rounded-full overflow-hidden">
-            <div
-              className="h-full bg-emerald-500 rounded-full transition-all duration-300"
-              style={{
-                width: `${projectProgress.total > 0 ? (projectProgress.current / projectProgress.total) * 100 : 0}%`,
-              }}
-            />
+            <div className="h-full bg-emerald-500 rounded-full transition-all duration-300" style={{ width: `${projectProgress.total > 0 ? (projectProgress.current / projectProgress.total) * 100 : 0}%` }} />
           </div>
-          <span className="text-[10px] text-emerald-400 font-mono">
-            {projectProgress.phase} ({projectProgress.current}/{projectProgress.total})
-          </span>
+          <span className="text-[10px] text-emerald-400 font-mono">{projectProgress.phase} ({projectProgress.current}/{projectProgress.total})</span>
+        </div>
+      )}
+
+      {/* Technology detection bar */}
+      {detectedTechs.size > 0 && (
+        <div className="h-8 border-b border-border flex items-center px-4 gap-2 bg-secondary/20 shrink-0 overflow-x-auto">
+          <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider shrink-0">Technologies :</span>
+          {Array.from(detectedTechs.entries()).map(([tech, count]) => {
+            const Icon = TECH_ICONS[tech] || Box;
+            const colorClass = TECH_COLORS[tech] || "text-muted-foreground bg-secondary/50 border-border";
+            return (
+              <div key={tech} className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-medium shrink-0 ${colorClass}`}>
+                <Icon className="w-3 h-3" />
+                <span className="capitalize">{tech}</span>
+                <span className="opacity-60">({count})</span>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -778,7 +688,7 @@ export default function Home() {
       <div className="flex-1 overflow-hidden">
         <ResizablePanelGroup direction="horizontal">
           {/* Left Panel — Legacy Code with Tabs */}
-          <ResizablePanel defaultSize={45} minSize={25}>
+          <ResizablePanel defaultSize={40} minSize={20}>
             <div className="h-full flex flex-col">
               {/* Tab bar */}
               <div className="h-9 border-b border-border flex items-center shrink-0 bg-secondary/30">
@@ -802,77 +712,48 @@ export default function Home() {
                             value={renameValue}
                             onChange={(e) => setRenameValue(e.target.value)}
                             onBlur={commitRename}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") commitRename();
-                              if (e.key === "Escape") setRenamingFileId(null);
-                            }}
-                            className="bg-transparent border-b border-primary text-xs w-32 outline-none font-mono"
+                            onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setRenamingFileId(null); }}
+                            className="bg-secondary border border-border rounded px-1 text-xs w-32 outline-none"
                             onClick={(e) => e.stopPropagation()}
                           />
                         ) : (
-                          <span className="truncate max-w-[120px] font-mono text-[11px]">
-                            {sf.name}
-                          </span>
-                        )}
-                        {sf.report && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
+                          <span className="truncate max-w-[120px]">{sf.name}</span>
                         )}
                         {sourceFiles.length > 1 && (
-                          <span
+                          <button
                             onClick={(e) => closeFile(sf.id, e)}
                             className="ml-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
                           >
                             <X className="w-3 h-3" />
-                          </span>
+                          </button>
+                        )}
+                        {sf.extendedReport && sf.extendedReport.summary.technologiesDetected.length > 0 && (
+                          <div className="flex gap-0.5 ml-1">
+                            {sf.extendedReport.summary.technologiesDetected.slice(0, 2).map((t) => {
+                              const TIcon = TECH_ICONS[t] || Box;
+                              return <TIcon key={t} className={`w-2.5 h-2.5 ${TECH_COLORS[t]?.split(" ")[0] || "text-muted-foreground"}`} />;
+                            })}
+                          </div>
                         )}
                       </button>
                     ))}
-
-                    {/* Add new tab button */}
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <button
-                          onClick={addNewFile}
-                          className="flex items-center justify-center h-9 w-8 text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors shrink-0"
-                        >
+                        <button onClick={addNewFile} className="flex items-center justify-center h-9 w-8 text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors shrink-0">
                           <Plus className="w-3.5 h-3.5" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        <p>Nouvel onglet</p>
-                      </TooltipContent>
+                      <TooltipContent side="bottom"><p>Nouvel onglet</p></TooltipContent>
                     </Tooltip>
                   </div>
                   <ScrollBar orientation="horizontal" className="h-0" />
                 </ScrollArea>
 
-                {/* Badge summary */}
                 {totalBadges && (
                   <div className="flex gap-1.5 px-2 shrink-0">
-                    {totalBadges.ejb > 0 && (
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] h-5 border-primary/40 text-primary"
-                      >
-                        {totalBadges.ejb} @EJB
-                      </Badge>
-                    )}
-                    {totalBadges.jndi > 0 && (
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] h-5 border-accent/40 text-accent"
-                      >
-                        {totalBadges.jndi} JNDI
-                      </Badge>
-                    )}
-                    {totalBadges.jms > 0 && (
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] h-5 border-destructive/40 text-destructive"
-                      >
-                        {totalBadges.jms} JMS/MQ
-                      </Badge>
-                    )}
+                    {totalBadges.ejb > 0 && <Badge variant="outline" className="text-[10px] h-5 border-primary/40 text-primary">{totalBadges.ejb} @EJB</Badge>}
+                    {totalBadges.jndi > 0 && <Badge variant="outline" className="text-[10px] h-5 border-accent/40 text-accent">{totalBadges.jndi} JNDI</Badge>}
+                    {totalBadges.jms > 0 && <Badge variant="outline" className="text-[10px] h-5 border-destructive/40 text-destructive">{totalBadges.jms} JMS/MQ</Badge>}
                   </div>
                 )}
               </div>
@@ -885,9 +766,13 @@ export default function Home() {
                     {activeFile.report.summary.totalEjbInjections} @EJB
                     {" · "}
                     {activeFile.report.summary.totalMethodCalls} appels
-                    {activeFile.report.summary.totalTransactions > 0 &&
-                      ` · ${activeFile.report.summary.totalTransactions} tx`}
+                    {activeFile.report.summary.totalTransactions > 0 && ` · ${activeFile.report.summary.totalTransactions} tx`}
                   </span>
+                  {activeFile.extendedReport && (
+                    <span className="text-[10px] text-muted-foreground font-mono ml-2">
+                      | {activeFile.extendedReport.summary.technologiesDetected.join(", ")}
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -920,187 +805,381 @@ export default function Home() {
 
           <ResizableHandle withHandle />
 
-          {/* Right Panel — Generated Code / Report */}
-          <ResizablePanel defaultSize={55} minSize={25}>
+          {/* Right Panel — Tabs */}
+          <ResizablePanel defaultSize={60} minSize={25}>
             <div className="h-full flex flex-col">
-              <Tabs
-                value={activeRightTab}
-                onValueChange={setActiveRightTab}
-                className="h-full flex flex-col"
-              >
-                <div className="h-9 border-b border-border flex items-center px-3 shrink-0 bg-secondary/30">
+              <Tabs value={activeRightTab} onValueChange={setActiveRightTab} className="h-full flex flex-col">
+                <div className="h-9 border-b border-border flex items-center px-2 shrink-0 bg-secondary/30 overflow-x-auto">
                   <TabsList className="h-7 bg-transparent p-0 gap-0">
-                    <TabsTrigger
-                      value="code"
-                      className="h-7 text-xs px-3 rounded-none data-[state=active]:bg-background data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-foreground text-muted-foreground"
-                    >
-                      <Code2 className="w-3.5 h-3.5 mr-1.5" />
-                      Code Généré
-                      {generationResult && (
-                        <Badge className="ml-1.5 h-4 text-[10px] bg-primary/20 text-primary border-0">
-                          {generationResult.files.length}
-                        </Badge>
-                      )}
+                    <TabsTrigger value="code" className="h-7 text-xs px-2.5 rounded-none data-[state=active]:bg-background data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-foreground text-muted-foreground">
+                      <Code2 className="w-3.5 h-3.5 mr-1" />Code
+                      {generationResult && <Badge className="ml-1 h-4 text-[10px] bg-primary/20 text-primary border-0">{generationResult.files.length}</Badge>}
                     </TabsTrigger>
-                    <TabsTrigger
-                      value="report"
-                      className="h-7 text-xs px-3 rounded-none data-[state=active]:bg-background data-[state=active]:border-b-2 data-[state=active]:border-accent data-[state=active]:text-foreground text-muted-foreground"
-                    >
-                      <BarChart3 className="w-3.5 h-3.5 mr-1.5" />
-                      Rapport
+                    <TabsTrigger value="tech" className="h-7 text-xs px-2.5 rounded-none data-[state=active]:bg-background data-[state=active]:border-b-2 data-[state=active]:border-emerald-500 data-[state=active]:text-foreground text-muted-foreground">
+                      <Layers className="w-3.5 h-3.5 mr-1" />Technologies
+                      {detectedTechs.size > 0 && <Badge className="ml-1 h-4 text-[10px] bg-emerald-500/20 text-emerald-400 border-0">{detectedTechs.size}</Badge>}
                     </TabsTrigger>
-                    <TabsTrigger
-                      value="ai"
-                      className="h-7 text-xs px-3 rounded-none data-[state=active]:bg-background data-[state=active]:border-b-2 data-[state=active]:border-amber-500 data-[state=active]:text-foreground text-muted-foreground"
-                    >
-                      <Brain className="w-3.5 h-3.5 mr-1.5" />
-                      IA Interne
-                      {aiResult && (
-                        <Badge className="ml-1.5 h-4 text-[10px] bg-amber-500/20 text-amber-400 border-0">
-                          {aiResult.summary.totalSuggestions}
-                        </Badge>
-                      )}
+                    <TabsTrigger value="micro" className="h-7 text-xs px-2.5 rounded-none data-[state=active]:bg-background data-[state=active]:border-b-2 data-[state=active]:border-cyan-500 data-[state=active]:text-foreground text-muted-foreground">
+                      <Network className="w-3.5 h-3.5 mr-1" />Microservices
+                      {microserviceResult && <Badge className="ml-1 h-4 text-[10px] bg-cyan-500/20 text-cyan-400 border-0">{microserviceResult.proposals.length}</Badge>}
+                    </TabsTrigger>
+                    <TabsTrigger value="cloud" className="h-7 text-xs px-2.5 rounded-none data-[state=active]:bg-background data-[state=active]:border-b-2 data-[state=active]:border-violet-500 data-[state=active]:text-foreground text-muted-foreground">
+                      <Cloud className="w-3.5 h-3.5 mr-1" />Cloud
+                      {cloudResult && <Badge className="ml-1 h-4 text-[10px] bg-violet-500/20 text-violet-400 border-0">{cloudResult.files.length}</Badge>}
+                    </TabsTrigger>
+                    <TabsTrigger value="ai" className="h-7 text-xs px-2.5 rounded-none data-[state=active]:bg-background data-[state=active]:border-b-2 data-[state=active]:border-amber-500 data-[state=active]:text-foreground text-muted-foreground">
+                      <Brain className="w-3.5 h-3.5 mr-1" />IA
+                      {aiResult && <Badge className="ml-1 h-4 text-[10px] bg-amber-500/20 text-amber-400 border-0">{aiResult.summary.totalSuggestions}</Badge>}
+                    </TabsTrigger>
+                    <TabsTrigger value="report" className="h-7 text-xs px-2.5 rounded-none data-[state=active]:bg-background data-[state=active]:border-b-2 data-[state=active]:border-accent data-[state=active]:text-foreground text-muted-foreground">
+                      <BarChart3 className="w-3.5 h-3.5 mr-1" />Rapport
                     </TabsTrigger>
                   </TabsList>
 
                   {selectedGenFile && activeRightTab === "code" && (
-                    <div className="ml-auto flex items-center gap-2">
-                      <span className="text-[10px] text-muted-foreground font-mono">
-                        {selectedGenFile.path}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0"
-                        onClick={handleCopy}
-                      >
-                        <Copy className="w-3 h-3" />
-                      </Button>
+                    <div className="ml-auto flex items-center gap-2 shrink-0">
+                      <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[200px]">{selectedGenFile.path}</span>
+                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleCopy}><Copy className="w-3 h-3" /></Button>
                     </div>
                   )}
                 </div>
 
+                {/* ====== CODE TAB ====== */}
                 <TabsContent value="code" className="flex-1 m-0 overflow-hidden">
                   {generationResult ? (
                     <div className="h-full flex">
-                      {/* File tree */}
                       <div className="w-56 border-r border-border shrink-0 overflow-hidden">
                         <ScrollArea className="h-full">
                           <div className="p-2">
-                            {filesByType &&
-                              Object.entries(filesByType).map(
-                                ([type, files]) =>
-                                  files.length > 0 && (
-                                    <div key={type} className="mb-2">
-                                      <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                                        <Layers className="w-3 h-3" />
-                                        {type}
-                                      </div>
-                                      {files.map((file) => (
-                                        <button
-                                          key={file.path}
-                                          onClick={() => setSelectedGenFile(file)}
-                                          className={`w-full text-left flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors ${
-                                            selectedGenFile?.path === file.path
-                                              ? "bg-primary/15 text-primary"
-                                              : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-                                          }`}
-                                        >
-                                          <ChevronRight className="w-3 h-3 shrink-0" />
-                                          <span className="truncate font-mono text-[11px]">
-                                            {file.fileName}
-                                          </span>
-                                        </button>
-                                      ))}
-                                    </div>
-                                  )
-                              )}
+                            {filesByType && Object.entries(filesByType).map(([type, files]) =>
+                              files.length > 0 && (
+                                <div key={type} className="mb-2">
+                                  <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                                    <Layers className="w-3 h-3" />{type}
+                                  </div>
+                                  {files.map((file) => (
+                                    <button key={file.path} onClick={() => setSelectedGenFile(file)} className={`w-full text-left flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors ${selectedGenFile?.path === file.path ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}>
+                                      <ChevronRight className="w-3 h-3 shrink-0" />
+                                      <span className="truncate font-mono text-[11px]">{file.fileName}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )
+                            )}
                           </div>
                         </ScrollArea>
                       </div>
-
-                      {/* Code viewer */}
                       <div className="flex-1">
                         {selectedGenFile ? (
-                          <Editor
-                            height="100%"
-                            language="java"
-                            theme="vs-dark"
-                            value={selectedGenFile.content}
-                            options={{
-                              readOnly: true,
-                              fontSize: 13,
-                              fontFamily: "'JetBrains Mono', monospace",
-                              minimap: { enabled: false },
-                              scrollBeyondLastLine: false,
-                              padding: { top: 12 },
-                              lineNumbers: "on",
-                              renderLineHighlight: "none",
-                              smoothScrolling: true,
-                            }}
-                          />
+                          <Editor height="100%" language="java" theme="vs-dark" value={selectedGenFile.content} options={{ readOnly: true, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", minimap: { enabled: false }, scrollBeyondLastLine: false, padding: { top: 12 }, lineNumbers: "on", renderLineHighlight: "none", smoothScrolling: true }} />
                         ) : (
-                          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-                            Sélectionnez un fichier dans l'arborescence
-                          </div>
+                          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Sélectionnez un fichier dans l'arborescence</div>
                         )}
                       </div>
                     </div>
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-4">
-                      <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="flex flex-col items-center gap-3"
-                      >
-                        <div className="w-16 h-16 rounded-xl bg-secondary/50 flex items-center justify-center">
-                          <Zap className="w-8 h-8 text-primary/40" />
-                        </div>
-                        <p className="text-sm">
-                          Collez du code Java legacy, puis cliquez sur{" "}
-                          <strong className="text-primary">Analyser</strong> et{" "}
-                          <strong className="text-accent">Transformer</strong>
-                        </p>
-                        <p className="text-xs text-muted-foreground/60">
-                          Le code sera transformé en clients API REST modernes (WebClient)
-                        </p>
+                      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center gap-3">
+                        <div className="w-16 h-16 rounded-xl bg-secondary/50 flex items-center justify-center"><Zap className="w-8 h-8 text-primary/40" /></div>
+                        <p className="text-sm">Collez du code Java legacy, puis cliquez sur <strong className="text-primary">Analyser</strong> et <strong className="text-accent">Transformer</strong></p>
+                        <p className="text-xs text-muted-foreground/60">Supporte : EJB, Servlets, SOAP, JDBC, Hibernate, Struts, JMS, Batch</p>
                       </motion.div>
                     </div>
                   )}
                 </TabsContent>
 
-                {/* AI Tab */}
+                {/* ====== TECHNOLOGIES TAB ====== */}
+                <TabsContent value="tech" className="flex-1 m-0 overflow-hidden">
+                  {extendedReports.length > 0 ? (
+                    <ScrollArea className="h-full">
+                      <div className="p-5 space-y-6">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Layers className="w-5 h-5 text-emerald-400" />
+                          <h2 className="text-sm font-semibold">Technologies Legacy Détectées</h2>
+                        </div>
+
+                        {/* Technology cards */}
+                        <div className="grid grid-cols-2 gap-3">
+                          {Array.from(detectedTechs.entries()).map(([tech, count]) => {
+                            const Icon = TECH_ICONS[tech] || Box;
+                            const colorClass = TECH_COLORS[tech] || "text-muted-foreground bg-secondary/50 border-border";
+                            const target = TECH_TARGETS[tech] || "Spring Boot";
+                            return (
+                              <div key={tech} className={`rounded-lg border p-4 ${colorClass}`}>
+                                <div className="flex items-center gap-2 mb-2">
+                                  <Icon className="w-5 h-5" />
+                                  <span className="text-sm font-semibold capitalize">{tech}</span>
+                                  <Badge variant="outline" className="ml-auto text-[10px] h-5 border-current/30">{count} occurrence(s)</Badge>
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[11px] opacity-80">
+                                  <ArrowUpRight className="w-3 h-3" />
+                                  <span>Cible : {target}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Per-file breakdown */}
+                        <div>
+                          <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                            <FileCode2 className="w-4 h-4 text-primary" />
+                            Détail par fichier
+                          </h3>
+                          <div className="space-y-2">
+                            {extendedReports.map((er, idx) => (
+                              <div key={idx} className="rounded-md border border-border bg-secondary/20 p-3">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <FileCode2 className="w-3.5 h-3.5 text-muted-foreground" />
+                                  <span className="text-xs font-medium text-foreground">{sourceFiles[idx]?.name || `Fichier ${idx + 1}`}</span>
+                                  <Badge variant="outline" className="ml-auto text-[9px] h-4 border-border">
+                                    Score : {er.summary.complexityScore}/100
+                                  </Badge>
+                                  <Badge variant="outline" className={`text-[9px] h-4 ${er.summary.riskLevel === "high" ? "border-red-500/40 text-red-400" : er.summary.riskLevel === "medium" ? "border-amber-500/40 text-amber-400" : "border-emerald-500/40 text-emerald-400"}`}>
+                                    Risque : {er.summary.riskLevel}
+                                  </Badge>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {er.summary.technologiesDetected.map((t) => {
+                                    const TIcon = TECH_ICONS[t] || Box;
+                                    return (
+                                      <div key={t} className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${TECH_COLORS[t] || "text-muted-foreground bg-secondary/50 border-border"}`}>
+                                        <TIcon className="w-2.5 h-2.5" />
+                                        <span className="capitalize">{t}</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                {er.summary.modernizationTargets.length > 0 && (
+                                  <div className="mt-2 flex flex-wrap gap-1">
+                                    {er.summary.modernizationTargets.map((target, ti) => (
+                                      <span key={ti} className="text-[9px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">{target}</span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Summary stats */}
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="rounded-lg border border-border bg-secondary/20 p-3 text-center">
+                            <div className="text-2xl font-bold font-mono text-primary">{extendedReports.length}</div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Fichiers analysés</div>
+                          </div>
+                          <div className="rounded-lg border border-border bg-secondary/20 p-3 text-center">
+                            <div className="text-2xl font-bold font-mono text-emerald-400">{detectedTechs.size}</div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Technologies</div>
+                          </div>
+                          <div className="rounded-lg border border-border bg-secondary/20 p-3 text-center">
+                            <div className="text-2xl font-bold font-mono text-amber-400">
+                              {extendedReports.reduce((sum, er) => sum + er.summary.estimatedEffortDays, 0)}j
+                            </div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Effort estimé</div>
+                          </div>
+                        </div>
+                      </div>
+                    </ScrollArea>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-3">
+                      <Layers className="w-10 h-10 text-muted-foreground/30" />
+                      <p className="text-sm">Les technologies legacy seront détectées après l'analyse</p>
+                      <p className="text-[11px] text-muted-foreground/60">Supporte : EJB, Servlets, JSP, Struts, SOAP, JDBC, Hibernate, JMS, Batch</p>
+                    </div>
+                  )}
+                </TabsContent>
+
+                {/* ====== MICROSERVICES TAB ====== */}
+                <TabsContent value="micro" className="flex-1 m-0 overflow-hidden">
+                  {microserviceResult ? (
+                    <ScrollArea className="h-full">
+                      <div className="p-5 space-y-6">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Network className="w-5 h-5 text-cyan-400" />
+                          <h2 className="text-sm font-semibold">Extraction de Microservices</h2>
+                          <Badge className="ml-2 text-[10px] bg-cyan-500/20 text-cyan-400 border-0">{microserviceResult.proposals.length} microservice(s)</Badge>
+                        </div>
+
+                        {/* Summary cards */}
+                        <div className="grid grid-cols-4 gap-3">
+                          <div className="rounded-lg border border-border bg-secondary/20 p-3 text-center">
+                            <div className="text-xl font-bold font-mono text-cyan-400">{microserviceResult.summary.totalServices}</div>
+                            <div className="text-[10px] text-muted-foreground">Services</div>
+                          </div>
+                          <div className="rounded-lg border border-border bg-secondary/20 p-3 text-center">
+                            <div className="text-xl font-bold font-mono text-emerald-400">{microserviceResult.proposals.reduce((sum, p) => sum + p.apis.length, 0)}</div>
+                            <div className="text-[10px] text-muted-foreground">APIs</div>
+                          </div>
+                          <div className="rounded-lg border border-border bg-secondary/20 p-3 text-center">
+                            <div className="text-xl font-bold font-mono text-purple-400">{microserviceResult.proposals.reduce((sum, p) => sum + p.events.length, 0)}</div>
+                            <div className="text-[10px] text-muted-foreground">Events</div>
+                          </div>
+                          <div className="rounded-lg border border-border bg-secondary/20 p-3 text-center">
+                            <div className="text-xl font-bold font-mono text-amber-400">{microserviceResult.summary.couplingScore}</div>
+                            <div className="text-[10px] text-muted-foreground">Couplage moy.</div>
+                          </div>
+                        </div>
+
+                        {/* Microservice proposals */}
+                        <div>
+                          <h3 className="text-sm font-semibold text-foreground mb-3">Propositions de Microservices</h3>
+                          <div className="space-y-3">
+                            {microserviceResult.proposals.map((p) => (
+                              <MicroserviceCard key={p.name} proposal={p} />
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Bounded contexts */}
+                        {microserviceResult.boundedContexts.length > 0 && (
+                          <div>
+                            <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                              <Box className="w-4 h-4 text-purple-400" />
+                              Bounded Contexts ({microserviceResult.boundedContexts.length})
+                            </h3>
+                            <div className="grid grid-cols-2 gap-2">
+                              {microserviceResult.boundedContexts.map((ctx: { name: string; services: string[] }) => (
+                                <div key={ctx.name} className="rounded-md border border-purple-500/20 bg-purple-500/5 p-3">
+                                  <div className="text-xs font-semibold text-purple-300 mb-1 capitalize">{ctx.name}</div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {ctx.services.map((s: string) => (
+                                      <span key={s} className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">{s}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Recommendations */}
+                        {microserviceResult.summary.recommendations.length > 0 && (
+                          <div>
+                            <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                              <Lightbulb className="w-4 h-4 text-amber-400" />
+                              Recommandations
+                            </h3>
+                            <div className="space-y-1.5">
+                              {microserviceResult.summary.recommendations.map((rec, i) => (
+                                <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-500/5 border border-amber-500/15">
+                                  <CheckCircle2 className="w-3 h-3 text-amber-400 shrink-0" />
+                                  <span className="text-xs text-amber-300">{rec}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </ScrollArea>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-3">
+                      <Network className="w-10 h-10 text-muted-foreground/30" />
+                      <p className="text-sm">L'extraction de microservices apparaîtra après la transformation</p>
+                      <p className="text-[11px] text-muted-foreground/60">Graphe de dépendances, bounded contexts, propositions d'APIs</p>
+                    </div>
+                  )}
+                </TabsContent>
+
+                {/* ====== CLOUD TAB ====== */}
+                <TabsContent value="cloud" className="flex-1 m-0 overflow-hidden">
+                  {cloudResult ? (
+                    <div className="h-full flex">
+                      {/* Cloud file tree */}
+                      <div className="w-56 border-r border-border shrink-0 overflow-hidden">
+                        <ScrollArea className="h-full">
+                          <div className="p-2">
+                            {["docker", "kubernetes", "helm", "gateway", "security", "observability", "ci", "compose"].map((cat) => {
+                              const catFiles = cloudResult.files.filter((f) => f.type === cat);
+                              if (catFiles.length === 0) return null;
+                              const catIcons: Record<string, typeof Container> = {
+                                docker: Container, kubernetes: Server, helm: Box,
+                                gateway: Globe, security: Shield, observability: Activity,
+                                cicd: GitBranch, compose: Container,
+                              };
+                              const CatIcon = catIcons[cat] || Box;
+                              return (
+                                <div key={cat} className="mb-2">
+                                  <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                                    <CatIcon className="w-3 h-3" />{cat}
+                                  </div>
+                                  {catFiles.map((file) => (
+                                    <button key={file.path} onClick={() => setSelectedCloudFile({ ...file, category: file.type } as CloudFileWithCategory)} className={`w-full text-left flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors ${selectedCloudFile?.path === file.path ? "bg-violet-500/15 text-violet-300" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}>
+                                      <ChevronRight className="w-3 h-3 shrink-0" />
+                                      <span className="truncate font-mono text-[11px]">{file.path.split("/").pop()}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </ScrollArea>
+                      </div>
+                      {/* Cloud file viewer */}
+                      <div className="flex-1">
+                        {selectedCloudFile ? (
+                          <div className="h-full flex flex-col">
+                            <div className="h-7 border-b border-border flex items-center px-3 bg-violet-500/5 shrink-0">
+                              <span className="text-[10px] text-violet-300 font-mono">{selectedCloudFile.path}</span>
+                              <Button variant="ghost" size="sm" className="h-5 w-5 p-0 ml-auto" onClick={() => { navigator.clipboard.writeText(selectedCloudFile.content); toast.success("Copié"); }}>
+                                <Copy className="w-3 h-3" />
+                              </Button>
+                            </div>
+                            <div className="flex-1">
+                              <Editor
+                                height="100%"
+                                language={selectedCloudFile.path.endsWith(".yaml") || selectedCloudFile.path.endsWith(".yml") ? "yaml" : selectedCloudFile.path.endsWith(".json") ? "json" : selectedCloudFile.path.endsWith(".java") ? "java" : selectedCloudFile.path.endsWith("Dockerfile") || selectedCloudFile.path.endsWith(".dockerignore") ? "dockerfile" : "plaintext"}
+                                theme="vs-dark"
+                                value={selectedCloudFile.content}
+                                options={{ readOnly: true, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", minimap: { enabled: false }, scrollBeyondLastLine: false, padding: { top: 8 }, lineNumbers: "on", renderLineHighlight: "none", smoothScrolling: true }}
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-3">
+                            <Cloud className="w-10 h-10 text-violet-400/30" />
+                            <p className="text-sm">Sélectionnez un fichier cloud dans l'arborescence</p>
+                            <div className="flex flex-wrap gap-2 justify-center max-w-sm">
+                              <Badge variant="outline" className="text-[10px] border-violet-500/30 text-violet-400">Dockerfile</Badge>
+                              <Badge variant="outline" className="text-[10px] border-violet-500/30 text-violet-400">K8s Manifests</Badge>
+                              <Badge variant="outline" className="text-[10px] border-violet-500/30 text-violet-400">Helm Charts</Badge>
+                              <Badge variant="outline" className="text-[10px] border-violet-500/30 text-violet-400">API Gateway</Badge>
+                              <Badge variant="outline" className="text-[10px] border-violet-500/30 text-violet-400">OAuth2/JWT</Badge>
+                              <Badge variant="outline" className="text-[10px] border-violet-500/30 text-violet-400">CI/CD</Badge>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-3">
+                      <Cloud className="w-10 h-10 text-muted-foreground/30" />
+                      <p className="text-sm">L'infrastructure cloud-native sera générée après la transformation</p>
+                      <p className="text-[11px] text-muted-foreground/60">Docker, Kubernetes, Helm, API Gateway, OAuth2, Observabilité, CI/CD</p>
+                    </div>
+                  )}
+                </TabsContent>
+
+                {/* ====== AI TAB ====== */}
                 <TabsContent value="ai" className="flex-1 m-0 overflow-hidden">
                   {aiResult ? (
                     <ScrollArea className="h-full">
                       <div className="p-5 space-y-6">
-                        {/* Score comparison */}
                         <div className="grid grid-cols-2 gap-4">
-                          <ScoreCard
-                            title="Code Legacy"
-                            score={aiResult.legacyScore.overall}
-                            color="destructive"
-                            details={[
-                              { label: "Maintenabilité", value: aiResult.legacyScore.maintainability },
-                              { label: "Sécurité", value: aiResult.legacyScore.security },
-                              { label: "Performance", value: aiResult.legacyScore.performance },
-                              { label: "Résilience", value: aiResult.legacyScore.resilience },
-                            ]}
-                          />
-                          <ScoreCard
-                            title="Code Modernisé"
-                            score={aiResult.modernScore.overall}
-                            color="primary"
-                            details={[
-                              { label: "Maintenabilité", value: aiResult.modernScore.maintainability },
-                              { label: "Sécurité", value: aiResult.modernScore.security },
-                              { label: "Performance", value: aiResult.modernScore.performance },
-                              { label: "Résilience", value: aiResult.modernScore.resilience },
-                            ]}
-                          />
+                          <ScoreCard title="Code Legacy" score={aiResult.legacyScore.overall} color="destructive" details={[
+                            { label: "Maintenabilité", value: aiResult.legacyScore.maintainability },
+                            { label: "Sécurité", value: aiResult.legacyScore.security },
+                            { label: "Performance", value: aiResult.legacyScore.performance },
+                            { label: "Résilience", value: aiResult.legacyScore.resilience },
+                          ]} />
+                          <ScoreCard title="Code Modernisé" score={aiResult.modernScore.overall} color="primary" details={[
+                            { label: "Maintenabilité", value: aiResult.modernScore.maintainability },
+                            { label: "Sécurité", value: aiResult.modernScore.security },
+                            { label: "Performance", value: aiResult.modernScore.performance },
+                            { label: "Résilience", value: aiResult.modernScore.resilience },
+                          ]} />
                         </div>
 
-                        {/* Summary badges */}
                         <div className="flex flex-wrap gap-2">
                           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-red-500/10 border border-red-500/20">
                             <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
@@ -1124,38 +1203,60 @@ export default function Home() {
                           </div>
                         </div>
 
-                        {/* Confidence notice */}
                         <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-emerald-500/5 border border-emerald-500/20">
                           <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
                           <span className="text-xs text-emerald-300">{aiResult.summary.confidenceLevel}</span>
                         </div>
 
-                        {/* Optimizations */}
+                        {/* Métriques du moteur de règles */}
+                        {aiResult.summary.totalRules && (
+                          <div>
+                            <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                              <BarChart3 className="w-4 h-4 text-cyan-400" />Moteur de règles ({aiResult.summary.totalRules} règles)
+                            </h3>
+                            <div className="grid grid-cols-3 gap-2 mb-3">
+                              <div className="px-3 py-2 rounded-md bg-cyan-500/5 border border-cyan-500/20 text-center">
+                                <div className="text-lg font-bold text-cyan-400">{aiResult.summary.totalRules}</div>
+                                <div className="text-[10px] text-muted-foreground">Règles totales</div>
+                              </div>
+                              <div className="px-3 py-2 rounded-md bg-amber-500/5 border border-amber-500/20 text-center">
+                                <div className="text-lg font-bold text-amber-400">{aiResult.summary.rulesTriggered}</div>
+                                <div className="text-[10px] text-muted-foreground">Déclenchées</div>
+                              </div>
+                              <div className="px-3 py-2 rounded-md bg-emerald-500/5 border border-emerald-500/20 text-center">
+                                <div className="text-lg font-bold text-emerald-400">{aiResult.summary.totalRules - aiResult.summary.rulesTriggered}</div>
+                                <div className="text-[10px] text-muted-foreground">Conformes</div>
+                              </div>
+                            </div>
+                            {aiResult.summary.rulesByCategory && Object.keys(aiResult.summary.rulesByCategory).length > 0 && (
+                              <div className="space-y-1.5">
+                                {Object.entries(aiResult.summary.rulesByCategory).sort((a, b) => b[1] - a[1]).map(([cat, count]) => (
+                                  <div key={cat} className="flex items-center gap-2">
+                                    <span className="text-[11px] text-muted-foreground w-24 truncate" title={cat}>{cat}</span>
+                                    <div className="flex-1 h-2 bg-secondary/40 rounded-full overflow-hidden">
+                                      <div className="h-full bg-cyan-500/60 rounded-full transition-all" style={{ width: `${Math.min(100, (count / Math.max(1, aiResult.summary.rulesTriggered)) * 100)}%` }} />
+                                    </div>
+                                    <span className="text-[11px] text-cyan-400 w-6 text-right">{count}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {aiResult.optimizations.length > 0 && (
                           <div>
                             <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-                              <Wrench className="w-4 h-4 text-primary" />
-                              Optimisations ({aiResult.optimizations.length})
+                              <Wrench className="w-4 h-4 text-primary" />Optimisations ({aiResult.optimizations.length})
                             </h3>
                             <div className="space-y-2">
                               {aiResult.optimizations.map((opt) => (
-                                <div
-                                  key={opt.id}
-                                  className="flex items-start gap-3 px-3 py-2.5 rounded-md bg-secondary/40 border border-border"
-                                >
-                                  <div className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${
-                                    opt.applied ? "bg-emerald-400" : "bg-amber-400"
-                                  }`} />
+                                <div key={opt.id} className="flex items-start gap-3 px-3 py-2.5 rounded-md bg-secondary/40 border border-border">
+                                  <div className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${opt.applied ? "bg-emerald-400" : "bg-amber-400"}`} />
                                   <div className="flex-1">
                                     <div className="flex items-center gap-2 mb-0.5">
                                       <span className="text-xs font-medium text-foreground capitalize">{opt.type}</span>
-                                      <Badge variant="outline" className={`text-[9px] h-4 ${
-                                        opt.applied
-                                          ? "border-emerald-500/40 text-emerald-400"
-                                          : "border-amber-500/40 text-amber-400"
-                                      }`}>
-                                        {opt.applied ? "Appliqué" : "Recommandé"}
-                                      </Badge>
+                                      <Badge variant="outline" className={`text-[9px] h-4 ${opt.applied ? "border-emerald-500/40 text-emerald-400" : "border-amber-500/40 text-amber-400"}`}>{opt.applied ? "Appliqué" : "Recommandé"}</Badge>
                                     </div>
                                     <p className="text-[11px] text-muted-foreground leading-relaxed">{opt.description}</p>
                                   </div>
@@ -1165,25 +1266,19 @@ export default function Home() {
                           </div>
                         )}
 
-                        {/* Suggestions list */}
                         <div>
                           <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-                            <Lightbulb className="w-4 h-4 text-amber-400" />
-                            Suggestions ({aiResult.suggestions.length})
+                            <Lightbulb className="w-4 h-4 text-amber-400" />Suggestions ({aiResult.suggestions.length})
                           </h3>
                           <div className="space-y-2">
-                            {aiResult.suggestions.map((sug) => (
-                              <SuggestionCard key={sug.id} suggestion={sug} />
-                            ))}
+                            {aiResult.suggestions.map((sug) => <SuggestionCard key={sug.id} suggestion={sug} />)}
                           </div>
                         </div>
 
-                        {/* Top risks */}
                         {aiResult.summary.topRisks.length > 0 && (
                           <div>
                             <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-                              <ShieldAlert className="w-4 h-4 text-red-400" />
-                              Risques principaux
+                              <ShieldAlert className="w-4 h-4 text-red-400" />Risques principaux
                             </h3>
                             <div className="space-y-1.5">
                               {aiResult.summary.topRisks.map((risk, i) => (
@@ -1196,27 +1291,11 @@ export default function Home() {
                           </div>
                         )}
 
-                        {/* PDF Export button */}
                         <div className="pt-4 border-t border-border">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="w-full h-10 gap-2 bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20 hover:text-amber-200 transition-all"
-                            onClick={() => {
-                              try {
-                                exportAiReportPdf(aiResult, projectName || undefined);
-                                toast.success("Rapport IA exporté en PDF avec succès");
-                              } catch (e) {
-                                toast.error("Erreur lors de l'export PDF");
-                              }
-                            }}
-                          >
-                            <FileDown className="w-4 h-4" />
-                            Exporter le rapport IA en PDF
+                          <Button variant="outline" size="sm" className="w-full h-10 gap-2 bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20 hover:text-amber-200 transition-all" onClick={() => { try { exportAiReportPdf(aiResult, projectName || undefined); toast.success("Rapport IA exporté en PDF"); } catch { toast.error("Erreur lors de l'export PDF"); } }}>
+                            <FileDown className="w-4 h-4" />Exporter le rapport IA en PDF
                           </Button>
-                          <p className="text-[10px] text-muted-foreground/60 text-center mt-2">
-                            Rapport professionnel incluant scores, optimisations et suggestions
-                          </p>
+                          <p className="text-[10px] text-muted-foreground/60 text-center mt-2">Moteur IA v2.0 — {aiResult.summary.totalRules || 55}+ règles (OWASP, SonarQube, SOLID, Clean Code, PMD, SpotBugs, Checkstyle) — aucune hallucination</p>
                         </div>
                       </div>
                     </ScrollArea>
@@ -1229,6 +1308,7 @@ export default function Home() {
                   )}
                 </TabsContent>
 
+                {/* ====== REPORT TAB ====== */}
                 <TabsContent value="report" className="flex-1 m-0 overflow-hidden">
                   {markdownReport ? (
                     <ScrollArea className="h-full">
@@ -1239,9 +1319,7 @@ export default function Home() {
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-3">
                       <BarChart3 className="w-10 h-10 text-muted-foreground/30" />
-                      <p className="text-sm">
-                        Le rapport d'analyse apparaîtra ici après l'analyse
-                      </p>
+                      <p className="text-sm">Le rapport d'analyse apparaîtra ici après l'analyse</p>
                     </div>
                   )}
                 </TabsContent>
@@ -1255,25 +1333,30 @@ export default function Home() {
       <footer className="h-7 border-t border-border flex items-center px-3 gap-4 shrink-0 bg-secondary/20 text-[11px] font-mono">
         <div className="flex items-center gap-1.5 text-muted-foreground">
           <Terminal className="w-3 h-3" />
-          <span>EJB Client Modernizer v1.0</span>
+          <span>EJB Client Modernizer v3.0</span>
         </div>
-
         <div className="w-px h-3.5 bg-border" />
         <div className="flex items-center gap-1 text-muted-foreground">
           <FilePlus2 className="w-3 h-3" />
           <span>{sourceFiles.length} fichier(s)</span>
         </div>
-
         {isProjectMode && projectName && (
           <>
             <div className="w-px h-3.5 bg-border" />
             <div className="flex items-center gap-1 text-emerald-400">
-              <PackageOpen className="w-3 h-3" />
-              <span>{projectName}</span>
+              <PackageOpen className="w-3 h-3" /><span>{projectName}</span>
             </div>
           </>
         )}
-
+        {detectedTechs.size > 0 && (
+          <>
+            <div className="w-px h-3.5 bg-border" />
+            <div className="flex items-center gap-1 text-emerald-400">
+              <Layers className="w-3 h-3" />
+              <span>{detectedTechs.size} tech(s)</span>
+            </div>
+          </>
+        )}
         {mergedReport && (
           <>
             <div className="w-px h-3.5 bg-border" />
@@ -1281,29 +1364,26 @@ export default function Home() {
               <CheckCircle2 className="w-3 h-3" />
               <span>{mergedReport.summary.servicesDetected.length} service(s)</span>
             </div>
-            <div className="flex items-center gap-1 text-muted-foreground">
-              <GitBranch className="w-3 h-3" />
-              <span>{mergedReport.summary.totalDependencies} dép.</span>
-            </div>
-            {mergedReport.summary.totalTransactions > 0 && (
-              <div className="flex items-center gap-1 text-accent">
-                <AlertTriangle className="w-3 h-3" />
-                <span>{mergedReport.summary.totalTransactions} tx</span>
-              </div>
-            )}
           </>
         )}
-
-        {generationResult && (
+        {microserviceResult && (
           <>
             <div className="w-px h-3.5 bg-border" />
-            <div className="flex items-center gap-1 text-primary">
-              <FileCode2 className="w-3 h-3" />
-              <span>{generationResult.files.length} fichier(s) générés</span>
+            <div className="flex items-center gap-1 text-cyan-400">
+              <Network className="w-3 h-3" />
+              <span>{microserviceResult.proposals.length} µservice(s)</span>
             </div>
           </>
         )}
-
+        {cloudResult && (
+          <>
+            <div className="w-px h-3.5 bg-border" />
+            <div className="flex items-center gap-1 text-violet-400">
+              <Cloud className="w-3 h-3" />
+              <span>{cloudResult.files.length} cloud</span>
+            </div>
+          </>
+        )}
         <div className="ml-auto text-muted-foreground/60">
           {statusMessages.length > 0 && statusMessages[statusMessages.length - 1]}
         </div>
@@ -1313,25 +1393,16 @@ export default function Home() {
 }
 
 // ============================================================
-// Sub-components for AI tab
+// Sub-components
 // ============================================================
 
-function ScoreCard({
-  title,
-  score,
-  color,
-  details,
-}: {
-  title: string;
-  score: number;
-  color: "destructive" | "primary";
+function ScoreCard({ title, score, color, details }: {
+  title: string; score: number; color: "destructive" | "primary";
   details: { label: string; value: number }[];
 }) {
-  const colorClasses =
-    color === "destructive"
-      ? { ring: "border-red-500/30", bg: "bg-red-500/5", text: "text-red-400", bar: "bg-red-500" }
-      : { ring: "border-primary/30", bg: "bg-primary/5", text: "text-primary", bar: "bg-primary" };
-
+  const colorClasses = color === "destructive"
+    ? { ring: "border-red-500/30", bg: "bg-red-500/5", text: "text-red-400", bar: "bg-red-500" }
+    : { ring: "border-primary/30", bg: "bg-primary/5", text: "text-primary", bar: "bg-primary" };
   return (
     <div className={`rounded-lg border ${colorClasses.ring} ${colorClasses.bg} p-4`}>
       <div className="flex items-center justify-between mb-3">
@@ -1346,10 +1417,7 @@ function ScoreCard({
               <span className="text-[10px] font-mono text-muted-foreground">{Math.min(100, Math.max(0, d.value))}%</span>
             </div>
             <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${colorClasses.bar}`}
-                style={{ width: `${Math.min(100, Math.max(0, d.value))}%` }}
-              />
+              <div className={`h-full rounded-full transition-all duration-500 ${colorClasses.bar}`} style={{ width: `${Math.min(100, Math.max(0, d.value))}%` }} />
             </div>
           </div>
         ))}
@@ -1365,10 +1433,8 @@ function SuggestionCard({ suggestion }: { suggestion: AiSuggestion }) {
     info: { icon: Lightbulb, color: "text-blue-400", bg: "bg-blue-500/5", border: "border-blue-500/20" },
     suggestion: { icon: TrendingUp, color: "text-emerald-400", bg: "bg-emerald-500/5", border: "border-emerald-500/20" },
   };
-
   const cfg = severityConfig[suggestion.severity];
   const Icon = cfg.icon;
-
   return (
     <div className={`rounded-md border ${cfg.border} ${cfg.bg} p-3`}>
       <div className="flex items-start gap-2.5">
@@ -1376,30 +1442,103 @@ function SuggestionCard({ suggestion }: { suggestion: AiSuggestion }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="text-xs font-semibold text-foreground">{suggestion.title}</span>
-            <Badge variant="outline" className="text-[9px] h-4 border-border text-muted-foreground">
-              {suggestion.ruleId}
-            </Badge>
-            <Badge variant="outline" className="text-[9px] h-4 border-border text-muted-foreground">
-              {suggestion.category}
-            </Badge>
+            <Badge variant="outline" className="text-[9px] h-4 border-border text-muted-foreground">{suggestion.ruleId}</Badge>
+            <Badge variant="outline" className="text-[9px] h-4 border-border text-muted-foreground">{suggestion.category}</Badge>
             {suggestion.line && (
-              <span className="text-[9px] font-mono text-muted-foreground/70">
-                {suggestion.fileName ? `${suggestion.fileName}:` : ""}L{suggestion.line}
-              </span>
+              <span className="text-[9px] font-mono text-muted-foreground/70">{suggestion.fileName ? `${suggestion.fileName}:` : ""}L{suggestion.line}</span>
             )}
           </div>
           <p className="text-[11px] text-muted-foreground leading-relaxed mb-1.5">{suggestion.description}</p>
           {suggestion.codeSnippet && (
-            <pre className="text-[10px] font-mono bg-secondary/60 rounded px-2 py-1 mb-1.5 text-muted-foreground overflow-x-auto">
-              {suggestion.codeSnippet}
-            </pre>
+            <pre className="text-[10px] font-mono bg-secondary/60 rounded px-2 py-1 mb-1.5 text-muted-foreground overflow-x-auto">{suggestion.codeSnippet}</pre>
           )}
           <div className="flex items-start gap-1.5 text-[10px]">
             <ArrowUpRight className="w-3 h-3 text-primary mt-0.5 shrink-0" />
             <span className="text-primary/80">{suggestion.fix}</span>
           </div>
+          {suggestion.impact && (
+            <div className="flex items-start gap-1.5 text-[10px] mt-1">
+              <AlertTriangle className="w-3 h-3 text-amber-400/70 mt-0.5 shrink-0" />
+              <span className="text-amber-300/70">{suggestion.impact}</span>
+            </div>
+          )}
+          {suggestion.reference && (
+            <div className="mt-1">
+              <a href={suggestion.reference} target="_blank" rel="noopener noreferrer" className="text-[9px] text-cyan-400/60 hover:text-cyan-400 underline underline-offset-2 transition-colors">
+                {suggestion.reference.replace(/^https?:\/\//, "").substring(0, 60)}...
+              </a>
+            </div>
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function MicroserviceCard({ proposal }: { proposal: MicroserviceProposal }) {
+  return (
+    <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Server className="w-4 h-4 text-cyan-400" />
+        <span className="text-sm font-semibold text-cyan-300">{proposal.name}</span>
+        <Badge variant="outline" className="ml-auto text-[9px] h-4 border-cyan-500/30 text-cyan-400">{proposal.boundedContext}</Badge>
+      </div>
+      <p className="text-[11px] text-muted-foreground mb-3">{proposal.description}</p>
+
+      {/* Technologies */}
+      <div className="flex flex-wrap gap-1 mb-3">
+        {proposal.technologies.map((t) => {
+          const TIcon = TECH_ICONS[t] || Box;
+          return (
+            <div key={t} className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] border ${TECH_COLORS[t] || "text-muted-foreground bg-secondary/50 border-border"}`}>
+              <TIcon className="w-2.5 h-2.5" />
+              <span className="capitalize">{t}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* APIs */}
+      {proposal.apis.length > 0 && (
+        <div className="mb-2">
+          <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">APIs :</span>
+          <div className="flex flex-wrap gap-1 mt-1">
+            {proposal.apis.map((api) => (
+              <span key={api.path} className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
+                {api.method} {api.path}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Events */}
+      {proposal.events.length > 0 && (
+        <div className="mb-2">
+          <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Events :</span>
+          <div className="flex flex-wrap gap-1 mt-1">
+            {proposal.events.map((ev) => (
+              <span key={ev.name} className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                {ev.type === "published" ? "PUB" : "SUB"} {ev.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Data stores */}
+      {proposal.dataStores.length > 0 && (
+        <div>
+          <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Data :</span>
+          <div className="flex flex-wrap gap-1 mt-1">
+            {proposal.dataStores.map((ds) => (
+              <span key={ds.name} className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                {ds.type}: {ds.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

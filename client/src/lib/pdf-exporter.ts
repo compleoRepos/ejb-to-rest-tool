@@ -94,8 +94,8 @@ function addFooter(doc: jsPDF, pageNum: number, totalPages: number) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
   doc.setTextColor(...COLORS.text);
-  doc.text("Hamza NORDINE — EJB Client Modernizer v2.0", 14, pageHeight - 10);
-  doc.text(`Analyse deterministe — 100% basee sur des regles codees`, pageWidth / 2, pageHeight - 10, { align: "center" });
+  doc.text("Hamza NORDINE — EJB Client Modernizer v3.0", 14, pageHeight - 10);
+  doc.text(`Moteur IA v2.0 — 55+ regles (OWASP, SonarQube, SOLID, Clean Code, PMD)`, pageWidth / 2, pageHeight - 10, { align: "center" });
   doc.text(`Page ${pageNum} / ${totalPages}`, pageWidth - 14, pageHeight - 10, { align: "right" });
 }
 
@@ -256,6 +256,64 @@ export function exportAiReportPdf(aiResult: AiAnalysisResult, projectName?: stri
   });
 
   y = (doc as any).lastAutoTable.finalY + 15;
+
+  // ---- Rules Engine Metrics ----
+  if (aiResult.summary.totalRules) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(...COLORS.textDark);
+    doc.text("Moteur de regles IA v2.0", margin, y);
+    y += 3;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...COLORS.text);
+    doc.text("Sources : OWASP, SonarQube, SOLID, Clean Code, PMD, SpotBugs, Checkstyle", margin, y + 4);
+    y += 10;
+
+    const rulesData: string[][] = [
+      ["Regles totales", String(aiResult.summary.totalRules)],
+      ["Regles declenchees", String(aiResult.summary.rulesTriggered || 0)],
+      ["Regles conformes", String(aiResult.summary.totalRules - (aiResult.summary.rulesTriggered || 0))],
+      ["Taux de conformite", `${Math.round(((aiResult.summary.totalRules - (aiResult.summary.rulesTriggered || 0)) / aiResult.summary.totalRules) * 100)}%`],
+    ];
+
+    if (aiResult.summary.rulesByCategory) {
+      const sorted = Object.entries(aiResult.summary.rulesByCategory).sort((a, b) => b[1] - a[1]);
+      for (const [cat, count] of sorted) {
+        rulesData.push([`  ${cat}`, String(count)]);
+      }
+    }
+
+    autoTable(doc, {
+      startY: y,
+      head: [["Indicateur", "Valeur"]],
+      body: rulesData,
+      margin: { left: margin, right: margin },
+      styles: {
+        fontSize: 8,
+        cellPadding: 2.5,
+        textColor: COLORS.textDark,
+        lineColor: COLORS.border,
+        lineWidth: 0.2,
+      },
+      headStyles: {
+        fillColor: [0, 128, 128],
+        textColor: COLORS.white,
+        fontStyle: "bold",
+        fontSize: 8,
+      },
+      alternateRowStyles: {
+        fillColor: COLORS.lightGray,
+      },
+      columnStyles: {
+        0: { fontStyle: "bold", cellWidth: 80 },
+        1: { halign: "center" },
+      },
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 15;
+  }
 
   // ---- Quality Scores ----
   doc.setFont("helvetica", "bold");
@@ -609,4 +667,4 @@ export function exportAiReportPdf(aiResult: AiAnalysisResult, projectName?: stri
     : `rapport-ia-ejb-client-modernizer.pdf`;
   doc.save(fileName);
 }
-// PDF export v1.0 - Hamza NORDINE
+// PDF export v2.0 - Hamza NORDINE — Moteur IA v2.0 avec 55+ regles industrielles
