@@ -6,18 +6,20 @@
 
 // ── Types de base ──────────────────────────────────────────────
 
-export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";
+export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO" | "critical" | "major" | "minor" | "info";
 
 export interface RuleHit {
   ruleId: string;
-  category: string;
+  category?: string;
   severity: Severity;
-  className: string;
+  className?: string;
   fieldName?: string;
   methodName?: string;
   line?: number;
+  location?: string;
   message: string;
-  reason: string;
+  reason?: string;
+  suggestion?: string;
   fix?: RuleFix;
 }
 
@@ -41,6 +43,13 @@ export interface RuleContext {
   injectedBeans: string[];
   role?: string;
   domain?: string;
+  rawSource?: string;
+  // Extended fields used by orchestrator
+  classType?: string;
+  modifiers?: string[];
+  extends?: string;
+  implements?: string[];
+  sourceCode?: string;
 }
 
 export interface FieldContext {

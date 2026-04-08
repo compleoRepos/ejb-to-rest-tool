@@ -318,6 +318,7 @@ export class IntelligenceOrchestrator {
     // 5. Évaluation des règles
     const allHits: RuleHit[] = [];
     for (const pc of parsedClasses) {
+      const fileContent = files.find((f) => f.className === pc.className)?.content || "";
       const ruleCtx: RuleContext = {
         className: pc.className,
         classType: pc.isEnum ? "ENUM" : pc.modifiers.includes("abstract") ? "ABSTRACT" : "CLASS",
@@ -325,11 +326,16 @@ export class IntelligenceOrchestrator {
         imports: pc.imports,
         annotations: pc.annotations,
         modifiers: pc.modifiers,
+        extendsClass: pc.extendsClass,
         extends: pc.extendsClass,
+        implementsInterfaces: pc.implementsInterfaces,
         implements: pc.implementsInterfaces,
+        isEnum: pc.isEnum,
         fields: pc.fields,
-        methods: pc.methods,
-        sourceCode: files.find((f) => f.className === pc.className)?.content || "",
+        methods: pc.methods.map(m => ({ ...m, callsExternal: m.callsExternal || [] })),
+        injectedBeans: pc.injectedBeans,
+        sourceCode: fileContent,
+        rawSource: fileContent,
       };
       const hits = this.knowledgeBase.evaluate(ruleCtx);
       allHits.push(...hits);
