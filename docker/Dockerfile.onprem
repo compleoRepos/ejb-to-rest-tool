@@ -1,0 +1,73 @@
+# ═══════════════════════════════════════════════════════════════
+# Compleo EJB Client Modernizer — Dockerfile On-Premises
+# Multi-stage build : builder → runtime
+# Image finale : ~150 MB, non-root, healthcheck intégré
+# ═══════════════════════════════════════════════════════════════
+
+# ── Stage 1 : Builder ──────────────────────────────────────────
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+# Installer pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+# Copier les fichiers de dépendances en premier (cache Docker)
+COPY package.json pnpm-lock.yaml ./
+
+# Installer toutes les dépendances (y compris devDependencies pour le build)
+RUN pnpm install --frozen-lockfile
+
+# Copier le reste du code source
+COPY . .
+
+# Build frontend (Vite) + backend (esbuild)
+RUN pnpm build
+
+# Nettoyer les devDependencies pour la production
+RUN pnpm prune --prod
+
+# ── Stage 2 : Runtime ─────────────────────────────────────────
+FROM node:22-alpine AS runtime
+
+# Labels OCI
+LABEL org.opencontainers.image.title="Compleo EJB Client Modernizer" \
+      org.opencontainers.image.description="Outil de modernisation automatique de code Java EJB vers Jakarta EE / Spring Boot" \
+      org.opencontainers.image.vendor="Compleo" \
+      org.opencontainers.image.version="1.0.0" \
+      org.opencontainers.image.authors="Hamza NORDINE"
+
+# Créer un utilisateur non-root
+RUN addgroup -g 1000 compleo && \
+    adduser -u 1000 -G compleo -s /bin/sh -D compleo
+
+WORKDIR /app
+
+# Copier les artefacts de build
+COPY --from=builder --chown=compleo:compleo /app/dist ./dist
+COPY --from=builder --chown=compleo:compleo /app/node_modules ./node_modules
+COPY --from=builder --chown=compleo:compleo /app/package.json ./package.json
+
+# Copier les projets de test et les règles (nécessaires au runtime)
+COPY --from=builder --chown=compleo:compleo /app/test-projects ./test-projects
+
+# Créer le répertoire temporaire pour les sessions
+RUN mkdir -p /tmp/compleo-sessions && chown compleo:compleo /tmp/compleo-sessions
+
+# Variables d'environnement par défaut
+ENV NODE_ENV=production \
+    COMPLEO_PORT=5000 \
+    LOG_LEVEL=info
+
+# Passer à l'utilisateur non-root
+USER compleo:compleo
+
+# Exposer le port
+EXPOSE 5000
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:5000/health || exit 1
+
+# Démarrer l'application
+CMD ["node", "dist/index.js"]

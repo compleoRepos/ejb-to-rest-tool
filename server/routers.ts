@@ -1,7 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router } from "./_core/trpc";
+import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import * as db from "./db";
@@ -21,7 +21,7 @@ const projectsRouter = router({
       return db.getProjectById(input.id);
     }),
 
-  create: publicProcedure
+  create: protectedProcedure
     .input(z.object({
       name: z.string().min(1).max(255),
       description: z.string().optional(),
@@ -39,7 +39,7 @@ const projectsRouter = router({
       });
     }),
 
-  update: publicProcedure
+  update: protectedProcedure
     .input(z.object({
       id: z.number(),
       name: z.string().min(1).max(255).optional(),
@@ -56,7 +56,7 @@ const projectsRouter = router({
       return db.updateProject(id, data);
     }),
 
-  delete: publicProcedure
+  delete: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       await db.deleteProject(input.id);
@@ -75,7 +75,7 @@ const filesRouter = router({
       return db.getProjectFiles(input.projectId);
     }),
 
-  upload: publicProcedure
+  upload: protectedProcedure
     .input(z.object({
       projectId: z.number(),
       files: z.array(z.object({
@@ -101,7 +101,7 @@ const filesRouter = router({
       return db.addProjectFiles(files);
     }),
 
-  deleteAll: publicProcedure
+  deleteAll: protectedProcedure
     .input(z.object({ projectId: z.number() }))
     .mutation(async ({ input }) => {
       await db.deleteProjectFiles(input.projectId);
@@ -126,7 +126,7 @@ const scansRouter = router({
       return db.getScanById(input.id);
     }),
 
-  create: publicProcedure
+  create: protectedProcedure
     .input(z.object({
       projectId: z.number(),
       scanType: z.enum(["full", "incremental", "quick"]).optional(),
@@ -140,7 +140,7 @@ const scansRouter = router({
       });
     }),
 
-  updateResult: publicProcedure
+  updateResult: protectedProcedure
     .input(z.object({
       id: z.number(),
       status: z.enum(["pending", "running", "completed", "failed"]).optional(),
@@ -181,7 +181,7 @@ const commentsRouter = router({
       return db.listComments(input.projectId);
     }),
 
-  create: publicProcedure
+  create: protectedProcedure
     .input(z.object({
       projectId: z.number(),
       scanId: z.number().optional(),
@@ -203,7 +203,7 @@ const commentsRouter = router({
       });
     }),
 
-  updateValidation: publicProcedure
+  updateValidation: protectedProcedure
     .input(z.object({
       id: z.number(),
       validationStatus: z.enum(["pending", "approved", "rejected"]),
@@ -212,7 +212,7 @@ const commentsRouter = router({
       return db.updateComment(input.id, { validationStatus: input.validationStatus });
     }),
 
-  delete: publicProcedure
+  delete: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       await db.deleteComment(input.id);
@@ -231,7 +231,7 @@ const gitRouter = router({
       return db.getGitConnections(input.projectId);
     }),
 
-  connect: publicProcedure
+  connect: protectedProcedure
     .input(z.object({
       projectId: z.number(),
       provider: z.enum(["github", "gitlab", "bitbucket", "azure_devops"]),
@@ -251,7 +251,7 @@ const gitRouter = router({
       });
     }),
 
-  disconnect: publicProcedure
+  disconnect: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       await db.deleteGitConnection(input.id);
@@ -270,7 +270,7 @@ const sharingRouter = router({
       return db.listSharedReports(input.projectId);
     }),
 
-  create: publicProcedure
+  create: protectedProcedure
     .input(z.object({
       projectId: z.number(),
       scanId: z.number().optional(),

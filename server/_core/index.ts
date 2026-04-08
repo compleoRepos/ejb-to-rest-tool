@@ -8,6 +8,8 @@ import { registerCompleoRoutes } from "../compleo-routes";
 import { registerAgentRoutes } from "../agent-routes";
 import learningRoutes from "../learning-routes";
 import { intelligenceRoutes } from "../intelligence-routes";
+import { authRoutes } from "../auth-routes";
+import { authMiddleware } from "../middleware/auth-middleware";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -37,8 +39,25 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+  // ── Health endpoint (public, pas d'auth) ────────────────────
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString(), version: "1.0.0" });
+  });
+
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
+
+  // ── Auth routes (login, me, refresh — publiques) ────────────
+  app.use("/api/auth", authRoutes);
+
+  // ── Routes protégées par auth middleware ─────────────────────
+  // Appliquer le middleware JWT sur toutes les routes sensibles
+  app.use("/api/compleo", authMiddleware);
+  app.use("/api/intelligence", authMiddleware);
+  app.use("/api/learning", authMiddleware);
+  app.use("/api/agent", authMiddleware);
+
   // Compleo API routes (upload, analyze, generate, download)
   registerCompleoRoutes(app);
   // Agent API routes (SSE, status, choices, cancel, download)
