@@ -134,11 +134,36 @@ function createPublicContext(): TrpcContext {
 }
 
 // ============================================================
+// Helper: create an authenticated context (for protectedProcedure)
+// ============================================================
+
+function createAuthContext(): TrpcContext {
+  return {
+    user: {
+      id: 1,
+      openId: "test-open-id-123",
+      name: "Test User",
+      email: "test@compleo.dev",
+      avatarUrl: null,
+      role: "admin" as const,
+      createdAt: new Date(),
+    },
+    req: {
+      protocol: "https",
+      headers: {},
+    } as TrpcContext["req"],
+    res: {
+      clearCookie: vi.fn(),
+    } as unknown as TrpcContext["res"],
+  };
+}
+
+// ============================================================
 // Tests
 // ============================================================
 
 describe("projects router", () => {
-  const ctx = createPublicContext();
+  const ctx = createAuthContext();
   const caller = appRouter.createCaller(ctx);
 
   it("creates a project", async () => {
@@ -198,7 +223,7 @@ describe("projects router", () => {
 });
 
 describe("files router", () => {
-  const ctx = createPublicContext();
+  const ctx = createAuthContext();
   const caller = appRouter.createCaller(ctx);
 
   it("uploads files to a project", async () => {
@@ -248,7 +273,7 @@ describe("files router", () => {
 });
 
 describe("scans router", () => {
-  const ctx = createPublicContext();
+  const ctx = createAuthContext();
   const caller = appRouter.createCaller(ctx);
 
   it("creates a scan", async () => {
@@ -300,7 +325,7 @@ describe("scans router", () => {
 });
 
 describe("comments router (collaboration)", () => {
-  const ctx = createPublicContext();
+  const ctx = createAuthContext();
   const caller = appRouter.createCaller(ctx);
 
   it("creates a comment", async () => {
@@ -371,7 +396,7 @@ describe("comments router (collaboration)", () => {
 });
 
 describe("git router", () => {
-  const ctx = createPublicContext();
+  const ctx = createAuthContext();
   const caller = appRouter.createCaller(ctx);
 
   it("connects a git repository", async () => {
@@ -429,7 +454,7 @@ describe("git router", () => {
 });
 
 describe("sharing router", () => {
-  const ctx = createPublicContext();
+  const ctx = createAuthContext();
   const caller = appRouter.createCaller(ctx);
 
   it("creates a shared report", async () => {
