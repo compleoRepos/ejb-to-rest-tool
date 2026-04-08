@@ -1680,7 +1680,7 @@ export default function CompleoPage() {
 
             {/* Tab: Code browser */}
             {resultTab === "code" && (
-              <div className="grid grid-cols-12 gap-4" style={{ height: "calc(100vh - 28rem)" }}>
+              <div className="grid grid-cols-12 gap-4" style={{ height: "calc(100vh - 20rem)", minHeight: "500px" }}>
                 {/* File tree */}
                 <div className="col-span-4 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] overflow-hidden">
                   <div className="p-3 border-b border-[oklch(0.25_0.01_250)]">
@@ -1777,7 +1777,7 @@ export default function CompleoPage() {
 
             {/* Tab: Diff Legacy/New */}
             {resultTab === "diff" && (
-              <div className="grid grid-cols-12 gap-4" style={{ height: "calc(100vh - 28rem)" }}>
+              <div className="grid grid-cols-12 gap-4" style={{ height: "calc(100vh - 20rem)", minHeight: "500px" }}>
                 {/* File tree (same as code tab) */}
                 <div className="col-span-3 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] overflow-hidden">
                   <div className="p-3 border-b border-[oklch(0.25_0.01_250)]">
@@ -1859,7 +1859,7 @@ export default function CompleoPage() {
 
             {/* Tab: Architecture */}
             {resultTab === "architecture" && analysisResult && (
-              <div style={{ height: "calc(100vh - 28rem)" }}>
+              <div style={{ height: "calc(100vh - 20rem)", minHeight: "500px" }}>
                 <ArchitectureDiagram
                   useCases={analysisResult.irSummary.useCases.map(uc => ({
                     className: uc.className,
