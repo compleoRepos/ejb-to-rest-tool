@@ -31,6 +31,12 @@ export interface ProjectIR {
   bianMapping: BianMapping[];
   stats: ProjectStats;
   warnings: string[];
+  /** EJB 2.x beans (SessionBean, EntityBean with Home/Remote interfaces) */
+  ejb2xBeans: Ejb2xBeanIR[];
+  /** JSR-352 batch jobs (ItemReader, ItemWriter, ItemProcessor) */
+  batchJobs: BatchJobIR[];
+  /** Raw Java files for secondary scanning (JNDI in batch/EJB2x files not classified as UseCases) */
+  _rawFiles?: { path: string; content: string }[];
 }
 
 export interface MavenDependency {
@@ -163,6 +169,26 @@ export interface BianMapping {
   action: string;
 }
 
+export interface Ejb2xBeanIR {
+  className: string;
+  packageName: string;
+  beanType: "SESSION" | "ENTITY" | "MDB";
+  homeInterface: string;
+  remoteInterface: string;
+  methods: { name: string; returnType: string; parameters: { name: string; type: string }[] }[];
+  sourceFile: string;
+  rawSource: string;
+}
+
+export interface BatchJobIR {
+  className: string;
+  packageName: string;
+  batchRole: "READER" | "WRITER" | "PROCESSOR" | "LISTENER" | "BATCHLET";
+  implementsInterface: string;
+  sourceFile: string;
+  rawSource: string;
+}
+
 export interface ProjectStats {
   totalFiles: number;
   totalLines: number;
@@ -216,6 +242,8 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
   const remoteFiles = javaFiles.filter(f => isRemoteInterface(f.content));
   const baseClassFiles = javaFiles.filter(f => isBaseClass(f.content, f.className));
   const constantsFile = javaFiles.find(f => f.className === "Constants");
+  const ejb2xFiles = javaFiles.filter(f => isEjb2xBean(f.content));
+  const batchFiles = javaFiles.filter(f => isBatchJob(f.content));
 
   // Build type registry for resolution
   const typeRegistry = buildTypeRegistry(javaFiles);
@@ -233,6 +261,8 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
   const remoteInterfaces = remoteFiles.map(f => parseRemoteInterface(f));
   const baseClasses = baseClassFiles.map(f => parseBaseClass(f));
   const constants = constantsFile ? parseConstants(constantsFile) : null;
+  const ejb2xBeans = ejb2xFiles.map(f => parseEjb2xBean(f, javaFiles));
+  const batchJobs = batchFiles.map(f => parseBatchJob(f));
 
   const useCases = useCaseFiles.map(f => {
     const uc = parseUseCase(f, dtoMap, bianMappings, typeRegistry);
@@ -282,8 +312,11 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
     baseClasses,
     constants,
     bianMapping: bianMappings,
+    ejb2xBeans,
+    batchJobs,
     stats,
     warnings,
+    _rawFiles: javaFiles.map(f => ({ path: f.path, content: f.content })),
   };
 }
 
@@ -334,6 +367,102 @@ function isBaseClass(content: string, className: string): boolean {
   if (className === "BaseUseCase" || className === "ValueObject") return true;
   if (/@interface/.test(content) && className === "UseCase") return true;
   return false;
+}
+
+function isEjb2xBean(content: string): boolean {
+  // EJB 2.x: implements SessionBean/EntityBean/MessageDrivenBean, or has ejbCreate/ejbRemove
+  if (/implements\s+(?:.*\b)?(?:SessionBean|EntityBean)\b/.test(content)) return true;
+  if (/\bejbCreate\b/.test(content) && /\bejbRemove\b/.test(content)) return true;
+  return false;
+}
+
+function isBatchJob(content: string): boolean {
+  // JSR-352: implements ItemReader/ItemWriter/ItemProcessor, or @BatchProperty
+  if (/implements\s+(?:.*\b)?(?:ItemReader|ItemWriter|ItemProcessor|AbstractItemReader|AbstractItemWriter)\b/.test(content)) return true;
+  if (/@BatchProperty/.test(content)) return true;
+  // Batchlet
+  if (/implements\s+(?:.*\b)?Batchlet\b/.test(content)) return true;
+  return false;
+}
+
+function parseEjb2xBean(file: JavaFile, allFiles: JavaFile[]): Ejb2xBeanIR {
+  const content = file.content;
+  const className = file.className;
+  const packageName = file.packageName;
+
+  // Determine bean type
+  let beanType: Ejb2xBeanIR["beanType"] = "SESSION";
+  if (/implements\s+(?:.*\b)?EntityBean\b/.test(content)) beanType = "ENTITY";
+  if (/implements\s+(?:.*\b)?MessageDrivenBean\b/.test(content)) beanType = "MDB";
+
+  // Find Home/Remote interfaces by naming convention (e.g., ActivationCarteBean → ActivationCarteHome/ActivationCarteRemote)
+  const baseName = className.replace(/Bean$/, "");
+  const homeFile = allFiles.find(f => f.className === `${baseName}Home`);
+  const remoteFile = allFiles.find(f => f.className === `${baseName}Remote`);
+
+  // Extract methods from the bean class
+  const methods: Ejb2xBeanIR["methods"] = [];
+  const methodPattern = /public\s+(\w[\w<>,\s]*?)\s+(\w+)\s*\(([^)]*)\)/g;
+  let m;
+  while ((m = methodPattern.exec(content)) !== null) {
+    const name = m[2];
+    // Skip EJB lifecycle methods
+    if (/^(ejbCreate|ejbRemove|ejbActivate|ejbPassivate|setSessionContext|setEntityContext|unsetEntityContext)$/.test(name)) continue;
+    const returnType = m[1].trim();
+    const params = m[3].trim()
+      .split(",")
+      .filter(Boolean)
+      .map(p => {
+        const parts = p.trim().split(/\s+/);
+        return { name: parts[parts.length - 1], type: parts.slice(0, -1).join(" ") };
+      });
+    methods.push({ name, returnType, parameters: params });
+  }
+
+  return {
+    className,
+    packageName,
+    beanType,
+    homeInterface: homeFile?.className || "",
+    remoteInterface: remoteFile?.className || "",
+    methods,
+    sourceFile: file.path,
+    rawSource: content,
+  };
+}
+
+function parseBatchJob(file: JavaFile): BatchJobIR {
+  const content = file.content;
+  const className = file.className;
+  const packageName = file.packageName;
+
+  let batchRole: BatchJobIR["batchRole"] = "PROCESSOR";
+  let implementsInterface = "";
+  if (/implements\s+(?:.*\b)?ItemReader\b/.test(content) || /implements\s+(?:.*\b)?AbstractItemReader\b/.test(content)) {
+    batchRole = "READER";
+    implementsInterface = "ItemReader";
+  } else if (/implements\s+(?:.*\b)?ItemWriter\b/.test(content) || /implements\s+(?:.*\b)?AbstractItemWriter\b/.test(content)) {
+    batchRole = "WRITER";
+    implementsInterface = "ItemWriter";
+  } else if (/implements\s+(?:.*\b)?ItemProcessor\b/.test(content)) {
+    batchRole = "PROCESSOR";
+    implementsInterface = "ItemProcessor";
+  } else if (/implements\s+(?:.*\b)?MessageListener\b/.test(content)) {
+    batchRole = "LISTENER";
+    implementsInterface = "MessageListener";
+  } else if (/implements\s+(?:.*\b)?Batchlet\b/.test(content)) {
+    batchRole = "BATCHLET";
+    implementsInterface = "Batchlet";
+  }
+
+  return {
+    className,
+    packageName,
+    batchRole,
+    implementsInterface,
+    sourceFile: file.path,
+    rawSource: content,
+  };
 }
 
 // ─── Extraction Helpers ─────────────────────────────────────────────────────

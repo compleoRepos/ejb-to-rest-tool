@@ -6,7 +6,7 @@
  * @author Hamza NORDINE
  */
 
-import type { ProjectIR, UseCaseIR, ServiceIR, DtoIR } from "../java-parser";
+import type { ProjectIR, UseCaseIR, ServiceIR, DtoIR, Ejb2xBeanIR, BatchJobIR } from "../java-parser";
 import {
   type DependencyGraph,
   type GraphNode,
@@ -206,21 +206,36 @@ export class GraphBuilder {
         addDeferredEdge(sourceId, dep.type, "DEPENDS_ON", dep.name);
       }
 
-      // 6b: JNDI lookup → JNDI_LOOKUP
-      const jndiPattern = /lookup\s*\(\s*["']([^"']+)["']\s*\)/g;
-      let jndiMatch;
-      while ((jndiMatch = jndiPattern.exec(raw)) !== null) {
-        const jndiName = jndiMatch[1];
-        // Create external node for JNDI target
-        const extId = `jndi:${jndiName}`;
-        addNode({
-          id: extId,
-          type: "EXTERNAL",
-          systemName: jndiName,
-          externalType: "WEBSERVICE",
-          protocol: "JNDI",
-        } as ExternalNode);
-        addEdge(sourceId, extId, "JNDI_LOOKUP", jndiName);
+      // 6b: JNDI lookup → JNDI_LOOKUP (5 patterns)
+      // Pattern 1: InitialContext.lookup("...")
+      // Pattern 2: @EJB(lookup = "...")
+      // Pattern 3: @EJB(lookup="...")
+      // Pattern 4: @EJB(beanName = "...")
+      // Pattern 5: @Resource(mappedName = "...")
+      const jndiPatterns: RegExp[] = [
+        /lookup\s*\(\s*["']([^"']+)["']\s*\)/g,                        // InitialContext.lookup("...")
+        /@EJB\s*\(\s*(?:[^)]*?,\s*)?lookup\s*=\s*["']([^"']+)["']/g,  // @EJB(lookup="...")
+        /@EJB\s*\(\s*(?:[^)]*?,\s*)?beanName\s*=\s*["']([^"']+)["']/g, // @EJB(beanName="...")
+        /@Resource\s*\(\s*(?:[^)]*?,\s*)?mappedName\s*=\s*["']([^"']+)["']/g, // @Resource(mappedName="...")
+      ];
+      const jndiTargetsSeen = new Set<string>();
+      for (const pattern of jndiPatterns) {
+        let jndiMatch;
+        while ((jndiMatch = pattern.exec(raw)) !== null) {
+          const jndiName = jndiMatch[1];
+          if (jndiTargetsSeen.has(jndiName)) continue;
+          jndiTargetsSeen.add(jndiName);
+          // Create external node for JNDI target
+          const extId = `jndi:${jndiName}`;
+          addNode({
+            id: extId,
+            type: "EXTERNAL",
+            systemName: jndiName,
+            externalType: "WEBSERVICE",
+            protocol: "JNDI",
+          } as ExternalNode);
+          addEdge(sourceId, extId, "JNDI_LOOKUP", jndiName);
+        }
       }
 
       // 6c: PreparedStatement / @Query → DB_ACCESS
@@ -300,6 +315,142 @@ export class GraphBuilder {
       if (uc.transactional) {
         for (const dep of uc.injectedServices) {
           addDeferredEdge(sourceId, dep.type, "TRANSACTION_WITH", "shared-tx");
+        }
+      }
+    }
+
+    // ── Step 6bis: Scan ALL raw Java files for JNDI patterns (covers batch, EJB 2.x, etc.) ──
+    // This catches JNDI lookups in files not classified as UseCases (e.g., JSR-352 batch processors)
+    const jndiPatternsGlobal: RegExp[] = [
+      /lookup\s*\(\s*["']([^"']+)["']\s*\)/g,
+      /@EJB\s*\(\s*(?:[^)]*?,\s*)?lookup\s*=\s*["']([^"']+)["']/g,
+      /@EJB\s*\(\s*(?:[^)]*?,\s*)?beanName\s*=\s*["']([^"']+)["']/g,
+      /@Resource\s*\(\s*(?:[^)]*?,\s*)?mappedName\s*=\s*["']([^"']+)["']/g,
+    ];
+    // Track which files we already scanned in Step 6 (UseCases)
+    const scannedFiles = new Set(ir.useCases.map(uc => uc.sourceFile));
+    // Scan baseClasses and remoteInterfaces rawSource if available
+    // Also scan any raw Java file content available via the IR's original files
+    if ((ir as any)._rawFiles) {
+      for (const file of (ir as any)._rawFiles) {
+        if (scannedFiles.has(file.path)) continue;
+        const raw = file.content || "";
+        // Try to find a node for this file
+        const classMatch = raw.match(/(?:public\s+)?(?:abstract\s+)?class\s+(\w+)/);
+        const pkgMatch = raw.match(/package\s+([\w.]+)/);
+        if (!classMatch) continue;
+        const className = classMatch[1];
+        const pkgName = pkgMatch ? pkgMatch[1] : "";
+        const sourceId = createNodeId(className, pkgName);
+        // If this class is not already a node, create it
+        if (!nodeIds.has(sourceId)) {
+          const tech = detectTechnology(raw, []);
+          addNode({
+            id: sourceId,
+            type: "CLASS",
+            className,
+            packageName: pkgName,
+            role: "INFRASTRUCTURE",
+            domain: "UNKNOWN",
+            linesOfCode: raw.split("\n").length,
+            complexity: estimateComplexity(raw),
+            technologyType: tech,
+            sourceFile: file.path,
+          } as ClassNode);
+        }
+        for (const pattern of jndiPatternsGlobal) {
+          let m;
+          while ((m = pattern.exec(raw)) !== null) {
+            const jndiName = m[1];
+            const extId = `jndi:${jndiName}`;
+            addNode({
+              id: extId,
+              type: "EXTERNAL",
+              systemName: jndiName,
+              externalType: "WEBSERVICE",
+              protocol: "JNDI",
+            } as ExternalNode);
+            addEdge(sourceId, extId, "JNDI_LOOKUP", jndiName);
+          }
+        }
+      }
+    }
+
+    // ── Step 6ter: Scan EJB 2.x beans and batch jobs for additional edges ─────────
+    // Scan ejb2xBeans for DB_ACCESS, JNDI, and EMITS_EVENT patterns
+    if (ir.ejb2xBeans) {
+      for (const bean of ir.ejb2xBeans) {
+        const sourceId = createNodeId(bean.className, bean.packageName);
+        const raw = bean.rawSource || "";
+        // DB_ACCESS
+        const tblPattern = /(?:FROM|INTO|UPDATE|JOIN|TABLE)\s+(?:`)?([A-Z_]\w+)(?:`)?/gi;
+        let tblMatch;
+        while ((tblMatch = tblPattern.exec(raw)) !== null) {
+          const tableName = tblMatch[1];
+          if (tableName.length < 3) continue;
+          const dbId = `db:${tableName}`;
+          if (!nodeIds.has(dbId)) {
+            addNode({ id: dbId, type: "EXTERNAL", systemName: tableName, externalType: "DATABASE", protocol: "JDBC" } as ExternalNode);
+          }
+          addEdge(sourceId, dbId, "DB_ACCESS", tableName);
+        }
+        // JMS / EMITS_EVENT
+        if (raw.includes("@MessageDriven") || raw.includes("MessageListener") || raw.includes("JMSProducer") || raw.includes("jms/")) {
+          const qPattern = /(?:destination|queue|topic|mappedName|name)\s*=\s*["']([^"']+)["']/gi;
+          let qMatch;
+          while ((qMatch = qPattern.exec(raw)) !== null) {
+            const qName = qMatch[1];
+            if (!qName.includes("jms") && !qName.includes("queue") && !qName.includes("Queue") && !qName.includes("topic") && !qName.includes("Topic")) continue;
+            const qId = `queue:${qName}`;
+            if (!nodeIds.has(qId)) {
+              addNode({ id: qId, type: "EXTERNAL", systemName: qName, externalType: "QUEUE", protocol: "JMS" } as ExternalNode);
+            }
+            addEdge(sourceId, qId, "EMITS_EVENT", qName);
+          }
+        }
+      }
+    }
+    // Scan batchJobs for DB_ACCESS, EMITS_EVENT, and @Resource DataSource patterns
+    if (ir.batchJobs) {
+      for (const job of ir.batchJobs) {
+        const sourceId = createNodeId(job.className, job.packageName);
+        const raw = job.rawSource || "";
+        // DB_ACCESS from SQL or DataSource
+        const tblPattern2 = /(?:FROM|INTO|UPDATE|JOIN|TABLE)\s+(?:`)?([A-Z_]\w+)(?:`)?/gi;
+        let tblMatch2;
+        while ((tblMatch2 = tblPattern2.exec(raw)) !== null) {
+          const tableName = tblMatch2[1];
+          if (tableName.length < 3) continue;
+          const dbId = `db:${tableName}`;
+          if (!nodeIds.has(dbId)) {
+            addNode({ id: dbId, type: "EXTERNAL", systemName: tableName, externalType: "DATABASE", protocol: "JDBC" } as ExternalNode);
+          }
+          addEdge(sourceId, dbId, "DB_ACCESS", tableName);
+        }
+        // @Resource DataSource → DB_ACCESS
+        const dsPattern = /@Resource\s*\(\s*(?:[^)]*?,\s*)?name\s*=\s*["']([^"']+)["']/g;
+        let dsMatch;
+        while ((dsMatch = dsPattern.exec(raw)) !== null) {
+          const dsName = dsMatch[1];
+          const dbId = `db:${dsName}`;
+          if (!nodeIds.has(dbId)) {
+            addNode({ id: dbId, type: "EXTERNAL", systemName: dsName, externalType: "DATABASE", protocol: "JDBC" } as ExternalNode);
+          }
+          addEdge(sourceId, dbId, "DB_ACCESS", dsName);
+        }
+        // JMS patterns in batch
+        if (raw.includes("@MessageDriven") || raw.includes("MessageListener") || raw.includes("jms/")) {
+          const qPattern2 = /(?:destination|queue|topic|mappedName|name)\s*=\s*["']([^"']+)["']/gi;
+          let qMatch2;
+          while ((qMatch2 = qPattern2.exec(raw)) !== null) {
+            const qName = qMatch2[1];
+            if (!qName.includes("jms") && !qName.includes("queue") && !qName.includes("Queue") && !qName.includes("topic") && !qName.includes("Topic")) continue;
+            const qId = `queue:${qName}`;
+            if (!nodeIds.has(qId)) {
+              addNode({ id: qId, type: "EXTERNAL", systemName: qName, externalType: "QUEUE", protocol: "JMS" } as ExternalNode);
+            }
+            addEdge(sourceId, qId, "EMITS_EVENT", qName);
+          }
         }
       }
     }

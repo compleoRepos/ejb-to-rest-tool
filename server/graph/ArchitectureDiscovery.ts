@@ -29,6 +29,7 @@ export interface ExitPoint {
   className: string;
   type: "DATABASE" | "QUEUE" | "WEBSERVICE" | "FILE" | "SMTP" | "EXTERNAL_SYSTEM";
   target: string;
+  targetSystem: string;
   protocol: string;
 }
 
@@ -227,6 +228,7 @@ export class ArchitectureDiscovery {
           className,
           type,
           target: ext.systemName,
+          targetSystem: this.inferTargetSystem(ext.systemName, ext.externalType, ext.protocol),
           protocol: ext.protocol || "UNKNOWN",
         });
       }
@@ -247,7 +249,16 @@ export class ArchitectureDiscovery {
 
     for (const node of graph.nodes) adjacency.set(node.id, []);
     for (const edge of graph.edges) {
-      if (edge.type === "DEPENDS_ON" || edge.type === "CALLS" || edge.type === "JNDI_LOOKUP") {
+      // Suivre toutes les arêtes de dépendance pour tracer les flux complets
+      if (
+        edge.type === "DEPENDS_ON" ||
+        edge.type === "CALLS" ||
+        edge.type === "JNDI_LOOKUP" ||
+        edge.type === "DB_ACCESS" ||
+        edge.type === "EMITS_EVENT" ||
+        edge.type === "SOAP_CALLS" ||
+        edge.type === "TRANSACTION_WITH"
+      ) {
         adjacency.get(edge.source)?.push(edge.target);
       }
     }
@@ -289,7 +300,7 @@ export class ArchitectureDiscovery {
 
       if (path.length < 2) continue;
 
-      // Évaluer le risque
+      // Évaluer le risque — facteurs structurels
       const riskFactors: string[] = [];
       if (maxDepth > 5) riskFactors.push(`Profondeur élevée (${maxDepth} niveaux)`);
       if (flowExitPoints.some((ep) => ep.type === "DATABASE"))
@@ -301,6 +312,67 @@ export class ArchitectureDiscovery {
       if (path.length > 10) riskFactors.push(`Chaîne longue (${path.length} classes)`);
       if (!isTransactional && flowExitPoints.some((ep) => ep.type === "DATABASE"))
         riskFactors.push("Accès DB sans transaction explicite");
+
+      // CORRECTION 2: Facteurs de risque supplémentaires basés sur les technologies et patterns
+      // Analyse des nœuds traversés pour détecter des patterns à risque
+      for (const nodeId of path) {
+        const node = graph.nodes.find((n) => n.id === nodeId);
+        if (!node || node.type !== "CLASS") continue;
+        const cn = node as ClassNode;
+        // EJB 2.x dans le flux = risque de migration élevé
+        if (cn.technologyType === "EJB_2X") {
+          if (!riskFactors.includes("Technologie EJB 2.x (migration complexe)"))
+            riskFactors.push("Technologie EJB 2.x (migration complexe)");
+        }
+        // Batch dans le flux
+        if (cn.technologyType === "BATCH_JSR352") {
+          if (!riskFactors.includes("Traitement batch JSR-352"))
+            riskFactors.push("Traitement batch JSR-352");
+        }
+        // Haute complexité cyclomatique
+        if (cn.complexity > 15) {
+          if (!riskFactors.includes("Complexité cyclomatique élevée"))
+            riskFactors.push("Complexité cyclomatique élevée");
+        }
+        // JNDI lookup dans le flux
+        const jndiEdges = graph.edges.filter((e) => e.source === nodeId && e.type === "JNDI_LOOKUP");
+        if (jndiEdges.length > 0) {
+          if (!riskFactors.includes("Lookup JNDI (couplage fort)"))
+            riskFactors.push("Lookup JNDI (couplage fort)");
+        }
+      }
+      // JDBC legacy pattern detection and direct DB_ACCESS from CLASS nodes
+      for (const nodeId of path) {
+        const node = graph.nodes.find((n) => n.id === nodeId);
+        if (!node || node.type !== "CLASS") continue;
+        const cn = node as ClassNode;
+        // Check if this CLASS node has direct DB_ACCESS edges (JDBC pattern)
+        const dbEdges = graph.edges.filter((e) => e.source === nodeId && e.type === "DB_ACCESS");
+        if (dbEdges.length > 0) {
+          if (cn.technologyType === "JDBC") {
+            if (!riskFactors.includes("Accès JDBC legacy (risque fuite connexion)"))
+              riskFactors.push("Accès JDBC legacy (risque fuite connexion)");
+          }
+          // Ensure DB access is counted as a risk factor
+          if (!riskFactors.includes("Accès base de données"))
+            riskFactors.push("Accès base de données");
+          // If no @Transactional and has DB access
+          if (!isTransactional && !riskFactors.includes("Accès DB sans transaction explicite"))
+            riskFactors.push("Accès DB sans transaction explicite");
+          // @Resource DataSource = JDBC pattern even if tech is EJB_3X
+          if (!riskFactors.includes("Accès JDBC legacy (risque fuite connexion)"))
+            riskFactors.push("Accès JDBC legacy (risque fuite connexion)");
+        }
+      }
+      // Flux multi-technologies
+      const techsInPath = new Set<string>();
+      for (const nodeId of path) {
+        const node = graph.nodes.find((n) => n.id === nodeId);
+        if (node && node.type === "CLASS") techsInPath.add((node as ClassNode).technologyType);
+      }
+      if (techsInPath.size > 2) {
+        riskFactors.push(`Flux multi-technologies (${techsInPath.size} techs)`);
+      }
 
       let riskLevel: CriticalFlow["riskLevel"] = "LOW";
       if (riskFactors.length >= 4) riskLevel = "CRITICAL";
@@ -379,6 +451,41 @@ export class ArchitectureDiscovery {
     }
 
     return modules;
+  }
+
+  // ─── Target System Inference ─────────────────────────────────────────────
+
+  private inferTargetSystem(systemName: string, externalType: string, protocol: string): string {
+    const name = systemName.toUpperCase();
+    // Database tables
+    if (externalType === "DATABASE") {
+      if (name.startsWith("T_COMPTES") || name.includes("COMPTE")) return "Core Banking System (Comptes)";
+      if (name.startsWith("T_VIREMENT") || name.includes("VIREMENT")) return "Système de Virements";
+      if (name.startsWith("T_CLIENT") || name.includes("CLIENT")) return "Référentiel Clients";
+      if (name.startsWith("T_CREDIT") || name.includes("CREDIT") || name.includes("PRET")) return "Système de Crédit";
+      if (name.startsWith("T_CARTE") || name.includes("CARTE") || name.includes("CARD")) return "Système Monétique";
+      if (name.startsWith("T_INTERET") || name.includes("INTERET")) return "Système Calcul Intérêts";
+      if (name.startsWith("T_RELEVE") || name.includes("RELEVE")) return "Système Relevés";
+      if (name.startsWith("T_KYC") || name.includes("KYC") || name.includes("CONFORMITE")) return "Système KYC/Conformité";
+      if (name.includes("AUDIT") || name.includes("LOG") || name.includes("TRACE")) return "Système d'Audit";
+      if (name.includes("JDBC") || name.includes("_DS")) return `DataSource ${systemName}`;
+      return `Base de données (${systemName})`;
+    }
+    // Queues
+    if (externalType === "QUEUE") {
+      if (name.includes("BATCH")) return "Système Batch";
+      if (name.includes("VIREMENT") || name.includes("SWIFT")) return "Bus Virements/SWIFT";
+      if (name.includes("NOTIF")) return "Système de Notifications";
+      return `File JMS (${systemName})`;
+    }
+    // Web services
+    if (externalType === "WEBSERVICE") {
+      if (protocol === "JNDI") return `Service JNDI (${systemName})`;
+      if (name.includes("SWIFT")) return "Réseau SWIFT";
+      if (name.includes("MAGIX") || name.includes("MAJ")) return "Système Magix";
+      return `Service externe (${systemName})`;
+    }
+    return `Système externe (${systemName})`;
   }
 
   // ─── Module Naming ──────────────────────────────────────────────────────
