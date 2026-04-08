@@ -27,6 +27,12 @@ import type {
   ProjectIR, UseCaseIR, DtoIR, DtoFieldIR, ServiceIR,
   EnumIR, ExceptionIR, ValidatorIR, RemoteInterfaceIR,
 } from "./java-parser";
+import {
+  BusinessLogicTransformer,
+  extractExecuteBody,
+  extractConstants,
+  type TransformContext,
+} from "./engine/BusinessLogicTransformer";
 
 export interface GeneratedFile {
   path: string;
@@ -819,6 +825,13 @@ function generateDomainService(
     const javadoc = (uc as any).useCaseDescription || (uc as any).javadoc || "";
     const javadocLine = javadoc ? `\n     * ${javadoc}` : "";
 
+    const methodBody = generateServiceMethodBody(uc, reqDto, resDto, reqType, resType);
+    // v5.3: If the body was migrated (contains "return builder.build()"), skip the fallback ending
+    const isMigrated = methodBody.includes("return builder.build()") || methodBody.includes("Migrated from:");
+    const endingLines = isMigrated
+      ? ""  // Migrated code already has its own return statement
+      : `\n        log.info("=== Ending ${methodName} ===");\n${returnType !== "void" ? "        return response;" : ""}`;
+
     methods.push(`
 ${txAnnotation}    /**
      * ${uc.className} — ${uc.bianDomain || domain} / ${uc.bianAction || methodName}.${javadocLine}
@@ -826,9 +839,7 @@ ${txAnnotation}    /**
      */
     public ${returnType} ${methodName}(${paramType}) {
         log.info("=== Starting ${methodName} ===");
-${generateServiceMethodBody(uc, reqDto, resDto, reqType, resType)}
-        log.info("=== Ending ${methodName} ===");
-${returnType !== "void" ? "        return response;" : ""}
+${methodBody}${endingLines}
     }`);
   }
 
@@ -874,6 +885,62 @@ function generateServiceMethodBody(
   uc: UseCaseIR, reqDto: DtoIR | undefined, resDto: DtoIR | undefined,
   reqType: string, resType: string
 ): string {
+  // ─── v5.3: Try to extract and transform real execute() body ───
+  const executeBody = extractExecuteBody(uc.rawSource);
+
+  if (executeBody) {
+    // Real business logic found — transform it
+    const transformer = new BusinessLogicTransformer();
+    const ctx: TransformContext = {
+      voInClass: uc.voInType,
+      voOutClass: uc.voOutType,
+      requestDtoClass: reqType,
+      responseDtoClass: resType,
+      sourceClassName: uc.className,
+    };
+    const result = transformer.transform(executeBody, ctx);
+
+    // Extract constants from the source and prepend them
+    const constants = extractConstants(uc.rawSource);
+    const constantLines = constants.map(c =>
+      `        // Migrated constant from ${uc.className}
+        final ${c.type} ${c.name} = ${c.value};`
+    );
+
+    const lines: string[] = [];
+
+    // Add constants if any
+    if (constantLines.length > 0) {
+      lines.push(...constantLines);
+      lines.push("");
+    }
+
+    // Add the builder initialization for response DTO
+    if (resDto && resType !== "Void") {
+      lines.push(`        var builder = ${resType}.builder();`);
+    }
+
+    // Add the transformed body (indented)
+    const bodyLines = result.body.split("\n").map(line => {
+      // Already indented lines stay as-is, others get 8 spaces
+      if (line.trim() === "") return "";
+      if (line.startsWith("        ")) return line;
+      return "        " + line;
+    });
+    lines.push(...bodyLines);
+
+    // Add warnings as comments
+    for (const warning of result.warnings) {
+      lines.push(`        // WARNING: ${warning}`);
+    }
+
+    // Add migration comment
+    lines.push(`        // Migrated from: ${uc.className}.execute() — ${result.linesTransformed} transformations applied`);
+
+    return lines.join("\n");
+  }
+
+  // ─── Fallback: No execute() body found — generate builder + TODO ───
   const lines: string[] = [];
 
   if (resDto && resType !== "Void") {
