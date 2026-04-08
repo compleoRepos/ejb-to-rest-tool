@@ -25,7 +25,51 @@ const router = Router();
 const engine = new LearningEngine();
 const store = new RuleStore();
 
-// ─── GET /api/learning/rules ────────────────────────────────────────────────
+//// ─── GET /api/learning/rules/export (MUST be before :id routes) ─────────────
+
+router.get("/rules/export", async (req, res) => {
+  try {
+    const tenant = (req.query.tenant as string) || "global";
+    const exported = await engine.exportRules(tenant);
+
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="compleo-rules-${new Date().toISOString().split("T")[0]}.json"`
+    );
+    res.json(exported);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─── POST /api/learning/rules/import (MUST be before :id routes) ────────────
+
+router.post("/rules/import", async (req, res) => {
+  try {
+    const { data, tenant, strategy = "merge" } = req.body;
+
+    if (!data || !data.rules) {
+      return res.status(400).json({
+        success: false,
+        error: "Format invalide : le champ 'data' avec 'rules' est requis",
+      });
+    }
+
+    const targetTenant = tenant || data.tenant || "global";
+    const result = await engine.importRules(data, targetTenant, strategy);
+
+    res.json({
+      success: true,
+      ...result,
+      message: `Import terminé : ${result.imported} importées, ${result.skipped} ignorées, ${result.conflicts} conflits résolus`,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─── GET /api/learning/rules ────────────────────────────────────────────
 
 router.get("/rules", async (req, res) => {
   try {
@@ -220,50 +264,6 @@ router.get("/stats", async (req, res) => {
     const stats = await engine.getStats(tenant);
 
     res.json({ success: true, stats });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// ─── GET /api/learning/rules/export ─────────────────────────────────────────
-
-router.get("/rules/export", async (req, res) => {
-  try {
-    const tenant = (req.query.tenant as string) || "global";
-    const exported = await engine.exportRules(tenant);
-
-    res.setHeader("Content-Type", "application/json");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="compleo-rules-${new Date().toISOString().split("T")[0]}.json"`
-    );
-    res.json(exported);
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// ─── POST /api/learning/rules/import ────────────────────────────────────────
-
-router.post("/rules/import", async (req, res) => {
-  try {
-    const { data, tenant, strategy = "merge" } = req.body;
-
-    if (!data || !data.rules) {
-      return res.status(400).json({
-        success: false,
-        error: "Format invalide : le champ 'data' avec 'rules' est requis",
-      });
-    }
-
-    const targetTenant = tenant || data.tenant || "global";
-    const result = await engine.importRules(data, targetTenant, strategy);
-
-    res.json({
-      success: true,
-      ...result,
-      message: `Import terminé : ${result.imported} importées, ${result.skipped} ignorées, ${result.conflicts} conflits résolus`,
-    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
