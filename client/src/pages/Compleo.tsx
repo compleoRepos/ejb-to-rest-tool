@@ -18,7 +18,11 @@ import {
   ChevronDown, RefreshCw, History, BarChart3,
   Terminal, Zap, Server, Database, Shield, Box,
   HelpCircle, Star, ArrowLeft, Lightbulb, Info,
+  Columns2, GitCompare, Network,
 } from "lucide-react";
+import CodeDiff from "@/components/CodeDiff";
+import ArchitectureDiagram from "@/components/ArchitectureDiagram";
+import { DebugPanel } from "@/components/DebugPanel";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -244,6 +248,9 @@ export default function CompleoPage() {
   const [previewFile, setPreviewFile] = useState<FilePreview | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [resultTab, setResultTab] = useState<"code" | "diff" | "architecture">("code");
+  const [sourceFile, setSourceFile] = useState<{ path: string; content: string } | null>(null);
+  const [loadingSource, setLoadingSource] = useState(false);
 
   // History state
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -422,6 +429,71 @@ export default function CompleoPage() {
     }
   }, [uploadResult, ambiguities, userChoices]);
 
+  // ─── Source File Fetch Handler ──────────────────────────────────────────
+
+  const fetchSourceFile = useCallback(async (generatedPath: string) => {
+    if (!uploadResult || !analysisResult) return;
+    setLoadingSource(true);
+    setSourceFile(null);
+
+    // Infer source file name from generated file name
+    const fileName = generatedPath.split("/").pop()?.replace(".java", "") || "";
+    let sourceClassName = "";
+
+    // Controller → UseCase mapping
+    if (fileName.endsWith("Controller")) {
+      const domain = fileName.replace("Controller", "");
+      const uc = analysisResult.irSummary.useCases.find(u =>
+        u.domain.toLowerCase() === domain.toLowerCase()
+      );
+      if (uc) sourceClassName = uc.className;
+    }
+    // RequestDTO → VoIn mapping
+    else if (fileName.endsWith("RequestDTO")) {
+      const baseName = fileName.replace("RequestDTO", "");
+      const dto = analysisResult.irSummary.dtos.find(d =>
+        d.className.replace("VoIn", "").replace("Dto", "") === baseName && d.direction === "in"
+      );
+      if (dto) sourceClassName = dto.className;
+    }
+    // ResponseDTO → VoOut mapping
+    else if (fileName.endsWith("ResponseDTO")) {
+      const baseName = fileName.replace("ResponseDTO", "");
+      const dto = analysisResult.irSummary.dtos.find(d =>
+        d.className.replace("VoOut", "").replace("Dto", "") === baseName && d.direction === "out"
+      );
+      if (dto) sourceClassName = dto.className;
+    }
+    // Service → RemoteInterface mapping
+    else if (fileName.endsWith("Service") || fileName.endsWith("ServiceAdapter")) {
+      const baseName = fileName.replace("ServiceAdapter", "").replace("Service", "");
+      const svc = analysisResult.irSummary.remoteInterfaces.find(r =>
+        r.className.replace("Remote", "").replace("Service", "").toLowerCase().includes(baseName.toLowerCase())
+      );
+      if (svc) sourceClassName = svc.className;
+    }
+    // Enum → same name
+    else {
+      const en = analysisResult.irSummary.enums.find(e => e.className === fileName);
+      if (en) sourceClassName = en.className;
+      const ex = analysisResult.irSummary.exceptions.find(e => e.className === fileName);
+      if (ex) sourceClassName = ex.className;
+    }
+
+    if (sourceClassName) {
+      try {
+        const res = await fetch(`/api/compleo/source/${uploadResult.sessionId}/${sourceClassName}.java`);
+        if (res.ok) {
+          const data = await res.json();
+          setSourceFile({ path: data.path, content: data.content });
+        }
+      } catch {
+        // No source found — that's OK
+      }
+    }
+    setLoadingSource(false);
+  }, [uploadResult, analysisResult]);
+
   // ─── Preview Handler ────────────────────────────────────────────────────
 
   const handlePreviewFile = useCallback(async (filePath: string) => {
@@ -433,12 +505,14 @@ export default function CompleoPage() {
       if (!res.ok) throw new Error("Preview failed");
       const data: FilePreview = await res.json();
       setPreviewFile(data);
+      // Also fetch the source file for diff view
+      fetchSourceFile(filePath);
     } catch (err: any) {
       toast.error("Impossible de charger le fichier");
     } finally {
       setLoadingPreview(false);
     }
-  }, [uploadResult]);
+  }, [uploadResult, fetchSourceFile]);
 
   // ─── Download Handler ───────────────────────────────────────────────────
 
@@ -469,9 +543,11 @@ export default function CompleoPage() {
     setAnalysisResult(null);
     setGenerationResult(null);
     setPreviewFile(null);
+    setSourceFile(null);
     setExpandedCategories(new Set());
     setUserChoices({});
     setCurrentAmbiguityIndex(0);
+    setResultTab("code");
   }, []);
 
   // ─── Toggle category ───────────────────────────────────────────────────
@@ -1208,103 +1284,263 @@ export default function CompleoPage() {
               </div>
             </div>
 
-            {/* File browser + Preview */}
-            <div className="grid grid-cols-12 gap-4" style={{ height: "calc(100vh - 24rem)" }}>
-              {/* File tree */}
-              <div className="col-span-4 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] overflow-hidden">
-                <div className="p-3 border-b border-[oklch(0.25_0.01_250)]">
-                  <h4 className="text-sm font-semibold text-white flex items-center gap-2">
-                    <FolderArchive className="w-4 h-4 text-emerald-400" />
-                    Fichiers generes ({generationResult.files.length})
-                  </h4>
-                </div>
-                <ScrollArea className="h-[calc(100%-3rem)]">
-                  <div className="p-2">
-                    {Object.entries(filesByCategory).map(([cat, files]) => {
-                      const Icon = categoryIcons[cat] || FileCode2;
-                      const isExpanded = expandedCategories.has(cat);
-                      return (
-                        <div key={cat} className="mb-1">
-                          <button
-                            onClick={() => toggleCategory(cat)}
-                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[oklch(0.2_0.01_250)] text-left"
-                          >
-                            {isExpanded ? <ChevronDown className="w-3 h-3 text-[oklch(0.5_0.01_250)]" /> : <ChevronRight className="w-3 h-3 text-[oklch(0.5_0.01_250)]" />}
-                            <Icon className={`w-4 h-4 ${categoryColors[cat] || "text-gray-400"}`} />
-                            <span className="text-sm text-white font-medium">{getCategoryLabel(cat)}</span>
-                            <span className="text-xs text-[oklch(0.4_0.01_250)] ml-auto">{files.length}</span>
-                          </button>
-                          {isExpanded && (
-                            <div className="ml-6 border-l border-[oklch(0.25_0.01_250)] pl-2">
-                              {files.map((f, i) => {
-                                const fileName = f.path.split("/").pop() || f.path;
-                                const isActive = previewFile?.path === f.path;
-                                return (
-                                  <button
-                                    key={`${cat}-${i}`}
-                                    onClick={() => handlePreviewFile(f.path)}
-                                    className={`w-full flex items-center gap-2 px-2 py-1 rounded text-left text-xs ${
-                                      isActive
-                                        ? "bg-emerald-500/20 text-emerald-400"
-                                        : "text-[oklch(0.6_0.01_250)] hover:bg-[oklch(0.2_0.01_250)] hover:text-white"
-                                    }`}
-                                  >
-                                    <FileCode2 className="w-3 h-3 flex-shrink-0" />
-                                    <span className="truncate">{fileName}</span>
-                                    <span className="text-[oklch(0.4_0.01_250)] ml-auto flex-shrink-0">{f.lines}L</span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </ScrollArea>
-              </div>
-
-              {/* Code preview */}
-              <div className="col-span-8 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.12_0.01_250)] overflow-hidden">
-                {loadingPreview ? (
-                  <div className="h-full flex items-center justify-center">
-                    <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
-                  </div>
-                ) : previewFile ? (
-                  <>
-                    <div className="p-3 border-b border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <FileCode2 className="w-4 h-4 text-emerald-400" />
-                        <span className="text-sm text-white font-mono">{previewFile.path}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className={`text-xs ${categoryColors[previewFile.category] || "text-gray-400"}`}>
-                          {getCategoryLabel(previewFile.category)}
-                        </Badge>
-                        <span className="text-xs text-[oklch(0.5_0.01_250)]">{previewFile.lines} lignes</span>
-                      </div>
-                    </div>
-                    <ScrollArea className="h-[calc(100%-3rem)]">
-                      <pre className="p-4 text-xs leading-relaxed">
-                        <code className="text-[oklch(0.8_0.01_250)] font-mono whitespace-pre">
-                          {previewFile.content}
-                        </code>
-                      </pre>
-                    </ScrollArea>
-                  </>
-                ) : (
-                  <div className="h-full flex items-center justify-center text-[oklch(0.4_0.01_250)]">
-                    <div className="text-center">
-                      <Eye className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                      <p className="text-sm">Selectionnez un fichier pour previsualiser</p>
-                    </div>
-                  </div>
-                )}
-              </div>
+            {/* Result view tabs */}
+            <div className="flex items-center gap-2 mb-4">
+              {[
+                { id: "code" as const, label: "Code", icon: Code2 },
+                { id: "diff" as const, label: "Diff Legacy/New", icon: Columns2 },
+                { id: "architecture" as const, label: "Architecture", icon: Network },
+              ].map(tab => {
+                const TabIcon = tab.icon;
+                const isActive = resultTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setResultTab(tab.id)}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      isActive
+                        ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                        : "text-[oklch(0.6_0.01_250)] hover:text-white hover:bg-[oklch(0.2_0.01_250)] border border-transparent"
+                    }`}
+                  >
+                    <TabIcon className="w-4 h-4" />
+                    {tab.label}
+                  </button>
+                );
+              })}
             </div>
+
+            {/* Tab: Code browser */}
+            {resultTab === "code" && (
+              <div className="grid grid-cols-12 gap-4" style={{ height: "calc(100vh - 28rem)" }}>
+                {/* File tree */}
+                <div className="col-span-4 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] overflow-hidden">
+                  <div className="p-3 border-b border-[oklch(0.25_0.01_250)]">
+                    <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+                      <FolderArchive className="w-4 h-4 text-emerald-400" />
+                      Fichiers generes ({generationResult.files.length})
+                    </h4>
+                  </div>
+                  <ScrollArea className="h-[calc(100%-3rem)]">
+                    <div className="p-2">
+                      {Object.entries(filesByCategory).map(([cat, files]) => {
+                        const Icon = categoryIcons[cat] || FileCode2;
+                        const isExpanded = expandedCategories.has(cat);
+                        return (
+                          <div key={cat} className="mb-1">
+                            <button
+                              onClick={() => toggleCategory(cat)}
+                              className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[oklch(0.2_0.01_250)] text-left"
+                            >
+                              {isExpanded ? <ChevronDown className="w-3 h-3 text-[oklch(0.5_0.01_250)]" /> : <ChevronRight className="w-3 h-3 text-[oklch(0.5_0.01_250)]" />}
+                              <Icon className={`w-4 h-4 ${categoryColors[cat] || "text-gray-400"}`} />
+                              <span className="text-sm text-white font-medium">{getCategoryLabel(cat)}</span>
+                              <span className="text-xs text-[oklch(0.4_0.01_250)] ml-auto">{files.length}</span>
+                            </button>
+                            {isExpanded && (
+                              <div className="ml-6 border-l border-[oklch(0.25_0.01_250)] pl-2">
+                                {files.map((f, i) => {
+                                  const fileName = f.path.split("/").pop() || f.path;
+                                  const isActive = previewFile?.path === f.path;
+                                  return (
+                                    <button
+                                      key={`${cat}-${i}`}
+                                      onClick={() => handlePreviewFile(f.path)}
+                                      className={`w-full flex items-center gap-2 px-2 py-1 rounded text-left text-xs ${
+                                        isActive
+                                          ? "bg-emerald-500/20 text-emerald-400"
+                                          : "text-[oklch(0.6_0.01_250)] hover:bg-[oklch(0.2_0.01_250)] hover:text-white"
+                                      }`}
+                                    >
+                                      <FileCode2 className="w-3 h-3 flex-shrink-0" />
+                                      <span className="truncate">{fileName}</span>
+                                      <span className="text-[oklch(0.4_0.01_250)] ml-auto flex-shrink-0">{f.lines}L</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                </div>
+
+                {/* Code preview */}
+                <div className="col-span-8 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.12_0.01_250)] overflow-hidden">
+                  {loadingPreview ? (
+                    <div className="h-full flex items-center justify-center">
+                      <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
+                    </div>
+                  ) : previewFile ? (
+                    <>
+                      <div className="p-3 border-b border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileCode2 className="w-4 h-4 text-emerald-400" />
+                          <span className="text-sm text-white font-mono">{previewFile.path}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className={`text-xs ${categoryColors[previewFile.category] || "text-gray-400"}`}>
+                            {getCategoryLabel(previewFile.category)}
+                          </Badge>
+                          <span className="text-xs text-[oklch(0.5_0.01_250)]">{previewFile.lines} lignes</span>
+                        </div>
+                      </div>
+                      <ScrollArea className="h-[calc(100%-3rem)]">
+                        <pre className="p-4 text-xs leading-relaxed">
+                          <code className="text-[oklch(0.8_0.01_250)] font-mono whitespace-pre">
+                            {previewFile.content}
+                          </code>
+                        </pre>
+                      </ScrollArea>
+                    </>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-[oklch(0.4_0.01_250)]">
+                      <div className="text-center">
+                        <Eye className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                        <p className="text-sm">Selectionnez un fichier pour previsualiser</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Tab: Diff Legacy/New */}
+            {resultTab === "diff" && (
+              <div className="grid grid-cols-12 gap-4" style={{ height: "calc(100vh - 28rem)" }}>
+                {/* File tree (same as code tab) */}
+                <div className="col-span-3 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] overflow-hidden">
+                  <div className="p-3 border-b border-[oklch(0.25_0.01_250)]">
+                    <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+                      <GitCompare className="w-4 h-4 text-cyan-400" />
+                      Fichiers ({generationResult.files.length})
+                    </h4>
+                  </div>
+                  <ScrollArea className="h-[calc(100%-3rem)]">
+                    <div className="p-2">
+                      {Object.entries(filesByCategory).map(([cat, files]) => {
+                        const Icon = categoryIcons[cat] || FileCode2;
+                        const isExpanded = expandedCategories.has(cat);
+                        return (
+                          <div key={cat} className="mb-1">
+                            <button
+                              onClick={() => toggleCategory(cat)}
+                              className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[oklch(0.2_0.01_250)] text-left"
+                            >
+                              {isExpanded ? <ChevronDown className="w-3 h-3 text-[oklch(0.5_0.01_250)]" /> : <ChevronRight className="w-3 h-3 text-[oklch(0.5_0.01_250)]" />}
+                              <Icon className={`w-4 h-4 ${categoryColors[cat] || "text-gray-400"}`} />
+                              <span className="text-xs text-white font-medium">{getCategoryLabel(cat)}</span>
+                              <span className="text-xs text-[oklch(0.4_0.01_250)] ml-auto">{files.length}</span>
+                            </button>
+                            {isExpanded && (
+                              <div className="ml-5 border-l border-[oklch(0.25_0.01_250)] pl-2">
+                                {files.map((f, i) => {
+                                  const fileName = f.path.split("/").pop() || f.path;
+                                  const isActive = previewFile?.path === f.path;
+                                  return (
+                                    <button
+                                      key={`diff-${cat}-${i}`}
+                                      onClick={() => handlePreviewFile(f.path)}
+                                      className={`w-full flex items-center gap-2 px-2 py-1 rounded text-left text-xs ${
+                                        isActive
+                                          ? "bg-cyan-500/20 text-cyan-400"
+                                          : "text-[oklch(0.6_0.01_250)] hover:bg-[oklch(0.2_0.01_250)] hover:text-white"
+                                      }`}
+                                    >
+                                      <FileCode2 className="w-3 h-3 flex-shrink-0" />
+                                      <span className="truncate">{fileName}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                </div>
+
+                {/* Diff view */}
+                <div className="col-span-9 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.12_0.01_250)] overflow-hidden">
+                  {loadingPreview || loadingSource ? (
+                    <div className="h-full flex items-center justify-center">
+                      <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+                    </div>
+                  ) : previewFile ? (
+                    <CodeDiff
+                      sourceCode={sourceFile?.content || ""}
+                      sourceFileName={sourceFile?.path?.split("/").pop() || "(pas de source correspondante)"}
+                      generatedCode={previewFile.content}
+                      generatedFileName={previewFile.path.split("/").pop() || previewFile.path}
+                      category={previewFile.category}
+                    />
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-[oklch(0.4_0.01_250)]">
+                      <div className="text-center">
+                        <Columns2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                        <p className="text-sm">Selectionnez un fichier pour voir le diff source/genere</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Tab: Architecture */}
+            {resultTab === "architecture" && analysisResult && (
+              <div style={{ height: "calc(100vh - 28rem)" }}>
+                <ArchitectureDiagram
+                  useCases={analysisResult.irSummary.useCases.map(uc => ({
+                    className: uc.className,
+                    domain: uc.domain,
+                    httpMethod: uc.httpMethod,
+                    restPath: uc.restPath,
+                    voInType: uc.voInType,
+                    voOutType: uc.voOutType,
+                  }))}
+                  dtos={analysisResult.irSummary.dtos.map(d => ({
+                    className: d.className,
+                    direction: d.direction as "in" | "out" | "unknown",
+                    fieldCount: d.fieldCount,
+                  }))}
+                  enums={analysisResult.irSummary.enums.map(e => ({
+                    className: e.className,
+                    valueCount: e.valueCount,
+                  }))}
+                  exceptions={analysisResult.irSummary.exceptions.map(e => ({
+                    className: e.className,
+                    extendsClass: e.extendsClass,
+                  }))}
+                  remoteInterfaces={analysisResult.irSummary.remoteInterfaces.map(r => ({
+                    className: r.className,
+                    methodCount: r.methodCount,
+                  }))}
+                  generatedFiles={generationResult.files.map(f => ({
+                    path: f.path,
+                    category: f.category,
+                    lines: f.lines,
+                  }))}
+                  domains={analysisResult.irSummary.domains}
+                  onNodeClick={(nodeId, side) => {
+                    if (side === "target") {
+                      const file = generationResult.files.find(f => f.path.includes(nodeId));
+                      if (file) {
+                        handlePreviewFile(file.path);
+                        setResultTab("diff");
+                      }
+                    }
+                  }}
+                />
+              </div>
+            )}
           </motion.div>
         )}
       </div>
+      {/* Debug Panel — visible only in development */}
+      <DebugPanel sessionId={sessionId} />
     </div>
   );
 }

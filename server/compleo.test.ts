@@ -399,8 +399,8 @@ describe("Spring Boot Generator (generateSpringBootProject)", () => {
     const result = generateSpringBootProject(getIR());
     const report = result.files.find(f => f.path === "MIGRATION_REPORT.md");
     expect(report).toBeDefined();
-    expect(report!.content).toContain("Migration Report");
-    expect(report!.content).toContain("Compleo Modernizer");
+    expect(report!.content).toContain("Rapport de modernisation Compleo");
+    expect(report!.content).toContain("Moteur Compleo");
   });
 
   it("generates Enum files", () => {
@@ -485,10 +485,10 @@ describe("Compleo Pipeline Integration", () => {
 
     for (const dto of ir.dtos) {
       const expectedName = dto.direction === "in"
-        ? dto.className.replace(/VoIn$/, "Request")
+        ? dto.className.replace(/VoIn$/, "RequestDTO")
         : dto.direction === "out"
-          ? dto.className.replace(/VoOut$/, "Response")
-          : dto.className;
+          ? dto.className.replace(/VoOut$/, "ResponseDTO")
+          : dto.className.replace(/Dto$/, "DTO");
       expect(generatedDtoNames).toContain(expectedName);
     }
   });

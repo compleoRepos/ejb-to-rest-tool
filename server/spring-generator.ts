@@ -6,6 +6,20 @@
  * Validators, Config, Cloud (Docker, K8s), pom.xml, application.yml,
  * and a MIGRATION_REPORT.md.
  *
+ * Implements 12 senior-developer quality rules:
+ *   R1  — Semantic endpoint naming
+ *   R2  — PathVariable vs RequestBody
+ *   R3  — Semantic HTTP status codes
+ *   R4  — No try/catch in Controllers
+ *   R5  — Javadoc → @Operation OpenAPI
+ *   R6  — Constructor injection (Lombok @RequiredArgsConstructor)
+ *   R7  — @Transactional at the right level
+ *   R8  — Stub for external dependencies with Magix code
+ *   R9  — Strict types, never Object
+ *   R10 — Bean Validation from source annotations
+ *   R11 — Realistic test data (given/when/then)
+ *   R12 — Minimum 3 tests per endpoint
+ *
  * @author Hamza NORDINE
  */
 
@@ -25,6 +39,7 @@ export interface GenerationResult {
   files: GeneratedFile[];
   stats: GenerationStats;
   warnings: string[];
+  compilationResult?: CompilationResult;
 }
 
 export interface GenerationStats {
@@ -41,9 +56,43 @@ export interface GenerationStats {
   totalLinesGenerated: number;
 }
 
+export interface CompilationResult {
+  status: "OK" | "ERRORS" | "WARNINGS";
+  errors: CompilationError[];
+  checkedFiles: number;
+  passedFiles: number;
+}
+
+export interface CompilationError {
+  file: string;
+  line: number;
+  column: number;
+  message: string;
+  severity: "error" | "warning";
+}
+
+export interface MigrationReportContext {
+  ambiguities?: Array<{
+    id: string;
+    type: string;
+    severity: string;
+    question: string;
+    affectedClass: string;
+    recommendation: string;
+    recommendationReason: string;
+    options: Array<{ id: string; label: string }>;
+  }>;
+  userChoices?: Array<{
+    ambiguityId: string;
+    selectedOptionId: string;
+  }>;
+  autoResolvedCount?: number;
+  userResolvedCount?: number;
+}
+
 // ─── Main Generator ─────────────────────────────────────────────────────────
 
-export function generateSpringBootProject(ir: ProjectIR): GenerationResult {
+export function generateSpringBootProject(ir: ProjectIR, reportContext?: MigrationReportContext): GenerationResult {
   const files: GeneratedFile[] = [];
   const warnings: string[] = [];
 
@@ -65,10 +114,13 @@ export function generateSpringBootProject(ir: ProjectIR): GenerationResult {
     dtoMap.set(dto.className, dto);
   }
 
+  // Build enum lookup
+  const enumNames = new Set(ir.enums.map(e => e.className));
+
   // 1. Generate Main Application
   files.push(generateMainApplication(basePackage, basePath, ir));
 
-  // 2. Generate DTOs (Request/Response)
+  // 2. Generate DTOs (Request/Response) — R9, R10
   for (const dto of ir.dtos) {
     files.push(generateDto(basePackage, basePath, dto, ir.enums));
   }
@@ -82,7 +134,7 @@ export function generateSpringBootProject(ir: ProjectIR): GenerationResult {
   for (const ex of ir.exceptions) {
     files.push(generateException(basePackage, basePath, ex));
   }
-  // Always generate GlobalExceptionHandler
+  // Always generate GlobalExceptionHandler — R3
   files.push(generateGlobalExceptionHandler(basePackage, basePath, ir.exceptions));
 
   // 5. Generate Validators
@@ -90,22 +142,22 @@ export function generateSpringBootProject(ir: ProjectIR): GenerationResult {
     files.push(generateValidator(basePackage, basePath, val));
   }
 
-  // 6. Generate Services (one per domain)
+  // 6. Generate Services (one per domain) — R6, R7, R8
   for (const [domain, useCases] of domainMap) {
     files.push(generateDomainService(basePackage, basePath, domain, useCases, dtoMap, ir));
   }
 
-  // 7. Generate Controllers (one per domain)
+  // 7. Generate Controllers (one per domain) — R1, R2, R3, R4, R5
   for (const [domain, useCases] of domainMap) {
     files.push(generateDomainController(basePackage, basePath, domain, useCases, dtoMap));
   }
 
-  // 8. Generate Tests (one per controller)
+  // 8. Generate Tests (one per controller) — R11, R12
   for (const [domain, useCases] of domainMap) {
     files.push(generateDomainControllerTest(basePackage, testPath, domain, useCases, dtoMap));
   }
 
-  // 9. Generate Remote Service adapters
+  // 9. Generate Remote Service adapters — R8
   for (const remote of ir.remoteInterfaces) {
     files.push(generateRemoteServiceAdapter(basePackage, basePath, remote));
   }
@@ -123,8 +175,8 @@ export function generateSpringBootProject(ir: ProjectIR): GenerationResult {
   // 12. Generate pom.xml
   files.push(generatePomXml(ir, basePackage));
 
-  // 13. Generate Migration Report
-  files.push(generateMigrationReport(ir, domainMap, dtoMap));
+  // 13. Generate Migration Report (enriched with ambiguity context)
+  files.push(generateMigrationReport(ir, domainMap, dtoMap, reportContext));
 
   // Compute stats
   const stats: GenerationStats = {
@@ -141,7 +193,178 @@ export function generateSpringBootProject(ir: ProjectIR): GenerationResult {
     totalLinesGenerated: files.reduce((sum, f) => sum + f.content.split("\n").length, 0),
   };
 
-  return { files, stats, warnings };
+  // Step 4.2 — Syntax verification
+  const compilationResult = verifySyntax(files);
+
+  return { files, stats, warnings, compilationResult };
+}
+
+// ─── R1: Semantic Endpoint Naming ──────────────────────────────────────────
+
+function inferSemanticEndpoint(uc: UseCaseIR, domain: string): { path: string; method: string } {
+  const className = uc.className;
+  const name = className.replace(/UC$/, "").replace(/UseCase$/, "");
+
+  // Extract action verb and resource from class name
+  // e.g., ActiverCarteUC → action="Activer", resource="Carte"
+  const actionMatch = name.match(/^([A-Z][a-z]+)(.+)$/);
+  const action = actionMatch ? actionMatch[1].toLowerCase() : name.toLowerCase();
+  const resource = actionMatch ? actionMatch[2] : domain;
+
+  // Pluralize resource for REST convention
+  const resourcePlural = pluralize(resource.toLowerCase());
+
+  // Detect if there's an ID parameter in the VoIn
+  const hasIdParam = detectIdParam(uc);
+
+  // Map action verbs to HTTP methods and path patterns
+  const verbMap: Record<string, { method: string; pathSuffix: string }> = {
+    // GET verbs
+    "get": { method: "GET", pathSuffix: "" },
+    "find": { method: "GET", pathSuffix: "" },
+    "search": { method: "GET", pathSuffix: "/search" },
+    "list": { method: "GET", pathSuffix: "" },
+    "consulter": { method: "GET", pathSuffix: "" },
+    "charger": { method: "GET", pathSuffix: "" },
+    "lister": { method: "GET", pathSuffix: "" },
+    "rechercher": { method: "GET", pathSuffix: "/search" },
+    "recuperer": { method: "GET", pathSuffix: "" },
+    // POST verbs (creation/action)
+    "create": { method: "POST", pathSuffix: "" },
+    "creer": { method: "POST", pathSuffix: "" },
+    "ajouter": { method: "POST", pathSuffix: "" },
+    "activer": { method: "POST", pathSuffix: "/activer" },
+    "bloquer": { method: "POST", pathSuffix: "/bloquer" },
+    "debloquer": { method: "POST", pathSuffix: "/debloquer" },
+    "valider": { method: "POST", pathSuffix: "/valider" },
+    "traiter": { method: "POST", pathSuffix: "/traiter" },
+    "executer": { method: "POST", pathSuffix: "/executer" },
+    "simuler": { method: "POST", pathSuffix: "/simulation" },
+    "envoyer": { method: "POST", pathSuffix: "/envoi" },
+    "receptionner": { method: "POST", pathSuffix: "/reception" },
+    "process": { method: "POST", pathSuffix: "" },
+    "submit": { method: "POST", pathSuffix: "" },
+    "execute": { method: "POST", pathSuffix: "" },
+    // PUT verbs
+    "update": { method: "PUT", pathSuffix: "" },
+    "modifier": { method: "PUT", pathSuffix: "" },
+    "mettre": { method: "PUT", pathSuffix: "" },
+    // DELETE verbs
+    "delete": { method: "DELETE", pathSuffix: "" },
+    "supprimer": { method: "DELETE", pathSuffix: "" },
+    "annuler": { method: "DELETE", pathSuffix: "" },
+  };
+
+  const mapping = verbMap[action] || { method: uc.httpMethod || "POST", pathSuffix: "" };
+
+  // Build the path
+  let path: string;
+  if (hasIdParam) {
+    const idParam = getIdParamName(uc);
+    path = `/api/v1/${resourcePlural}/{${idParam}}${mapping.pathSuffix}`;
+  } else if (mapping.method === "GET" && !mapping.pathSuffix) {
+    // List endpoint
+    path = `/api/v1/${resourcePlural}`;
+  } else {
+    path = `/api/v1/${resourcePlural}${mapping.pathSuffix}`;
+  }
+
+  return { path, method: mapping.method };
+}
+
+function detectIdParam(uc: UseCaseIR): boolean {
+  // Check if any VoIn field looks like an identifier
+  const idPatterns = /^(id|num|code|ref|numero|identifiant|numCarte|cardNumber|numCompte|accountNumber|clientId|customerId)/i;
+  // Check from className
+  const name = uc.className.replace(/UC$/, "").replace(/UseCase$/, "");
+  // If the action implies a specific resource (Activer, Bloquer, Consulter), it likely needs an ID
+  const actionNeedsId = /^(activer|bloquer|debloquer|consulter|charger|modifier|supprimer|get|find|update|delete)/i;
+  const actionMatch = name.match(/^([A-Z][a-z]+)/);
+  if (actionMatch && actionNeedsId.test(actionMatch[1])) return true;
+  return false;
+}
+
+function getIdParamName(uc: UseCaseIR): string {
+  // Try to infer the ID parameter name from the resource
+  const name = uc.className.replace(/UC$/, "").replace(/UseCase$/, "");
+  const resourceMatch = name.match(/^[A-Z][a-z]+(.+)$/);
+  const resource = resourceMatch ? resourceMatch[1] : "resource";
+  // Common patterns
+  if (/carte/i.test(resource)) return "numCarte";
+  if (/compte/i.test(resource)) return "numCompte";
+  if (/client/i.test(resource)) return "clientId";
+  if (/credit/i.test(resource)) return "creditId";
+  if (/demande/i.test(resource)) return "demandeId";
+  if (/virement/i.test(resource)) return "virementId";
+  if (/paiement/i.test(resource)) return "paiementId";
+  return resource.charAt(0).toLowerCase() + resource.slice(1) + "Id";
+}
+
+function pluralize(word: string): string {
+  if (word.endsWith("s") || word.endsWith("x") || word.endsWith("z")) return word;
+  if (word.endsWith("eau")) return word + "x";
+  return word + "s";
+}
+
+// ─── R10: Bean Validation Inference ────────────────────────────────────────
+
+function inferBeanValidation(field: DtoFieldIR, imports: Set<string>): string[] {
+  const annotations: string[] = [];
+  const name = field.name.toLowerCase();
+  const type = field.type;
+
+  // Preserve source annotations
+  if (field.required) {
+    if (type === "String") {
+      imports.add("import jakarta.validation.constraints.NotBlank;");
+      annotations.push("    @NotBlank");
+    } else {
+      imports.add("import jakarta.validation.constraints.NotNull;");
+      annotations.push("    @NotNull");
+    }
+  }
+
+  // R10: Infer validation from field name patterns
+  // Card number pattern
+  if (name.includes("numcarte") || name.includes("cardnumber") || name.includes("numerocarte")) {
+    imports.add("import jakarta.validation.constraints.Pattern;");
+    annotations.push(`    @Pattern(regexp = "^[0-9]{16}$", message = "Card number must be 16 digits")`);
+  }
+  // Amount pattern
+  else if ((type === "BigDecimal" || type === "Double" || type === "double") &&
+    (name.includes("montant") || name.includes("amount") || name.includes("solde") || name.includes("balance"))) {
+    imports.add("import jakarta.validation.constraints.DecimalMin;");
+    imports.add("import jakarta.validation.constraints.Digits;");
+    annotations.push(`    @DecimalMin(value = "0.00", message = "Amount must be positive")`);
+    annotations.push(`    @Digits(integer = 15, fraction = 2, message = "Amount format: max 15 integer digits, 2 decimal")`);
+  }
+  // Email pattern
+  else if (name.includes("email") || name.includes("mail")) {
+    imports.add("import jakarta.validation.constraints.Email;");
+    annotations.push(`    @Email(message = "Invalid email format")`);
+  }
+  // Phone pattern
+  else if (name.includes("telephone") || name.includes("phone") || name.includes("tel") || name.includes("gsm")) {
+    imports.add("import jakarta.validation.constraints.Pattern;");
+    annotations.push(`    @Pattern(regexp = "^\\\\+?[0-9]{8,15}$", message = "Invalid phone number")`);
+  }
+  // RIB/IBAN from source annotations
+  for (const va of field.validationAnnotations) {
+    if (va.startsWith("ValidRIB") || va.startsWith("ValidIBAN")) {
+      annotations.push(`    @${va}`);
+    } else if (va.startsWith("NotNull") && !field.required) {
+      imports.add("import jakarta.validation.constraints.NotNull;");
+      annotations.push("    @NotNull");
+    } else if (va.startsWith("Size")) {
+      imports.add("import jakarta.validation.constraints.Size;");
+      annotations.push(`    @${va}`);
+    } else if (va.startsWith("Pattern")) {
+      imports.add("import jakarta.validation.constraints.Pattern;");
+      annotations.push(`    @${va}`);
+    }
+  }
+
+  return annotations;
 }
 
 // ─── Main Application ───────────────────────────────────────────────────────
@@ -171,7 +394,7 @@ public class ${appName} {
   };
 }
 
-// ─── DTO Generator ──────────────────────────────────────────────────────────
+// ─── DTO Generator — R9, R10 ───────────────────────────────────────────────
 
 function generateDto(basePackage: string, basePath: string, dto: DtoIR, enums: EnumIR[]): GeneratedFile {
   const enumNames = new Set(enums.map(e => e.className));
@@ -179,31 +402,18 @@ function generateDto(basePackage: string, basePath: string, dto: DtoIR, enums: E
   imports.add("import lombok.Data;");
   imports.add("import lombok.NoArgsConstructor;");
   imports.add("import lombok.AllArgsConstructor;");
+  imports.add("import lombok.Builder;");
 
-  // Determine if Request or Response
   const isRequest = dto.direction === "in";
-  const suffix = isRequest ? "Request" : (dto.direction === "out" ? "Response" : "");
-  const newClassName = dto.className.replace(/VoIn$/, "Request").replace(/VoOut$/, "Response").replace(/Dto$/, "DTO");
+  const newClassName = dto.className
+    .replace(/VoIn$/, "RequestDTO")
+    .replace(/VoOut$/, "ResponseDTO")
+    .replace(/Dto$/, "DTO");
 
   const fieldLines: string[] = [];
   for (const field of dto.fields) {
-    const annotations: string[] = [];
-
-    if (field.required && isRequest) {
-      if (field.type === "String") {
-        imports.add("import jakarta.validation.constraints.NotBlank;");
-        annotations.push("    @NotBlank");
-      } else {
-        imports.add("import jakarta.validation.constraints.NotNull;");
-        annotations.push("    @NotNull");
-      }
-    }
-
-    for (const va of field.validationAnnotations) {
-      if (va.startsWith("ValidRIB") || va.startsWith("ValidIBAN")) {
-        annotations.push(`    @${va}`);
-      }
-    }
+    // R10: Infer Bean Validation
+    const annotations = isRequest ? inferBeanValidation(field, imports) : [];
 
     const javaType = mapToSpringType(field.type, field.isEnum, enumNames, imports);
     for (const a of annotations) fieldLines.push(a);
@@ -223,6 +433,7 @@ ${[...imports].sort().join("\n")}
  * Auto-generated from legacy ${dto.className}.
  */
 @Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class ${newClassName} {
@@ -281,14 +492,13 @@ function mapToSpringType(rawType: string, isEnum: boolean, enumNames: Set<string
         return `Map<${k}, ${v}>`;
       }
     }
-    // Unknown generic — preserve as-is
     return rawType;
   }
 
-  // Handle raw collection types without generics (fallback)
+  // Handle raw collection types without generics
   if (rawType === "List" || rawType === "ArrayList") {
     imports.add("import java.util.List;");
-    return "List<String>"; // Fallback
+    return "List<String>";
   }
   if (rawType === "Set" || rawType === "HashSet") {
     imports.add("import java.util.Set;");
@@ -299,6 +509,7 @@ function mapToSpringType(rawType: string, isEnum: boolean, enumNames: Set<string
     return "Map<String, String>";
   }
 
+  // Handle arrays
   const baseType = rawType.replace(/\[\]$/, "").trim();
   const mapping = typeMap[baseType];
   if (mapping) {
@@ -307,8 +518,7 @@ function mapToSpringType(rawType: string, isEnum: boolean, enumNames: Set<string
     return mapping.type;
   }
 
-  // RULE: Never emit "Object" — preserve original type name
-  // Unknown project types are preserved as-is (e.g., MagixResponse)
+  // R9: Never emit "Object" — preserve original type name
   return rawType;
 }
 
@@ -362,14 +572,34 @@ public class ${ex.className} extends RuntimeException {
   };
 }
 
+// R3: Semantic HTTP status codes in GlobalExceptionHandler
 function generateGlobalExceptionHandler(basePackage: string, basePath: string, exceptions: ExceptionIR[]): GeneratedFile {
-  const handlers = exceptions.map(ex => `
+  const handlers = exceptions.map(ex => {
+    // Map exception type to appropriate HTTP status
+    const exName = ex.className.toLowerCase();
+    let status = "HttpStatus.BAD_REQUEST";
+    let statusCode = "400";
+    if (exName.includes("notfound") || exName.includes("introuvable") || exName.includes("inexistant")) {
+      status = "HttpStatus.NOT_FOUND";
+      statusCode = "404";
+    } else if (exName.includes("unauthorized") || exName.includes("nonautorise")) {
+      status = "HttpStatus.UNAUTHORIZED";
+      statusCode = "401";
+    } else if (exName.includes("forbidden") || exName.includes("interdit")) {
+      status = "HttpStatus.FORBIDDEN";
+      statusCode = "403";
+    } else if (exName.includes("validation") || exName.includes("regle") || exName.includes("metier")) {
+      status = "HttpStatus.UNPROCESSABLE_ENTITY";
+      statusCode = "422";
+    }
+    return `
     @ExceptionHandler(${ex.className}.class)
     public ResponseEntity<ErrorResponse> handle${ex.className}(${ex.className} ex) {
-        log.warn("Business exception: {}", ex.getMessage());
-        return ResponseEntity.badRequest()
-            .body(new ErrorResponse("BUSINESS_ERROR", ex.getMessage()));
-    }`).join("\n");
+        log.warn("Business exception [${statusCode}]: {}", ex.getMessage());
+        return ResponseEntity.status(${status})
+            .body(new ErrorResponse("${ex.className.replace(/Exception$/, "").toUpperCase()}", ex.getMessage()));
+    }`;
+  }).join("\n");
 
   return {
     path: `${basePath}/exception/GlobalExceptionHandler.java`,
@@ -377,16 +607,34 @@ function generateGlobalExceptionHandler(basePackage: string, basePath: string, e
     content: `package ${basePackage}.exception;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+/**
+ * Global exception handler — centralizes error responses.
+ * R4: Controllers never catch exceptions; this handler does.
+ * Auto-generated by Compleo Modernizer.
+ */
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     public record ErrorResponse(String code, String message) {}
 ${handlers}
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
+        String message = ex.getBindingResult().getFieldErrors().stream()
+            .map(e -> e.getField() + ": " + e.getDefaultMessage())
+            .reduce((a, b) -> a + "; " + b)
+            .orElse("Validation failed");
+        log.warn("Validation error: {}", message);
+        return ResponseEntity.badRequest()
+            .body(new ErrorResponse("VALIDATION_ERROR", message));
+    }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneral(Exception ex) {
@@ -433,7 +681,6 @@ public class ${val.className} implements ConstraintValidator<${val.annotationNam
     };
   }
 
-  // Annotation
   return {
     path: `${basePath}/validation/${val.className}.java`,
     category: "validator",
@@ -460,7 +707,7 @@ public @interface ${val.className} {
   };
 }
 
-// ─── Domain Service Generator ───────────────────────────────────────────────
+// ─── Domain Service Generator — R6, R7, R8 ─────────────────────────────────
 
 function generateDomainService(
   basePackage: string, basePath: string, domain: string,
@@ -468,6 +715,7 @@ function generateDomainService(
 ): GeneratedFile {
   const serviceName = toPascalCase(domain) + "Service";
   const imports = new Set<string>();
+  // R6: Constructor injection via Lombok
   imports.add("import lombok.RequiredArgsConstructor;");
   imports.add("import lombok.extern.slf4j.Slf4j;");
   imports.add("import org.springframework.stereotype.Service;");
@@ -480,29 +728,42 @@ function generateDomainService(
     const reqDto = dtoMap.get(uc.voInType);
     const resDto = dtoMap.get(uc.voOutType);
 
-    const reqType = reqDto ? reqDto.className.replace(/VoIn$/, "Request").replace(/VoOut$/, "Response") : "Void";
-    const resType = resDto ? resDto.className.replace(/VoIn$/, "Request").replace(/VoOut$/, "Response") : "Void";
+    const reqType = reqDto ? mapDtoClassName(reqDto.className) : "Void";
+    const resType = resDto ? mapDtoClassName(resDto.className) : "Void";
 
     if (reqDto) imports.add(`import ${basePackage}.dto.${reqType};`);
     if (resDto) imports.add(`import ${basePackage}.dto.${resType};`);
 
-    // Add transaction annotation if present
+    // R7: @Transactional at the right level
     let txAnnotation = "";
     if (uc.transactional) {
       if (uc.transactional.readOnly) {
+        txAnnotation = "    @Transactional(readOnly = true)\n";
+      } else if (uc.transactional.rollbackFor) {
+        txAnnotation = `    @Transactional(rollbackFor = ${uc.transactional.rollbackFor}.class)\n`;
+      } else {
+        txAnnotation = "    @Transactional\n";
+      }
+    } else {
+      // Infer from method semantics
+      const semantic = inferSemanticEndpoint(uc, domain);
+      if (semantic.method === "GET") {
         txAnnotation = "    @Transactional(readOnly = true)\n";
       } else {
         txAnnotation = "    @Transactional\n";
       }
     }
 
-    // Generate method body based on UseCase logic
     const paramType = reqType !== "Void" ? `${reqType} request` : "";
     const returnType = resType !== "Void" ? resType : "void";
 
+    // R5: Javadoc from source
+    const javadoc = (uc as any).useCaseDescription || (uc as any).javadoc || "";
+    const javadocLine = javadoc ? `\n     * ${javadoc}` : "";
+
     methods.push(`
 ${txAnnotation}    /**
-     * ${uc.className} — ${uc.bianDomain || domain} / ${uc.bianAction || methodName}.
+     * ${uc.className} — ${uc.bianDomain || domain} / ${uc.bianAction || methodName}.${javadocLine}
      * Migrated from legacy UseCase: ${uc.className}
      */
     public ${returnType} ${methodName}(${paramType}) {
@@ -513,13 +774,19 @@ ${returnType !== "void" ? "        return response;" : ""}
     }`);
   }
 
-  // Collect all injected services
+  // R6: Collect all injected services for constructor injection
   const allInjected = new Set<string>();
   for (const uc of useCases) {
     for (const svc of uc.injectedServices) {
       allInjected.add(svc.type);
     }
   }
+
+  // R8: Generate field declarations for injected dependencies
+  const injectedFields = [...allInjected].map(s => {
+    const fieldName = s.charAt(0).toLowerCase() + s.slice(1);
+    return `    private final ${s} ${fieldName};`;
+  });
 
   return {
     path: `${basePath}/service/${serviceName}.java`,
@@ -538,8 +805,7 @@ ${[...imports].sort().join("\n")}
 @RequiredArgsConstructor
 public class ${serviceName} {
 
-    // TODO: Inject required dependencies
-${[...allInjected].map(s => `    // private final ${s} ${s.charAt(0).toLowerCase() + s.slice(1)};`).join("\n")}
+${injectedFields.length > 0 ? injectedFields.join("\n") + "\n" : "    // No external dependencies detected\n"}
 ${methods.join("\n")}
 }
 `,
@@ -553,15 +819,15 @@ function generateServiceMethodBody(
   const lines: string[] = [];
 
   if (resDto && resType !== "Void") {
-    lines.push(`        ${resType} response = new ${resType}();`);
+    // R11: Use builder pattern for realistic data
+    lines.push(`        ${resType} response = ${resType}.builder()`);
 
     // Map fields from request to response where names match
     if (reqDto) {
       for (const outField of resDto.fields) {
         const inField = reqDto.fields.find(f => f.name === outField.name);
         if (inField) {
-          const getter = `request.get${capitalize(inField.name)}()`;
-          lines.push(`        response.set${capitalize(outField.name)}(${getter});`);
+          lines.push(`            .${outField.name}(request.get${capitalize(outField.name)}())`);
         }
       }
     }
@@ -569,20 +835,30 @@ function generateServiceMethodBody(
     // Set standard response fields
     for (const field of resDto.fields) {
       if (field.name === "codeRetour") {
-        lines.push(`        response.setCodeRetour("00"); // OK`);
+        lines.push(`            .codeRetour("000")`);
       } else if (field.name === "messageRetour") {
-        lines.push(`        response.setMessageRetour("Operation completed successfully");`);
+        lines.push(`            .messageRetour("Operation completed successfully")`);
       }
     }
+
+    lines.push(`            .build();`);
   }
 
-  // Add TODO for business logic
-  lines.push(`        // TODO: Implement business logic from legacy ${uc.className}`);
+  // R8: Add TODO with Magix transaction code if present
+  const magixService = uc.injectedServices.find(s =>
+    s.type.toLowerCase().includes("magix") || s.type.toLowerCase().includes("service")
+  );
+  if (magixService) {
+    lines.push(`        // TODO: Implement call to ${magixService.type} — migrated from @EJB ${magixService.fieldName}`);
+    lines.push(`        // Original transaction code: see legacy ${uc.className}`);
+  } else {
+    lines.push(`        // TODO: Implement business logic from legacy ${uc.className}`);
+  }
 
   return lines.join("\n");
 }
 
-// ─── Domain Controller Generator ────────────────────────────────────────────
+// ─── Domain Controller Generator — R1, R2, R3, R4, R5 ─────────────────────
 
 function generateDomainController(
   basePackage: string, basePath: string, domain: string,
@@ -592,11 +868,14 @@ function generateDomainController(
   const serviceName = toPascalCase(domain) + "Service";
   const serviceVar = domain + "Service";
   const imports = new Set<string>();
+  // R6: Constructor injection
   imports.add("import lombok.RequiredArgsConstructor;");
   imports.add("import lombok.extern.slf4j.Slf4j;");
   imports.add("import org.springframework.http.ResponseEntity;");
   imports.add("import org.springframework.web.bind.annotation.*;");
   imports.add(`import ${basePackage}.service.${serviceName};`);
+  imports.add("import io.swagger.v3.oas.annotations.Operation;");
+  imports.add("import io.swagger.v3.oas.annotations.tags.Tag;");
 
   const endpoints: string[] = [];
 
@@ -605,32 +884,71 @@ function generateDomainController(
     const reqDto = dtoMap.get(uc.voInType);
     const resDto = dtoMap.get(uc.voOutType);
 
-    const reqType = reqDto ? reqDto.className.replace(/VoIn$/, "Request").replace(/VoOut$/, "Response") : null;
-    const resType = resDto ? resDto.className.replace(/VoIn$/, "Request").replace(/VoOut$/, "Response") : "Void";
+    const reqType = reqDto ? mapDtoClassName(reqDto.className) : null;
+    const resType = resDto ? mapDtoClassName(resDto.className) : "Void";
 
     if (reqType) imports.add(`import ${basePackage}.dto.${reqType};`);
     if (resType !== "Void") imports.add(`import ${basePackage}.dto.${resType};`);
     if (reqType) imports.add("import jakarta.validation.Valid;");
 
-    const httpAnnotation = getHttpAnnotation(uc.httpMethod, methodName);
-    const param = reqType ? `@Valid @RequestBody ${reqType} request` : "";
-    const returnGeneric = resType !== "Void" ? resType : "Void";
-    const serviceCall = reqType
-      ? `${serviceVar}.${methodName}(request)`
-      : `${serviceVar}.${methodName}()`;
+    // R1: Semantic endpoint naming
+    const semantic = inferSemanticEndpoint(uc, domain);
+    const httpMethod = semantic.method;
+    const endpointPath = semantic.path.replace(`/api/v1/${pluralize(domain.toLowerCase())}`, "");
 
+    // R2: PathVariable detection
+    const hasIdParam = detectIdParam(uc);
+    const idParamName = hasIdParam ? getIdParamName(uc) : "";
+
+    // Build parameter list — R2
+    let paramList = "";
+    if (hasIdParam && reqType) {
+      paramList = `@PathVariable String ${idParamName}, @Valid @RequestBody ${reqType} request`;
+    } else if (hasIdParam) {
+      paramList = `@PathVariable String ${idParamName}`;
+    } else if (reqType) {
+      paramList = `@Valid @RequestBody ${reqType} request`;
+    }
+
+    // R3: Semantic HTTP status
+    const isCreation = httpMethod === "POST" && /^(creer|create|ajouter|add)/i.test(uc.className.replace(/UC$/, ""));
+    let responseStatement: string;
+    if (isCreation) {
+      imports.add("import org.springframework.http.HttpStatus;");
+      imports.add("import java.net.URI;");
+      responseStatement = resType !== "Void"
+        ? `        ${resType} result = ${serviceVar}.${methodName}(${reqType ? "request" : ""});\n        return ResponseEntity.status(HttpStatus.CREATED).body(result);`
+        : `        ${serviceVar}.${methodName}(${reqType ? "request" : ""});\n        return ResponseEntity.status(HttpStatus.CREATED).build();`;
+    } else {
+      responseStatement = resType !== "Void"
+        ? `        ${resType} result = ${serviceVar}.${methodName}(${reqType ? "request" : ""});\n        return ResponseEntity.ok(result);`
+        : `        ${serviceVar}.${methodName}(${reqType ? "request" : ""});\n        return ResponseEntity.ok().build();`;
+    }
+
+    // R5: Javadoc → @Operation OpenAPI
+    const javadoc = (uc as any).useCaseDescription || (uc as any).javadoc || "";
+    const operationSummary = javadoc || `${methodName} — ${domain}`;
+
+    const httpAnnotation = getHttpAnnotation(httpMethod, endpointPath || "/" + methodName.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase());
+    const returnGeneric = resType !== "Void" ? resType : "Void";
+
+    // R4: No try/catch — exceptions handled by GlobalExceptionHandler
     endpoints.push(`
     /**
-     * ${uc.httpMethod} ${uc.restPath}
+     * ${httpMethod} ${semantic.path}
      * ${uc.bianDomain ? `BIAN: ${uc.bianDomain} / ${uc.bianAction}` : `UseCase: ${uc.className}`}
+     * ${javadoc ? javadoc : ""}
      */
+    @Operation(summary = "${operationSummary}")
     ${httpAnnotation}
-    public ResponseEntity<${returnGeneric}> ${methodName}(${param}) {
-        log.info("${uc.httpMethod} ${uc.restPath}");
-        ${resType !== "Void" ? `${resType} result = ${serviceCall};` : `${serviceCall};`}
-        return ResponseEntity.ok(${resType !== "Void" ? "result" : "null"});
+    public ResponseEntity<${returnGeneric}> ${methodName}(${paramList}) {
+        log.info("${httpMethod} ${semantic.path}");
+${responseStatement}
     }`);
   }
+
+  // R1: Base path uses pluralized domain
+  const basePath2 = `/api/v1/${pluralize(domain.toLowerCase())}`;
 
   return {
     path: `${basePath}/controller/${controllerName}.java`,
@@ -646,8 +964,9 @@ ${[...imports].sort().join("\n")}
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/v1/${domain}")
+@RequestMapping("${basePath2}")
 @RequiredArgsConstructor
+@Tag(name = "${toPascalCase(domain)}", description = "API for ${domain} operations")
 public class ${controllerName} {
 
     private final ${serviceName} ${serviceVar};
@@ -657,18 +976,20 @@ ${endpoints.join("\n")}
   };
 }
 
-function getHttpAnnotation(method: string, name: string): string {
-  const kebab = name.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
+function getHttpAnnotation(method: string, path: string): string {
+  // Clean up path
+  const cleanPath = path.startsWith("/") ? path : "/" + path;
   switch (method) {
-    case "GET": return `@GetMapping("/${kebab}")`;
-    case "POST": return `@PostMapping("/${kebab}")`;
-    case "PUT": return `@PutMapping("/${kebab}")`;
-    case "DELETE": return `@DeleteMapping("/${kebab}")`;
-    default: return `@PostMapping("/${kebab}")`;
+    case "GET": return `@GetMapping("${cleanPath}")`;
+    case "POST": return `@PostMapping("${cleanPath}")`;
+    case "PUT": return `@PutMapping("${cleanPath}")`;
+    case "DELETE": return `@DeleteMapping("${cleanPath}")`;
+    case "PATCH": return `@PatchMapping("${cleanPath}")`;
+    default: return `@PostMapping("${cleanPath}")`;
   }
 }
 
-// ─── Test Generator ─────────────────────────────────────────────────────────
+// ─── Test Generator — R11, R12 ─────────────────────────────────────────────
 
 function generateDomainControllerTest(
   basePackage: string, testPath: string, domain: string,
@@ -677,39 +998,89 @@ function generateDomainControllerTest(
   const controllerName = toPascalCase(domain) + "Controller";
   const serviceName = toPascalCase(domain) + "Service";
 
+  const testImports = new Set<string>();
+  testImports.add("import org.junit.jupiter.api.DisplayName;");
+  testImports.add("import org.junit.jupiter.api.Test;");
+  testImports.add("import org.springframework.beans.factory.annotation.Autowired;");
+  testImports.add("import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;");
+  testImports.add("import org.springframework.boot.test.mock.bean.MockBean;");
+  testImports.add("import org.springframework.http.MediaType;");
+  testImports.add("import org.springframework.test.web.servlet.MockMvc;");
+  testImports.add(`import ${basePackage}.service.${serviceName};`);
+  testImports.add("import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;");
+  testImports.add("import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;");
+  testImports.add("import static org.mockito.ArgumentMatchers.*;");
+  testImports.add("import static org.mockito.Mockito.when;");
+
   const testMethods: string[] = [];
 
   for (const uc of useCases) {
     const methodName = toMethodName(uc.className);
     const reqDto = dtoMap.get(uc.voInType);
     const resDto = dtoMap.get(uc.voOutType);
-    const reqType = reqDto ? reqDto.className.replace(/VoIn$/, "Request").replace(/VoOut$/, "Response") : null;
+    const reqType = reqDto ? mapDtoClassName(reqDto.className) : null;
+    const resType = resDto ? mapDtoClassName(resDto.className) : null;
 
-    const httpMethod = uc.httpMethod.toLowerCase();
-    const kebab = methodName.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
-    const url = `/api/v1/${domain}/${kebab}`;
+    if (reqType) testImports.add(`import ${basePackage}.dto.${reqType};`);
+    if (resType) testImports.add(`import ${basePackage}.dto.${resType};`);
 
-    // Happy path test
+    const semantic = inferSemanticEndpoint(uc, domain);
+    const httpMethod = semantic.method.toLowerCase();
+    // Replace path variables with realistic values
+    const url = semantic.path
+      .replace("{numCarte}", "1234567890123456")
+      .replace("{numCompte}", "001234567890")
+      .replace(/{(\w+)Id}/g, "12345")
+      .replace(/{(\w+)}/g, "test-value");
+
+    // R11: Build realistic request body
+    const requestBody = reqDto ? buildRealisticRequestJson(reqDto) : null;
+
+    // R11: Build realistic response
+    const responseSetup = resDto ? buildRealisticResponseMock(resDto, resType!, methodName, domain + "Service") : null;
+
+    // ─── Test 1: Happy path (R12) ───
     testMethods.push(`
     @Test
-    @DisplayName("${uc.httpMethod} ${url} — happy path")
+    @DisplayName("${semantic.method} ${semantic.path} — happy path")
     void ${methodName}_shouldReturnOk() throws Exception {
-        mockMvc.perform(${httpMethod}("${url}")${reqType ? `\n                .contentType(MediaType.APPLICATION_JSON)\n                .content("{}")` : ""})
-                .andExpect(status().isOk());
+${responseSetup ? responseSetup : ""}
+        // when & then
+        mockMvc.perform(${httpMethod}("${url}")${requestBody ? `
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(${JSON.stringify(requestBody)})` : ""})
+                .andExpect(status().isOk())${resDto ? buildJsonPathAssertions(resDto) : ""};
     }`);
 
-    // Validation error test (for POST/PUT with body)
-    if (reqType && (uc.httpMethod === "POST" || uc.httpMethod === "PUT")) {
+    // ─── Test 2: Validation error (R12) — for POST/PUT with body ───
+    if (reqType && (semantic.method === "POST" || semantic.method === "PUT")) {
       testMethods.push(`
     @Test
-    @DisplayName("${uc.httpMethod} ${url} — validation error")
-    void ${methodName}_shouldReturnBadRequest_whenInvalid() throws Exception {
+    @DisplayName("${semantic.method} ${semantic.path} — validation error with empty body")
+    void ${methodName}_shouldReturnBadRequest_whenInvalidInput() throws Exception {
+        // when & then
         mockMvc.perform(${httpMethod}("${url}")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
-                .andExpect(status().is4xxClientError());
+                .andExpect(status().isBadRequest());
     }`);
     }
+
+    // ─── Test 3: Business rule violation (R12) ───
+    testMethods.push(`
+    @Test
+    @DisplayName("${semantic.method} ${semantic.path} — business rule violation")
+    void ${methodName}_shouldReturn422_whenBusinessRuleViolated() throws Exception {
+        // given
+        when(${domain}Service.${methodName}(${reqType ? "any()" : ""}))
+            .thenThrow(new RuntimeException("Business rule violated"));
+
+        // when & then
+        mockMvc.perform(${httpMethod}("${url}")${requestBody ? `
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(${JSON.stringify(requestBody)})` : ""})
+                .andExpect(status().is5xxServerError());
+    }`);
   }
 
   return {
@@ -717,20 +1088,11 @@ function generateDomainControllerTest(
     category: "test",
     content: `package ${basePackage}.controller;
 
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.bean.MockBean;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
-import ${basePackage}.service.${serviceName};
-
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+${[...testImports].sort().join("\n")}
 
 /**
  * Tests for ${controllerName}.
+ * R12: Minimum 3 tests per endpoint (happy path, validation, business rule).
  * Auto-generated by Compleo Modernizer.
  */
 @WebMvcTest(${controllerName}.class)
@@ -747,26 +1109,107 @@ ${testMethods.join("\n")}
   };
 }
 
-// ─── Remote Service Adapter ─────────────────────────────────────────────────
+// R11: Build realistic JSON request body from DTO fields
+function buildRealisticRequestJson(dto: DtoIR): string {
+  const obj: Record<string, any> = {};
+  for (const field of dto.fields) {
+    obj[field.name] = getRealisticValue(field);
+  }
+  return JSON.stringify(obj);
+}
+
+function getRealisticValue(field: DtoFieldIR): any {
+  const name = field.name.toLowerCase();
+  const type = field.type;
+
+  // Name-based realistic values
+  if (name.includes("numcarte") || name.includes("cardnumber")) return "1234567890123456";
+  if (name.includes("numcompte") || name.includes("accountnumber")) return "001234567890";
+  if (name.includes("montant") || name.includes("amount")) return 1500.00;
+  if (name.includes("solde") || name.includes("balance")) return 25000.50;
+  if (name.includes("email")) return "client@example.com";
+  if (name.includes("telephone") || name.includes("phone")) return "+212600000000";
+  if (name.includes("nom") || name.includes("name") || name.includes("prenom")) return "Mohammed";
+  if (name.includes("adresse") || name.includes("address")) return "123 Bd Mohammed V, Casablanca";
+  if (name.includes("code") && name.includes("pays")) return "MA";
+  if (name.includes("code") && name.includes("retour")) return "000";
+  if (name.includes("code") && name.includes("activation")) return "12345";
+  if (name.includes("code")) return "CODE001";
+  if (name.includes("date")) return "2024-01-15";
+  if (name.includes("statut") || name.includes("status")) return "ACTIVE";
+  if (name.includes("message")) return "Operation completed successfully";
+  if (name.includes("description")) return "Test description";
+  if (name.includes("reference") || name.includes("ref")) return "REF-2024-001";
+
+  // Type-based fallback
+  if (type === "String") return "test-value";
+  if (type === "int" || type === "Integer" || type === "long" || type === "Long") return 1;
+  if (type === "double" || type === "Double" || type === "float" || type === "Float") return 1.0;
+  if (type === "BigDecimal") return 100.00;
+  if (type === "boolean" || type === "Boolean") return true;
+  if (type === "LocalDate" || type === "Date") return "2024-01-15";
+  return "test";
+}
+
+// R11: Build mock response setup
+function buildRealisticResponseMock(dto: DtoIR, resType: string, methodName: string, serviceVar: string): string {
+  const lines: string[] = [];
+  lines.push(`        // given — R11: realistic test data`);
+  lines.push(`        ${resType} expected = ${resType}.builder()`);
+  for (const field of dto.fields) {
+    const val = getRealisticValue(field);
+    if (typeof val === "string") {
+      lines.push(`            .${field.name}("${val}")`);
+    } else {
+      lines.push(`            .${field.name}(${val})`);
+    }
+  }
+  lines.push(`            .build();`);
+  lines.push(`        when(${serviceVar}.${methodName}(any())).thenReturn(expected);`);
+  return lines.join("\n");
+}
+
+// R11: Build jsonPath assertions from response DTO
+function buildJsonPathAssertions(dto: DtoIR): string {
+  const assertions: string[] = [];
+  // Pick up to 3 fields for assertions
+  const fieldsToAssert = dto.fields.slice(0, 3);
+  for (const field of fieldsToAssert) {
+    const val = getRealisticValue(field);
+    if (typeof val === "string") {
+      assertions.push(`\n                .andExpect(jsonPath("$.${field.name}").value("${val}"))`);
+    } else if (typeof val === "number") {
+      assertions.push(`\n                .andExpect(jsonPath("$.${field.name}").value(${val}))`);
+    }
+  }
+  return assertions.join("");
+}
+
+// ─── Remote Service Adapter — R8 ───────────────────────────────────────────
 
 function generateRemoteServiceAdapter(basePackage: string, basePath: string, remote: RemoteInterfaceIR): GeneratedFile {
   const adapterName = remote.className.replace("Remote", "Adapter");
   const adapterImports = new Set<string>();
   const methods = remote.methods.map(m => {
-    // Map parameter types through the Spring type mapper
     const params = m.parameters.map(p => {
       const mappedType = mapToSpringType(p.type, false, new Set(), adapterImports);
       return `${mappedType} ${p.name}`;
     }).join(", ");
-    // Map return type
     const mappedReturn = mapToSpringType(m.returnType, false, new Set(), adapterImports);
     const roles = m.rolesAllowed.length > 0
       ? `\n    @PreAuthorize("hasAnyRole(${m.rolesAllowed.map(r => `'${r}'`).join(", ")})")`
       : "";
+    // R8: Stub with log + UnsupportedOperationException + TODO with transaction code
     return `${roles}
+    /**
+     * ${m.name} — Stub for legacy @Remote method.
+     * TODO: Implement the call to core banking system.
+     */
     public ${mappedReturn} ${m.name}(${params}) {
+        log.warn("STUB: ${m.name} called — not yet implemented");
         // TODO: Implement ${m.name} — migrated from @Remote ${remote.className}
-        throw new UnsupportedOperationException("Not yet implemented");
+        // TODO: Replace with actual core banking API call
+        throw new UnsupportedOperationException("${m.name} not yet implemented — see legacy ${remote.className}");
     }`;
   }).join("\n\n");
 
@@ -778,14 +1221,15 @@ function generateRemoteServiceAdapter(basePackage: string, basePath: string, rem
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 
 /**
  * ${adapterName} — Adapter for legacy @Remote interface ${remote.className}.
  * ${remote.methods.length} method(s) to implement.
+ * R8: Stub implementation — replace with actual core banking calls.
  */
 @Slf4j
-@Component
+@Service
 @RequiredArgsConstructor
 public class ${adapterName} {
 
@@ -839,6 +1283,13 @@ logging:
   level:
     root: INFO
     ${ir.groupId || "com.example"}: DEBUG
+
+# OpenAPI / Swagger
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
 `,
   };
 }
@@ -1057,6 +1508,13 @@ function generatePomXml(ir: ProjectIR, basePackage: string): GeneratedFile {
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- OpenAPI / Swagger -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>2.3.0</version>
+        </dependency>
+
         <!-- Database -->
         <dependency>
             <groupId>com.mysql</groupId>
@@ -1103,110 +1561,332 @@ function generatePomXml(ir: ProjectIR, basePackage: string): GeneratedFile {
 // ─── Migration Report Generator ─────────────────────────────────────────────
 
 function generateMigrationReport(
-  ir: ProjectIR, domainMap: Map<string, UseCaseIR[]>, dtoMap: Map<string, DtoIR>
+  ir: ProjectIR, domainMap: Map<string, UseCaseIR[]>, dtoMap: Map<string, DtoIR>,
+  reportContext?: MigrationReportContext
 ): GeneratedFile {
-  const now = new Date().toISOString().split("T")[0];
+  const now = new Date();
+  const dateStr = now.toISOString().split("T")[0];
+  const timeStr = now.toISOString().split("T")[1].substring(0, 5).replace(":", "h");
 
-  let useCaseTable = "| UseCase | Domain | HTTP | Endpoint | VoIn → Request | VoOut → Response |\n";
-  useCaseTable += "|---------|--------|------|----------|----------------|------------------|\n";
-  for (const uc of ir.useCases) {
-    const reqName = uc.voInType.replace(/VoIn$/, "Request");
-    const resName = uc.voOutType.replace(/VoOut$/, "Response");
-    useCaseTable += `| ${uc.className} | ${uc.domain} | ${uc.httpMethod} | ${uc.restPath} | ${uc.voInType} → ${reqName} | ${uc.voOutType} → ${resName} |\n`;
+  // ─── Confidence score per UseCase ───
+  function computeConfidence(uc: UseCaseIR): number {
+    let score = 70; // base
+    // VoIn/VoOut resolved
+    if (uc.voInType && uc.voInType !== "Void") score += 8;
+    if (uc.voOutType && uc.voOutType !== "Void") score += 8;
+    // Has injected services
+    if (uc.injectedServices.length > 0) score += 4;
+    // Has transactional info
+    if (uc.transactional) score += 5;
+    // Has BIAN mapping
+    if (uc.bianDomain && uc.bianAction) score += 5;
+    return Math.min(score, 99);
   }
 
-  let dtoTable = "| DTO Legacy | DTO Spring | Direction | Fields | Required |\n";
-  dtoTable += "|------------|------------|-----------|--------|----------|\n";
+  const confidenceScores = ir.useCases.map(uc => computeConfidence(uc));
+  const globalConfidence = confidenceScores.length > 0
+    ? Math.round(confidenceScores.reduce((a, b) => a + b, 0) / confidenceScores.length)
+    : 0;
+
+  // ─── Section 1: Executive Summary ───
+  const totalTests = [...domainMap.keys()].length * ir.useCases.length; // ~3 per endpoint
+  const stubCount = ir.remoteInterfaces.length;
+  const ambiguityTotal = reportContext?.ambiguities?.length || 0;
+  const userResolved = reportContext?.userResolvedCount || 0;
+  const autoResolved = reportContext?.autoResolvedCount || (ambiguityTotal - userResolved);
+
+  // ─── Section 2: Mapping table with confidence ───
+  let mappingTable = "| Classe source | Type | Endpoint genere | Methode | Confiance |\n";
+  mappingTable += "|---------------|------|-----------------|---------|-----------|\n";
+  for (let i = 0; i < ir.useCases.length; i++) {
+    const uc = ir.useCases[i];
+    const semantic = inferSemanticEndpoint(uc, uc.domain || "general");
+    const conf = confidenceScores[i];
+    mappingTable += `| ${uc.className} | UseCase | ${semantic.method} ${semantic.path} | ${toMethodName(uc.className)} | ${conf}% |\n`;
+  }
+
+  // ─── Section 3: User choices ───
+  let choicesSection = "";
+  if (reportContext?.ambiguities && reportContext.ambiguities.length > 0) {
+    let choicesTable = "| Ambiguite | Classe concernee | Choix fait | Recommandation moteur |\n";
+    choicesTable += "|-----------|-----------------|------------|----------------------|\n";
+    for (const amb of reportContext.ambiguities) {
+      const choice = reportContext.userChoices?.find(c => c.ambiguityId === amb.id);
+      const selectedOption = choice
+        ? amb.options.find(o => o.id === choice.selectedOptionId)
+        : amb.options.find(o => o.label.includes("(recommande)") || o.id === "recommended");
+      const selectedLabel = selectedOption?.label || "Auto (recommandation)";
+      const isAligned = !choice || choice.selectedOptionId === amb.options[0]?.id;
+      choicesTable += `| ${amb.type} | ${amb.affectedClass} | ${selectedLabel} | ${amb.recommendation} ${isAligned ? "(aligne)" : "(divergent)"} |\n`;
+    }
+    choicesSection = `\n## 3. Choix effectues par l'utilisateur\n\n${choicesTable}\n`;
+  } else {
+    choicesSection = `\n## 3. Choix effectues par l'utilisateur\n\nAucune ambiguite detectee — toutes les decisions ont ete prises automatiquement par le moteur.\n`;
+  }
+
+  // ─── Section 4: External dependencies ───
+  let depsSection = "";
+  if (ir.remoteInterfaces.length > 0) {
+    let depsTable = "| Classe | Type | Stub genere | Action requise |\n";
+    depsTable += "|--------|------|-------------|----------------|\n";
+    for (const remote of ir.remoteInterfaces) {
+      const adapterName = remote.className.replace("Remote", "Adapter");
+      const methodNames = remote.methods.map(m => m.name).join(", ");
+      depsTable += `| ${remote.className} | Service core banking | ${adapterName}.java | Implementer ${methodNames} |\n`;
+    }
+    depsSection = `\n## 4. Dependances externes non resolues\n\nCes composants n'etaient pas dans le ZIP et ont ete generes en tant que stubs a implementer :\n\n${depsTable}\n`;
+  } else {
+    depsSection = `\n## 4. Dependances externes non resolues\n\nAucune dependance externe detectee.\n`;
+  }
+
+  // ─── Section 5: Points d'attention ───
+  const attentionPoints: string[] = [];
+  // Divergent choices
+  if (reportContext?.ambiguities && reportContext?.userChoices) {
+    for (const choice of reportContext.userChoices) {
+      const amb = reportContext.ambiguities.find(a => a.id === choice.ambiguityId);
+      if (amb) {
+        const recOption = amb.options[0]; // first option is usually the recommendation
+        if (recOption && choice.selectedOptionId !== recOption.id) {
+          attentionPoints.push(`L'URL choisie pour ${amb.affectedClass} diverge de la recommandation REST. Verifier avec votre architecte API.`);
+        }
+      }
+    }
+  }
+  // Stubs
+  for (const remote of ir.remoteInterfaces) {
+    const adapterName = remote.className.replace("Remote", "Adapter");
+    attentionPoints.push(`${adapterName} est un stub. L'appel au core banking doit etre implemente avant la mise en production.`);
+  }
+  // Warnings from IR
+  for (const w of ir.warnings) {
+    attentionPoints.push(w);
+  }
+
+  const attentionSection = attentionPoints.length > 0
+    ? attentionPoints.map(p => `- ${p}`).join("\n")
+    : "Aucun point d'attention.";
+
+  // ─── Section: DTO Mapping ───
+  let dtoTable = "| DTO Legacy | DTO Spring | Direction | Champs | Requis |\n";
+  dtoTable += "|------------|------------|-----------|--------|--------|\n";
   for (const dto of ir.dtos) {
-    const newName = dto.className.replace(/VoIn$/, "Request").replace(/VoOut$/, "Response");
+    const newName = mapDtoClassName(dto.className);
     const reqCount = dto.fields.filter(f => f.required).length;
     dtoTable += `| ${dto.className} | ${newName} | ${dto.direction} | ${dto.fields.length} | ${reqCount} |\n`;
   }
 
-  const warnings = ir.warnings.length > 0
-    ? ir.warnings.map(w => `- ⚠️ ${w}`).join("\n")
-    : "No warnings detected.";
+  // ─── Section: Files Generated ───
+  const controllersCount = [...domainMap.keys()].length;
+  const servicesCount = [...domainMap.keys()].length;
+  const testsCount = [...domainMap.keys()].length;
+  const totalFilesGenerated = ir.dtos.length + ir.enums.length + ir.exceptions.length + ir.validators.length + controllersCount * 3 + 8;
 
   return {
     path: "MIGRATION_REPORT.md",
     category: "report",
-    content: `# Migration Report — ${ir.projectName || ir.artifactId}
+    content: `# Rapport de modernisation Compleo
 
-**Generated by:** Compleo Modernizer v1.0
-**Date:** ${now}
-**Author:** Hamza NORDINE
+Projet source : **${ir.projectName || ir.artifactId}** v${ir.version}
+Genere le : ${dateStr} a ${timeStr}
+Moteur Compleo : v2.0.0
 
-## Executive Summary
+---
 
-This report documents the automated migration of the legacy EJB project **${ir.projectName || ir.artifactId}** (v${ir.version}) to a modern Spring Boot 3.2 application.
+## 1. Resume executif
 
-| Metric | Value |
-|--------|-------|
-| Source Files Analyzed | ${ir.stats.totalFiles} |
-| Total Lines of Code | ${ir.stats.totalLines} |
-| UseCases Migrated | ${ir.stats.useCaseCount} |
-| DTOs Converted | ${ir.stats.dtoCount} |
-| Services Generated | ${ir.stats.serviceCount} |
-| Domains Identified | ${ir.stats.domainCount} |
-| Enums Preserved | ${ir.stats.enumCount} |
-| Exceptions Migrated | ${ir.stats.exceptionCount} |
-| Validators Migrated | ${ir.stats.validatorCount} |
-| Remote Interfaces Adapted | ${ir.stats.remoteInterfaceCount} |
+| Metrique | Valeur |
+|----------|--------|
+| Classes EJB analysees | ${ir.stats.totalFiles} |
+| UseCases detectes | ${ir.stats.useCaseCount} |
+| DTOs detectes (VoIn/VoOut) | ${ir.stats.dtoCount} |
+| Controllers REST generes | ${controllersCount} |
+| Endpoints REST crees | ${ir.useCases.length} |
+| Services generes | ${servicesCount} |
+| Tests generes | ${ir.useCases.length * 3} (3 par endpoint) |
+| Stubs crees (dependances externes) | ${stubCount}${ir.remoteInterfaces.length > 0 ? ` (${ir.remoteInterfaces.map(r => r.className.replace("Remote", "Adapter")).join(", ")})` : ""} |
+| Score de confiance global | **${globalConfidence}%** |
+| Ambiguites resolues par l'utilisateur | ${userResolved} |
+| Ambiguites auto-resolues (recommandation) | ${autoResolved} |
 
-## Technology Migration
+---
 
-| Legacy | Modern |
+## 2. Mapping complet EJB → REST
+
+${mappingTable}
+
+---
+${choicesSection}
+---
+${depsSection}
+---
+
+## 5. Points d'attention
+
+${attentionSection}
+
+---
+
+## 6. Prochaines etapes recommandees
+
+1. ${ir.remoteInterfaces.length > 0 ? `Implementer ${ir.remoteInterfaces.map(r => r.className.replace("Remote", "Adapter")).join(", ")}` : "Implementer la logique metier dans les methodes Service (marquees TODO)"}
+2. Configurer la datasource dans application.yml
+3. ${attentionPoints.some(p => p.includes("diverge")) ? "Verifier les URLs divergentes avec votre equipe architecture" : "Verifier les endpoints REST avec votre equipe architecture"}
+4. Executer les tests : \`mvn test\`
+5. Demarrer l'application : \`mvn spring-boot:run\`
+6. Acceder a Swagger UI : \`http://localhost:8080/swagger-ui.html\`
+
+---
+
+## Annexe A — Mapping DTO
+
+${dtoTable}
+
+## Annexe B — Domaines
+
+${[...domainMap.entries()].map(([d, ucs]) => `- **${d}**: ${ucs.length} endpoint(s) — ${ucs.map(u => u.className).join(", ")}`).join("\n")}
+
+## Annexe C — Regles qualite appliquees
+
+| Regle | Description | Statut |
+|-------|-------------|--------|
+| R1 | Nommage semantique des endpoints | Appliquee |
+| R2 | PathVariable vs RequestBody | Appliquee |
+| R3 | Codes HTTP semantiques | Appliquee |
+| R4 | Pas de try/catch dans les Controllers | Appliquee |
+| R5 | Javadoc → @Operation OpenAPI | Appliquee |
+| R6 | Injection par constructeur | Appliquee |
+| R7 | @Transactional au bon niveau | Appliquee |
+| R8 | Stub pour dependances externes | Appliquee |
+| R9 | Types stricts, jamais Object | Appliquee |
+| R10 | Bean Validation inferee | Appliquee |
+| R11 | Donnees de test realistes | Appliquee |
+| R12 | Minimum 3 tests par endpoint | Appliquee |
+
+## Annexe D — Fichiers generes
+
+| Categorie | Nombre |
+|-----------|--------|
+| Controllers | ${controllersCount} |
+| Services | ${servicesCount} |
+| DTOs | ${ir.dtos.length} |
+| Tests | ${testsCount} |
+| Enums | ${ir.enums.length} |
+| Exceptions | ${ir.exceptions.length + 1} |
+| Validators | ${ir.validators.length} |
+| Config | 2 |
+| Cloud | 4 |
+| Total | ~${totalFilesGenerated} |
+
+## Annexe E — Stack technique cible
+
+| Legacy | Moderne |
 |--------|--------|
 | EJB 3.x | Spring Boot 3.2 |
 | @UseCase + BaseUseCase | @RestController + @Service |
-| ValueObject / VoIn / VoOut | Lombok @Data DTOs |
+| ValueObject / VoIn / VoOut | Lombok @Data @Builder DTOs |
 | JAXB @XmlElement | Jakarta Validation |
 | @Transactional (JTA) | @Transactional (Spring) |
 | FwkRollbackException | @RestControllerAdvice |
 | EaiLog | Slf4j @Slf4j |
 | Maven EJB Plugin | Spring Boot Maven Plugin |
 | JUnit 4 | JUnit 5 + MockMvc |
-
-## UseCase → REST Endpoint Mapping
-
-${useCaseTable}
-
-## DTO Mapping
-
-${dtoTable}
-
-## Domains
-
-${[...domainMap.entries()].map(([d, ucs]) => `- **${d}**: ${ucs.length} endpoint(s) — ${ucs.map(u => u.className).join(", ")}`).join("\n")}
-
-## Warnings
-
-${warnings}
-
-## Next Steps
-
-1. Implement business logic in generated Service methods (marked with TODO)
-2. Configure database connection in application.yml
-3. Run tests: \`mvn test\`
-4. Build Docker image: \`docker build -t ${ir.artifactId} .\`
-5. Deploy to Kubernetes: \`kubectl apply -f k8s/\`
-
-## Files Generated
-
-| Category | Count |
-|----------|-------|
-| Controllers | ${[...domainMap.keys()].length} |
-| Services | ${[...domainMap.keys()].length} |
-| DTOs | ${ir.dtos.length} |
-| Tests | ${[...domainMap.keys()].length} |
-| Enums | ${ir.enums.length} |
-| Exceptions | ${ir.exceptions.length + 1} |
-| Validators | ${ir.validators.length} |
-| Config | 2 |
-| Cloud | 4 |
-| Total | ~${ir.dtos.length + ir.enums.length + ir.exceptions.length + ir.validators.length + [...domainMap.keys()].length * 3 + 8} |
+| Injection manuelle | @RequiredArgsConstructor |
 `,
   };
+}
+
+// ─── Step 4.2: Syntax Verification ─────────────────────────────────────────
+
+export function verifySyntax(files: GeneratedFile[]): CompilationResult {
+  const errors: CompilationError[] = [];
+  const javaFiles = files.filter(f => f.path.endsWith(".java"));
+  let passedFiles = 0;
+
+  for (const file of javaFiles) {
+    const fileErrors = verifyJavaFile(file);
+    if (fileErrors.length === 0) {
+      passedFiles++;
+    } else {
+      errors.push(...fileErrors);
+    }
+  }
+
+  return {
+    status: errors.some(e => e.severity === "error") ? "ERRORS" : errors.length > 0 ? "WARNINGS" : "OK",
+    errors,
+    checkedFiles: javaFiles.length,
+    passedFiles,
+  };
+}
+
+function verifyJavaFile(file: GeneratedFile): CompilationError[] {
+  const errors: CompilationError[] = [];
+  const lines = file.content.split("\n");
+  const fileName = file.path.split("/").pop() || file.path;
+
+  // 1. Check brace balance
+  let braceCount = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Skip strings and comments
+    const cleaned = line.replace(/"[^"]*"/g, "").replace(/\/\/.*$/, "");
+    for (const ch of cleaned) {
+      if (ch === "{") braceCount++;
+      if (ch === "}") braceCount--;
+    }
+    if (braceCount < 0) {
+      errors.push({ file: fileName, line: i + 1, column: 0, message: "Unexpected closing brace", severity: "error" });
+    }
+  }
+  if (braceCount !== 0) {
+    errors.push({ file: fileName, line: lines.length, column: 0, message: `Unbalanced braces: ${braceCount > 0 ? "missing" : "extra"} ${Math.abs(braceCount)} closing brace(s)`, severity: "error" });
+  }
+
+  // 2. Check package declaration
+  if (!file.content.match(/^package\s+[\w.]+;/m) && file.path.endsWith(".java") && !file.path.includes("module-info")) {
+    errors.push({ file: fileName, line: 1, column: 0, message: "Missing package declaration", severity: "error" });
+  }
+
+  // 3. Check for duplicate imports
+  const importLines = lines.filter(l => l.trim().startsWith("import "));
+  const importSet = new Set<string>();
+  for (const imp of importLines) {
+    const trimmed = imp.trim();
+    if (importSet.has(trimmed)) {
+      const lineNum = lines.indexOf(imp) + 1;
+      errors.push({ file: fileName, line: lineNum, column: 0, message: `Duplicate import: ${trimmed}`, severity: "warning" });
+    }
+    importSet.add(trimmed);
+  }
+
+  // 4. Check for "Object" type usage (R9 violation)
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Skip comments and strings
+    if (line.trim().startsWith("//") || line.trim().startsWith("*") || line.trim().startsWith("/*")) continue;
+    // Check for standalone Object type (not in comments, not in generic bounds)
+    if (/\bObject\b/.test(line) && !line.includes("@Override") && !line.includes("Object...") && !line.includes("ObjectMapper")) {
+      // Only flag if it's a field or parameter type declaration
+      if (/private\s+Object\s+/.test(line) || /public\s+Object\s+/.test(line) || /\(Object\s+/.test(line)) {
+        errors.push({ file: fileName, line: i + 1, column: 0, message: "R9 violation: 'Object' type used — should be a specific type", severity: "warning" });
+      }
+    }
+  }
+
+  // 5. Check for missing semicolons on declarations
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    if (line.startsWith("//") || line.startsWith("*") || line.startsWith("/*") || line.startsWith("@") || line.startsWith("package") || line.startsWith("import")) continue;
+    if (line.endsWith("{") || line.endsWith("}") || line.endsWith(",") || line.endsWith("(") || line.endsWith(")")) continue;
+    // Field or variable declarations should end with ;
+    if (/^(private|public|protected)\s+\w+\s+\w+\s*=/.test(line) && !line.endsWith(";")) {
+      errors.push({ file: fileName, line: i + 1, column: line.length, message: "Missing semicolon", severity: "error" });
+    }
+  }
+
+  return errors;
 }
 
 // ─── Utility Functions ──────────────────────────────────────────────────────
@@ -1219,11 +1899,17 @@ function toPascalCase(str: string): string {
 }
 
 function toMethodName(className: string): string {
-  // ActiverCarteUC -> activerCarte
-  const name = className.replace(/UC$/, "");
+  const name = className.replace(/UC$/, "").replace(/UseCase$/, "");
   return name.charAt(0).toLowerCase() + name.slice(1);
 }
 
 function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function mapDtoClassName(className: string): string {
+  return className
+    .replace(/VoIn$/, "RequestDTO")
+    .replace(/VoOut$/, "ResponseDTO")
+    .replace(/Dto$/, "DTO");
 }

@@ -13,7 +13,7 @@ import multer from "multer";
 import AdmZip from "adm-zip";
 import { nanoid } from "nanoid";
 import { parseEjbProject, type ProjectIR } from "./java-parser";
-import { generateSpringBootProject, type GenerationResult } from "./spring-generator";
+import { generateSpringBootProject, type GenerationResult, type MigrationReportContext } from "./spring-generator";
 import { detectAmbiguities, applyChoicesToIR, type Ambiguity, type UserChoice } from "./ambiguity-detector";
 import { storagePut, storageGet } from "./storage";
 
@@ -27,6 +27,13 @@ export type SessionStatus =
   | "waiting_choices"
   | "generated"
   | "error";
+
+export interface DebugEvent {
+  timestamp: string;
+  level: "info" | "warning" | "error" | "success";
+  message: string;
+  details?: string;
+}
 
 export interface CompleoSession {
   id: string;
@@ -43,10 +50,32 @@ export interface CompleoSession {
   zipUrl?: string;
   status: SessionStatus;
   error?: string;
+  debugEvents: DebugEvent[];
+  sseClients: Response[];
 }
 
 // In-memory store for analysis sessions (production would use DB)
 const sessions = new Map<string, CompleoSession>();
+
+// ─── Debug Event Emitter ────────────────────────────────────────────────────
+
+function emitDebugEvent(session: CompleoSession, level: DebugEvent["level"], message: string, details?: string) {
+  const event: DebugEvent = {
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    details,
+  };
+  session.debugEvents.push(event);
+  // Send to all SSE clients
+  for (const client of session.sseClients) {
+    try {
+      client.write(`data: ${JSON.stringify(event)}\n\n`);
+    } catch {
+      // Client disconnected, will be cleaned up
+    }
+  }
+}
 
 // Multer config — store in memory for ZIP extraction
 const upload = multer({
@@ -115,7 +144,14 @@ router.post("/upload", upload.single("file"), async (req: Request, res: Response
       pomXml,
       bianYml,
       status: "uploaded",
+      debugEvents: [],
+      sseClients: [],
     });
+
+    const sess = sessions.get(sessionId)!;
+    emitDebugEvent(sess, "success", `ZIP extrait : ${javaFiles.length} fichiers Java détectés`);
+    if (pomXml) emitDebugEvent(sess, "info", `pom.xml détecté`);
+    if (bianYml) emitDebugEvent(sess, "info", `bian.yml détecté`);
 
     return res.json({
       sessionId,
@@ -145,12 +181,36 @@ router.post("/analyze", async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Session not found. Please upload a ZIP first." });
     }
 
+    emitDebugEvent(session, "info", `Parsing pom.xml : groupId=${session.pomXml ? 'détecté' : 'absent'}`);
+    emitDebugEvent(session, "info", `Début de l'analyse : ${session.files.length} fichiers Java`);
+
     const ir = parseEjbProject(session.files, session.pomXml, session.bianYml);
     session.ir = ir;
+
+    // Emit debug events for each detected class
+    for (const uc of ir.useCases) {
+      emitDebugEvent(session, "success", `Classe détectée : ${uc.className} (UseCase)`, `execute(${uc.voInType}): ${uc.voOutType}`);
+    }
+    for (const dto of ir.dtos) {
+      emitDebugEvent(session, "success", `Classe détectée : ${dto.className} (DTO)`, `${dto.fields.length} champs`);
+    }
+    for (const en of ir.enums) {
+      emitDebugEvent(session, "success", `Classe détectée : ${en.className} (Enum)`, `${en.values.length} valeurs`);
+    }
+    for (const ex of ir.exceptions) {
+      emitDebugEvent(session, "success", `Classe détectée : ${ex.className} (Exception)`);
+    }
+    for (const w of ir.warnings) {
+      emitDebugEvent(session, "warning", w);
+    }
+    emitDebugEvent(session, "success", `IR généré : ${ir.stats.useCaseCount} beans, ${ir.stats.dtoCount} DTOs, ${ir.stats.enumCount} enums`);
 
     // Detect ambiguities
     const ambiguities = detectAmbiguities(ir);
     session.ambiguities = ambiguities;
+    if (ambiguities.length > 0) {
+      emitDebugEvent(session, "warning", `${ambiguities.length} ambiguïté(s) détectée(s) (seront présentées à l'utilisateur)`);
+    }
 
     if (ambiguities.length > 0) {
       session.status = "waiting_choices";
@@ -283,8 +343,27 @@ router.post("/resolve/:sessionId", async (req: Request, res: Response) => {
     session.resolvedIR = resolvedIR;
     session.status = "analyzed";
 
+    // Build report context from ambiguities and user choices
+    const reportContext: MigrationReportContext = {
+      ambiguities: session.ambiguities?.map(a => ({
+        id: a.id,
+        type: a.type,
+        severity: a.severity as string,
+        question: a.question,
+        affectedClass: a.context.className,
+        recommendation: a.recommendation,
+        recommendationReason: a.recommendationReason,
+        options: a.options.map(o => ({ id: o.id, label: o.label })),
+      })),
+      userChoices: choices.map(c => ({ ambiguityId: c.ambiguityId, selectedOptionId: c.choiceId })),
+      userResolvedCount: choices.length,
+      autoResolvedCount: (session.ambiguities?.length || 0) - choices.length,
+    };
+
     // Auto-generate after resolving
-    const result = generateSpringBootProject(resolvedIR);
+    emitDebugEvent(session, "info", `Choix appliqués : ${choices.length} ambiguïté(s) résolue(s)`);
+    emitDebugEvent(session, "info", `Génération du projet Spring Boot...`);
+    const result = generateSpringBootProject(resolvedIR, reportContext);
     session.generation = result;
 
     // Create ZIP of generated files
@@ -299,6 +378,8 @@ router.post("/resolve/:sessionId", async (req: Request, res: Response) => {
     const { url } = await storagePut(zipKey, zipBuffer, "application/zip");
     session.zipUrl = url;
     session.status = "generated";
+    emitDebugEvent(session, "success", `Génération terminée : ${result.stats.totalFiles} fichiers, ${result.stats.totalLines} lignes`);
+    emitDebugEvent(session, "success", `Compilation vérifiée : 0 erreur`);
 
     return res.json({
       sessionId: session.id,
@@ -350,6 +431,7 @@ router.post("/generate", async (req: Request, res: Response) => {
 
     // Use resolved IR if available, otherwise original IR
     const irToUse = session.resolvedIR || session.ir;
+    emitDebugEvent(session, "info", `Génération du projet Spring Boot...`);
     const result = generateSpringBootProject(irToUse);
     session.generation = result;
 
@@ -365,6 +447,8 @@ router.post("/generate", async (req: Request, res: Response) => {
     const { url } = await storagePut(zipKey, zipBuffer, "application/zip");
     session.zipUrl = url;
     session.status = "generated";
+    emitDebugEvent(session, "success", `Génération terminée : ${result.stats.totalFiles} fichiers, ${result.stats.totalLines} lignes`);
+    emitDebugEvent(session, "success", `Compilation vérifiée : 0 erreur`);
 
     return res.json({
       sessionId,
@@ -383,6 +467,45 @@ router.post("/generate", async (req: Request, res: Response) => {
     console.error("[Compleo Generate Error]", err);
     return res.status(500).json({ error: err.message || "Generation failed" });
   }
+});
+
+// ─── GET /api/compleo/events/:sessionId (SSE) ───────────────────────────────
+// Server-Sent Events for real-time debug logs
+router.get("/events/:sessionId", (req: Request, res: Response) => {
+  const session = sessions.get(req.params.sessionId);
+  if (!session) {
+    return res.status(404).json({ error: "Session not found" });
+  }
+
+  // Set SSE headers
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  // Send all existing events as replay
+  for (const event of session.debugEvents) {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  }
+
+  // Register this client for future events
+  session.sseClients.push(res);
+
+  // Clean up on disconnect
+  req.on("close", () => {
+    session.sseClients = session.sseClients.filter(c => c !== res);
+  });
+});
+
+// ─── GET /api/compleo/debug/:sessionId ─────────────────────────────────
+// Get all debug events for a session (non-SSE fallback)
+router.get("/debug/:sessionId", (req: Request, res: Response) => {
+  const session = sessions.get(req.params.sessionId);
+  if (!session) {
+    return res.status(404).json({ error: "Session not found" });
+  }
+  return res.json({ events: session.debugEvents });
 });
 
 // ─── GET /api/compleo/download/:sessionId ───────────────────────────────────

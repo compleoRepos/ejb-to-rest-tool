@@ -267,14 +267,22 @@
         "validators": 2,
         "configFiles": 2,
         "cloudFiles": 4,
-        "totalLinesGenerated": 1495
+        "totalLinesGenerated": 1800
       },
       "warnings": [],
       "fileCount": 47
     },
     "quality": {
-      "objectCount": 0,
-      "objectFiles": [],
+      "objectCount": 1,
+      "objectFiles": [
+        {
+          "path": "MIGRATION_REPORT.md",
+          "count": 1,
+          "lines": [
+            "| R9 | Strict types, never Object | Applied |"
+          ]
+        }
+      ],
       "voidIssues": [],
       "duplicateImports": []
     }
@@ -653,19 +661,26 @@
         "validators": 4,
         "configFiles": 2,
         "cloudFiles": 4,
-        "totalLinesGenerated": 2041
+        "totalLinesGenerated": 2503
       },
       "warnings": [],
       "fileCount": 64
     },
     "quality": {
-      "objectCount": 1,
+      "objectCount": 2,
       "objectFiles": [
         {
           "path": "src/main/java/ma/eai/idev/boaultimatetest/adapter/DocumentServiceAdapter.java",
           "count": 1,
           "lines": [
             "public Map<String, Object> getInfosDocument(String referenceDocument) {"
+          ]
+        },
+        {
+          "path": "MIGRATION_REPORT.md",
+          "count": 1,
+          "lines": [
+            "| R9 | Strict types, never Object | Applied |"
           ]
         }
       ],
@@ -1062,14 +1077,22 @@
         "validators": 6,
         "configFiles": 2,
         "cloudFiles": 4,
-        "totalLinesGenerated": 2489
+        "totalLinesGenerated": 2958
       },
       "warnings": [],
       "fileCount": 81
     },
     "quality": {
-      "objectCount": 0,
-      "objectFiles": [],
+      "objectCount": 1,
+      "objectFiles": [
+        {
+          "path": "MIGRATION_REPORT.md",
+          "count": 1,
+          "lines": [
+            "| R9 | Strict types, never Object | Applied |"
+          ]
+        }
+      ],
       "voidIssues": [],
       "duplicateImports": []
     }
