@@ -1,13 +1,14 @@
 /**
  * Tests pour GitConnector — clone, branche, écriture, commit.
  * Les tests de PR sont mockés (pas d'API réelle).
+ * Utilise isomorphic-git pour créer le repo de test (pas besoin du binaire git).
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { GitConnector, type WorkingDir } from "./GitConnector";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import simpleGit from "simple-git";
+import git from "isomorphic-git";
 
 describe("GitConnector", () => {
   let connector: GitConnector;
@@ -21,28 +22,33 @@ describe("GitConnector", () => {
     testRepoDir = path.join(os.tmpdir(), `compleo-test-repo-${Date.now()}`);
     fs.mkdirSync(testRepoDir, { recursive: true });
 
-    const git = simpleGit(testRepoDir);
-    await git.init();
-    await git.addConfig("user.email", "test@test.com");
-    await git.addConfig("user.name", "Test");
+    await git.init({ fs, dir: testRepoDir });
 
-    // Create initial commit
+    // Create initial commit with isomorphic-git
     const readmePath = path.join(testRepoDir, "README.md");
     fs.writeFileSync(readmePath, "# Test Repo\n");
     const pomPath = path.join(testRepoDir, "pom.xml");
     fs.writeFileSync(pomPath, "<project><groupId>com.test</groupId></project>");
     const javaDir = path.join(testRepoDir, "src/main/java/com/test");
     fs.mkdirSync(javaDir, { recursive: true });
-    fs.writeFileSync(path.join(javaDir, "App.java"), "package com.test;\npublic class App {}");
+    fs.writeFileSync(
+      path.join(javaDir, "App.java"),
+      "package com.test;\npublic class App {}"
+    );
 
-    await git.add(".");
-    await git.commit("Initial commit");
+    await git.add({ fs, dir: testRepoDir, filepath: "." });
+    await git.commit({
+      fs,
+      dir: testRepoDir,
+      message: "Initial commit",
+      author: { name: "Test", email: "test@test.com" },
+    });
   });
 
   afterAll(() => {
-    // Cleanup
     if (testRepoDir) fs.rmSync(testRepoDir, { recursive: true, force: true });
-    if (workingDir?.path) fs.rmSync(workingDir.path, { recursive: true, force: true });
+    if (workingDir?.path)
+      fs.rmSync(workingDir.path, { recursive: true, force: true });
   });
 
   it("clone un repo local", async () => {
@@ -58,8 +64,11 @@ describe("GitConnector", () => {
 
   it("crée une branche", async () => {
     await connector.createBranch(workingDir, "compleo/migration");
-    const branch = await workingDir.git.branch();
-    expect(branch.current).toBe("compleo/migration");
+    const currentBranch = await git.currentBranch({
+      fs,
+      dir: workingDir.path,
+    });
+    expect(currentBranch).toBe("compleo/migration");
   });
 
   it("écrit des fichiers générés", async () => {
@@ -84,7 +93,10 @@ describe("GitConnector", () => {
     // Verify files exist on disk
     expect(
       fs.existsSync(
-        path.join(workingDir.path, "src/main/java/com/test/controller/AppController.java")
+        path.join(
+          workingDir.path,
+          "src/main/java/com/test/controller/AppController.java"
+        )
       )
     ).toBe(true);
     expect(
@@ -99,9 +111,9 @@ describe("GitConnector", () => {
     );
     expect(hash).toBeTruthy();
 
-    // Verify commit exists
-    const log = await workingDir.git.log();
-    expect(log.latest?.message).toContain("migration Spring Boot");
+    // Verify commit exists via isomorphic-git log
+    const log = await git.log({ fs, dir: workingDir.path, depth: 1 });
+    expect(log[0]?.commit?.message).toContain("migration Spring Boot");
   });
 
   it("lit les fichiers source d'un working dir", async () => {
@@ -116,13 +128,15 @@ describe("GitConnector", () => {
   });
 
   it("cleanup supprime le répertoire", async () => {
-    const tempDir = path.join(os.tmpdir(), `compleo-cleanup-test-${Date.now()}`);
+    const tempDir = path.join(
+      os.tmpdir(),
+      `compleo-cleanup-test-${Date.now()}`
+    );
     fs.mkdirSync(tempDir, { recursive: true });
     fs.writeFileSync(path.join(tempDir, "test.txt"), "test");
 
     const tempWorkingDir: WorkingDir = {
       path: tempDir,
-      git: simpleGit(tempDir),
       repoUrl: "",
       defaultBranch: "main",
     };
@@ -135,7 +149,6 @@ describe("GitConnector", () => {
 
   describe("extractOwnerRepo (via createPR error path)", () => {
     it("parse une URL HTTPS GitHub", () => {
-      // We test the URL parsing indirectly by checking that clone works with local paths
       expect(workingDir.path).toBeTruthy();
     });
   });
@@ -149,17 +162,29 @@ describe("GitConnector", () => {
     });
 
     it("crée un connecteur GitLab", () => {
-      const c = new GitConnector({ provider: "gitlab", token: "glpat-xxx", apiUrl: "https://gitlab.com/api/v4" });
+      const c = new GitConnector({
+        provider: "gitlab",
+        token: "glpat-xxx",
+        apiUrl: "https://gitlab.com/api/v4",
+      });
       expect(c).toBeInstanceOf(GitConnector);
     });
 
     it("crée un connecteur Azure DevOps", () => {
-      const c = new GitConnector({ provider: "azure", token: "xxx", apiUrl: "https://dev.azure.com/org/project/_apis" });
+      const c = new GitConnector({
+        provider: "azure",
+        token: "xxx",
+        apiUrl: "https://dev.azure.com/org/project/_apis",
+      });
       expect(c).toBeInstanceOf(GitConnector);
     });
 
     it("crée un connecteur Gitea", () => {
-      const c = new GitConnector({ provider: "gitea", token: "xxx", apiUrl: "https://gitea.local/api/v1" });
+      const c = new GitConnector({
+        provider: "gitea",
+        token: "xxx",
+        apiUrl: "https://gitea.local/api/v1",
+      });
       expect(c).toBeInstanceOf(GitConnector);
     });
 

@@ -2,6 +2,9 @@
  * GitConnector — Connecteur Git multi-providers.
  * Supporte GitHub, GitLab, Azure DevOps, Gitea, et Git bare.
  *
+ * Utilise isomorphic-git (pure JS, pas besoin du binaire git)
+ * pour toutes les opérations : clone, branch, commit, push.
+ *
  * Méthodes :
  *   clone(url, token, targetDir)
  *   createBranch(dir, branchName)
@@ -13,10 +16,11 @@
  * @author Hamza NORDINE
  */
 
-import simpleGit, { type SimpleGit } from "simple-git";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import http from "isomorphic-git/http/node";
+import git from "isomorphic-git";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,7 +35,6 @@ export interface GitConfig {
 
 export interface WorkingDir {
   path: string;
-  git: SimpleGit;
   repoUrl: string;
   defaultBranch: string;
 }
@@ -72,7 +75,7 @@ export class GitConnector {
     this.config = config;
   }
 
-  // ─── clone ──────────────────────────────────────────────────────────────
+  // ─── clone (isomorphic-git — pure JS, no git binary needed) ─────────────
 
   async clone(
     url: string,
@@ -82,17 +85,41 @@ export class GitConnector {
     const dir = targetDir || path.join(os.tmpdir(), `compleo-git-${Date.now()}`);
     fs.mkdirSync(dir, { recursive: true });
 
-    // Inject token into URL if provided
-    const cloneUrl = this.injectToken(url, token || this.config.token);
+    const effectiveToken = token || this.config.token;
 
-    const git = simpleGit();
-    await git.clone(cloneUrl, dir, ["--depth", "1"]);
+    // Build auth headers for isomorphic-git
+    const onAuth = effectiveToken
+      ? () => this.buildIsomorphicAuth(effectiveToken)
+      : undefined;
 
-    const repoGit = simpleGit(dir);
+    // isomorphic-git only supports http/https — local paths use fs copy
+    const isLocalPath = url.startsWith("/") || url.startsWith(".");
+
+    if (isLocalPath) {
+      // Local clone: copy directory recursively
+      const resolvedSrc = path.resolve(url);
+      this.copyDirRecursive(resolvedSrc, dir);
+    } else {
+      // Remote clone with isomorphic-git (depth 1 for speed)
+      await git.clone({
+        fs,
+        http,
+        dir,
+        url,
+        depth: 1,
+        singleBranch: true,
+        onAuth,
+      });
+    }
 
     // Detect default branch
-    const branchInfo = await repoGit.branch();
-    const defaultBranch = branchInfo.current || "main";
+    let defaultBranch = "main";
+    try {
+      const currentBranch = await git.currentBranch({ fs, dir });
+      if (currentBranch) defaultBranch = currentBranch;
+    } catch {
+      // Fallback to main if branch detection fails
+    }
 
     // Count files
     let fileCount = 0;
@@ -105,7 +132,11 @@ export class GitConnector {
           countFiles(full);
         } else {
           fileCount++;
-          if (entry.name.endsWith(".java") || entry.name.endsWith(".jsp") || entry.name.endsWith(".xml")) {
+          if (
+            entry.name.endsWith(".java") ||
+            entry.name.endsWith(".jsp") ||
+            entry.name.endsWith(".xml")
+          ) {
             javaFileCount++;
           }
         }
@@ -115,7 +146,6 @@ export class GitConnector {
 
     return {
       path: dir,
-      git: repoGit,
       repoUrl: url,
       defaultBranch,
       fileCount,
@@ -123,10 +153,11 @@ export class GitConnector {
     };
   }
 
-  // ─── createBranch ───────────────────────────────────────────────────────
+  // ─── createBranch (isomorphic-git) ──────────────────────────────────────
 
   async createBranch(workingDir: WorkingDir, branchName: string): Promise<void> {
-    await workingDir.git.checkoutLocalBranch(branchName);
+    await git.branch({ fs, dir: workingDir.path, ref: branchName });
+    await git.checkout({ fs, dir: workingDir.path, ref: branchName });
   }
 
   // ─── writeFiles ─────────────────────────────────────────────────────────
@@ -142,31 +173,47 @@ export class GitConnector {
       fs.writeFileSync(fullPath, file.content, "utf-8");
       written++;
     }
-    // Stage all changes
-    await workingDir.git.add(".");
+    // Stage all changes with isomorphic-git
+    await git.add({ fs, dir: workingDir.path, filepath: "." });
     return written;
   }
 
-  // ─── commit ─────────────────────────────────────────────────────────────
+  // ─── commit (isomorphic-git) ────────────────────────────────────────────
 
   async commit(workingDir: WorkingDir, message: string): Promise<string> {
-    // Configure git user if not set
-    try {
-      await workingDir.git.addConfig("user.email", "compleo@migration.tool");
-      await workingDir.git.addConfig("user.name", "Compleo Agent");
-    } catch {
-      // Ignore if already set
-    }
-
-    const result = await workingDir.git.commit(message);
-    return result.commit || "unknown";
+    const sha = await git.commit({
+      fs,
+      dir: workingDir.path,
+      message,
+      author: {
+        name: "Compleo Agent",
+        email: "compleo@migration.tool",
+      },
+    });
+    return sha;
   }
 
-  // ─── push ───────────────────────────────────────────────────────────────
+  // ─── push (isomorphic-git) ──────────────────────────────────────────────
 
   async push(workingDir: WorkingDir, branchName?: string): Promise<void> {
-    const branch = branchName || (await workingDir.git.branch()).current;
-    await workingDir.git.push("origin", branch, ["--set-upstream"]);
+    const branch =
+      branchName ||
+      (await git.currentBranch({ fs, dir: workingDir.path })) ||
+      "main";
+
+    const effectiveToken = this.config.token;
+    const onAuth = effectiveToken
+      ? () => this.buildIsomorphicAuth(effectiveToken)
+      : undefined;
+
+    await git.push({
+      fs,
+      http,
+      dir: workingDir.path,
+      remote: "origin",
+      ref: branch,
+      onAuth,
+    });
   }
 
   // ─── createPR ───────────────────────────────────────────────────────────
@@ -182,7 +229,9 @@ export class GitConnector {
       case "gitea":
         return this.createGiteaPR(config);
       case "bare":
-        throw new Error("Git bare ne supporte pas la création de PR. Utilisez push seulement.");
+        throw new Error(
+          "Git bare ne supporte pas la création de PR. Utilisez push seulement."
+        );
       default:
         throw new Error(`Provider non supporté: ${this.config.provider}`);
     }
@@ -192,7 +241,10 @@ export class GitConnector {
 
   private async createGitHubPR(config: PRConfig): Promise<PRResult> {
     const apiUrl = this.config.apiUrl || "https://api.github.com";
-    const { owner, repo } = this.extractOwnerRepo(config.workingDir.repoUrl, "github");
+    const { owner, repo } = this.extractOwnerRepo(
+      config.workingDir.repoUrl,
+      "github"
+    );
 
     const response = await fetch(`${apiUrl}/repos/${owner}/${repo}/pulls`, {
       method: "POST",
@@ -211,10 +263,12 @@ export class GitConnector {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`GitHub PR creation failed (${response.status}): ${error}`);
+      throw new Error(
+        `GitHub PR creation failed (${response.status}): ${error}`
+      );
     }
 
-    const data = await response.json() as any;
+    const data = (await response.json()) as any;
     return {
       url: data.html_url,
       number: data.number,
@@ -227,30 +281,38 @@ export class GitConnector {
 
   private async createGitLabMR(config: PRConfig): Promise<PRResult> {
     const apiUrl = this.config.apiUrl || "https://gitlab.com/api/v4";
-    const projectPath = this.extractProjectPath(config.workingDir.repoUrl, "gitlab");
+    const projectPath = this.extractProjectPath(
+      config.workingDir.repoUrl,
+      "gitlab"
+    );
     const encodedPath = encodeURIComponent(projectPath);
 
-    const response = await fetch(`${apiUrl}/projects/${encodedPath}/merge_requests`, {
-      method: "POST",
-      headers: {
-        "PRIVATE-TOKEN": this.config.token || "",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        title: config.title,
-        description: config.body,
-        source_branch: config.sourceBranch,
-        target_branch: config.targetBranch,
-        labels: config.labels?.join(","),
-      }),
-    });
+    const response = await fetch(
+      `${apiUrl}/projects/${encodedPath}/merge_requests`,
+      {
+        method: "POST",
+        headers: {
+          "PRIVATE-TOKEN": this.config.token || "",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: config.title,
+          description: config.body,
+          source_branch: config.sourceBranch,
+          target_branch: config.targetBranch,
+          labels: config.labels?.join(","),
+        }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`GitLab MR creation failed (${response.status}): ${error}`);
+      throw new Error(
+        `GitLab MR creation failed (${response.status}): ${error}`
+      );
     }
 
-    const data = await response.json() as any;
+    const data = (await response.json()) as any;
     return {
       url: data.web_url,
       number: data.iid,
@@ -262,8 +324,12 @@ export class GitConnector {
   // ─── Azure DevOps PR ────────────────────────────────────────────────────
 
   private async createAzurePR(config: PRConfig): Promise<PRResult> {
-    const { org, project, repo } = this.extractAzureInfo(config.workingDir.repoUrl);
-    const apiUrl = this.config.apiUrl || `https://dev.azure.com/${org}/${project}/_apis`;
+    const { org, project, repo } = this.extractAzureInfo(
+      config.workingDir.repoUrl
+    );
+    const apiUrl =
+      this.config.apiUrl ||
+      `https://dev.azure.com/${org}/${project}/_apis`;
 
     const response = await fetch(
       `${apiUrl}/git/repositories/${repo}/pullrequests?api-version=7.1`,
@@ -284,10 +350,12 @@ export class GitConnector {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Azure DevOps PR creation failed (${response.status}): ${error}`);
+      throw new Error(
+        `Azure DevOps PR creation failed (${response.status}): ${error}`
+      );
     }
 
-    const data = await response.json() as any;
+    const data = (await response.json()) as any;
     return {
       url: `https://dev.azure.com/${org}/${project}/_git/${repo}/pullrequest/${data.pullRequestId}`,
       number: data.pullRequestId,
@@ -299,8 +367,12 @@ export class GitConnector {
   // ─── Gitea PR ───────────────────────────────────────────────────────────
 
   private async createGiteaPR(config: PRConfig): Promise<PRResult> {
-    const apiUrl = this.config.apiUrl || "https://gitea.example.com/api/v1";
-    const { owner, repo } = this.extractOwnerRepo(config.workingDir.repoUrl, "gitea");
+    const apiUrl =
+      this.config.apiUrl || "https://gitea.example.com/api/v1";
+    const { owner, repo } = this.extractOwnerRepo(
+      config.workingDir.repoUrl,
+      "gitea"
+    );
 
     const response = await fetch(`${apiUrl}/repos/${owner}/${repo}/pulls`, {
       method: "POST",
@@ -319,10 +391,12 @@ export class GitConnector {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Gitea PR creation failed (${response.status}): ${error}`);
+      throw new Error(
+        `Gitea PR creation failed (${response.status}): ${error}`
+      );
     }
 
-    const data = await response.json() as any;
+    const data = (await response.json()) as any;
     return {
       url: data.html_url,
       number: data.number,
@@ -333,40 +407,27 @@ export class GitConnector {
 
   // ─── Helpers ────────────────────────────────────────────────────────────
 
-  private injectToken(url: string, token?: string): string {
-    if (!token) return url;
-
-    // HTTPS URL: https://github.com/owner/repo.git
-    if (url.startsWith("https://")) {
-      const urlObj = new URL(url);
-      if (this.config.provider === "gitlab") {
-        urlObj.username = "oauth2";
-        urlObj.password = token;
-      } else if (this.config.provider === "azure") {
-        urlObj.username = "";
-        urlObj.password = token;
-      } else {
-        // GitHub, Gitea
-        urlObj.username = token;
-        urlObj.password = "x-oauth-basic";
-      }
-      return urlObj.toString();
+  private buildIsomorphicAuth(token: string): {
+    username: string;
+    password: string;
+  } {
+    if (this.config.provider === "gitlab") {
+      return { username: "oauth2", password: token };
     }
-
-    // SSH URL: git@github.com:owner/repo.git — can't inject token
-    return url;
+    if (this.config.provider === "azure") {
+      return { username: "", password: token };
+    }
+    // GitHub, Gitea
+    return { username: token, password: "x-oauth-basic" };
   }
 
   private extractOwnerRepo(
     url: string,
     _provider: string
   ): { owner: string; repo: string } {
-    // Handle HTTPS: https://github.com/owner/repo.git
-    // Handle SSH: git@github.com:owner/repo.git
     let cleaned = url.replace(/\.git$/, "");
 
     if (cleaned.includes("@")) {
-      // SSH format
       const parts = cleaned.split(":").pop()?.split("/") || [];
       return { owner: parts[0] || "", repo: parts[1] || "" };
     }
@@ -382,13 +443,12 @@ export class GitConnector {
       return cleaned.split(":").pop() || "";
     }
     const urlObj = new URL(cleaned);
-    return urlObj.pathname.slice(1); // Remove leading /
+    return urlObj.pathname.slice(1);
   }
 
   private extractAzureInfo(
     url: string
   ): { org: string; project: string; repo: string } {
-    // https://dev.azure.com/org/project/_git/repo
     const urlObj = new URL(url.replace(/\.git$/, ""));
     const parts = urlObj.pathname.split("/").filter(Boolean);
     return {
@@ -406,7 +466,12 @@ export class GitConnector {
     const files: { path: string; content: string }[] = [];
     const walk = (dir: string) => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (entry.name === ".git" || entry.name === "node_modules" || entry.name === "target") continue;
+        if (
+          entry.name === ".git" ||
+          entry.name === "node_modules" ||
+          entry.name === "target"
+        )
+          continue;
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
           walk(full);
@@ -427,6 +492,21 @@ export class GitConnector {
     };
     walk(workingDir.path);
     return files;
+  }
+
+  // ─── Local copy (for local path cloning) ────────────────────────────────
+
+  private copyDirRecursive(src: string, dest: string): void {
+    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isDirectory()) {
+        fs.mkdirSync(destPath, { recursive: true });
+        this.copyDirRecursive(srcPath, destPath);
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
   }
 
   // ─── Cleanup ────────────────────────────────────────────────────────────
