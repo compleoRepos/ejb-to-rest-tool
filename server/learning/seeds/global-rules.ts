@@ -50,6 +50,155 @@ export const globalSeedRules: InsertLearningRule[] = [
     confirmedByUser: false,
   },
 
+  // ═══════════════════════════════════════════════════════════════
+  // TRANSACTION_AMBIGUOUS — 5 règles
+  // ═══════════════════════════════════════════════════════════════
+
+  // T1. Classe *UC + execute → @Transactional (readWrite)
+  {
+    tenantId: GLOBAL_TENANT,
+    ruleType: "TRANSACTION_AMBIGUOUS",
+    patternClassName: ".*UC$",
+    patternMethodName: "^execute$",
+    chosenOption: "A",
+    chosenReason: "Les Use Cases d'écriture bancaires nécessitent une transaction complète avec rollback",
+    confidence: SEED_CONFIDENCE,
+    occurrenceCount: SEED_OCCURRENCES,
+    isActive: true,
+    sourceProject: "seed",
+    confirmedByUser: false,
+  },
+
+  // T2. Classe *Maj* → @Transactional (readWrite)
+  {
+    tenantId: GLOBAL_TENANT,
+    ruleType: "TRANSACTION_AMBIGUOUS",
+    patternClassName: ".*Maj.*",
+    chosenOption: "A",
+    chosenReason: "Les mises à jour (Maj) sont des opérations d'écriture → transaction complète",
+    confidence: SEED_CONFIDENCE,
+    occurrenceCount: SEED_OCCURRENCES,
+    isActive: true,
+    sourceProject: "seed",
+    confirmedByUser: false,
+  },
+
+  // T3. Classe *Envoyer* → @Transactional (readWrite)
+  {
+    tenantId: GLOBAL_TENANT,
+    ruleType: "TRANSACTION_AMBIGUOUS",
+    patternClassName: ".*Envoyer.*",
+    chosenOption: "A",
+    chosenReason: "L'envoi de notifications/messages est une opération d'écriture",
+    confidence: SEED_CONFIDENCE,
+    occurrenceCount: SEED_OCCURRENCES,
+    isActive: true,
+    sourceProject: "seed",
+    confirmedByUser: false,
+  },
+
+  // T4. Classe *Generer* → @Transactional (readWrite)
+  {
+    tenantId: GLOBAL_TENANT,
+    ruleType: "TRANSACTION_AMBIGUOUS",
+    patternClassName: ".*Generer.*",
+    chosenOption: "A",
+    chosenReason: "La génération de documents est une opération d'écriture",
+    confidence: SEED_CONFIDENCE,
+    occurrenceCount: SEED_OCCURRENCES,
+    isActive: true,
+    sourceProject: "seed",
+    confirmedByUser: false,
+  },
+
+  // T5. Classe *Simuler* → Pas de transaction
+  {
+    tenantId: GLOBAL_TENANT,
+    ruleType: "TRANSACTION_AMBIGUOUS",
+    patternClassName: ".*Simuler.*",
+    chosenOption: "C",
+    chosenReason: "Les simulations sont des calculs sans effet de bord",
+    confidence: SEED_CONFIDENCE,
+    occurrenceCount: SEED_OCCURRENCES,
+    isActive: true,
+    sourceProject: "seed",
+    confirmedByUser: false,
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // URL_STRUCTURE_AMBIGUOUS — 5 règles
+  // ═══════════════════════════════════════════════════════════════
+
+  // U1. Classe *Activer* → /resource/{id}/action
+  {
+    tenantId: GLOBAL_TENANT,
+    ruleType: "URL_STRUCTURE_AMBIGUOUS",
+    patternClassName: ".*Activer.*",
+    chosenOption: "A",
+    chosenReason: "Les opérations d'activation utilisent le pattern REST /resource/{id}/action",
+    confidence: SEED_CONFIDENCE,
+    occurrenceCount: SEED_OCCURRENCES,
+    isActive: true,
+    sourceProject: "seed",
+    confirmedByUser: false,
+  },
+
+  // U2. Classe *Bloquer* → /resource/{id}/action
+  {
+    tenantId: GLOBAL_TENANT,
+    ruleType: "URL_STRUCTURE_AMBIGUOUS",
+    patternClassName: ".*Bloquer.*",
+    chosenOption: "A",
+    chosenReason: "Les opérations de blocage utilisent le pattern REST /resource/{id}/action",
+    confidence: SEED_CONFIDENCE,
+    occurrenceCount: SEED_OCCURRENCES,
+    isActive: true,
+    sourceProject: "seed",
+    confirmedByUser: false,
+  },
+
+  // U3. Classe *Charger* → /resource/{id}/action
+  {
+    tenantId: GLOBAL_TENANT,
+    ruleType: "URL_STRUCTURE_AMBIGUOUS",
+    patternClassName: ".*Charger.*",
+    chosenOption: "A",
+    chosenReason: "Le chargement de données utilise le pattern REST /resource/{id}/action",
+    confidence: SEED_CONFIDENCE,
+    occurrenceCount: SEED_OCCURRENCES,
+    isActive: true,
+    sourceProject: "seed",
+    confirmedByUser: false,
+  },
+
+  // U4. Classe *Valider* → /resource/{id}/action
+  {
+    tenantId: GLOBAL_TENANT,
+    ruleType: "URL_STRUCTURE_AMBIGUOUS",
+    patternClassName: ".*Valider.*",
+    chosenOption: "A",
+    chosenReason: "Les validations utilisent le pattern REST /resource/{id}/action",
+    confidence: SEED_CONFIDENCE,
+    occurrenceCount: SEED_OCCURRENCES,
+    isActive: true,
+    sourceProject: "seed",
+    confirmedByUser: false,
+  },
+
+  // U5. Classe *Annuler* → /resource/{id}/action
+  {
+    tenantId: GLOBAL_TENANT,
+    ruleType: "URL_STRUCTURE_AMBIGUOUS",
+    patternClassName: ".*Annuler.*",
+    chosenOption: "A",
+    chosenReason: "Les annulations utilisent le pattern REST /resource/{id}/action",
+    confidence: SEED_CONFIDENCE,
+    occurrenceCount: SEED_OCCURRENCES,
+    isActive: true,
+    sourceProject: "seed",
+    confirmedByUser: false,
+  },
+
   // 3. Méthode find* → GET
   {
     tenantId: GLOBAL_TENANT,

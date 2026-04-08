@@ -13,6 +13,10 @@
 import { Router, type Express, type Request, type Response } from "express";
 import { getAgent, getAgentStore, type AgentConfig, type AgentEvent } from "./agent/CompleoAgent";
 import archiver from "archiver";
+import { LearningEngine } from "./learning/LearningEngine";
+import type { ChoiceWithAutoResolve } from "./learning/ConfidenceScorer";
+
+const learningEngine = new LearningEngine();
 
 export function registerAgentRoutes(app: Express) {
   const router = Router();
@@ -137,8 +141,8 @@ export function registerAgentRoutes(app: Express) {
     res.json(status);
   });
 
-  // ─── POST /api/agent/:id/choices ────────────────────────────────────────────
-  router.post("/:id/choices", (req: Request, res: Response) => {
+    // ─── POST /api/agent/:id/choices ────────────────────────────────────────
+  router.post("/:id/choices", async (req: Request, res: Response) => {
     const { id } = req.params;
     const { choices } = req.body;
 
@@ -147,13 +151,59 @@ export function registerAgentRoutes(app: Express) {
     }
 
     const agent = getAgent();
+    const store = getAgentStore();
+    const session = store.get(id);
+
     const resolved = agent.resolveAmbiguities(id, choices);
 
     if (!resolved) {
       return res.status(400).json({ error: "Session non en attente d'input ou introuvable" });
     }
 
-    res.json({ message: "Ambiguïtés résolues, l'agent reprend" });
+    // ─── Learning: Learn from user choices ───────────────────────────────
+    let learningResult: any = null;
+    try {
+      if (session?.pendingAmbiguities && session.pendingAmbiguities.length > 0) {
+        const tenantId = session.config.options.projectName || "global";
+
+        const enrichedChoices: ChoiceWithAutoResolve[] = choices.map((c: any) => ({
+          ambiguityId: c.ambiguityId,
+          choiceId: c.choiceId,
+          wasAutoResolved: false,
+        }));
+
+        learningResult = await learningEngine.learnFromChoices(
+          session.pendingAmbiguities,
+          enrichedChoices,
+          tenantId,
+          session.config.options.projectName || "unknown",
+          session.id
+        );
+
+        if (learningResult.rulesCreated > 0 || learningResult.rulesReinforced > 0) {
+          store.addEvent(id, {
+            type: "LOG",
+            timestamp: Date.now(),
+            level: "info",
+            message: `Apprentissage : ${learningResult.rulesCreated} règle(s) créée(s), ${learningResult.rulesReinforced} renforcée(s)`,
+            phase: "ANALYZING",
+          });
+        }
+      }
+    } catch (learningErr) {
+      console.warn("[Learning] Agent learn from choices failed:", learningErr);
+    }
+    // ─── End Learning ────────────────────────────────────────────────
+
+    res.json({
+      message: "Ambiguïtés résolues, l'agent reprend",
+      learning: learningResult ? {
+        rulesCreated: learningResult.rulesCreated,
+        rulesReinforced: learningResult.rulesReinforced,
+        rulesDegraded: learningResult.rulesDegraded,
+        rulesCorrected: learningResult.rulesCorrected,
+      } : null,
+    });
   });
 
   // ─── POST /api/agent/:id/cancel ─────────────────────────────────────────────

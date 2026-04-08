@@ -24,6 +24,12 @@ import type { DetectedComponent, GeneratedFile, TechnologyType } from "./engine/
 import { getEngine, type AnalysisResult } from "./engine/CompleoEngine";
 import { GitConnector, type GitProvider } from "./git/GitConnector";
 import { sessionStore } from "./session-store";
+import { LearningEngine } from "./learning/LearningEngine";
+import type { ChoiceWithAutoResolve } from "./learning/ConfidenceScorer";
+import type { AmbiguityResolution } from "./learning/LearningEngine";
+
+// Learning engine singleton
+const learningEngine = new LearningEngine();
 
 // Register all detectors and generators at startup
 registerAllDetectors(registry);
@@ -254,8 +260,42 @@ router.post("/analyze-multitech", async (req: Request, res: Response) => {
     session.ir = ir;
 
     // Detect ambiguities from the EJB IR
-    const ambiguities = detectAmbiguities(ir);
-    session.ambiguities = ambiguities;
+    const allAmbiguities = detectAmbiguities(ir);
+
+    // ─── Learning: Auto-resolve ambiguities with learned rules ───────
+    let ambiguities = allAmbiguities;
+    let learningResolutions: AmbiguityResolution[] = [];
+    let autoResolvedChoices: UserChoice[] = [];
+    try {
+      if (allAmbiguities.length > 0) {
+        const tenantId = session.projectName || "global";
+        learningResolutions = await learningEngine.resolveAmbiguities(allAmbiguities, tenantId);
+
+        // Separate auto-resolved from remaining
+        const autoResolved = learningResolutions.filter(r => r.autoResolved && r.chosenOption);
+        autoResolvedChoices = autoResolved.map(r => ({
+          ambiguityId: r.ambiguityId,
+          choiceId: r.chosenOption!,
+        }));
+
+        const autoResolvedIds = new Set(autoResolved.map(r => r.ambiguityId));
+        ambiguities = allAmbiguities.filter(a => !autoResolvedIds.has(a.id));
+
+        if (autoResolved.length > 0) {
+          emitDebugEvent(session, "success",
+            `Apprentissage : ${autoResolved.length} ambiguïté(s) auto-résolue(s) par les règles apprises`,
+            autoResolved.map(r => `${r.ambiguityId} → ${r.chosenOption} (confiance: ${(r.confidence || 0).toFixed(2)})`).join(", ")
+          );
+        }
+      }
+    } catch (learningErr) {
+      console.warn("[Learning] Auto-resolve failed, falling back to manual:", learningErr);
+    }
+    // ─── End Learning ────────────────────────────────────────────────
+
+    session.ambiguities = allAmbiguities; // Keep all for learning feedback
+    (session as any)._learningResolutions = learningResolutions;
+    (session as any)._autoResolvedChoices = autoResolvedChoices;
 
     if (ambiguities.length > 0) {
       session.status = "waiting_choices";
@@ -300,6 +340,18 @@ router.post("/analyze-multitech", async (req: Request, res: Response) => {
       })),
       // EJB-specific data
       ambiguities,
+      // Learning engine data
+      learningResolutions: learningResolutions.filter(r => r.suggestion || r.autoResolved).map(r => ({
+        ambiguityId: r.ambiguityId,
+        autoResolved: r.autoResolved,
+        chosenOption: r.chosenOption,
+        suggestion: r.suggestion,
+        confidence: r.confidence,
+        message: r.message,
+        hasConflict: r.hasConflict,
+      })),
+      autoResolvedCount: autoResolvedChoices.length,
+      totalAmbiguities: allAmbiguities.length,
       irSummary: {
         useCases: ir.useCases.map(uc => ({
           className: uc.className,
@@ -629,6 +681,45 @@ router.post("/resolve/:sessionId", async (req: Request, res: Response) => {
     // Store user choices
     session.userChoices = choices;
 
+    // ─── Learning: Learn from user choices ───────────────────────────────
+    let learningResult: any = null;
+    try {
+      const tenantId = session.projectName || "global";
+      const autoResolutions = (session as any)._learningResolutions || [];
+
+      // Enrich choices with auto-resolution info for ConfidenceScorer
+      const enrichedChoices: ChoiceWithAutoResolve[] = choices.map(c => {
+        const autoRes = autoResolutions.find((r: AmbiguityResolution) =>
+          r.ambiguityId === c.ambiguityId && r.autoResolved
+        );
+        return {
+          ambiguityId: c.ambiguityId,
+          choiceId: c.choiceId,
+          wasAutoResolved: !!autoRes,
+          autoResolvedOption: autoRes?.chosenOption,
+          autoResolvedRuleId: autoRes?.ruleId,
+        };
+      });
+
+      learningResult = await learningEngine.learnFromChoices(
+        session.ambiguities,
+        enrichedChoices,
+        tenantId,
+        session.projectName || "unknown",
+        session.id
+      );
+
+      if (learningResult.rulesCreated > 0 || learningResult.rulesReinforced > 0) {
+        emitDebugEvent(session, "success",
+          `Apprentissage : ${learningResult.rulesCreated} règle(s) créée(s), ${learningResult.rulesReinforced} renforcée(s)`,
+          learningResult.rulesDegraded > 0 ? `${learningResult.rulesDegraded} dégradée(s)` : undefined
+        );
+      }
+    } catch (learningErr) {
+      console.warn("[Learning] Learn from choices failed:", learningErr);
+    }
+    // ─── End Learning ────────────────────────────────────────────────
+
     // Apply choices to IR
     const resolvedIR = applyChoicesToIR(session.ir, session.ambiguities, choices);
     session.resolvedIR = resolvedIR;
@@ -686,6 +777,12 @@ router.post("/resolve/:sessionId", async (req: Request, res: Response) => {
         lines: f.content.split("\n").length,
       })),
       choicesApplied: choices.length,
+      learning: learningResult ? {
+        rulesCreated: learningResult.rulesCreated,
+        rulesReinforced: learningResult.rulesReinforced,
+        rulesDegraded: learningResult.rulesDegraded,
+        rulesCorrected: learningResult.rulesCorrected,
+      } : null,
     });
   } catch (err: any) {
     console.error("[Compleo Resolve Error]", err);

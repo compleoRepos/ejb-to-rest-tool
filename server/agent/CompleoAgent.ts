@@ -15,6 +15,7 @@ import { GitConnector, type CloneResult, type PRResult, type WorkingDir } from "
 import { CompilationLoop, type LoopResult, type GeneratedFile as CompLoopFile } from "./CompilationLoop";
 import type { Ambiguity, UserChoice } from "../ambiguity-detector";
 import type { ProjectIR } from "../java-parser";
+import { LearningEngine, type AmbiguityResolution } from "../learning/LearningEngine";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -199,21 +200,80 @@ export class CompleoAgent {
 
       // ─── Phase 3: Handle ambiguities ──────────────────────────────────
       if (session.pendingAmbiguities && session.pendingAmbiguities.length > 0) {
-        if (config.options.autoResolveAmbiguities) {
-          // Auto-resolve: use recommendations
-          const autoChoices: UserChoice[] = session.pendingAmbiguities.map((a) => ({
-            ambiguityId: a.id,
-            choiceId: a.recommendation,
-          }));
-          session.userChoices = autoChoices;
+        // ─── Learning: Try auto-resolve with learned rules first ───────
+        let remainingAmbiguities = session.pendingAmbiguities;
+        try {
+          const le = new LearningEngine();
+          const tenantId = config.options.projectName || "global";
+          const resolutions = await le.resolveAmbiguities(session.pendingAmbiguities, tenantId);
+
+          const autoResolved = resolutions.filter(r => r.autoResolved && r.chosenOption);
+          if (autoResolved.length > 0) {
+            const autoChoices: UserChoice[] = autoResolved.map(r => ({
+              ambiguityId: r.ambiguityId,
+              choiceId: r.chosenOption!,
+            }));
+
+            // Merge auto-resolved choices
+            session.userChoices = autoChoices;
+
+            yield this.event("LOG", {
+              level: "success",
+              message: `Apprentissage : ${autoResolved.length} ambiguïté(s) auto-résolue(s) par les règles apprises`,
+              phase: "ANALYZING",
+              data: {
+                autoResolved: autoResolved.map(r => ({
+                  ambiguityId: r.ambiguityId,
+                  chosenOption: r.chosenOption,
+                  confidence: r.confidence,
+                })),
+              },
+            });
+
+            // Filter out auto-resolved ambiguities
+            const autoResolvedIds = new Set(autoResolved.map(r => r.ambiguityId));
+            remainingAmbiguities = session.pendingAmbiguities.filter(a => !autoResolvedIds.has(a.id));
+          }
+
+          // Add suggestions for remaining ambiguities
+          const suggestions = resolutions.filter(r => !r.autoResolved && r.suggestion);
+          if (suggestions.length > 0) {
+            yield this.event("LOG", {
+              level: "info",
+              message: `Apprentissage : ${suggestions.length} suggestion(s) pour les ambiguïtés restantes`,
+              phase: "ANALYZING",
+            });
+          }
+        } catch (learningErr) {
+          console.warn("[Learning] Agent auto-resolve failed:", learningErr);
+        }
+        // ─── End Learning ────────────────────────────────────────────────
+
+        if (remainingAmbiguities.length > 0) {
+          if (config.options.autoResolveAmbiguities) {
+            // Auto-resolve remaining: use recommendations
+            const autoChoices: UserChoice[] = remainingAmbiguities.map((a) => ({
+              ambiguityId: a.id,
+              choiceId: a.recommendation,
+            }));
+            session.userChoices = [...(session.userChoices || []), ...autoChoices];
+            yield this.event("LOG", {
+              level: "info",
+              message: `${autoChoices.length} ambiguïté(s) restante(s) auto-résolues avec les recommandations du moteur`,
+              phase: "ANALYZING",
+            });
+          } else {
+            // Update pending ambiguities to only remaining ones
+            session.pendingAmbiguities = remainingAmbiguities;
+            // Pause and wait for user input
+            yield* this.phaseAwaitingInput(session);
+          }
+        } else {
           yield this.event("LOG", {
-            level: "info",
-            message: `${autoChoices.length} ambiguïtés auto-résolues avec les recommandations du moteur`,
+            level: "success",
+            message: `Toutes les ambiguïtés ont été résolues par l'apprentissage automatique`,
             phase: "ANALYZING",
           });
-        } else {
-          // Pause and wait for user input
-          yield* this.phaseAwaitingInput(session);
         }
       }
 

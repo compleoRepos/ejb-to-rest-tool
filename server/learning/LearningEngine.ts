@@ -21,7 +21,7 @@ import type { Ambiguity, UserChoice } from "../ambiguity-detector";
 import type { LearningRule, InsertLearningRule } from "../../drizzle/schema";
 import { RuleStore, type RuleStats } from "./RuleStore";
 import { RuleInferrer } from "./RuleInferrer";
-import { RuleMatcher, type RuleMatch, THRESHOLDS } from "./RuleMatcher";
+import { RuleMatcher, type RuleMatch, THRESHOLDS, computeMatchScore } from "./RuleMatcher";
 import { ConfidenceScorer, type ChoiceWithAutoResolve, type ScoringResult } from "./ConfidenceScorer";
 import { RuleConflictResolver, type ConflictCandidate } from "./RuleConflictResolver";
 
@@ -163,7 +163,6 @@ export class LearningEngine {
       // Vérifier les conflits entre règles candidates
       const scoredCandidates: ConflictCandidate[] = candidates
         .map(rule => {
-          const { computeMatchScore } = require("./RuleMatcher");
           return {
             rule,
             matchScore: computeMatchScore(context, rule),
