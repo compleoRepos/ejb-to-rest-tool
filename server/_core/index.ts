@@ -9,6 +9,7 @@ import { registerAgentRoutes } from "../agent-routes";
 import learningRoutes from "../learning-routes";
 import { intelligenceRoutes } from "../intelligence-routes";
 import { authRoutes } from "../auth-routes";
+import { registerArchitectureRoutes } from "../architecture-routes";
 import { authMiddleware } from "../middleware/auth-middleware";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -57,6 +58,7 @@ async function startServer() {
   app.use("/api/intelligence", authMiddleware);
   app.use("/api/learning", authMiddleware);
   app.use("/api/agent", authMiddleware);
+  app.use("/api/architecture", authMiddleware);
 
   // Compleo API routes (upload, analyze, generate, download)
   registerCompleoRoutes(app);
@@ -66,6 +68,8 @@ async function startServer() {
   app.use("/api/learning", learningRoutes);
   // Intelligence engine routes (analyze, report, stats)
   app.use("/api/intelligence", intelligenceRoutes);
+  // Architecture discovery routes (analyze, export, result)
+  registerArchitectureRoutes(app);
 
   // tRPC API
   app.use(

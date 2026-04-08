@@ -11,6 +11,7 @@
 import { Router, Request, Response } from "express";
 import multer from "multer";
 import AdmZip from "adm-zip";
+import { enrichZipWithArchitecture } from "./graph/architecture-zip-enricher";
 import { nanoid } from "nanoid";
 import { parseEjbProject, type ProjectIR } from "./java-parser";
 import { generateSpringBootProject, type GenerationResult, type MigrationReportContext } from "./spring-generator";
@@ -413,6 +414,18 @@ router.post("/generate-multitech", async (req: Request, res: Response) => {
     for (const file of result.generatedFiles) {
       zip.addFile(file.path, Buffer.from(file.content, "utf8"));
     }
+    // Enrich with architecture discovery files
+    if (session.ir) {
+      try {
+        const archResult = enrichZipWithArchitecture(session.ir);
+        for (const archFile of archResult.files) {
+          zip.addFile(archFile.path, Buffer.from(archFile.content, "utf8"));
+        }
+        emitDebugEvent(session, "info", `Architecture : ${archResult.microserviceCount} microservices, ${archResult.domainCount} domaines, ${archResult.files.length} fichiers`);
+      } catch (e: any) {
+        emitDebugEvent(session, "warning", `Architecture enrichment skipped: ${e.message}`);
+      }
+    }
     const zipBuffer = zip.toBuffer();
 
     // Upload ZIP to S3
@@ -753,6 +766,16 @@ router.post("/resolve/:sessionId", async (req: Request, res: Response) => {
     for (const file of result.files) {
       zip.addFile(file.path, Buffer.from(file.content, "utf8"));
     }
+    // Enrich with architecture discovery files
+    try {
+      const archResult = enrichZipWithArchitecture(resolvedIR);
+      for (const archFile of archResult.files) {
+        zip.addFile(archFile.path, Buffer.from(archFile.content, "utf8"));
+      }
+      emitDebugEvent(session, "info", `Architecture : ${archResult.microserviceCount} microservices, ${archResult.domainCount} domaines, ${archResult.files.length} fichiers`);
+    } catch (e: any) {
+      emitDebugEvent(session, "warning", `Architecture enrichment skipped: ${e.message}`);
+    }
     const zipBuffer = zip.toBuffer();
 
     // Upload ZIP to S3
@@ -828,6 +851,16 @@ router.post("/generate", async (req: Request, res: Response) => {
     const zip = new AdmZip();
     for (const file of result.files) {
       zip.addFile(file.path, Buffer.from(file.content, "utf8"));
+    }
+    // Enrich with architecture discovery files
+    try {
+      const archResult = enrichZipWithArchitecture(irToUse);
+      for (const archFile of archResult.files) {
+        zip.addFile(archFile.path, Buffer.from(archFile.content, "utf8"));
+      }
+      emitDebugEvent(session, "info", `Architecture : ${archResult.microserviceCount} microservices, ${archResult.domainCount} domaines, ${archResult.files.length} fichiers`);
+    } catch (e: any) {
+      emitDebugEvent(session, "warning", `Architecture enrichment skipped: ${e.message}`);
     }
     const zipBuffer = zip.toBuffer();
 
