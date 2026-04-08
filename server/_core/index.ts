@@ -7,6 +7,7 @@ import { registerOAuthRoutes } from "./oauth";
 import { registerCompleoRoutes } from "../compleo-routes";
 import { registerAgentRoutes } from "../agent-routes";
 import learningRoutes from "../learning-routes";
+import { intelligenceRoutes } from "../intelligence-routes";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -44,6 +45,8 @@ async function startServer() {
   registerAgentRoutes(app);
   // Learning engine routes (rules CRUD, stats, export/import)
   app.use("/api/learning", learningRoutes);
+  // Intelligence engine routes (analyze, report, stats)
+  app.use("/api/intelligence", intelligenceRoutes);
 
   // tRPC API
   app.use(
