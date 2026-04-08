@@ -1,0 +1,23 @@
+CREATE TABLE `learning_rules` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`tenant_id` varchar(100) NOT NULL DEFAULT 'global',
+	`rule_type` varchar(50) NOT NULL,
+	`pattern_class_name` varchar(200),
+	`pattern_method_name` varchar(200),
+	`pattern_package` varchar(200),
+	`pattern_javadoc` text,
+	`pattern_annotations` varchar(500),
+	`pattern_return_type` varchar(200),
+	`pattern_param_types` varchar(500),
+	`chosen_option` varchar(100) NOT NULL,
+	`chosen_reason` text,
+	`occurrence_count` int NOT NULL DEFAULT 1,
+	`confidence` float NOT NULL DEFAULT 0.5,
+	`is_active` boolean NOT NULL DEFAULT true,
+	`source_project` varchar(200),
+	`source_session_id` varchar(100),
+	`confirmed_by_user` boolean NOT NULL DEFAULT true,
+	`last_seen_at` timestamp NOT NULL DEFAULT (now()),
+	`created_at` timestamp NOT NULL DEFAULT (now()),
+	CONSTRAINT `learning_rules_id` PRIMARY KEY(`id`)
+);

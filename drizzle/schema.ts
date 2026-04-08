@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, json, boolean } from "drizzle-orm/mysql-core";
+import { int, float, mysqlEnum, mysqlTable, text, timestamp, varchar, json, boolean } from "drizzle-orm/mysql-core";
 
 // ============================================================
 // Users (from template — preserved)
@@ -156,3 +156,42 @@ export const sharedReports = mysqlTable("shared_reports", {
 
 export type SharedReport = typeof sharedReports.$inferSelect;
 export type InsertSharedReport = typeof sharedReports.$inferInsert;
+
+// ============================================================
+// Learning Rules (Moteur d'apprentissage automatique)
+// ============================================================
+
+export const learningRules = mysqlTable("learning_rules", {
+  id: int("id").autoincrement().primaryKey(),
+  tenantId: varchar("tenant_id", { length: 100 }).default("global").notNull(),
+  ruleType: varchar("rule_type", { length: 50 }).notNull(),
+
+  // Patterns de déclenchement
+  patternClassName: varchar("pattern_class_name", { length: 200 }),
+  patternMethodName: varchar("pattern_method_name", { length: 200 }),
+  patternPackage: varchar("pattern_package", { length: 200 }),
+  patternJavadoc: text("pattern_javadoc"),
+  patternAnnotations: varchar("pattern_annotations", { length: 500 }),
+  patternReturnType: varchar("pattern_return_type", { length: 200 }),
+  patternParamTypes: varchar("pattern_param_types", { length: 500 }),
+
+  // Choix de l'utilisateur
+  chosenOption: varchar("chosen_option", { length: 100 }).notNull(),
+  chosenReason: text("chosen_reason"),
+
+  // Statistiques d'apprentissage
+  occurrenceCount: int("occurrence_count").default(1).notNull(),
+  confidence: float("confidence").default(0.5).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+
+  // Source du choix
+  sourceProject: varchar("source_project", { length: 200 }),
+  sourceSessionId: varchar("source_session_id", { length: 100 }),
+  confirmedByUser: boolean("confirmed_by_user").default(true).notNull(),
+
+  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type LearningRule = typeof learningRules.$inferSelect;
+export type InsertLearningRule = typeof learningRules.$inferInsert;

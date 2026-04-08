@@ -23,6 +23,7 @@ import { registry } from "./engine/registry/index";
 import type { DetectedComponent, GeneratedFile, TechnologyType } from "./engine/registry/types";
 import { getEngine, type AnalysisResult } from "./engine/CompleoEngine";
 import { GitConnector, type GitProvider } from "./git/GitConnector";
+import { sessionStore } from "./session-store";
 
 // Register all detectors and generators at startup
 registerAllDetectors(registry);
@@ -74,8 +75,9 @@ export interface CompleoSession {
   technologiesDetected?: TechnologyType[];
 }
 
-// In-memory store for analysis sessions (production would use DB)
-const sessions = new Map<string, CompleoSession>();
+// Persistent session store (survives HMR restarts)
+// Use sessionStore.set() to create, sessionStore.get() to read, sessionStore.persist() after mutations
+const sessions = sessionStore;
 
 // ─── Debug Event Emitter ────────────────────────────────────────────────────
 
@@ -260,6 +262,7 @@ router.post("/analyze-multitech", async (req: Request, res: Response) => {
     } else {
       session.status = "analyzed";
     }
+    sessions.persist(session.id);
 
     return res.json({
       sessionId,
@@ -365,6 +368,7 @@ router.post("/generate-multitech", async (req: Request, res: Response) => {
     const { url } = await storagePut(zipKey, zipBuffer, "application/zip");
     session.zipUrl = url;
     session.status = "generated";
+    sessions.persist(session.id);
 
     emitDebugEvent(session, "success",
       `Génération terminée : ${result.generatedFiles.length} fichiers`,
@@ -499,6 +503,7 @@ router.post("/analyze", async (req: Request, res: Response) => {
 
     if (ambiguities.length > 0) {
       session.status = "waiting_choices";
+      sessions.persist(session.id);
 
       return res.json({
         sessionId,
@@ -541,6 +546,7 @@ router.post("/analyze", async (req: Request, res: Response) => {
     } else {
       // No ambiguities — go straight to analyzed
       session.status = "analyzed";
+      sessions.persist(session.id);
 
       return res.json({
         sessionId,
@@ -663,6 +669,7 @@ router.post("/resolve/:sessionId", async (req: Request, res: Response) => {
     const { url } = await storagePut(zipKey, zipBuffer, "application/zip");
     session.zipUrl = url;
     session.status = "generated";
+    sessions.persist(session.id);
     emitDebugEvent(session, "success", `Génération terminée : ${result.stats.totalFiles} fichiers, ${result.stats.totalLines} lignes`);
     emitDebugEvent(session, "success", `Compilation vérifiée : 0 erreur`);
 
@@ -732,6 +739,7 @@ router.post("/generate", async (req: Request, res: Response) => {
     const { url } = await storagePut(zipKey, zipBuffer, "application/zip");
     session.zipUrl = url;
     session.status = "generated";
+    sessions.persist(session.id);
     emitDebugEvent(session, "success", `Génération terminée : ${result.stats.totalFiles} fichiers, ${result.stats.totalLines} lignes`);
     emitDebugEvent(session, "success", `Compilation vérifiée : 0 erreur`);
 
