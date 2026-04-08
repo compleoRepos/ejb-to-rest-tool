@@ -1,0 +1,25 @@
+{
+  "projectName": "bmce-credit-immobilier-ejb",
+  "expectedBeans": 5,
+  "expectedEndpoints": 5,
+  "expectedDTOs": 15,
+  "expectedEnums": 4,
+  "expectedSecurityIssues": {
+    "CRITICAL": 2,
+    "HIGH": 2,
+    "MEDIUM": 2
+  },
+  "expectedRulesTriggered": [
+    "FIN-001",
+    "FIN-010",
+    "FIN-011",
+    "FIN-023",
+    "JPA-011",
+    "CON-003",
+    "TRX-001"
+  ],
+  "expectedExternalDependencies": [
+    "CreditCompteUC (JNDI bmce-core-banking-ejb)",
+    "CalculerScoreRisqueUC (JNDI bmce-kyc-ejb)"
+  ]
+}

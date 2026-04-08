@@ -1,0 +1,27 @@
+{
+  "projectName": "bmce-virement-swift-ejb",
+  "expectedBeans": 7,
+  "expectedEndpoints": 6,
+  "expectedDTOs": 14,
+  "expectedEnums": 2,
+  "expectedSecurityIssues": {
+    "CRITICAL": 1,
+    "HIGH": 3,
+    "MEDIUM": 2
+  },
+  "expectedRulesTriggered": [
+    "FIN-001",
+    "FIN-002",
+    "FIN-010",
+    "FIN-011",
+    "FIN-025",
+    "FIN-032",
+    "RES-001",
+    "RES-002"
+  ],
+  "expectedExternalDependencies": [
+    "ConsulterSoldeUC (JNDI bmce-core-banking-ejb)",
+    "ScreeningOfacUC (JNDI bmce-kyc-ejb)",
+    "SwiftClient (external service)"
+  ]
+}

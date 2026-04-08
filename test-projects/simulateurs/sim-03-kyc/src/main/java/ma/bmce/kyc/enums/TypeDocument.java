@@ -1,0 +1,5 @@
+package ma.bmce.kyc.enums;
+
+public enum TypeDocument {
+    CIN, PASSEPORT, JUSTIFICATIF_DOMICILE, BULLETIN_SALAIRE, RELEVE_BANCAIRE, ATTESTATION_TRAVAIL
+}

@@ -1,0 +1,29 @@
+{
+  "projectName": "bmce-core-banking-ejb",
+  "expectedBeans": 9,
+  "expectedEndpoints": 9,
+  "expectedDTOs": 16,
+  "expectedEnums": 4,
+  "expectedExceptions": 4,
+  "expectedSecurityIssues": {
+    "CRITICAL": 2,
+    "HIGH": 3,
+    "MEDIUM": 2
+  },
+  "expectedRulesTriggered": [
+    "FIN-001",
+    "FIN-010",
+    "FIN-021",
+    "SEC-001",
+    "SEC-003",
+    "TRX-001",
+    "JDBC-001",
+    "JDBC-002",
+    "JDBC-003",
+    "PERF-002"
+  ],
+  "expectedExternalDependencies": [
+    "MagixService (CPT001-CPT006)",
+    "VerifierKycUC (JNDI inter-module)"
+  ]
+}

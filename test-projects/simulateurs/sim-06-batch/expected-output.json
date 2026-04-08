@@ -1,0 +1,24 @@
+{
+  "projectName": "bmce-batch-nuit-ejb",
+  "expectedBeans": 7,
+  "expectedBatchJobs": 3,
+  "expectedJmsListeners": 1,
+  "expectedSecurityIssues": {
+    "CRITICAL": 2,
+    "HIGH": 2,
+    "MEDIUM": 2
+  },
+  "expectedRulesTriggered": [
+    "FIN-001",
+    "FIN-010",
+    "JDBC-001",
+    "TRX-001",
+    "TST-013",
+    "RES-008"
+  ],
+  "expectedExternalDependencies": [
+    "ValiderVirementUC (JNDI bmce-virement-swift-ejb)",
+    "GenererDocumentUC (JNDI bmce-document-ejb)",
+    "MagixService (MAJ001)"
+  ]
+}

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>ma.bmce.kyc</groupId>
+    <artifactId>bmce-kyc-conformite-ejb</artifactId>
+    <version>2.4.1-SNAPSHOT</version>
+    <packaging>ejb</packaging>
+    <name>bmce-kyc-conformite-ejb</name>
+    <dependencies>
+        <dependency>
+            <groupId>ma.eai.midw</groupId>
+            <artifactId>eai-commons</artifactId>
+            <version>2.1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>javax</groupId>
+            <artifactId>javaee-api</artifactId>
+            <version>8.0.1</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>ma.bmce.framework</groupId>
+            <artifactId>bmce-commons</artifactId>
+            <version>5.1.0</version>
+        </dependency>
+    </dependencies>
+</project>

@@ -1,0 +1,16 @@
+{
+  "projectName": "bmce-monetique-ejb2",
+  "ejbVersion": "2.x",
+  "expectedBeans": 4,
+  "expectedStateful": 1,
+  "ejb2xParsed": true,
+  "homeRemoteMatched": true,
+  "ejbJarXmlParsed": true,
+  "expectedCriticalRules": [
+    "PCI-003",
+    "PCI-004",
+    "SEC-002",
+    "CRY-001"
+  ],
+  "remoteExceptionRemoved": true
+}

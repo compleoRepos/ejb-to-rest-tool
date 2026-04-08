@@ -1,0 +1,25 @@
+{
+  "projectName": "bmce-kyc-conformite-ejb",
+  "expectedBeans": 5,
+  "expectedEndpoints": 5,
+  "expectedDTOs": 12,
+  "expectedEnums": 4,
+  "expectedSecurityIssues": {
+    "CRITICAL": 2,
+    "HIGH": 3,
+    "MEDIUM": 2
+  },
+  "expectedRulesTriggered": [
+    "PCI-001",
+    "DL-001",
+    "SEC-003",
+    "VAL-006",
+    "API-019",
+    "RES-002",
+    "CACHE-001",
+    "FIN-004"
+  ],
+  "expectedExternalDependencies": [
+    "OfacApi (external OFAC screening service)"
+  ]
+}
