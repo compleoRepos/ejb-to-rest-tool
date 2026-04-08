@@ -147,6 +147,45 @@ interface SessionInfo {
   ambiguityCount: number;
 }
 
+// Multi-tech v3.0 types
+interface MultiTechComponent {
+  className: string;
+  technology: string;
+  confidence: number;
+  filePath: string;
+  methods: { name: string; returnType: string; parameters: any[] }[];
+}
+
+interface MaturityScore {
+  global: number;
+  dimensions: {
+    technicalComplexity: number;
+    codeCoverage: number;
+    breakingRisk: number;
+    addedValue: number;
+    engineConfidence: number;
+  };
+  label: string;
+  attentionPoints: string[];
+  estimatedEffort: string;
+}
+
+interface MigrationNote {
+  title: string;
+  content: string;
+  severity: string;
+  technology: string;
+  affectedFiles: string[];
+}
+
+interface MultiTechResult {
+  technologiesDetected: string[];
+  maturityScore: MaturityScore;
+  detectedComponents: MultiTechComponent[];
+  migrationNotes: MigrationNote[];
+  generatedFiles: { path: string; category: string; technology: string; lines: number }[];
+}
+
 // ─── Category helpers ───────────────────────────────────────────────────────
 
 const categoryColors: Record<string, string> = {
@@ -161,6 +200,50 @@ const categoryColors: Record<string, string> = {
   cloud: "text-teal-400",
   main: "text-green-400",
   migration: "text-yellow-400",
+  infrastructure: "text-slate-400",
+  entity: "text-indigo-400",
+  repository: "text-sky-400",
+  migration_note: "text-yellow-400",
+};
+
+const techColors: Record<string, string> = {
+  SERVLET: "bg-orange-500/20 text-orange-300 border-orange-500/30",
+  JSP: "bg-yellow-500/20 text-yellow-300 border-yellow-500/30",
+  EJB_2X: "bg-red-500/20 text-red-300 border-red-500/30",
+  EJB_3X_STATELESS: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+  EJB_3X_STATEFUL: "bg-green-500/20 text-green-300 border-green-500/30",
+  EJB_3X_MDB: "bg-teal-500/20 text-teal-300 border-teal-500/30",
+  STRUTS_1: "bg-purple-500/20 text-purple-300 border-purple-500/30",
+  STRUTS_2: "bg-violet-500/20 text-violet-300 border-violet-500/30",
+  SOAP: "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  JAX_RS: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
+  JDBC: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+  HIBERNATE: "bg-rose-500/20 text-rose-300 border-rose-500/30",
+  JPA: "bg-indigo-500/20 text-indigo-300 border-indigo-500/30",
+  JMS: "bg-pink-500/20 text-pink-300 border-pink-500/30",
+  BATCH: "bg-sky-500/20 text-sky-300 border-sky-500/30",
+  EAI_BOA: "bg-lime-500/20 text-lime-300 border-lime-500/30",
+  SPRING_BOOT: "bg-green-500/20 text-green-300 border-green-500/30",
+};
+
+const techLabels: Record<string, string> = {
+  SERVLET: "Servlet",
+  JSP: "JSP",
+  EJB_2X: "EJB 2.x",
+  EJB_3X_STATELESS: "EJB 3.x",
+  EJB_3X_STATEFUL: "EJB 3.x Stateful",
+  EJB_3X_MDB: "EJB MDB",
+  STRUTS_1: "Struts 1",
+  STRUTS_2: "Struts 2",
+  SOAP: "SOAP/JAX-WS",
+  JAX_RS: "JAX-RS",
+  JDBC: "JDBC",
+  HIBERNATE: "Hibernate",
+  JPA: "JPA",
+  JMS: "JMS",
+  BATCH: "Java Batch",
+  EAI_BOA: "EAI/BOA",
+  SPRING_BOOT: "Spring Boot",
 };
 
 const categoryIcons: Record<string, typeof Code2> = {
@@ -256,6 +339,9 @@ export default function CompleoPage() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
+  // Multi-tech v3.0 state
+  const [multiTechResult, setMultiTechResult] = useState<MultiTechResult | null>(null);
+
   // ─── Derived state ──────────────────────────────────────────────────────
 
   const ambiguities = analysisResult?.ambiguities ?? [];
@@ -329,7 +415,8 @@ export default function CompleoPage() {
     setAnalyzing(true);
 
     try {
-      const res = await fetch("/api/compleo/analyze", {
+      // Use multi-tech endpoint (v3.0)
+      const res = await fetch("/api/compleo/analyze-multitech", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId: uploadResult.sessionId }),
@@ -340,15 +427,29 @@ export default function CompleoPage() {
         throw new Error(err.error || "Analysis failed");
       }
 
-      const data: AnalysisResult = await res.json();
-      setAnalysisResult(data);
+      const data = await res.json();
+
+      // Store multi-tech results
+      setMultiTechResult({
+        technologiesDetected: data.technologiesDetected || [],
+        maturityScore: data.maturityScore,
+        detectedComponents: data.detectedComponents || [],
+        migrationNotes: data.migrationNotes || [],
+        generatedFiles: data.generatedFiles || [],
+      });
+
+      // Also store as AnalysisResult for backward compatibility
+      setAnalysisResult(data as AnalysisResult);
+
+      const techCount = data.technologiesDetected?.length || 0;
+      const compCount = data.detectedComponents?.length || 0;
 
       if (data.ambiguities && data.ambiguities.length > 0) {
         setStep("choices");
-        toast.success(`${data.stats.useCaseCount} UseCases detectes — ${data.ambiguities.length} choix a faire`);
+        toast.success(`${techCount} technologies, ${compCount} composants — ${data.ambiguities.length} choix a faire`);
       } else {
         setStep("generate");
-        toast.success(`${data.stats.useCaseCount} UseCases detectes — aucune ambiguite`);
+        toast.success(`${techCount} technologies, ${compCount} composants detectes`);
       }
     } catch (err: any) {
       toast.error(err.message || "Erreur lors de l'analyse");
@@ -548,6 +649,7 @@ export default function CompleoPage() {
     setUserChoices({});
     setCurrentAmbiguityIndex(0);
     setResultTab("code");
+    setMultiTechResult(null);
   }, []);
 
   // ─── Toggle category ───────────────────────────────────────────────────
@@ -596,9 +698,9 @@ export default function CompleoPage() {
               <div>
                 <h1 className="text-xl font-bold text-white flex items-center gap-2">
                   Compleo
-                  <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 text-xs">v2.0</Badge>
+                  <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 text-xs">v3.0</Badge>
                 </h1>
-                <p className="text-sm text-[oklch(0.6_0.01_250)]">EJB → Spring Boot Migration Engine</p>
+                <p className="text-sm text-[oklch(0.6_0.01_250)]">Multi-Technology → Spring Boot Migration Engine</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -696,9 +798,9 @@ export default function CompleoPage() {
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
             <div className="max-w-2xl mx-auto">
               <div className="text-center mb-8">
-                <h2 className="text-2xl font-bold text-white mb-2">Uploadez votre projet EJB</h2>
+                <h2 className="text-2xl font-bold text-white mb-2">Uploadez votre projet Java Legacy</h2>
                 <p className="text-[oklch(0.6_0.01_250)]">
-                  Glissez-deposez un fichier ZIP contenant votre projet Maven EJB
+                  Glissez-deposez un fichier ZIP contenant votre projet Maven (EJB, Servlet, Struts, SOAP, JDBC, Hibernate, JMS, Batch...)
                 </p>
               </div>
 
@@ -746,11 +848,11 @@ export default function CompleoPage() {
               </div>
 
               {/* Features grid */}
-              <div className="grid grid-cols-3 gap-4 mt-8">
+                <div className="grid grid-cols-3 gap-4 mt-8">
                 {[
-                  { icon: Terminal, label: "Parsing AST", desc: "Analyse statique du code Java" },
-                  { icon: Layers, label: "Spring Boot 3.2", desc: "Controllers, Services, DTOs" },
-                  { icon: Cloud, label: "Cloud-Native", desc: "Dockerfile, K8s, docker-compose" },
+                  { icon: Terminal, label: "13 Detecteurs", desc: "Servlet, EJB, Struts, SOAP, JDBC, JMS..." },
+                  { icon: Layers, label: "Spring Boot 3.2", desc: "REST, JPA, Kafka, Spring Batch" },
+                  { icon: Cloud, label: "Score de Maturite", desc: "5 dimensions, effort estime" },
                 ].map(f => (
                   <div key={f.label} className="p-4 rounded-lg border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)]">
                     <f.icon className="w-5 h-5 text-emerald-400 mb-2" />
@@ -804,17 +906,17 @@ export default function CompleoPage() {
                   {analyzing ? (
                     <>
                       <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                      Analyse en cours...
+                      Analyse multi-technologies en cours...
                     </>
                   ) : (
                     <>
                       <Play className="w-5 h-5 mr-2" />
-                      Lancer l'analyse EJB
+                      Lancer l'analyse multi-technologies
                     </>
                   )}
                 </Button>
                 <p className="text-sm text-[oklch(0.5_0.01_250)] mt-2">
-                  Detection des UseCases, DTOs, Services, Enums, Exceptions, Validators
+                  Detection automatique : EJB, Servlet, Struts, SOAP, JDBC, Hibernate, JMS, Batch, JPA, JAX-RS
                 </p>
               </div>
             </div>
@@ -859,18 +961,26 @@ export default function CompleoPage() {
 
               {/* Analysis summary (collapsed) */}
               <div className="p-4 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] mb-6">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="w-5 h-5 text-emerald-400" />
                     <span className="text-sm font-medium text-white">{analysisResult.projectName}</span>
                   </div>
                   <div className="flex items-center gap-4 text-xs text-[oklch(0.5_0.01_250)]">
-                    <span>{analysisResult.stats.useCaseCount} UseCases</span>
-                    <span>{analysisResult.stats.dtoCount} DTOs</span>
-                    <span>{analysisResult.stats.enumCount} Enums</span>
-                    <span>{analysisResult.stats.exceptionCount} Exceptions</span>
+                    <span>{analysisResult.stats?.useCaseCount || 0} UseCases</span>
+                    <span>{analysisResult.stats?.dtoCount || 0} DTOs</span>
+                    <span>{multiTechResult?.detectedComponents?.length || 0} composants</span>
                   </div>
                 </div>
+                {multiTechResult && multiTechResult.technologiesDetected.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {multiTechResult.technologiesDetected.map(tech => (
+                      <span key={tech} className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${techColors[tech] || "bg-gray-500/20 text-gray-300 border-gray-500/30"}`}>
+                        {techLabels[tech] || tech}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Current ambiguity card */}
@@ -1073,21 +1183,116 @@ export default function CompleoPage() {
         {step === "generate" && analysisResult && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
             <div className="max-w-4xl mx-auto">
+              {/* Multi-tech summary */}
+              {multiTechResult && (
+                <div className="p-6 rounded-xl border border-emerald-500/20 bg-emerald-500/5 mb-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                      <Layers className="w-5 h-5 text-emerald-400" />
+                      Technologies detectees
+                    </h3>
+                    {multiTechResult.maturityScore && (
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <div className="text-2xl font-bold text-emerald-400">{multiTechResult.maturityScore.global}/100</div>
+                          <div className="text-xs text-[oklch(0.5_0.01_250)]">{multiTechResult.maturityScore.label}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Technology badges */}
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    {multiTechResult.technologiesDetected.map(tech => (
+                      <span key={tech} className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${techColors[tech] || "bg-gray-500/20 text-gray-300 border-gray-500/30"}`}>
+                        {techLabels[tech] || tech}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Maturity dimensions */}
+                  {multiTechResult.maturityScore && (
+                    <div className="grid grid-cols-5 gap-2 mb-4">
+                      {[
+                        { label: "Complexite", value: multiTechResult.maturityScore.dimensions.technicalComplexity },
+                        { label: "Couverture", value: multiTechResult.maturityScore.dimensions.codeCoverage },
+                        { label: "Risque", value: multiTechResult.maturityScore.dimensions.breakingRisk },
+                        { label: "Valeur", value: multiTechResult.maturityScore.dimensions.addedValue },
+                        { label: "Confiance", value: multiTechResult.maturityScore.dimensions.engineConfidence },
+                      ].map(d => (
+                        <div key={d.label} className="p-2 rounded-lg bg-[oklch(0.15_0.01_250)] text-center">
+                          <div className="text-lg font-bold text-white">{d.value}<span className="text-xs text-[oklch(0.5_0.01_250)]">/100</span></div>
+                          <div className="text-xs text-[oklch(0.5_0.01_250)]">{d.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Effort estimate */}
+                  {multiTechResult.maturityScore?.estimatedEffort && (
+                    <div className="flex items-center gap-2 text-sm text-[oklch(0.6_0.01_250)]">
+                      <Info className="w-4 h-4 text-cyan-400" />
+                      Effort estime : <span className="text-white font-medium">{multiTechResult.maturityScore.estimatedEffort}</span>
+                    </div>
+                  )}
+
+                  {/* Detected components summary */}
+                  {multiTechResult.detectedComponents.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-[oklch(0.25_0.01_250)]">
+                      <h4 className="text-sm font-medium text-[oklch(0.7_0.01_250)] mb-2">
+                        {multiTechResult.detectedComponents.length} composants detectes
+                      </h4>
+                      <div className="grid grid-cols-2 gap-2 max-h-[200px] overflow-y-auto">
+                        {multiTechResult.detectedComponents.map((comp, i) => (
+                          <div key={i} className="flex items-center gap-2 p-2 rounded bg-[oklch(0.15_0.01_250)]">
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium border ${techColors[comp.technology] || "bg-gray-500/20 text-gray-300 border-gray-500/30"}`}>
+                              {techLabels[comp.technology] || comp.technology}
+                            </span>
+                            <span className="text-sm text-white truncate">{comp.className}</span>
+                            <span className="text-xs text-[oklch(0.4_0.01_250)] ml-auto">{comp.confidence}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Migration notes */}
+                  {multiTechResult.migrationNotes.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-[oklch(0.25_0.01_250)]">
+                      <h4 className="text-sm font-medium text-amber-400 mb-2 flex items-center gap-1">
+                        <AlertTriangle className="w-4 h-4" />
+                        {multiTechResult.migrationNotes.length} note(s) de migration
+                      </h4>
+                      {multiTechResult.migrationNotes.map((note, i) => (
+                        <div key={i} className={`p-2 rounded mb-1 text-sm ${
+                          note.severity === "critical" ? "bg-red-500/10 text-red-300" :
+                          note.severity === "warning" ? "bg-amber-500/10 text-amber-300" :
+                          "bg-blue-500/10 text-blue-300"
+                        }`}>
+                          <span className="font-medium">{note.title}</span>
+                          <span className="text-xs ml-2 opacity-70">{note.content}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Analysis results */}
               <div className="p-6 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] mb-6">
                 <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
                   <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                  Analyse terminee — {analysisResult.projectName}
+                  Analyse EJB/BOA — {analysisResult.projectName}
                 </h3>
 
                 {/* Stats grid */}
                 <div className="grid grid-cols-5 gap-3 mb-6">
                   {[
-                    { label: "UseCases", value: analysisResult.stats.useCaseCount, color: "text-emerald-400" },
-                    { label: "DTOs", value: analysisResult.stats.dtoCount, color: "text-amber-400" },
-                    { label: "Services", value: analysisResult.stats.serviceCount, color: "text-cyan-400" },
-                    { label: "Enums", value: analysisResult.stats.enumCount, color: "text-pink-400" },
-                    { label: "Exceptions", value: analysisResult.stats.exceptionCount, color: "text-red-400" },
+                    { label: "UseCases", value: analysisResult.stats?.useCaseCount || 0, color: "text-emerald-400" },
+                    { label: "DTOs", value: analysisResult.stats?.dtoCount || 0, color: "text-amber-400" },
+                    { label: "Services", value: analysisResult.stats?.serviceCount || 0, color: "text-cyan-400" },
+                    { label: "Enums", value: analysisResult.stats?.enumCount || 0, color: "text-pink-400" },
+                    { label: "Exceptions", value: analysisResult.stats?.exceptionCount || 0, color: "text-red-400" },
                   ].map(s => (
                     <div key={s.label} className="p-3 rounded-lg bg-[oklch(0.18_0.01_250)] text-center">
                       <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>

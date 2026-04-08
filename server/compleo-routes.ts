@@ -16,6 +16,15 @@ import { parseEjbProject, type ProjectIR } from "./java-parser";
 import { generateSpringBootProject, type GenerationResult, type MigrationReportContext } from "./spring-generator";
 import { detectAmbiguities, applyChoicesToIR, type Ambiguity, type UserChoice } from "./ambiguity-detector";
 import { storagePut, storageGet } from "./storage";
+import { runPipeline, type PipelineResult, type MaturityScore } from "./engine/pipeline/index";
+import { registerAllDetectors } from "./engine/detectors/index";
+import { registerAllGenerators } from "./engine/generators/index";
+import { registry } from "./engine/registry/index";
+import type { DetectedComponent, GeneratedFile, TechnologyType } from "./engine/registry/types";
+
+// Register all detectors and generators at startup
+registerAllDetectors(registry);
+registerAllGenerators(registry);
 
 const router = Router();
 
@@ -52,6 +61,12 @@ export interface CompleoSession {
   error?: string;
   debugEvents: DebugEvent[];
   sseClients: Response[];
+  // Multi-tech v3.0 fields
+  pipelineResult?: PipelineResult;
+  detectedComponents?: DetectedComponent[];
+  multiTechGeneration?: GeneratedFile[];
+  maturityScore?: MaturityScore;
+  technologiesDetected?: TechnologyType[];
 }
 
 // In-memory store for analysis sessions (production would use DB)
@@ -164,6 +179,271 @@ router.post("/upload", upload.single("file"), async (req: Request, res: Response
   } catch (err: any) {
     console.error("[Compleo Upload Error]", err);
     return res.status(500).json({ error: err.message || "Upload failed" });
+  }
+});
+
+// ─── POST /api/compleo/analyze-multitech ────────────────────────────────────
+// Multi-technology analysis using the Registry+Strategy engine (v3.0)
+router.post("/analyze-multitech", async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.body;
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId is required" });
+    }
+
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found. Please upload a ZIP first." });
+    }
+
+    emitDebugEvent(session, "info", `Analyse multi-technologies : ${session.files.length} fichiers`);
+
+    // Also include JSP/XML files from the upload for detection
+    const allFiles = [...session.files];
+
+    // Detect base package from pom.xml
+    let basePackage = "com.app";
+    if (session.pomXml) {
+      const groupMatch = session.pomXml.match(/<groupId>([^<]+)<\/groupId>/);
+      if (groupMatch) basePackage = groupMatch[1];
+    }
+
+    // Run the multi-tech pipeline
+    const result = runPipeline({
+      files: allFiles,
+      basePackage,
+      projectName: session.projectName,
+    });
+
+    // Store results in session
+    session.pipelineResult = result;
+    session.detectedComponents = result.detectedComponents;
+    session.multiTechGeneration = result.generatedFiles;
+    session.maturityScore = result.maturityScore;
+    session.technologiesDetected = result.technologiesDetected;
+
+    // Emit debug events for each detected component
+    for (const comp of result.detectedComponents) {
+      emitDebugEvent(session, "success",
+        `[${comp.technology}] ${comp.className} détecté`,
+        `Confiance: ${comp.confidence}%${comp.metadata?.methods ? `, ${(comp.metadata.methods as any[]).length} méthodes` : ""}`
+      );
+    }
+
+    for (const note of result.migrationNotes) {
+      emitDebugEvent(session, note.severity === "critical" ? "error" : "warning",
+        `Note de migration : ${note.title}`,
+        note.content
+      );
+    }
+
+    emitDebugEvent(session, "success",
+      `Score de maturité : ${result.maturityScore?.global}/100 — ${result.maturityScore?.label}`,
+      `Effort estimé : ${result.maturityScore?.estimatedEffort}`
+    );
+
+    // Also run the EJB-specific parser for backward compatibility
+    const ir = parseEjbProject(session.files, session.pomXml, session.bianYml);
+    session.ir = ir;
+
+    // Detect ambiguities from the EJB IR
+    const ambiguities = detectAmbiguities(ir);
+    session.ambiguities = ambiguities;
+
+    if (ambiguities.length > 0) {
+      session.status = "waiting_choices";
+    } else {
+      session.status = "analyzed";
+    }
+
+    return res.json({
+      sessionId,
+      status: ambiguities.length > 0 ? "WAITING_CHOICES" : "ANALYZED",
+      projectName: session.projectName,
+      // Multi-tech results
+      technologiesDetected: result.technologiesDetected,
+      maturityScore: result.maturityScore,
+      stats: {
+        ...result.stats,
+        // Also include EJB-specific stats for backward compat
+        useCaseCount: ir.stats.useCaseCount,
+        dtoCount: ir.stats.dtoCount,
+        enumCount: ir.stats.enumCount,
+        exceptionCount: ir.stats.exceptionCount,
+        domains: ir.stats.domains,
+      },
+      detectedComponents: result.detectedComponents.map(c => ({
+        className: c.className,
+        technology: c.technology,
+        confidence: c.confidence,
+        filePath: c.filePath,
+        methods: (c.metadata as any)?.methods?.map((m: any) => ({
+          name: m.name || m.methodName,
+          returnType: m.returnType,
+          parameters: m.parameters || m.params,
+        })) || [],
+      })),
+      migrationNotes: result.migrationNotes,
+      generatedFiles: result.generatedFiles.map(f => ({
+        path: f.path,
+        category: f.category,
+        technology: f.technology,
+        lines: f.content.split("\n").length,
+      })),
+      // EJB-specific data
+      ambiguities,
+      irSummary: {
+        useCases: ir.useCases.map(uc => ({
+          className: uc.className,
+          domain: uc.domain,
+          httpMethod: uc.httpMethod,
+          restPath: uc.restPath,
+          voInType: uc.voInType,
+          voOutType: uc.voOutType,
+          bianDomain: uc.bianDomain,
+          bianAction: uc.bianAction,
+          useCaseDescription: uc.useCaseDescription,
+        })),
+        dtos: ir.dtos.map(d => ({
+          className: d.className,
+          direction: d.direction,
+          fieldCount: d.fields.length,
+          requiredFields: d.fields.filter(f => f.required).length,
+        })),
+        enums: ir.enums.map(e => ({ className: e.className, valueCount: e.values.length })),
+        exceptions: ir.exceptions.map(e => ({ className: e.className, extendsClass: e.extendsClass })),
+        validators: ir.validators.map(v => ({ className: v.className, annotationName: v.annotationName })),
+        remoteInterfaces: ir.remoteInterfaces.map(r => ({
+          className: r.className,
+          methodCount: r.methods.length,
+        })),
+        domains: ir.stats.domains,
+      },
+    });
+  } catch (err: any) {
+    console.error("[Compleo Multi-Tech Analyze Error]", err);
+    return res.status(500).json({ error: err.message || "Multi-tech analysis failed" });
+  }
+});
+
+// ─── POST /api/compleo/generate-multitech ───────────────────────────────────
+// Generate from multi-tech pipeline results
+router.post("/generate-multitech", async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.body;
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId is required" });
+    }
+
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+    if (!session.pipelineResult) {
+      return res.status(400).json({ error: "Multi-tech analysis not run. Call /analyze-multitech first." });
+    }
+
+    emitDebugEvent(session, "info", `Génération multi-technologies...`);
+
+    const result = session.pipelineResult;
+
+    // Create ZIP of generated files
+    const AdmZipModule = await import("adm-zip");
+    const zip = new AdmZipModule.default();
+    for (const file of result.generatedFiles) {
+      zip.addFile(file.path, Buffer.from(file.content, "utf8"));
+    }
+    const zipBuffer = zip.toBuffer();
+
+    // Upload ZIP to S3
+    const zipKey = `compleo/${sessionId}/${session.projectName}-spring-boot.zip`;
+    const { url } = await storagePut(zipKey, zipBuffer, "application/zip");
+    session.zipUrl = url;
+    session.status = "generated";
+
+    emitDebugEvent(session, "success",
+      `Génération terminée : ${result.generatedFiles.length} fichiers`,
+      `Technologies : ${result.technologiesDetected.join(", ")}`
+    );
+
+    return res.json({
+      sessionId,
+      status: "GENERATED",
+      stats: result.stats,
+      maturityScore: result.maturityScore,
+      downloadUrl: `/api/compleo/download-multitech/${sessionId}`,
+      directUrl: url,
+      files: result.generatedFiles.map(f => ({
+        path: f.path,
+        category: f.category,
+        technology: f.technology,
+        lines: f.content.split("\n").length,
+      })),
+    });
+  } catch (err: any) {
+    console.error("[Compleo Multi-Tech Generate Error]", err);
+    return res.status(500).json({ error: err.message || "Multi-tech generation failed" });
+  }
+});
+
+// ─── GET /api/compleo/download-multitech/:sessionId ─────────────────────────
+// Download the multi-tech generated project as ZIP
+router.get("/download-multitech/:sessionId", async (req: Request, res: Response) => {
+  try {
+    const session = sessions.get(req.params.sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+    if (!session.pipelineResult) {
+      return res.status(400).json({ error: "Multi-tech project not generated yet" });
+    }
+
+    const AdmZipModule = await import("adm-zip");
+    const zip = new AdmZipModule.default();
+    for (const file of session.pipelineResult.generatedFiles) {
+      zip.addFile(file.path, Buffer.from(file.content, "utf8"));
+    }
+
+    const zipBuffer = zip.toBuffer();
+    const fileName = `${session.projectName}-spring-boot-multitech.zip`;
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Content-Length", zipBuffer.length.toString());
+    return res.send(zipBuffer);
+  } catch (err: any) {
+    console.error("[Compleo Multi-Tech Download Error]", err);
+    return res.status(500).json({ error: err.message || "Download failed" });
+  }
+});
+
+// ─── GET /api/compleo/preview-multitech/:sessionId/* ────────────────────────
+// Preview a single file from multi-tech generation
+router.get("/preview-multitech/:sessionId/*", async (req: Request, res: Response) => {
+  try {
+    const session = sessions.get(req.params.sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+    if (!session.pipelineResult) {
+      return res.status(400).json({ error: "Multi-tech project not generated yet" });
+    }
+
+    const filePath = req.params[0];
+    const file = session.pipelineResult.generatedFiles.find(f => f.path === filePath);
+    if (!file) {
+      return res.status(404).json({ error: `File not found: ${filePath}` });
+    }
+
+    return res.json({
+      path: file.path,
+      category: file.category,
+      technology: file.technology,
+      content: file.content,
+      lines: file.content.split("\n").length,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
   }
 });
 
