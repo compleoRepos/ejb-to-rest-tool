@@ -1199,16 +1199,29 @@ public class SmartCodeEnhancer {
             Path testFile = testDir.resolve("controller/" + uc.getControllerName() + "Test.java");
             if (!Files.exists(testFile)) {
                 String resourceName = uc.getClassName().replace("UC", "");
+                // Remplacer les path variables BIAN par des valeurs concrètes pour les tests
+                String testEndpoint = uc.getRestEndpoint().replaceAll("\\{[^}]+\\}", "test-ref-123");
+
+                // Construire les setters pour remplir les champs requis du DTO d'entrée
+                java.util.Set<String> enumImports = new java.util.LinkedHashSet<>();
+                String setterLines = buildTestSetters(uc.getInputDtoClassName(), analysisResult, enumImports);
+                // Construire les imports dynamiques pour les enums utilisés
+                StringBuilder extraImports = new StringBuilder();
+                for (String enumImport : enumImports) {
+                    extraImports.append("                        import ").append(enumImport).append(";\n");
+                }
+
                 String testCode = """
                         package %s.controller;
 
                         import %s.dto.%s;
                         import %s.dto.%s;
                         import %s.service.%s;
-                        import com.fasterxml.jackson.databind.ObjectMapper;
+%s                        import com.fasterxml.jackson.databind.ObjectMapper;
                         import org.junit.jupiter.api.DisplayName;
                         import org.junit.jupiter.api.Test;
                         import org.springframework.beans.factory.annotation.Autowired;
+                        import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
                         import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
                         import org.springframework.boot.test.mock.mockito.MockBean;
                         import org.springframework.http.MediaType;
@@ -1224,6 +1237,7 @@ public class SmartCodeEnhancer {
                          * Utilise @WebMvcTest pour tester uniquement la couche web.
                          */
                         @WebMvcTest(%s.class)
+                        @AutoConfigureMockMvc(addFilters = false)
                         class %sTest {
 
                             @Autowired
@@ -1235,11 +1249,17 @@ public class SmartCodeEnhancer {
                             @MockBean
                             private %s serviceAdapter;
 
+                            private %s createValidRequest() {
+                                %s request = new %s();
+%s
+                                return request;
+                            }
+
                             @Test
                             @DisplayName("POST %s - Execution reussie retourne %s")
                             void execute_shouldReturnSuccess_whenValidRequest() throws Exception {
                                 // Given
-                                %s request = new %s();
+                                %s request = createValidRequest();
                                 %s response = new %s();
                                 when(serviceAdapter.execute(any(%s.class))).thenReturn(response);
 
@@ -1265,7 +1285,7 @@ public class SmartCodeEnhancer {
                             @DisplayName("POST %s - Erreur service retourne 500")
                             void execute_shouldReturn500_whenServiceFails() throws Exception {
                                 // Given
-                                %s request = new %s();
+                                %s request = createValidRequest();
                                 when(serviceAdapter.execute(any(%s.class)))
                                         .thenThrow(new RuntimeException("EJB indisponible"));
 
@@ -1281,28 +1301,105 @@ public class SmartCodeEnhancer {
                         BASE_PACKAGE, uc.getInputDtoClassName(),
                         BASE_PACKAGE, uc.getOutputDtoClassName(),
                         BASE_PACKAGE, uc.getServiceAdapterName(),
+                        extraImports.toString(),
                         uc.getControllerName(),
                         uc.getControllerName(),
                         uc.getControllerName(),
                         uc.getServiceAdapterName(),
-                        uc.getRestEndpoint(), expectedCode,
+                        uc.getInputDtoClassName(),
                         uc.getInputDtoClassName(), uc.getInputDtoClassName(),
+                        setterLines,
+                        testEndpoint, expectedCode,
+                        uc.getInputDtoClassName(),
                         uc.getOutputDtoClassName(), uc.getOutputDtoClassName(),
                         uc.getInputDtoClassName(),
-                        uc.getRestEndpoint(),
+                        testEndpoint,
                         expectedStatus,
-                        uc.getRestEndpoint(),
-                        uc.getRestEndpoint(),
-                        uc.getRestEndpoint(),
-                        uc.getInputDtoClassName(), uc.getInputDtoClassName(),
+                        testEndpoint,
+                        testEndpoint,
+                        testEndpoint,
                         uc.getInputDtoClassName(),
-                        uc.getRestEndpoint());
+                        uc.getInputDtoClassName(),
+                        testEndpoint);
                 Files.writeString(testFile, testCode);
                 report.addEnhancement(new Enhancement("R69", Category.TESTING, Severity.WARNING,
                         "Création du test unitaire " + uc.getControllerName() + "Test (3 scénarios: " + expectedCode + ", 4xx, 500)",
                         uc.getControllerName() + "Test.java", true));
             }
         }
+    }
+
+    /**
+     * Construit les lignes de setters pour remplir les champs requis d'un DTO de test.
+     * Génère des appels setter avec des valeurs de test pour chaque champ requis (required=true)
+     * afin que la validation @NotBlank/@NotNull passe dans les tests unitaires.
+     */
+    private String buildTestSetters(String dtoClassName, ProjectAnalysisResult analysisResult,
+                                     java.util.Set<String> enumImports) {
+        // Construire un index des enums détectés pour résoudre les types enum
+        java.util.Map<String, ProjectAnalysisResult.EnumInfo> enumIndex = new java.util.HashMap<>();
+        for (ProjectAnalysisResult.EnumInfo ei : analysisResult.getDetectedEnums()) {
+            enumIndex.put(ei.getName(), ei);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (DtoInfo dto : analysisResult.getDtos()) {
+            if (dto.getClassName().equals(dtoClassName)) {
+                for (DtoInfo.FieldInfo field : dto.getFields()) {
+                    if (field.isRequired() && !field.isStatic() && !field.isFinal()) {
+                        String setterName = "set" + Character.toUpperCase(field.getName().charAt(0)) + field.getName().substring(1);
+                        String testValue = generateTestValue(field.getName(), field.getType(),
+                                field.getCustomAnnotations(), enumIndex, enumImports);
+                        sb.append("                            request.").append(setterName).append("(").append(testValue).append(");\n");
+                    }
+                }
+                break;
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Génère une valeur de test appropriée selon le type, le nom du champ, les annotations custom,
+     * et les types enum détectés. Les annotations custom de validation (@ValidNumCarte, @ValidRIB,
+     * @ValidIBAN) nécessitent des valeurs conformes au format attendu par le validateur.
+     * Les types enum sont résolus en utilisant la première valeur de l'enum.
+     */
+    private String generateTestValue(String fieldName, String fieldType,
+                                     java.util.List<String> customAnnotations,
+                                     java.util.Map<String, ProjectAnalysisResult.EnumInfo> enumIndex,
+                                     java.util.Set<String> enumImports) {
+        // Vérifier d'abord les annotations custom qui imposent un format spécifique
+        if (customAnnotations != null) {
+            for (String annotation : customAnnotations) {
+                switch (annotation) {
+                    case "ValidNumCarte", "@ValidNumCarte" -> { return "\"1234567890123456\""; }  // 16 chiffres
+                    case "ValidRIB", "@ValidRIB" -> { return "\"123456789012345678901234\""; }  // 24 chiffres
+                    case "ValidIBAN", "@ValidIBAN" -> { return "\"FR7630006000011234567890189\""; }  // Format IBAN valide
+                    default -> { /* continuer avec la logique standard */ }
+                }
+            }
+        }
+        // Vérifier si le type est un enum détecté
+        ProjectAnalysisResult.EnumInfo enumInfo = enumIndex.get(fieldType);
+        if (enumInfo != null && enumInfo.getValues() != null && !enumInfo.getValues().isEmpty()) {
+            // Ajouter l'import de l'enum
+            enumImports.add(BASE_PACKAGE + ".enums." + fieldType);
+            return fieldType + "." + enumInfo.getValues().get(0);
+        }
+        return switch (fieldType) {
+            case "String" -> "\"test-" + fieldName + "\"";
+            case "int", "Integer" -> "1";
+            case "long", "Long" -> "1L";
+            case "double", "Double" -> "1.0";
+            case "float", "Float" -> "1.0f";
+            case "boolean", "Boolean" -> "true";
+            case "BigDecimal" -> "java.math.BigDecimal.ONE";
+            case "Date" -> "new java.util.Date()";
+            case "LocalDate" -> "java.time.LocalDate.now()";
+            case "LocalDateTime" -> "java.time.LocalDateTime.now()";
+            default -> "null";
+        };
     }
 
     // ==================== CATÉGORIE 12 : PERFORMANCE ====================
