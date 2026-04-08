@@ -1339,8 +1339,8 @@ function MicroserviceCard({ proposal }: { proposal: MicroserviceProposal }) {
       <p className="text-[11px] text-muted-foreground mb-3">{proposal.description}</p>
       {proposal.apis.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
-          {proposal.apis.map((api) => (
-            <span key={api.path} className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
+          {proposal.apis.map((api, idx) => (
+            <span key={`${api.method}-${api.path}-${idx}`} className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
               {api.method} {api.path}
             </span>
           ))}
@@ -1348,8 +1348,8 @@ function MicroserviceCard({ proposal }: { proposal: MicroserviceProposal }) {
       )}
       {proposal.events.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {proposal.events.map((ev) => (
-            <span key={ev.name} className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
+          {proposal.events.map((ev, idx) => (
+            <span key={`${ev.type}-${ev.name}-${idx}`} className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
               {ev.type === "published" ? "PUB" : "SUB"} {ev.name}
             </span>
           ))}
