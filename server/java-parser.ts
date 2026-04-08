@@ -734,57 +734,89 @@ function parseDto(file: JavaFile, enumNames: Set<string>): DtoIR {
 
   // Extract fields
   const fields: DtoFieldIR[] = [];
-  // Match field declarations: private Type name;
-  const fieldRegex = /(?:(@\w+(?:\([^)]*\))?)\s+)*(?:private|protected|public)\s+(?:static\s+final\s+\w+\s+serialVersionUID[^;]+;|(\w+(?:<[\w,\s<>]+>)?)\s+(\w+)\s*;)/g;
-
-  // Better approach: line by line
   const lines = content.split("\n");
   let pendingAnnotations: string[] = [];
 
   for (const line of lines) {
     const trimmed = line.trim();
 
-    // Collect annotations
-    if (trimmed.startsWith("@") && !trimmed.includes("class ") && !trimmed.includes("interface ")) {
-      pendingAnnotations.push(trimmed);
+    // Skip empty lines, class/interface declarations, imports, package
+    if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")) {
+      continue;
+    }
+    if (trimmed.startsWith("package ") || trimmed.startsWith("import ")) {
+      continue;
+    }
+    if (/^(public|abstract)?\s*(class|interface|enum)\s/.test(trimmed)) {
+      pendingAnnotations = [];
       continue;
     }
 
-    // Match field declaration
-    const fieldMatch = trimmed.match(/(?:private|protected|public)\s+(?:static\s+final\s+\w+\s+serialVersionUID)|(?:private|protected|public)\s+([\w<>,\s]+?)\s+(\w+)\s*;/);
-    if (fieldMatch && fieldMatch[1] && fieldMatch[2]) {
-      const rawType = fieldMatch[1].trim();
-      const name = fieldMatch[2];
-
-      // Skip serialVersionUID
-      if (name === "serialVersionUID") {
-        pendingAnnotations = [];
-        continue;
+    // CORRECTION v5.2: Handle lines with BOTH annotations AND field declaration on the same line
+    // e.g. "@XmlElement(required = true) @NotBlank @ValidRIB private String ribEmetteur;"
+    const fieldAccessorMatch = trimmed.match(/(private|protected|public)\s+/);
+    if (fieldAccessorMatch) {
+      // Extract inline annotations from the part BEFORE the access modifier
+      const accessorIdx = trimmed.indexOf(fieldAccessorMatch[0]);
+      if (accessorIdx > 0) {
+        const annotationPart = trimmed.substring(0, accessorIdx).trim();
+        // Extract all @Xxx(...) annotations from the prefix
+        const inlineAnnotations = annotationPart.match(/@\w+(?:\([^)]*\))?/g);
+        if (inlineAnnotations) {
+          pendingAnnotations.push(...inlineAnnotations);
+        }
       }
 
-      const required = pendingAnnotations.some(a => /required\s*=\s*true/.test(a));
-      const xmlElement = pendingAnnotations.some(a => /@XmlElement/.test(a));
-      const validationAnnotations = pendingAnnotations
-        .filter(a => /@Valid/.test(a) || /@NotNull/.test(a) || /@NotBlank/.test(a) || /@Size/.test(a))
-        .map(a => a.replace(/^@/, ""));
+      // Now match the field declaration part
+      const fieldPart = trimmed.substring(accessorIdx);
+      const fieldMatch = fieldPart.match(/(?:private|protected|public)\s+(?:static\s+final\s+\w+\s+serialVersionUID)|(?:private|protected|public)\s+([\w<>,\s]+?)\s+(\w+)\s*;/);
+      if (fieldMatch && fieldMatch[1] && fieldMatch[2]) {
+        const rawType = fieldMatch[1].trim();
+        const name = fieldMatch[2];
 
-      const isEnum = enumNames.has(rawType);
-      const isList = /List</.test(rawType) || /\[\]/.test(rawType);
-      const resolvedType = resolveJavaType(rawType, isEnum);
+        // Skip serialVersionUID
+        if (name === "serialVersionUID") {
+          pendingAnnotations = [];
+          continue;
+        }
 
-      fields.push({
-        name,
-        type: rawType,
-        resolvedType,
-        required,
-        xmlElement,
-        validationAnnotations,
-        isEnum,
-        isList,
-      });
+        const allAnnotations = pendingAnnotations;
+        const required = allAnnotations.some(a => /required\s*=\s*true/.test(a));
+        const xmlElement = allAnnotations.some(a => /@XmlElement/.test(a));
+        const validationAnnotations = allAnnotations
+          .filter(a => /@Valid/.test(a) || /@NotNull/.test(a) || /@NotBlank/.test(a) || /@Size/.test(a) || /@NotEmpty/.test(a) || /@DecimalMin/.test(a) || /@DecimalMax/.test(a) || /@Min/.test(a) || /@Max/.test(a) || /@Pattern/.test(a) || /@Positive/.test(a))
+          .map(a => a.replace(/^@/, ""));
 
-      pendingAnnotations = [];
-    } else if (!trimmed.startsWith("@")) {
+        const isEnum = enumNames.has(rawType);
+        const isList = /List</.test(rawType) || /\[\]/.test(rawType);
+        const resolvedType = resolveJavaType(rawType, isEnum);
+
+        // CORRECTION v5.2: Semantic type inference — String fields named date* → LocalDate
+        let finalType = rawType;
+        if (rawType === "String" && /^date/i.test(name)) {
+          finalType = "LocalDate";
+        }
+
+        fields.push({
+          name,
+          type: finalType,
+          resolvedType: finalType !== rawType ? finalType : resolvedType,
+          required,
+          xmlElement,
+          validationAnnotations,
+          isEnum,
+          isList,
+        });
+
+        pendingAnnotations = [];
+      } else {
+        pendingAnnotations = [];
+      }
+    } else if (trimmed.startsWith("@")) {
+      // Pure annotation line (no field on this line)
+      pendingAnnotations.push(trimmed);
+    } else {
+      // Non-annotation, non-field line (getter/setter, etc.) → reset
       pendingAnnotations = [];
     }
   }

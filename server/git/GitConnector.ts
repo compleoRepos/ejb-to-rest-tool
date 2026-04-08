@@ -19,8 +19,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import http from "isomorphic-git/http/node";
 import git from "isomorphic-git";
+import { createRequire } from "module";
+const _require = createRequire(import.meta.url);
+const http = _require("isomorphic-git/http/node");
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

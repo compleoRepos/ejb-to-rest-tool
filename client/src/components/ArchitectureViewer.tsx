@@ -1,19 +1,28 @@
 /**
- * ArchitectureViewer — Composant Cytoscape.js interactif 3 niveaux.
- * Niveau 1 : Vue domaines (clusters)
- * Niveau 2 : Vue classes (nœuds individuels)
- * Niveau 3 : Vue détail (propriétés d'un nœud)
+ * ArchitectureViewer — Composant Cytoscape.js interactif v5.2.
+ * V1: Compound nodes (domaines = parents, classes = enfants)
+ * V2: Vue microservices par défaut
+ * V3: Légende interactive + filtres par type d'arête
+ * V4: Zoom sémantique (3 niveaux de détail)
+ * V5: Export SVG natif depuis Cytoscape
  *
  * @author Hamza NORDINE
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import cytoscape, { type Core, type EventObject } from "cytoscape";
+// @ts-ignore
+import dagre from "cytoscape-dagre";
+// @ts-ignore
+import cola from "cytoscape-cola";
+// @ts-ignore
+import svg from "cytoscape-svg";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   ZoomIn,
   ZoomOut,
@@ -21,10 +30,17 @@ import {
   Layers,
   Download,
   Eye,
+  EyeOff,
   Network,
   Box,
   ArrowLeft,
+  Filter,
 } from "lucide-react";
+
+// Register layout extensions
+cytoscape.use(dagre);
+cytoscape.use(cola);
+cytoscape.use(svg);
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -100,15 +116,26 @@ const DOMAIN_COLORS: Record<string, string> = {
   UNKNOWN: "#BDC3C7",
 };
 
-const EDGE_COLORS: Record<string, string> = {
-  CALLS: "#2C3E50",
-  DEPENDS_ON: "#3498DB",
-  JNDI_LOOKUP: "#E74C3C",
-  DB_ACCESS: "#F39C12",
-  EMITS_EVENT: "#27AE60",
-  SOAP_CALLS: "#9B59B6",
-  SHARES_DTO: "#95A5A6",
-  TRANSACTION_WITH: "#1ABC9C",
+const EDGE_STYLES: Record<string, { color: string; dash: string; label: string }> = {
+  CALLS: { color: "#2C3E50", dash: "solid", label: "Appels" },
+  DEPENDS_ON: { color: "#3498DB", dash: "solid", label: "Dépendances" },
+  JNDI_LOOKUP: { color: "#E74C3C", dash: "5,3", label: "JNDI Lookup" },
+  DB_ACCESS: { color: "#F39C12", dash: "solid", label: "Accès BD" },
+  EMITS_EVENT: { color: "#27AE60", dash: "3,3", label: "Événements" },
+  SOAP_CALLS: { color: "#9B59B6", dash: "solid", label: "SOAP" },
+  SHARES_DTO: { color: "#95A5A6", dash: "solid", label: "DTO partagé" },
+  TRANSACTION_WITH: { color: "#1ABC9C", dash: "solid", label: "Transaction" },
+};
+
+const ROLE_ICONS: Record<string, string> = {
+  ORCHESTRATOR: "hexagon",
+  DOMAIN_SERVICE: "rectangle",
+  REPOSITORY: "barrel",
+  VALUE_OBJECT: "ellipse",
+  ENUM_TYPE: "diamond",
+  EXCEPTION_TYPE: "triangle",
+  ENTRY_POINT: "star",
+  BATCH_STEP: "round-rectangle",
 };
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -123,10 +150,66 @@ export function ArchitectureViewer({
 }: ArchitectureViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
-  const [viewLevel, setViewLevel] = useState<1 | 2 | 3>(1);
+  const [viewLevel, setViewLevel] = useState<"microservices" | "domains" | "classes" | "detail">("microservices");
   const [selectedNode, setSelectedNode] = useState<CytoscapeNode["data"] | null>(null);
-  const [layout, setLayout] = useState<string>("cose");
+  const [layout, setLayout] = useState<string>("dagre");
   const [activeTab, setActiveTab] = useState<string>("interactive");
+  const [visibleEdgeTypes, setVisibleEdgeTypes] = useState<Set<string>>(
+    new Set(Object.keys(EDGE_STYLES))
+  );
+  const [showLegend, setShowLegend] = useState(true);
+
+  // ─── Toggle edge type visibility ─────────────────────────────────────
+
+  const toggleEdgeType = useCallback((edgeType: string) => {
+    setVisibleEdgeTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(edgeType)) {
+        next.delete(edgeType);
+      } else {
+        next.add(edgeType);
+      }
+      return next;
+    });
+  }, []);
+
+  // ─── V5: SVG Export from Cytoscape ───────────────────────────────────
+
+  const exportSVG = useCallback(() => {
+    if (!cyRef.current) return;
+    const cy = cyRef.current;
+    const svgContent = cy.svg({
+      full: true,
+      scale: 1,
+      bg: "#0f0f23",
+    });
+    // If cy.svg is not available (no extension), fallback to PNG
+    if (typeof svgContent === "string") {
+      const blob = new Blob([svgContent], { type: "image/svg+xml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "architecture-graph.svg";
+      a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      // Fallback: export as PNG
+      const pngData = cy.png({ full: true, scale: 2, bg: "#0f0f23" });
+      const a = document.createElement("a");
+      a.href = pngData;
+      a.download = "architecture-graph.png";
+      a.click();
+    }
+  }, []);
+
+  const exportPNG = useCallback(() => {
+    if (!cyRef.current) return;
+    const pngData = cyRef.current.png({ full: true, scale: 2, bg: "#0f0f23" });
+    const a = document.createElement("a");
+    a.href = pngData;
+    a.download = "architecture-graph.png";
+    a.click();
+  }, []);
 
   // ─── Initialize Cytoscape ─────────────────────────────────────────────
 
@@ -139,75 +222,183 @@ export function ArchitectureViewer({
 
     const elements: cytoscape.ElementDefinition[] = [];
 
-    if (viewLevel === 1) {
-      // Niveau 1: Vue domaines (compound nodes)
-      const domains = new Map<string, string[]>();
-      for (const node of cytoscapeData.nodes) {
-        const domain = node.data.domain || "UNKNOWN";
-        if (!domains.has(domain)) domains.set(domain, []);
-        domains.get(domain)!.push(node.data.id);
-      }
-
-      // Create domain compound nodes
-      for (const [domain, nodeIds] of domains) {
-        elements.push({
-          data: {
-            id: `domain-${domain}`,
-            label: domain.replace(/_/g, " "),
-            type: "domain",
-            classCount: nodeIds.length,
-          },
-        });
-
-        // Add class nodes as children
-        for (const nodeId of nodeIds) {
-          const originalNode = cytoscapeData.nodes.find((n) => n.data.id === nodeId);
-          if (originalNode) {
-            elements.push({
-              data: {
-                ...originalNode.data,
-                parent: `domain-${domain}`,
-              },
-            });
+    if (viewLevel === "microservices") {
+      // V2: Vue microservices — compound nodes par microservice
+      if (microservices.length > 0) {
+        const classToService = new Map<string, string>();
+        for (const svc of microservices) {
+          // Create microservice compound node
+          elements.push({
+            data: {
+              id: `ms-${svc.id}`,
+              label: svc.name,
+              type: "microservice",
+              classCount: svc.classCount,
+              endpoints: svc.endpoints,
+              cohesion: svc.cohesion,
+              coupling: svc.coupling,
+              boundedContext: svc.boundedContext,
+            },
+          });
+          // Map classes to their service
+          for (const cls of svc.classes) {
+            classToService.set(cls, svc.id);
           }
         }
-      }
 
-      // Add edges
-      for (const edge of cytoscapeData.edges) {
-        elements.push({ data: { ...edge.data } });
+        // Add class nodes as children of their microservice
+        for (const node of cytoscapeData.nodes) {
+          const serviceId = classToService.get(node.data.id);
+          if (serviceId) {
+            elements.push({
+              data: {
+                ...node.data,
+                parent: `ms-${serviceId}`,
+              },
+            });
+          } else {
+            // Orphan nodes (not in any microservice)
+            elements.push({ data: { ...node.data } });
+          }
+        }
+
+        // Add edges (filtered by visibility)
+        for (const edge of cytoscapeData.edges) {
+          if (visibleEdgeTypes.has(edge.data.type)) {
+            elements.push({ data: { ...edge.data } });
+          }
+        }
+      } else {
+        // Fallback to domains if no microservices
+        return initDomainsView(elements);
       }
-    } else if (viewLevel === 2) {
-      // Niveau 2: Vue classes (flat)
+    } else if (viewLevel === "domains") {
+      // V1: Compound nodes — domaines comme parents
+      initDomainsView(elements);
+      return;
+    } else if (viewLevel === "classes") {
+      // Flat view — all classes without grouping
       for (const node of cytoscapeData.nodes) {
         elements.push({ data: { ...node.data } });
       }
       for (const edge of cytoscapeData.edges) {
+        if (visibleEdgeTypes.has(edge.data.type)) {
+          elements.push({ data: { ...edge.data } });
+        }
+      }
+    }
+
+    createCytoscapeInstance(elements);
+  }, [cytoscapeData, viewLevel, layout, microservices, visibleEdgeTypes]);
+
+  // ─── Domains view helper ──────────────────────────────────────────────
+
+  function initDomainsView(elements: cytoscape.ElementDefinition[]) {
+    if (!cytoscapeData || !containerRef.current) return;
+
+    const domains = new Map<string, string[]>();
+    for (const node of cytoscapeData.nodes) {
+      const domain = node.data.domain || "UNKNOWN";
+      if (!domains.has(domain)) domains.set(domain, []);
+      domains.get(domain)!.push(node.data.id);
+    }
+
+    // Create domain compound nodes
+    for (const [domain, nodeIds] of domains) {
+      elements.push({
+        data: {
+          id: `domain-${domain}`,
+          label: domain.replace(/_/g, " "),
+          type: "domain",
+          classCount: nodeIds.length,
+        },
+      });
+
+      // Add class nodes as children
+      for (const nodeId of nodeIds) {
+        const originalNode = cytoscapeData.nodes.find((n) => n.data.id === nodeId);
+        if (originalNode) {
+          elements.push({
+            data: {
+              ...originalNode.data,
+              parent: `domain-${domain}`,
+            },
+          });
+        }
+      }
+    }
+
+    // Add edges (filtered)
+    for (const edge of cytoscapeData.edges) {
+      if (visibleEdgeTypes.has(edge.data.type)) {
         elements.push({ data: { ...edge.data } });
       }
     }
+
+    createCytoscapeInstance(elements);
+  }
+
+  // ─── Create Cytoscape Instance ────────────────────────────────────────
+
+  function createCytoscapeInstance(elements: cytoscape.ElementDefinition[]) {
+    if (!containerRef.current) return;
+
+    const layoutConfig = getLayoutConfig(layout);
 
     const cy = cytoscape({
       container: containerRef.current,
       elements,
       style: [
-        // Domain compound nodes
+        // Microservice compound nodes
         {
-          selector: 'node[type="domain"]',
+          selector: 'node[type="microservice"]',
           style: {
-            "background-color": "#1a1a2e",
-            "background-opacity": 0.3,
+            "background-color": (ele: cytoscape.NodeSingular) => {
+              const ctx = ele.data("boundedContext") || "";
+              const domainKey = ctx.split("+")[0];
+              return (DOMAIN_COLORS[domainKey] || DOMAIN_COLORS.UNKNOWN) + "15";
+            },
             "border-width": 2,
-            "border-color": "#3498DB",
+            "border-color": (ele: cytoscape.NodeSingular) => {
+              const ctx = ele.data("boundedContext") || "";
+              const domainKey = ctx.split("+")[0];
+              return DOMAIN_COLORS[domainKey] || DOMAIN_COLORS.UNKNOWN;
+            },
+            "border-style": "solid",
             label: "data(label)",
             "text-valign": "top",
             "text-halign": "center",
             color: "#e0e0e0",
             "font-size": "14px",
             "font-weight": "bold",
-            "padding": "20px",
+            "text-margin-y": -8,
+            padding: "25px",
             shape: "round-rectangle",
-          },
+          } as any,
+        },
+        // Domain compound nodes
+        {
+          selector: 'node[type="domain"]',
+          style: {
+            "background-color": (ele: cytoscape.NodeSingular) => {
+              const domain = ele.data("id")?.replace("domain-", "") || "UNKNOWN";
+              return (DOMAIN_COLORS[domain] || DOMAIN_COLORS.UNKNOWN) + "15";
+            },
+            "border-width": 2,
+            "border-color": (ele: cytoscape.NodeSingular) => {
+              const domain = ele.data("id")?.replace("domain-", "") || "UNKNOWN";
+              return DOMAIN_COLORS[domain] || DOMAIN_COLORS.UNKNOWN;
+            },
+            label: "data(label)",
+            "text-valign": "top",
+            "text-halign": "center",
+            color: "#e0e0e0",
+            "font-size": "13px",
+            "font-weight": "bold",
+            "text-margin-y": -8,
+            padding: "20px",
+            shape: "round-rectangle",
+          } as any,
         },
         // Class nodes
         {
@@ -221,18 +412,22 @@ export function ArchitectureViewer({
             "text-valign": "bottom",
             "text-halign": "center",
             color: "#ccc",
-            "font-size": "8px",
+            "font-size": "9px",
             width: (ele: cytoscape.NodeSingular) => {
               const loc = ele.data("linesOfCode") || 50;
-              return Math.max(15, Math.min(50, loc / 10));
+              return Math.max(18, Math.min(55, loc / 8));
             },
             height: (ele: cytoscape.NodeSingular) => {
               const loc = ele.data("linesOfCode") || 50;
-              return Math.max(15, Math.min(50, loc / 10));
+              return Math.max(18, Math.min(55, loc / 8));
             },
-            "border-width": 1,
-            "border-color": "#fff",
-          },
+            shape: (ele: cytoscape.NodeSingular) => {
+              const role = ele.data("role") || "";
+              return ROLE_ICONS[role] || "ellipse";
+            },
+            "border-width": 1.5,
+            "border-color": "#ffffff40",
+          } as any,
         },
         // External nodes
         {
@@ -243,14 +438,14 @@ export function ArchitectureViewer({
             label: "data(label)",
             "text-valign": "bottom",
             color: "#aaa",
-            "font-size": "7px",
-            width: 20,
-            height: 20,
-            "border-width": 1,
-            "border-color": "#fff",
+            "font-size": "8px",
+            width: 22,
+            height: 22,
+            "border-width": 1.5,
+            "border-color": "#ffffff60",
           },
         },
-        // Edges
+        // Edges — base style
         {
           selector: "edge",
           style: {
@@ -260,24 +455,24 @@ export function ArchitectureViewer({
             },
             "line-color": (ele: cytoscape.EdgeSingular) => {
               const type = ele.data("type") || "DEPENDS_ON";
-              return EDGE_COLORS[type] || "#666";
+              return EDGE_STYLES[type]?.color || "#666";
             },
             "target-arrow-color": (ele: cytoscape.EdgeSingular) => {
               const type = ele.data("type") || "DEPENDS_ON";
-              return EDGE_COLORS[type] || "#666";
+              return EDGE_STYLES[type]?.color || "#666";
             },
             "target-arrow-shape": "triangle",
             "curve-style": "bezier",
-            opacity: 0.5,
+            opacity: 0.6,
             "line-style": (ele: cytoscape.EdgeSingular) => {
               const type = ele.data("type");
               if (type === "JNDI_LOOKUP") return "dashed";
               if (type === "EMITS_EVENT") return "dotted";
               return "solid";
             },
-          },
+          } as any,
         },
-        // Highlighted
+        // Selected
         {
           selector: ":selected",
           style: {
@@ -287,28 +482,45 @@ export function ArchitectureViewer({
           },
         },
       ],
-      layout: {
-        name: layout === "cose" ? "cose" : layout === "circle" ? "circle" : layout === "grid" ? "grid" : "breadthfirst",
-        animate: true,
-        animationDuration: 500,
-        ...(layout === "cose"
-          ? {
-              nodeRepulsion: () => 8000,
-              idealEdgeLength: () => 100,
-              edgeElasticity: () => 100,
-              gravity: 0.25,
-            }
-          : {}),
-      } as cytoscape.LayoutOptions,
-      minZoom: 0.1,
-      maxZoom: 5,
+      layout: layoutConfig,
+      minZoom: 0.05,
+      maxZoom: 8,
       wheelSensitivity: 0.3,
+    });
+
+    // V4: Semantic zoom — adjust label visibility based on zoom level
+    cy.on("zoom", () => {
+      const zoom = cy.zoom();
+      cy.batch(() => {
+        if (zoom < 0.3) {
+          // Low zoom: only show compound node labels
+          cy.nodes('[type="CLASS"], [type="EXTERNAL"]').style("label", "");
+          cy.edges().style("opacity", 0.2);
+        } else if (zoom < 0.7) {
+          // Medium zoom: show class labels but small
+          cy.nodes('[type="CLASS"]').style({ label: "data(label)", "font-size": "7px" });
+          cy.nodes('[type="EXTERNAL"]').style({ label: "data(label)", "font-size": "6px" });
+          cy.edges().style("opacity", 0.4);
+        } else {
+          // High zoom: full detail
+          cy.nodes('[type="CLASS"]').style({ label: "data(label)", "font-size": "9px" });
+          cy.nodes('[type="EXTERNAL"]').style({ label: "data(label)", "font-size": "8px" });
+          cy.edges().style("opacity", 0.6);
+        }
+      });
     });
 
     // Click handler
     cy.on("tap", "node", (evt: EventObject) => {
       const node = evt.target;
-      setSelectedNode(node.data());
+      if (node.data("type") === "domain" || node.data("type") === "microservice") {
+        // Click on compound node — highlight its children
+        const children = node.children();
+        cy.elements().unselect();
+        children.select();
+      } else {
+        setSelectedNode(node.data());
+      }
     });
 
     cy.on("tap", (evt: EventObject) => {
@@ -318,10 +530,67 @@ export function ArchitectureViewer({
     });
 
     cyRef.current = cy;
-  }, [cytoscapeData, viewLevel, layout]);
+  }
+
+  // ─── Layout configs ───────────────────────────────────────────────────
+
+  function getLayoutConfig(layoutName: string): cytoscape.LayoutOptions {
+    switch (layoutName) {
+      case "dagre":
+        return {
+          name: "dagre",
+          rankDir: "TB",
+          nodeSep: 40,
+          rankSep: 60,
+          edgeSep: 20,
+          animate: true,
+          animationDuration: 500,
+        } as any;
+      case "cola":
+        return {
+          name: "cola",
+          animate: true,
+          maxSimulationTime: 2000,
+          nodeSpacing: 30,
+          edgeLength: 120,
+          convergenceThreshold: 0.01,
+        } as any;
+      case "cose":
+        return {
+          name: "cose",
+          animate: true,
+          animationDuration: 500,
+          nodeRepulsion: () => 12000,
+          idealEdgeLength: () => 120,
+          edgeElasticity: () => 100,
+          gravity: 0.2,
+          numIter: 500,
+        } as any;
+      case "circle":
+        return {
+          name: "circle",
+          animate: true,
+          animationDuration: 500,
+        } as cytoscape.LayoutOptions;
+      case "breadthfirst":
+        return {
+          name: "breadthfirst",
+          animate: true,
+          animationDuration: 500,
+          directed: true,
+          spacingFactor: 1.5,
+        } as cytoscape.LayoutOptions;
+      default:
+        return {
+          name: "dagre",
+          animate: true,
+          animationDuration: 500,
+        } as any;
+    }
+  }
 
   useEffect(() => {
-    if (activeTab === "interactive") {
+    if (activeTab === "interactive" && viewLevel !== "detail") {
       initCytoscape();
     }
     return () => {
@@ -341,63 +610,85 @@ export function ArchitectureViewer({
   const handleLayoutChange = (newLayout: string) => {
     setLayout(newLayout);
     if (cyRef.current) {
-      cyRef.current
-        .layout({
-          name: newLayout,
-          animate: true,
-          animationDuration: 500,
-          ...(newLayout === "cose"
-            ? { nodeRepulsion: () => 8000, idealEdgeLength: () => 100, gravity: 0.25 }
-            : {}),
-        } as cytoscape.LayoutOptions)
-        .run();
+      cyRef.current.layout(getLayoutConfig(newLayout)).run();
     }
   };
 
   // ─── Render ───────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full gap-4">
+    <div className="flex flex-col h-full gap-3">
       {/* Header Controls */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <Button
-            variant={viewLevel === 1 ? "default" : "outline"}
-            size="sm"
-            onClick={() => { setViewLevel(1); setSelectedNode(null); }}
-          >
-            <Layers className="w-4 h-4 mr-1" />
-            Domaines
-          </Button>
-          <Button
-            variant={viewLevel === 2 ? "default" : "outline"}
-            size="sm"
-            onClick={() => { setViewLevel(2); setSelectedNode(null); }}
-          >
-            <Network className="w-4 h-4 mr-1" />
-            Classes
-          </Button>
-          <Button
-            variant={viewLevel === 3 ? "default" : "outline"}
-            size="sm"
-            onClick={() => setViewLevel(3)}
-            disabled={!selectedNode}
-          >
-            <Box className="w-4 h-4 mr-1" />
-            Détail
-          </Button>
+        <div className="flex items-center gap-1.5">
+          {microservices.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={viewLevel === "microservices" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => { setViewLevel("microservices"); setSelectedNode(null); }}
+                >
+                  <Network className="w-4 h-4 mr-1" />
+                  Microservices
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Vue groupée par microservice extrait</TooltipContent>
+            </Tooltip>
+          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={viewLevel === "domains" ? "default" : "outline"}
+                size="sm"
+                onClick={() => { setViewLevel("domains"); setSelectedNode(null); }}
+              >
+                <Layers className="w-4 h-4 mr-1" />
+                Domaines
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Vue groupée par domaine métier</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={viewLevel === "classes" ? "default" : "outline"}
+                size="sm"
+                onClick={() => { setViewLevel("classes"); setSelectedNode(null); }}
+              >
+                <Box className="w-4 h-4 mr-1" />
+                Classes
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Vue à plat de toutes les classes</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={viewLevel === "detail" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setViewLevel("detail")}
+                disabled={!selectedNode}
+              >
+                <Eye className="w-4 h-4 mr-1" />
+                Détail
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Propriétés détaillées du nœud sélectionné</TooltipContent>
+          </Tooltip>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <Select value={layout} onValueChange={handleLayoutChange}>
-            <SelectTrigger className="w-[130px] h-8">
+            <SelectTrigger className="w-[140px] h-8">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="cose">Force-directed</SelectItem>
+              <SelectItem value="dagre">Dagre (hiérarchique)</SelectItem>
+              <SelectItem value="cola">Cola (force)</SelectItem>
+              <SelectItem value="cose">CoSE (organique)</SelectItem>
               <SelectItem value="circle">Circulaire</SelectItem>
-              <SelectItem value="grid">Grille</SelectItem>
-              <SelectItem value="breadthfirst">Hiérarchique</SelectItem>
+              <SelectItem value="breadthfirst">Arbre</SelectItem>
             </SelectContent>
           </Select>
 
@@ -410,27 +701,38 @@ export function ArchitectureViewer({
           <Button variant="outline" size="icon" className="h-8 w-8" onClick={handleFit}>
             <Maximize2 className="w-4 h-4" />
           </Button>
+          <Button
+            variant={showLegend ? "default" : "outline"}
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => setShowLegend(!showLegend)}
+          >
+            <Filter className="w-4 h-4" />
+          </Button>
 
-          {onExport && (
-            <Select onValueChange={(v) => onExport(v)}>
-              <SelectTrigger className="w-[120px] h-8">
-                <Download className="w-4 h-4 mr-1" />
-                <SelectValue placeholder="Export" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="svg">SVG</SelectItem>
-                <SelectItem value="graphml">GraphML</SelectItem>
-                <SelectItem value="json">Cytoscape JSON</SelectItem>
-                <SelectItem value="d2">D2 Diagram</SelectItem>
-                <SelectItem value="png">PNG</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
+          {/* V5: Export menu */}
+          <Select onValueChange={(v) => {
+            if (v === "svg") exportSVG();
+            else if (v === "png") exportPNG();
+            else if (onExport) onExport(v);
+          }}>
+            <SelectTrigger className="w-[120px] h-8">
+              <Download className="w-4 h-4 mr-1" />
+              <SelectValue placeholder="Export" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="svg">SVG</SelectItem>
+              <SelectItem value="png">PNG (HD)</SelectItem>
+              <SelectItem value="graphml">GraphML</SelectItem>
+              <SelectItem value="json">Cytoscape JSON</SelectItem>
+              <SelectItem value="d2">D2 Diagram</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
       {/* Main Content */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
         <TabsList>
           <TabsTrigger value="interactive">
             <Eye className="w-4 h-4 mr-1" />
@@ -441,22 +743,26 @@ export function ArchitectureViewer({
           <TabsTrigger value="overview">Vue d'ensemble</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="interactive" className="flex-1 flex gap-4 mt-2">
+        <TabsContent value="interactive" className="flex-1 flex gap-3 mt-2 min-h-0">
           {/* Cytoscape Canvas */}
-          <div className="flex-1 relative">
-            {viewLevel < 3 ? (
+          <div className="flex-1 relative min-h-0">
+            {viewLevel !== "detail" ? (
               <div
                 ref={containerRef}
-                className="w-full h-full min-h-[500px] rounded-lg border border-border bg-[#0f0f23]"
+                className="w-full rounded-lg border border-border bg-[#0f0f23]"
+                style={{ height: "calc(100vh - 16rem)", minHeight: "550px" }}
               />
             ) : (
-              /* Niveau 3: Detail View */
-              <div className="w-full h-full min-h-[500px] rounded-lg border border-border bg-background p-6 overflow-auto">
+              /* Detail View */
+              <div
+                className="w-full rounded-lg border border-border bg-background p-6 overflow-auto"
+                style={{ height: "calc(100vh - 16rem)", minHeight: "550px" }}
+              >
                 <Button
                   variant="ghost"
                   size="sm"
                   className="mb-4"
-                  onClick={() => setViewLevel(2)}
+                  onClick={() => setViewLevel(microservices.length > 0 ? "microservices" : "domains")}
                 >
                   <ArrowLeft className="w-4 h-4 mr-1" />
                   Retour
@@ -469,20 +775,53 @@ export function ArchitectureViewer({
                         <CardHeader className="pb-2">
                           <CardTitle className="text-sm">Propriétés</CardTitle>
                         </CardHeader>
-                        <CardContent className="text-sm space-y-1">
-                          <div>Type: <Badge variant="outline">{selectedNode.type}</Badge></div>
-                          {selectedNode.role && <div>Rôle: <Badge>{selectedNode.role}</Badge></div>}
-                          {selectedNode.domain && <div>Domaine: <Badge variant="secondary">{selectedNode.domain}</Badge></div>}
-                          {selectedNode.technologyType && <div>Technologie: {selectedNode.technologyType}</div>}
+                        <CardContent className="text-sm space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted-foreground">Type:</span>
+                            <Badge variant="outline">{selectedNode.type}</Badge>
+                          </div>
+                          {selectedNode.role && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-muted-foreground">Rôle:</span>
+                              <Badge>{selectedNode.role}</Badge>
+                            </div>
+                          )}
+                          {selectedNode.domain && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-muted-foreground">Domaine:</span>
+                              <Badge
+                                variant="secondary"
+                                style={{ backgroundColor: (DOMAIN_COLORS[selectedNode.domain] || "#BDC3C7") + "30" }}
+                              >
+                                {(selectedNode.domain as string).replace(/_/g, " ")}
+                              </Badge>
+                            </div>
+                          )}
+                          {selectedNode.technologyType && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-muted-foreground">Technologie:</span>
+                              <span>{selectedNode.technologyType}</span>
+                            </div>
+                          )}
                         </CardContent>
                       </Card>
                       <Card>
                         <CardHeader className="pb-2">
                           <CardTitle className="text-sm">Métriques</CardTitle>
                         </CardHeader>
-                        <CardContent className="text-sm space-y-1">
-                          {selectedNode.linesOfCode !== undefined && <div>Lignes de code: {selectedNode.linesOfCode}</div>}
-                          {selectedNode.complexity !== undefined && <div>Complexité: {selectedNode.complexity}</div>}
+                        <CardContent className="text-sm space-y-2">
+                          {selectedNode.linesOfCode !== undefined && (
+                            <div>
+                              <span className="text-muted-foreground">Lignes de code:</span>{" "}
+                              <span className="font-mono">{selectedNode.linesOfCode}</span>
+                            </div>
+                          )}
+                          {selectedNode.complexity !== undefined && (
+                            <div>
+                              <span className="text-muted-foreground">Complexité cyclomatique:</span>{" "}
+                              <span className="font-mono">{selectedNode.complexity}</span>
+                            </div>
+                          )}
                         </CardContent>
                       </Card>
                     </div>
@@ -491,8 +830,71 @@ export function ArchitectureViewer({
               </div>
             )}
 
+            {/* V3: Interactive Legend + Edge Filters */}
+            {showLegend && viewLevel !== "detail" && (
+              <div className="absolute top-3 right-3 bg-[#0f0f23]/90 backdrop-blur-sm border border-border rounded-lg p-3 max-w-[220px] z-10">
+                {/* Domain colors */}
+                <div className="text-xs font-semibold text-muted-foreground mb-2">Domaines</div>
+                <div className="space-y-1 mb-3">
+                  {Object.entries(DOMAIN_COLORS)
+                    .filter(([key]) => key !== "UNKNOWN")
+                    .slice(0, 8)
+                    .map(([name, color]) => (
+                      <div key={name} className="flex items-center gap-2">
+                        <div
+                          className="w-3 h-3 rounded-full shrink-0"
+                          style={{ backgroundColor: color }}
+                        />
+                        <span className="text-[10px] text-muted-foreground truncate">
+                          {name.replace(/_/g, " ")}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+
+                {/* Edge type filters */}
+                <div className="text-xs font-semibold text-muted-foreground mb-2">
+                  Arêtes <span className="text-[10px] font-normal">(cliquer pour filtrer)</span>
+                </div>
+                <div className="space-y-1">
+                  {Object.entries(EDGE_STYLES).map(([type, style]) => (
+                    <button
+                      key={type}
+                      className="flex items-center gap-2 w-full text-left hover:bg-white/5 rounded px-1 py-0.5 transition-colors"
+                      onClick={() => toggleEdgeType(type)}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        {visibleEdgeTypes.has(type) ? (
+                          <Eye className="w-3 h-3 text-muted-foreground" />
+                        ) : (
+                          <EyeOff className="w-3 h-3 text-muted-foreground/40" />
+                        )}
+                        <div
+                          className="w-4 h-0.5 shrink-0"
+                          style={{
+                            backgroundColor: style.color,
+                            opacity: visibleEdgeTypes.has(type) ? 1 : 0.3,
+                            borderTop: style.dash !== "solid" ? `2px ${style.dash === "3,3" ? "dotted" : "dashed"} ${style.color}` : "none",
+                            height: style.dash !== "solid" ? 0 : 2,
+                          }}
+                        />
+                      </div>
+                      <span
+                        className="text-[10px] truncate"
+                        style={{
+                          color: visibleEdgeTypes.has(type) ? "#ccc" : "#666",
+                        }}
+                      >
+                        {style.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Node count badge */}
-            {cytoscapeData && viewLevel < 3 && (
+            {cytoscapeData && viewLevel !== "detail" && (
               <div className="absolute bottom-3 left-3 flex gap-2">
                 <Badge variant="secondary" className="text-xs">
                   {cytoscapeData.nodes.length} nœuds
@@ -500,13 +902,18 @@ export function ArchitectureViewer({
                 <Badge variant="secondary" className="text-xs">
                   {cytoscapeData.edges.length} arêtes
                 </Badge>
+                {microservices.length > 0 && (
+                  <Badge variant="secondary" className="text-xs bg-emerald-900/50 text-emerald-300">
+                    {microservices.length} microservices
+                  </Badge>
+                )}
               </div>
             )}
           </div>
 
           {/* Side Panel */}
-          {selectedNode && viewLevel < 3 && (
-            <Card className="w-72 shrink-0 overflow-auto max-h-[600px]">
+          {selectedNode && viewLevel !== "detail" && (
+            <Card className="w-72 shrink-0 overflow-auto" style={{ maxHeight: "calc(100vh - 16rem)" }}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm truncate">{selectedNode.label}</CardTitle>
               </CardHeader>
@@ -527,7 +934,7 @@ export function ArchitectureViewer({
                     <Badge
                       variant="secondary"
                       className="text-xs"
-                      style={{ backgroundColor: DOMAIN_COLORS[selectedNode.domain] + "30" }}
+                      style={{ backgroundColor: (DOMAIN_COLORS[selectedNode.domain] || "#BDC3C7") + "30" }}
                     >
                       {(selectedNode.domain as string).replace(/_/g, " ")}
                     </Badge>
@@ -552,7 +959,7 @@ export function ArchitectureViewer({
                   variant="outline"
                   size="sm"
                   className="w-full mt-2"
-                  onClick={() => setViewLevel(3)}
+                  onClick={() => setViewLevel("detail")}
                 >
                   Voir détail complet
                 </Button>
@@ -564,11 +971,15 @@ export function ArchitectureViewer({
         <TabsContent value="dependency" className="flex-1 mt-2">
           {svgDependency ? (
             <div
-              className="w-full h-full min-h-[500px] rounded-lg border border-border overflow-auto"
+              className="w-full rounded-lg border border-border overflow-auto"
+              style={{ height: "calc(100vh - 16rem)", minHeight: "550px" }}
               dangerouslySetInnerHTML={{ __html: svgDependency }}
             />
           ) : (
-            <div className="flex items-center justify-center h-[500px] text-muted-foreground">
+            <div
+              className="flex items-center justify-center text-muted-foreground"
+              style={{ height: "calc(100vh - 16rem)", minHeight: "550px" }}
+            >
               Lancez une analyse pour générer le graphe de dépendances
             </div>
           )}
@@ -577,11 +988,15 @@ export function ArchitectureViewer({
         <TabsContent value="microservices" className="flex-1 mt-2">
           {svgMicroservices ? (
             <div
-              className="w-full h-full min-h-[500px] rounded-lg border border-border overflow-auto"
+              className="w-full rounded-lg border border-border overflow-auto"
+              style={{ height: "calc(100vh - 16rem)", minHeight: "550px" }}
               dangerouslySetInnerHTML={{ __html: svgMicroservices }}
             />
           ) : (
-            <div className="flex items-center justify-center h-[500px] text-muted-foreground">
+            <div
+              className="flex items-center justify-center text-muted-foreground"
+              style={{ height: "calc(100vh - 16rem)", minHeight: "550px" }}
+            >
               Lancez une analyse pour générer la carte des microservices
             </div>
           )}
@@ -590,11 +1005,15 @@ export function ArchitectureViewer({
         <TabsContent value="overview" className="flex-1 mt-2">
           {svgOverview ? (
             <div
-              className="w-full h-full min-h-[500px] rounded-lg border border-border overflow-auto"
+              className="w-full rounded-lg border border-border overflow-auto"
+              style={{ height: "calc(100vh - 16rem)", minHeight: "550px" }}
               dangerouslySetInnerHTML={{ __html: svgOverview }}
             />
           ) : (
-            <div className="flex items-center justify-center h-[500px] text-muted-foreground">
+            <div
+              className="flex items-center justify-center text-muted-foreground"
+              style={{ height: "calc(100vh - 16rem)", minHeight: "550px" }}
+            >
               Lancez une analyse pour générer la vue d'ensemble
             </div>
           )}
