@@ -1,23 +1,23 @@
 /**
- * Compleo v1.0 — IHM de migration EJB → Spring Boot
- * Upload ZIP, Analyse, Génération, Preview, Download
+ * Compleo v2.0 — IHM de migration EJB → Spring Boot
+ * Pipeline interactif : Upload → Analyse → Choix Difficiles → Génération → Résultats
  * @author Hamza NORDINE
  */
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Upload, FileCode2, Play, Download, Eye, FolderArchive,
   CheckCircle2, AlertTriangle, Loader2, ArrowRight, Package,
   Layers, Code2, TestTube, Cloud, FileText, ChevronRight,
-  ChevronDown, RefreshCw, History, Trash2, BarChart3,
+  ChevronDown, RefreshCw, History, BarChart3,
   Terminal, Zap, Server, Database, Shield, Box,
+  HelpCircle, Star, ArrowLeft, Lightbulb, Info,
 } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -31,8 +31,36 @@ interface UploadResult {
   totalLines: number;
 }
 
+interface AmbiguityOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
+interface AmbiguityContext {
+  className: string;
+  methodName?: string;
+  signature?: string;
+  javadoc?: string;
+  packageName?: string;
+  relatedClasses?: string[];
+  injectedType?: string;
+}
+
+interface Ambiguity {
+  id: string;
+  type: string;
+  severity: "info" | "warning" | "blocking";
+  context: AmbiguityContext;
+  question: string;
+  recommendation: string;
+  recommendationReason: string;
+  options: AmbiguityOption[];
+}
+
 interface AnalysisResult {
   sessionId: string;
+  status: string;
   projectName: string;
   groupId: string;
   artifactId: string;
@@ -51,26 +79,31 @@ interface AnalysisResult {
     domains: string[];
   };
   warnings: string[];
-  useCases: {
-    className: string;
-    domain: string;
-    httpMethod: string;
-    restPath: string;
-    voInType: string;
-    voOutType: string;
-    bianDomain: string;
-    bianAction: string;
-  }[];
-  dtos: { className: string; direction: string; fieldCount: number; requiredFields: number }[];
-  enums: { className: string; valueCount: number }[];
-  exceptions: { className: string; extendsClass: string }[];
-  validators: { className: string; annotationName: string }[];
-  remoteInterfaces: { className: string; methodCount: number }[];
-  domains: string[];
+  ambiguities: Ambiguity[];
+  irSummary: {
+    useCases: {
+      className: string;
+      domain: string;
+      httpMethod: string;
+      restPath: string;
+      voInType: string;
+      voOutType: string;
+      bianDomain: string;
+      bianAction: string;
+      useCaseDescription: string;
+    }[];
+    dtos: { className: string; direction: string; fieldCount: number; requiredFields: number }[];
+    enums: { className: string; valueCount: number }[];
+    exceptions: { className: string; extendsClass: string }[];
+    validators: { className: string; annotationName: string }[];
+    remoteInterfaces: { className: string; methodCount: number }[];
+    domains: string[];
+  };
 }
 
 interface GenerationResult {
   sessionId: string;
+  status: string;
   stats: {
     totalFiles: number;
     controllers: number;
@@ -88,6 +121,7 @@ interface GenerationResult {
   downloadUrl: string;
   directUrl: string;
   files: { path: string; category: string; lines: number }[];
+  choicesApplied?: number;
 }
 
 interface FilePreview {
@@ -106,6 +140,7 @@ interface SessionInfo {
   useCaseCount: number;
   dtoCount: number;
   generatedFiles: number;
+  ambiguityCount: number;
 }
 
 // ─── Category helpers ───────────────────────────────────────────────────────
@@ -155,11 +190,37 @@ function getCategoryLabel(cat: string): string {
   return labels[cat] || cat;
 }
 
+const ambiguityTypeLabels: Record<string, string> = {
+  HTTP_VERB_AMBIGUOUS: "Methode HTTP",
+  URL_STRUCTURE_AMBIGUOUS: "Structure URL",
+  RETURN_TYPE_AMBIGUOUS: "Type de retour",
+  CLASS_GROUPING_AMBIGUOUS: "Regroupement",
+  TRANSACTION_AMBIGUOUS: "Transaction",
+  EXTERNAL_DEPENDENCY: "Dependance externe",
+  DOMAIN_NAME_AMBIGUOUS: "Nom de domaine",
+};
+
+const ambiguityTypeIcons: Record<string, typeof Code2> = {
+  HTTP_VERB_AMBIGUOUS: Server,
+  URL_STRUCTURE_AMBIGUOUS: Code2,
+  RETURN_TYPE_AMBIGUOUS: Database,
+  CLASS_GROUPING_AMBIGUOUS: Layers,
+  TRANSACTION_AMBIGUOUS: Shield,
+  EXTERNAL_DEPENDENCY: Box,
+  DOMAIN_NAME_AMBIGUOUS: HelpCircle,
+};
+
+const severityColors: Record<string, { bg: string; text: string; border: string }> = {
+  blocking: { bg: "bg-red-500/10", text: "text-red-400", border: "border-red-500/30" },
+  warning: { bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/30" },
+  info: { bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/30" },
+};
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function CompleoPage() {
-  // Step state
-  const [step, setStep] = useState<"upload" | "analyze" | "generate" | "preview">("upload");
+  // Step state — now includes "choices" between analyze and generate
+  const [step, setStep] = useState<"upload" | "analyze" | "choices" | "generate" | "preview">("upload");
 
   // Upload state
   const [uploading, setUploading] = useState(false);
@@ -170,6 +231,10 @@ export default function CompleoPage() {
   // Analysis state
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+
+  // Ambiguity choices state
+  const [userChoices, setUserChoices] = useState<Record<string, string>>({});
+  const [currentAmbiguityIndex, setCurrentAmbiguityIndex] = useState(0);
 
   // Generation state
   const [generating, setGenerating] = useState(false);
@@ -184,11 +249,23 @@ export default function CompleoPage() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
+  // ─── Derived state ──────────────────────────────────────────────────────
+
+  const ambiguities = analysisResult?.ambiguities ?? [];
+  const currentAmbiguity = ambiguities[currentAmbiguityIndex];
+  const resolvedCount = Object.keys(userChoices).length;
+  const blockingCount = ambiguities.filter(a => a.severity === "blocking").length;
+  const blockingResolved = ambiguities
+    .filter(a => a.severity === "blocking")
+    .filter(a => userChoices[a.id])
+    .length;
+  const canGenerate = blockingCount === 0 || blockingResolved === blockingCount;
+
   // ─── Upload Handler ─────────────────────────────────────────────────────
 
   const handleUpload = useCallback(async (file: File) => {
     if (!file.name.endsWith(".zip")) {
-      toast.error("Seuls les fichiers ZIP sont acceptés");
+      toast.error("Seuls les fichiers ZIP sont acceptes");
       return;
     }
 
@@ -197,6 +274,8 @@ export default function CompleoPage() {
     setAnalysisResult(null);
     setGenerationResult(null);
     setPreviewFile(null);
+    setUserChoices({});
+    setCurrentAmbiguityIndex(0);
 
     try {
       const formData = new FormData();
@@ -256,8 +335,14 @@ export default function CompleoPage() {
 
       const data: AnalysisResult = await res.json();
       setAnalysisResult(data);
-      setStep("generate");
-      toast.success(`${data.stats.useCaseCount} UseCases détectés dans ${data.stats.domainCount} domaine(s)`);
+
+      if (data.ambiguities && data.ambiguities.length > 0) {
+        setStep("choices");
+        toast.success(`${data.stats.useCaseCount} UseCases detectes — ${data.ambiguities.length} choix a faire`);
+      } else {
+        setStep("generate");
+        toast.success(`${data.stats.useCaseCount} UseCases detectes — aucune ambiguite`);
+      }
     } catch (err: any) {
       toast.error(err.message || "Erreur lors de l'analyse");
     } finally {
@@ -265,34 +350,77 @@ export default function CompleoPage() {
     }
   }, [uploadResult]);
 
-  // ─── Generate Handler ───────────────────────────────────────────────────
+  // ─── Choice Handlers ───────────────────────────────────────────────────
 
-  const handleGenerate = useCallback(async () => {
+  const handleChoice = useCallback((ambiguityId: string, choiceId: string) => {
+    setUserChoices(prev => ({ ...prev, [ambiguityId]: choiceId }));
+  }, []);
+
+  const handleApplyAllRecommendations = useCallback(() => {
+    const newChoices: Record<string, string> = { ...userChoices };
+    for (const amb of ambiguities) {
+      if (!newChoices[amb.id]) {
+        newChoices[amb.id] = amb.recommendation;
+      }
+    }
+    setUserChoices(newChoices);
+    toast.success("Toutes les recommandations appliquees");
+  }, [ambiguities, userChoices]);
+
+  // ─── Generate Handler (with choices) ───────────────────────────────────
+
+  const handleGenerateWithChoices = useCallback(async () => {
     if (!uploadResult) return;
     setGenerating(true);
 
     try {
-      const res = await fetch("/api/compleo/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: uploadResult.sessionId }),
-      });
+      // If there are ambiguities, use the resolve endpoint
+      if (ambiguities.length > 0) {
+        // Fill in recommendations for any unresolved non-blocking ambiguities
+        const finalChoices = ambiguities.map(amb => ({
+          ambiguityId: amb.id,
+          choiceId: userChoices[amb.id] || amb.recommendation,
+        }));
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Generation failed");
+        const res = await fetch(`/api/compleo/resolve/${uploadResult.sessionId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ choices: finalChoices }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Resolution failed");
+        }
+
+        const data: GenerationResult = await res.json();
+        setGenerationResult(data);
+        setStep("preview");
+        toast.success(`${data.stats.totalFiles} fichiers Spring Boot generes`);
+      } else {
+        // No ambiguities — use the generate endpoint directly
+        const res = await fetch("/api/compleo/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: uploadResult.sessionId }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Generation failed");
+        }
+
+        const data: GenerationResult = await res.json();
+        setGenerationResult(data);
+        setStep("preview");
+        toast.success(`${data.stats.totalFiles} fichiers Spring Boot generes`);
       }
-
-      const data: GenerationResult = await res.json();
-      setGenerationResult(data);
-      setStep("preview");
-      toast.success(`${data.stats.totalFiles} fichiers Spring Boot générés`);
     } catch (err: any) {
-      toast.error(err.message || "Erreur lors de la génération");
+      toast.error(err.message || "Erreur lors de la generation");
     } finally {
       setGenerating(false);
     }
-  }, [uploadResult]);
+  }, [uploadResult, ambiguities, userChoices]);
 
   // ─── Preview Handler ────────────────────────────────────────────────────
 
@@ -342,6 +470,8 @@ export default function CompleoPage() {
     setGenerationResult(null);
     setPreviewFile(null);
     setExpandedCategories(new Set());
+    setUserChoices({});
+    setCurrentAmbiguityIndex(0);
   }, []);
 
   // ─── Toggle category ───────────────────────────────────────────────────
@@ -357,19 +487,22 @@ export default function CompleoPage() {
 
   // ─── Group files by category ──────────────────────────────────────────
 
-  const filesByCategory = generationResult?.files.reduce((acc, f) => {
-    if (!acc[f.category]) acc[f.category] = [];
-    acc[f.category].push(f);
-    return acc;
-  }, {} as Record<string, typeof generationResult.files>) ?? {};
+  const filesByCategory = useMemo(() =>
+    generationResult?.files.reduce((acc, f) => {
+      if (!acc[f.category]) acc[f.category] = [];
+      acc[f.category].push(f);
+      return acc;
+    }, {} as Record<string, typeof generationResult.files>) ?? {},
+  [generationResult]);
 
   // ─── Steps indicator ──────────────────────────────────────────────────
 
   const steps = [
     { id: "upload", label: "Upload", icon: Upload },
     { id: "analyze", label: "Analyse", icon: BarChart3 },
-    { id: "generate", label: "Génération", icon: Zap },
-    { id: "preview", label: "Résultats", icon: Eye },
+    { id: "choices", label: "Choix", icon: HelpCircle },
+    { id: "generate", label: "Generation", icon: Zap },
+    { id: "preview", label: "Resultats", icon: Eye },
   ] as const;
 
   const stepIndex = steps.findIndex(s => s.id === step);
@@ -387,7 +520,7 @@ export default function CompleoPage() {
               <div>
                 <h1 className="text-xl font-bold text-white flex items-center gap-2">
                   Compleo
-                  <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 text-xs">v1.0</Badge>
+                  <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 text-xs">v2.0</Badge>
                 </h1>
                 <p className="text-sm text-[oklch(0.6_0.01_250)]">EJB → Spring Boot Migration Engine</p>
               </div>
@@ -422,6 +555,8 @@ export default function CompleoPage() {
               const Icon = s.icon;
               const isActive = i === stepIndex;
               const isDone = i < stepIndex;
+              // Skip "choices" step in indicator if no ambiguities
+              if (s.id === "choices" && ambiguities.length === 0 && step !== "choices") return null;
               return (
                 <div key={s.id} className="flex items-center gap-2">
                   {i > 0 && (
@@ -454,7 +589,7 @@ export default function CompleoPage() {
             className="border-b border-[oklch(0.25_0.01_250)] bg-[oklch(0.14_0.01_250)] overflow-hidden"
           >
             <div className="max-w-7xl mx-auto px-6 py-4">
-              <h3 className="text-sm font-semibold text-[oklch(0.7_0.01_250)] mb-3">Sessions précédentes</h3>
+              <h3 className="text-sm font-semibold text-[oklch(0.7_0.01_250)] mb-3">Sessions precedentes</h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {sessions.map(s => (
                   <div key={s.id} className="p-3 rounded-lg border border-[oklch(0.25_0.01_250)] bg-[oklch(0.16_0.01_250)]">
@@ -462,12 +597,13 @@ export default function CompleoPage() {
                       <span className="text-sm font-medium text-white truncate">{s.projectName}</span>
                       <Badge variant="outline" className={`text-xs ${
                         s.status === "generated" ? "text-emerald-400 border-emerald-500/30" :
+                        s.status === "waiting_choices" ? "text-amber-400 border-amber-500/30" :
                         s.status === "analyzed" ? "text-cyan-400 border-cyan-500/30" :
-                        "text-amber-400 border-amber-500/30"
+                        "text-[oklch(0.5_0.01_250)] border-[oklch(0.3_0.01_250)]"
                       }`}>{s.status}</Badge>
                     </div>
                     <div className="text-xs text-[oklch(0.5_0.01_250)]">
-                      {s.fileCount} fichiers · {s.useCaseCount} UC · {s.generatedFiles} générés
+                      {s.fileCount} fichiers · {s.useCaseCount} UC · {s.ambiguityCount > 0 ? `${s.ambiguityCount} choix` : ""} {s.generatedFiles > 0 ? `· ${s.generatedFiles} generes` : ""}
                     </div>
                   </div>
                 ))}
@@ -486,7 +622,7 @@ export default function CompleoPage() {
               <div className="text-center mb-8">
                 <h2 className="text-2xl font-bold text-white mb-2">Uploadez votre projet EJB</h2>
                 <p className="text-[oklch(0.6_0.01_250)]">
-                  Glissez-déposez un fichier ZIP contenant votre projet Maven EJB
+                  Glissez-deposez un fichier ZIP contenant votre projet Maven EJB
                 </p>
               </div>
 
@@ -537,7 +673,7 @@ export default function CompleoPage() {
               <div className="grid grid-cols-3 gap-4 mt-8">
                 {[
                   { icon: Terminal, label: "Parsing AST", desc: "Analyse statique du code Java" },
-                  { icon: Layers, label: "Spring Boot 3.2", desc: "Génération Controllers, Services, DTOs" },
+                  { icon: Layers, label: "Spring Boot 3.2", desc: "Controllers, Services, DTOs" },
                   { icon: Cloud, label: "Cloud-Native", desc: "Dockerfile, K8s, docker-compose" },
                 ].map(f => (
                   <div key={f.label} className="p-4 rounded-lg border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)]">
@@ -560,7 +696,7 @@ export default function CompleoPage() {
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-white flex items-center gap-2">
                     <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                    Projet uploadé
+                    Projet uploade
                   </h3>
                   <Badge variant="outline" className="text-emerald-400 border-emerald-500/30">
                     {uploadResult.projectName}
@@ -570,8 +706,8 @@ export default function CompleoPage() {
                   {[
                     { label: "Fichiers Java", value: uploadResult.fileCount },
                     { label: "Lignes de code", value: uploadResult.totalLines.toLocaleString() },
-                    { label: "pom.xml", value: uploadResult.hasPom ? "Détecté" : "Non trouvé" },
-                    { label: "BIAN mapping", value: uploadResult.hasBian ? "Détecté" : "Non trouvé" },
+                    { label: "pom.xml", value: uploadResult.hasPom ? "Detecte" : "Non trouve" },
+                    { label: "BIAN mapping", value: uploadResult.hasBian ? "Detecte" : "Non trouve" },
                   ].map(s => (
                     <div key={s.label} className="text-center">
                       <div className="text-xl font-bold text-white">{s.value}</div>
@@ -602,14 +738,262 @@ export default function CompleoPage() {
                   )}
                 </Button>
                 <p className="text-sm text-[oklch(0.5_0.01_250)] mt-2">
-                  Détection des UseCases, DTOs, Services, Enums, Exceptions, Validators
+                  Detection des UseCases, DTOs, Services, Enums, Exceptions, Validators
                 </p>
               </div>
             </div>
           </motion.div>
         )}
 
-        {/* Step 3: Generate */}
+        {/* Step 2.5: Choix Difficiles */}
+        {step === "choices" && analysisResult && ambiguities.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+            <div className="max-w-4xl mx-auto">
+              {/* Header banner */}
+              <div className="p-5 rounded-xl border border-amber-500/30 bg-amber-500/5 mb-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <AlertTriangle className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-lg font-semibold text-white mb-1">
+                      {ambiguities.length} point{ambiguities.length > 1 ? "s" : ""} necessitent votre attention
+                    </h3>
+                    <p className="text-sm text-[oklch(0.6_0.01_250)] mb-3">
+                      Le moteur a detecte des ambiguites qu'il ne peut pas resoudre automatiquement.
+                      Vos choix guideront la generation du code.
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleApplyAllRecommendations}
+                        className="border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+                      >
+                        <Star className="w-4 h-4 mr-1" />
+                        Appliquer toutes les recommandations
+                      </Button>
+                      <div className="text-sm text-[oklch(0.5_0.01_250)]">
+                        {resolvedCount}/{ambiguities.length} resolues
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Analysis summary (collapsed) */}
+              <div className="p-4 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] mb-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                    <span className="text-sm font-medium text-white">{analysisResult.projectName}</span>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs text-[oklch(0.5_0.01_250)]">
+                    <span>{analysisResult.stats.useCaseCount} UseCases</span>
+                    <span>{analysisResult.stats.dtoCount} DTOs</span>
+                    <span>{analysisResult.stats.enumCount} Enums</span>
+                    <span>{analysisResult.stats.exceptionCount} Exceptions</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Current ambiguity card */}
+              {currentAmbiguity && (
+                <motion.div
+                  key={currentAmbiguity.id}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] overflow-hidden mb-6"
+                >
+                  {/* Card header */}
+                  <div className="p-4 border-b border-[oklch(0.25_0.01_250)] flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-bold text-white">
+                        {currentAmbiguityIndex + 1}/{ambiguities.length}
+                      </span>
+                      <span className="text-sm text-[oklch(0.7_0.01_250)]">
+                        {ambiguityTypeLabels[currentAmbiguity.type] || currentAmbiguity.type}
+                      </span>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className={`text-xs ${severityColors[currentAmbiguity.severity]?.text} ${severityColors[currentAmbiguity.severity]?.border}`}
+                    >
+                      {currentAmbiguity.severity === "blocking" ? "Bloquant" :
+                       currentAmbiguity.severity === "warning" ? "Warning" : "Info"}
+                    </Badge>
+                  </div>
+
+                  {/* Context */}
+                  <div className="p-5">
+                    <div className="mb-4 space-y-2">
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="text-[oklch(0.5_0.01_250)]">Classe :</span>
+                        <span className="text-white font-mono">{currentAmbiguity.context.className}</span>
+                      </div>
+                      {currentAmbiguity.context.methodName && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="text-[oklch(0.5_0.01_250)]">Methode :</span>
+                          <span className="text-[oklch(0.7_0.01_250)] font-mono">{currentAmbiguity.context.signature || currentAmbiguity.context.methodName}</span>
+                        </div>
+                      )}
+                      {currentAmbiguity.context.packageName && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="text-[oklch(0.5_0.01_250)]">Package :</span>
+                          <span className="text-[oklch(0.6_0.01_250)] font-mono text-xs">{currentAmbiguity.context.packageName}</span>
+                        </div>
+                      )}
+                      {currentAmbiguity.context.javadoc && (
+                        <div className="flex items-start gap-2 text-sm mt-2">
+                          <FileText className="w-4 h-4 text-[oklch(0.5_0.01_250)] mt-0.5 flex-shrink-0" />
+                          <span className="text-[oklch(0.7_0.01_250)] italic">"{currentAmbiguity.context.javadoc}"</span>
+                        </div>
+                      )}
+                      {currentAmbiguity.context.injectedType && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="text-[oklch(0.5_0.01_250)]">Dependance :</span>
+                          <span className="text-amber-400 font-mono">{currentAmbiguity.context.injectedType}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Question */}
+                    <div className="p-3 rounded-lg bg-[oklch(0.18_0.01_250)] border border-[oklch(0.25_0.01_250)] mb-5">
+                      <div className="flex items-center gap-2 text-white font-medium">
+                        <HelpCircle className="w-4 h-4 text-amber-400" />
+                        {currentAmbiguity.question}
+                      </div>
+                    </div>
+
+                    {/* Options grid */}
+                    <div className="grid grid-cols-2 gap-3 mb-5">
+                      {currentAmbiguity.options.map(option => {
+                        const isSelected = userChoices[currentAmbiguity.id] === option.id;
+                        const isRecommended = currentAmbiguity.recommendation === option.id;
+                        return (
+                          <button
+                            key={option.id}
+                            onClick={() => handleChoice(currentAmbiguity.id, option.id)}
+                            className={`relative p-4 rounded-lg border-2 text-left transition-all ${
+                              isSelected
+                                ? "border-emerald-400 bg-emerald-500/10"
+                                : isRecommended
+                                  ? "border-amber-500/40 bg-amber-500/5 hover:border-amber-400"
+                                  : "border-[oklch(0.25_0.01_250)] hover:border-[oklch(0.35_0.01_250)] bg-[oklch(0.18_0.01_250)]"
+                            }`}
+                          >
+                            {isRecommended && (
+                              <div className="absolute -top-2.5 left-3">
+                                <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[10px] px-1.5 py-0">
+                                  <Star className="w-3 h-3 mr-0.5" />
+                                  RECOMMANDE
+                                </Badge>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                                isSelected ? "border-emerald-400 bg-emerald-400" : "border-[oklch(0.4_0.01_250)]"
+                              }`}>
+                                {isSelected && <CheckCircle2 className="w-3 h-3 text-white" />}
+                              </div>
+                              <span className={`font-semibold ${isSelected ? "text-emerald-400" : "text-white"}`}>
+                                {option.label}
+                              </span>
+                            </div>
+                            <p className="text-xs text-[oklch(0.6_0.01_250)] ml-7">{option.description}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Recommendation reason */}
+                    <div className="p-3 rounded-lg bg-[oklch(0.12_0.01_250)] border border-[oklch(0.22_0.01_250)]">
+                      <div className="flex items-start gap-2">
+                        <Lightbulb className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <span className="text-xs font-medium text-amber-400">Pourquoi le moteur recommande {currentAmbiguity.recommendation} :</span>
+                          <p className="text-xs text-[oklch(0.6_0.01_250)] mt-0.5">{currentAmbiguity.recommendationReason}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Navigation + Generate */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentAmbiguityIndex(Math.max(0, currentAmbiguityIndex - 1))}
+                    disabled={currentAmbiguityIndex === 0}
+                    className="border-[oklch(0.25_0.01_250)] text-[oklch(0.7_0.01_250)] hover:text-white"
+                  >
+                    <ArrowLeft className="w-4 h-4 mr-1" />
+                    Precedent
+                  </Button>
+                  <span className="text-sm text-[oklch(0.5_0.01_250)]">
+                    Ambiguite {currentAmbiguityIndex + 1} sur {ambiguities.length}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentAmbiguityIndex(Math.min(ambiguities.length - 1, currentAmbiguityIndex + 1))}
+                    disabled={currentAmbiguityIndex === ambiguities.length - 1}
+                    className="border-[oklch(0.25_0.01_250)] text-[oklch(0.7_0.01_250)] hover:text-white"
+                  >
+                    Suivant
+                    <ArrowRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </div>
+
+                <Button
+                  size="lg"
+                  onClick={handleGenerateWithChoices}
+                  disabled={generating || !canGenerate}
+                  className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white px-8"
+                >
+                  {generating ? (
+                    <>
+                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                      Generation en cours...
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-5 h-5 mr-2" />
+                      Generer le code avec mes choix
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              {/* Ambiguity dots navigation */}
+              <div className="flex items-center justify-center gap-1.5 mt-4">
+                {ambiguities.map((amb, i) => {
+                  const isResolved = !!userChoices[amb.id];
+                  const isCurrent = i === currentAmbiguityIndex;
+                  return (
+                    <button
+                      key={amb.id}
+                      onClick={() => setCurrentAmbiguityIndex(i)}
+                      className={`w-2.5 h-2.5 rounded-full transition-all ${
+                        isCurrent
+                          ? "w-6 bg-emerald-400"
+                          : isResolved
+                            ? "bg-emerald-500/50"
+                            : "bg-[oklch(0.3_0.01_250)]"
+                      }`}
+                      title={`Ambiguite ${i + 1}: ${isResolved ? "resolue" : "en attente"}`}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Step 3: Generate (no ambiguities path) */}
         {step === "generate" && analysisResult && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
             <div className="max-w-4xl mx-auto">
@@ -617,7 +1001,7 @@ export default function CompleoPage() {
               <div className="p-6 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] mb-6">
                 <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
                   <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                  Analyse terminée — {analysisResult.projectName}
+                  Analyse terminee — {analysisResult.projectName}
                 </h3>
 
                 {/* Stats grid */}
@@ -653,16 +1037,16 @@ export default function CompleoPage() {
                 <Tabs defaultValue="usecases" className="mt-4">
                   <TabsList className="bg-[oklch(0.18_0.01_250)] border border-[oklch(0.25_0.01_250)]">
                     <TabsTrigger value="usecases" className="data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400">
-                      UseCases ({analysisResult.useCases.length})
+                      UseCases ({analysisResult.irSummary.useCases.length})
                     </TabsTrigger>
                     <TabsTrigger value="dtos" className="data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400">
-                      DTOs ({analysisResult.dtos.length})
+                      DTOs ({analysisResult.irSummary.dtos.length})
                     </TabsTrigger>
                     <TabsTrigger value="enums" className="data-[state=active]:bg-pink-500/20 data-[state=active]:text-pink-400">
-                      Enums ({analysisResult.enums.length})
+                      Enums ({analysisResult.irSummary.enums.length})
                     </TabsTrigger>
                     <TabsTrigger value="exceptions" className="data-[state=active]:bg-red-500/20 data-[state=active]:text-red-400">
-                      Exceptions ({analysisResult.exceptions.length})
+                      Exceptions ({analysisResult.irSummary.exceptions.length})
                     </TabsTrigger>
                   </TabsList>
 
@@ -678,7 +1062,7 @@ export default function CompleoPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {analysisResult.useCases.map((uc, i) => (
+                          {analysisResult.irSummary.useCases.map((uc, i) => (
                             <tr key={i} className="border-b border-[oklch(0.2_0.01_250)] hover:bg-[oklch(0.18_0.01_250)]">
                               <td className="py-2 px-3 text-white font-mono text-xs">{uc.className}</td>
                               <td className="py-2 px-3">
@@ -710,7 +1094,7 @@ export default function CompleoPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {analysisResult.dtos.map((d, i) => (
+                          {analysisResult.irSummary.dtos.map((d, i) => (
                             <tr key={i} className="border-b border-[oklch(0.2_0.01_250)] hover:bg-[oklch(0.18_0.01_250)]">
                               <td className="py-2 px-3 text-white font-mono text-xs">{d.className}</td>
                               <td className="py-2 px-3">
@@ -732,7 +1116,7 @@ export default function CompleoPage() {
                   <TabsContent value="enums">
                     <ScrollArea className="h-[300px]">
                       <div className="grid grid-cols-2 gap-2 p-2">
-                        {analysisResult.enums.map((e, i) => (
+                        {analysisResult.irSummary.enums.map((e, i) => (
                           <div key={i} className="p-3 rounded-lg bg-[oklch(0.18_0.01_250)] border border-[oklch(0.25_0.01_250)]">
                             <span className="text-white font-mono text-xs">{e.className}</span>
                             <span className="text-[oklch(0.5_0.01_250)] text-xs ml-2">({e.valueCount} valeurs)</span>
@@ -745,7 +1129,7 @@ export default function CompleoPage() {
                   <TabsContent value="exceptions">
                     <ScrollArea className="h-[300px]">
                       <div className="grid grid-cols-2 gap-2 p-2">
-                        {analysisResult.exceptions.map((e, i) => (
+                        {analysisResult.irSummary.exceptions.map((e, i) => (
                           <div key={i} className="p-3 rounded-lg bg-[oklch(0.18_0.01_250)] border border-[oklch(0.25_0.01_250)]">
                             <span className="text-red-400 font-mono text-xs">{e.className}</span>
                             <span className="text-[oklch(0.5_0.01_250)] text-xs ml-2">extends {e.extendsClass}</span>
@@ -761,19 +1145,19 @@ export default function CompleoPage() {
               <div className="text-center">
                 <Button
                   size="lg"
-                  onClick={handleGenerate}
+                  onClick={handleGenerateWithChoices}
                   disabled={generating}
                   className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white px-8"
                 >
                   {generating ? (
                     <>
                       <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                      Génération Spring Boot en cours...
+                      Generation Spring Boot en cours...
                     </>
                   ) : (
                     <>
                       <Zap className="w-5 h-5 mr-2" />
-                      Générer le projet Spring Boot
+                      Generer le projet Spring Boot
                     </>
                   )}
                 </Button>
@@ -793,14 +1177,19 @@ export default function CompleoPage() {
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-white flex items-center gap-2">
                   <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                  Projet Spring Boot généré
+                  Projet Spring Boot genere
+                  {generationResult.choicesApplied && generationResult.choicesApplied > 0 && (
+                    <Badge variant="outline" className="text-amber-400 border-amber-500/30 text-xs ml-2">
+                      {generationResult.choicesApplied} choix appliques
+                    </Badge>
+                  )}
                 </h3>
                 <Button
                   onClick={handleDownload}
                   className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white"
                 >
                   <Download className="w-4 h-4 mr-2" />
-                  Télécharger ZIP
+                  Telecharger ZIP
                 </Button>
               </div>
               <div className="grid grid-cols-5 gap-3">
@@ -826,7 +1215,7 @@ export default function CompleoPage() {
                 <div className="p-3 border-b border-[oklch(0.25_0.01_250)]">
                   <h4 className="text-sm font-semibold text-white flex items-center gap-2">
                     <FolderArchive className="w-4 h-4 text-emerald-400" />
-                    Fichiers générés ({generationResult.files.length})
+                    Fichiers generes ({generationResult.files.length})
                   </h4>
                 </div>
                 <ScrollArea className="h-[calc(100%-3rem)]">
@@ -907,7 +1296,7 @@ export default function CompleoPage() {
                   <div className="h-full flex items-center justify-center text-[oklch(0.4_0.01_250)]">
                     <div className="text-center">
                       <Eye className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                      <p className="text-sm">Sélectionnez un fichier pour prévisualiser</p>
+                      <p className="text-sm">Selectionnez un fichier pour previsualiser</p>
                     </div>
                   </div>
                 )}

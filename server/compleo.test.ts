@@ -507,3 +507,213 @@ describe("Compleo Pipeline Integration", () => {
     }
   });
 });
+
+// ─── Phase 1.2 & 1.3 Regression Tests ──────────────────────────────────────
+
+// Stub UseCase: no cast, no new, no explicit import — only naming convention
+const STUB_USECASE_NO_CAST = `
+package ma.eai.boa.xbanking.carte.usecases;
+
+import ma.eai.boa.xbanking.carte.dto.*;
+import ma.eai.boa.framework.BaseUseCase;
+import ma.eai.boa.framework.UseCase;
+
+@UseCase(description = "Consultation du solde d'un compte")
+public class ConsulterSoldeUC implements BaseUseCase {
+
+    @Override
+    public Object execute(Object voIn) throws Exception {
+        // Stub — business logic not implemented
+        return null;
+    }
+}
+`;
+
+const STUB_VO_IN = `
+package ma.eai.boa.xbanking.carte.dto;
+
+import java.io.Serializable;
+
+public class ConsulterSoldeVoIn implements Serializable {
+    private String numeroCompte;
+    private String canal;
+
+    public String getNumeroCompte() { return numeroCompte; }
+    public void setNumeroCompte(String v) { this.numeroCompte = v; }
+    public String getCanal() { return canal; }
+    public void setCanal(String v) { this.canal = v; }
+}
+`;
+
+const STUB_VO_OUT = `
+package ma.eai.boa.xbanking.carte.dto;
+
+import java.io.Serializable;
+
+public class ConsulterSoldeVoOut implements Serializable {
+    private String solde;
+    private String devise;
+
+    public String getSolde() { return solde; }
+    public void setSolde(String v) { this.solde = v; }
+    public String getDevise() { return devise; }
+    public void setDevise(String v) { this.devise = v; }
+}
+`;
+
+// @Stateless-only EJB (no @UseCase, no BaseUseCase)
+const STATELESS_ONLY_EJB = `
+package ma.eai.boa.xbanking.payment;
+
+import javax.ejb.Stateless;
+
+@Stateless
+public class ProcessPaymentEJB {
+
+    public String process(String orderId) {
+        return "PROCESSED:" + orderId;
+    }
+}
+`;
+
+// DTO with complex types: Map, List, BigDecimal
+const COMPLEX_DTO = `
+package com.bank.dto;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
+
+public class ComplexVoIn implements java.io.Serializable {
+    private BigDecimal montant;
+    private List<String> references;
+    private Map<String, Long> metadata;
+    private int count;
+
+    public BigDecimal getMontant() { return montant; }
+    public void setMontant(BigDecimal v) { this.montant = v; }
+    public List<String> getReferences() { return references; }
+    public void setReferences(List<String> v) { this.references = v; }
+    public Map<String, Long> getMetadata() { return metadata; }
+    public void setMetadata(Map<String, Long> v) { this.metadata = v; }
+    public int getCount() { return count; }
+    public void setCount(int v) { this.count = v; }
+}
+`;
+
+describe("Phase 1.2 — VoIn/VoOut Fallback Resolution", () => {
+  it("resolves VoIn/VoOut by naming convention when no cast/new/import is present", () => {
+    const files = [
+      { path: "src/main/java/ma/eai/boa/xbanking/carte/usecases/ConsulterSoldeUC.java", content: STUB_USECASE_NO_CAST },
+      { path: "src/main/java/ma/eai/boa/xbanking/carte/dto/ConsulterSoldeVoIn.java", content: STUB_VO_IN },
+      { path: "src/main/java/ma/eai/boa/xbanking/carte/dto/ConsulterSoldeVoOut.java", content: STUB_VO_OUT },
+    ];
+    const ir = parseEjbProject(files);
+    expect(ir.useCases.length).toBe(1);
+    expect(ir.useCases[0].voInType).toBe("ConsulterSoldeVoIn");
+    expect(ir.useCases[0].voOutType).toBe("ConsulterSoldeVoOut");
+  });
+
+  it("produces zero warnings when VoIn/VoOut are resolved by convention", () => {
+    const files = [
+      { path: "src/main/java/ma/eai/boa/xbanking/carte/usecases/ConsulterSoldeUC.java", content: STUB_USECASE_NO_CAST },
+      { path: "src/main/java/ma/eai/boa/xbanking/carte/dto/ConsulterSoldeVoIn.java", content: STUB_VO_IN },
+      { path: "src/main/java/ma/eai/boa/xbanking/carte/dto/ConsulterSoldeVoOut.java", content: STUB_VO_OUT },
+    ];
+    const ir = parseEjbProject(files);
+    const voWarnings = ir.warnings.filter(w => w.includes("Could not resolve"));
+    expect(voWarnings.length).toBe(0);
+  });
+
+  it("extracts @UseCase description", () => {
+    const files = [
+      { path: "src/main/java/ma/eai/boa/xbanking/carte/usecases/ConsulterSoldeUC.java", content: STUB_USECASE_NO_CAST },
+      { path: "src/main/java/ma/eai/boa/xbanking/carte/dto/ConsulterSoldeVoIn.java", content: STUB_VO_IN },
+      { path: "src/main/java/ma/eai/boa/xbanking/carte/dto/ConsulterSoldeVoOut.java", content: STUB_VO_OUT },
+    ];
+    const ir = parseEjbProject(files);
+    expect(ir.useCases[0].useCaseDescription).toBe("Consultation du solde d'un compte");
+  });
+
+  it("falls back to ValueObject when no matching DTO exists", () => {
+    // UseCase with no matching DTOs at all
+    const files = [
+      { path: "src/main/java/ma/eai/boa/xbanking/carte/usecases/ConsulterSoldeUC.java", content: STUB_USECASE_NO_CAST },
+    ];
+    const ir = parseEjbProject(files);
+    expect(ir.useCases[0].voInType).toBe("ValueObject");
+    expect(ir.useCases[0].voOutType).toBe("ValueObject");
+    expect(ir.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe("Phase 1.3 — @Stateless EJB Detection", () => {
+  it("detects @Stateless EJBs as UseCases", () => {
+    const files = [
+      { path: "src/main/java/ma/eai/boa/xbanking/payment/ProcessPaymentEJB.java", content: STATELESS_ONLY_EJB },
+    ];
+    const ir = parseEjbProject(files);
+    expect(ir.useCases.length).toBe(1);
+    expect(ir.useCases[0].className).toBe("ProcessPaymentEJB");
+  });
+
+  it("@Stateless EJB falls back to ValueObject when no DTO exists", () => {
+    const files = [
+      { path: "src/main/java/ma/eai/boa/xbanking/payment/ProcessPaymentEJB.java", content: STATELESS_ONLY_EJB },
+    ];
+    const ir = parseEjbProject(files);
+    expect(ir.useCases[0].voInType).toBe("ValueObject");
+    expect(ir.useCases[0].voOutType).toBe("ValueObject");
+  });
+});
+
+describe("Phase 1.2 — Type Inference Quality", () => {
+  it("resolves BigDecimal, List<String>, Map<String,Long> in DTOs", () => {
+    const files = [
+      { path: "src/main/java/com/bank/dto/ComplexVoIn.java", content: COMPLEX_DTO },
+    ];
+    const ir = parseEjbProject(files);
+    const dto = ir.dtos.find(d => d.className === "ComplexVoIn");
+    expect(dto).toBeDefined();
+
+    const montant = dto!.fields.find(f => f.name === "montant");
+    expect(montant?.resolvedType).toBe("BigDecimal");
+
+    const refs = dto!.fields.find(f => f.name === "references");
+    expect(refs?.resolvedType).toBe("List<String>");
+    expect(refs?.isList).toBe(true);
+
+    const meta = dto!.fields.find(f => f.name === "metadata");
+    expect(meta?.resolvedType).toContain("Map");
+    expect(meta?.resolvedType).toContain("String");
+    expect(meta?.resolvedType).toContain("Long");
+
+    const count = dto!.fields.find(f => f.name === "count");
+    expect(count?.resolvedType).toBe("int");
+  });
+
+  it("generated code contains zero 'Object' for well-typed DTOs", () => {
+    const files = [
+      ...createTestFiles(),
+      { path: "src/main/java/com/bank/dto/ComplexVoIn.java", content: COMPLEX_DTO },
+    ];
+    const ir = parseEjbProject(files, SAMPLE_POM);
+    const result = generateSpringBootProject(ir);
+
+    // Filter out legitimate uses (like ErrorResponse, Class<?>)
+    const objectOccurrences = result.files
+      .filter(f => f.category === "dto" || f.category === "controller" || f.category === "service")
+      .filter(f => {
+        const lines = f.content.split("\n");
+        return lines.some(l =>
+          /\bObject\b/.test(l) &&
+          !l.includes("Class<?>") &&
+          !l.includes("ErrorResponse") &&
+          !l.includes("// TODO") &&
+          !l.includes("UnsupportedOperationException")
+        );
+      });
+
+    expect(objectOccurrences.length).toBe(0);
+  });
+});

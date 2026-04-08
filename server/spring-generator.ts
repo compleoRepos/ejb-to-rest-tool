@@ -256,21 +256,59 @@ function mapToSpringType(rawType: string, isEnum: boolean, enumNames: Set<string
     "byte[]": { type: "byte[]" },
   };
 
-  const baseType = rawType.replace(/<.*>/, "").trim();
+  // Handle generics: List<X>, Set<X>, Map<K,V>
+  const genericMatch = rawType.match(/^(\w+)<(.+)>$/);
+  if (genericMatch) {
+    const container = genericMatch[1];
+    const innerRaw = genericMatch[2];
+
+    if (container === "List" || container === "ArrayList" || container === "LinkedList") {
+      imports.add("import java.util.List;");
+      const innerResolved = mapToSpringType(innerRaw.trim(), false, enumNames, imports);
+      return `List<${innerResolved}>`;
+    }
+    if (container === "Set" || container === "HashSet" || container === "TreeSet") {
+      imports.add("import java.util.Set;");
+      const innerResolved = mapToSpringType(innerRaw.trim(), false, enumNames, imports);
+      return `Set<${innerResolved}>`;
+    }
+    if (container === "Map" || container === "HashMap" || container === "TreeMap") {
+      imports.add("import java.util.Map;");
+      const parts = innerRaw.split(",").map(p => p.trim());
+      if (parts.length === 2) {
+        const k = mapToSpringType(parts[0], false, enumNames, imports);
+        const v = mapToSpringType(parts[1], false, enumNames, imports);
+        return `Map<${k}, ${v}>`;
+      }
+    }
+    // Unknown generic — preserve as-is
+    return rawType;
+  }
+
+  // Handle raw collection types without generics (fallback)
+  if (rawType === "List" || rawType === "ArrayList") {
+    imports.add("import java.util.List;");
+    return "List<String>"; // Fallback
+  }
+  if (rawType === "Set" || rawType === "HashSet") {
+    imports.add("import java.util.Set;");
+    return "Set<String>";
+  }
+  if (rawType === "Map" || rawType === "HashMap") {
+    imports.add("import java.util.Map;");
+    return "Map<String, String>";
+  }
+
+  const baseType = rawType.replace(/\[\]$/, "").trim();
   const mapping = typeMap[baseType];
   if (mapping) {
     if (mapping.import) imports.add(mapping.import);
-    // Handle generics
-    if (rawType.includes("<")) {
-      imports.add("import java.util.List;");
-      const inner = rawType.match(/<(.+)>/)?.[1] || "Object";
-      const innerMapping = typeMap[inner];
-      if (innerMapping?.import) imports.add(innerMapping.import);
-      return `List<${innerMapping?.type || inner}>`;
-    }
+    if (rawType.endsWith("[]")) return mapping.type + "[]";
     return mapping.type;
   }
 
+  // RULE: Never emit "Object" — preserve original type name
+  // Unknown project types are preserved as-is (e.g., MagixResponse)
   return rawType;
 }
 
@@ -713,13 +751,20 @@ ${testMethods.join("\n")}
 
 function generateRemoteServiceAdapter(basePackage: string, basePath: string, remote: RemoteInterfaceIR): GeneratedFile {
   const adapterName = remote.className.replace("Remote", "Adapter");
+  const adapterImports = new Set<string>();
   const methods = remote.methods.map(m => {
-    const params = m.parameters.map(p => `${p.type} ${p.name}`).join(", ");
+    // Map parameter types through the Spring type mapper
+    const params = m.parameters.map(p => {
+      const mappedType = mapToSpringType(p.type, false, new Set(), adapterImports);
+      return `${mappedType} ${p.name}`;
+    }).join(", ");
+    // Map return type
+    const mappedReturn = mapToSpringType(m.returnType, false, new Set(), adapterImports);
     const roles = m.rolesAllowed.length > 0
       ? `\n    @PreAuthorize("hasAnyRole(${m.rolesAllowed.map(r => `'${r}'`).join(", ")})")`
       : "";
     return `${roles}
-    public ${m.returnType} ${m.name}(${params}) {
+    public ${mappedReturn} ${m.name}(${params}) {
         // TODO: Implement ${m.name} — migrated from @Remote ${remote.className}
         throw new UnsupportedOperationException("Not yet implemented");
     }`;

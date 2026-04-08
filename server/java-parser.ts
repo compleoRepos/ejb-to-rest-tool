@@ -48,6 +48,8 @@ export interface UseCaseIR {
   bianAction: string;
   voInType: string;
   voOutType: string;
+  useCaseDescription: string;
+  javadoc: string;
   injectedServices: InjectedService[];
   transactional: TransactionalInfo | null;
   exceptionsCaught: string[];
@@ -288,17 +290,26 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
 // ─── File Classification ────────────────────────────────────────────────────
 
 function isUseCase(content: string): boolean {
-  return /@UseCase/.test(content) && /implements\s+BaseUseCase/.test(content);
+  // BOA pattern: @UseCase + BaseUseCase
+  if (/@UseCase/.test(content) && /implements\s+BaseUseCase/.test(content)) return true;
+  // Standard Java EE pattern: @Stateless with a public method (not a Service class)
+  if (/@Stateless/.test(content) && /public\s+class/.test(content)) return true;
+  return false;
 }
 
 function isDto(content: string, className: string): boolean {
+  // VoIn/VoOut/Dto naming convention (most reliable for BOA)
+  if (/Vo(In|Out)$|Dto$/.test(className) && /(private|protected)\s+\w+\s+\w+;/.test(content)) return true;
+  // Implements ValueObject or Serializable with DTO-like name
   if (/implements\s+(ValueObject|Serializable)/.test(content) && /Vo(In|Out)|Dto/.test(className)) return true;
+  // XML-annotated data classes
   if (/@Xml(RootElement|AccessorType)/.test(content) && /(private|protected)\s+\w+\s+\w+;/.test(content)) return true;
   return false;
 }
 
 function isService(content: string, className: string): boolean {
   if (isUseCase(content) || isEnum(content) || isException(className, content)) return false;
+  if (isDto(content, className)) return false; // Don't classify DTOs as services
   if (/Service\b/.test(className) && !/@Remote/.test(content) && !/@interface/.test(content)) return true;
   return false;
 }
@@ -363,29 +374,30 @@ function parseUseCase(
   // Extract domain from package or class name
   const domain = extractDomain(file.packageName, file.className);
 
-  // Extract VoIn type from cast pattern: (XxxVoIn) voIn or (XxxVoIn) in
-  let voInType = "ValueObject";
-  const castMatch = content.match(/\((\w+VoIn)\)\s*\w+/);
-  if (castMatch) {
-    voInType = castMatch[1];
-  } else {
-    // Try import-based resolution
-    const importMatch = content.match(/import\s+[\w.]+\.(\w+VoIn)\s*;/);
-    if (importMatch) voInType = importMatch[1];
+  // Extract @UseCase description for Javadoc / OpenAPI
+  let useCaseDescription = "";
+  const ucDescMatch = content.match(/@UseCase\s*\(\s*description\s*=\s*"([^"]+)"/);
+  if (ucDescMatch) useCaseDescription = ucDescMatch[1];
+
+  // Extract Javadoc comment above the class
+  let javadoc = "";
+  const javadocMatch = content.match(/\/\*\*([\s\S]*?)\*\/\s*(?:@\w+[\s\S]*?)*(?:public\s+(?:abstract\s+)?class)/);
+  if (javadocMatch) {
+    javadoc = javadocMatch[1]
+      .split("\n")
+      .map(l => l.replace(/^\s*\*\s?/, "").trim())
+      .filter(l => l && !l.startsWith("@"))
+      .join(" ")
+      .trim();
   }
 
-  // Extract VoOut type from constructor: new XxxVoOut()
-  let voOutType = "ValueObject";
-  const newMatch = content.match(/new\s+(\w+VoOut)\s*\(/);
-  if (newMatch) {
-    voOutType = newMatch[1];
-  } else {
-    // Try return type from import
-    const importMatch = content.match(/import\s+[\w.]+\.(\w+VoOut)\s*;/);
-    if (importMatch) voOutType = importMatch[1];
-  }
+  // ─── VoIn Resolution (4-level fallback) ───
+  let voInType = resolveVoType(content, file.className, "VoIn", dtoMap, typeRegistry);
 
-  // Extract injected services
+  // ─── VoOut Resolution (4-level fallback) ───
+  let voOutType = resolveVoType(content, file.className, "VoOut", dtoMap, typeRegistry);
+
+  // ─── Extract injected services ───
   const injectedServices: InjectedService[] = [];
   const autowiredRegex = /@(?:Autowired|Inject|EJB|Resource)\s+(?:private\s+)?(\w+)\s+(\w+)/g;
   let am;
@@ -452,6 +464,8 @@ function parseUseCase(
     bianAction,
     voInType,
     voOutType,
+    useCaseDescription,
+    javadoc,
     injectedServices,
     transactional,
     exceptionsCaught,
@@ -461,6 +475,68 @@ function parseUseCase(
     httpMethod,
     restPath,
   };
+}
+
+/**
+ * Resolve VoIn or VoOut type using a 4-level fallback strategy:
+ * 1. Cast pattern in method body: (XxxVoIn) voIn
+ * 2. Constructor pattern: new XxxVoOut()
+ * 3. Explicit import: import ...XxxVoIn;
+ * 4. Naming convention fallback: UseCaseName → UseCaseNameVoIn/VoOut
+ *    (looks up in dtoMap and typeRegistry)
+ */
+function resolveVoType(
+  content: string,
+  className: string,
+  suffix: "VoIn" | "VoOut",
+  dtoMap: Map<string, DtoIR>,
+  typeRegistry: Map<string, string>
+): string {
+  const suffixRegex = suffix === "VoIn" ? /VoIn/ : /VoOut/;
+
+  // Strategy 1: Cast pattern (VoIn) or constructor pattern (VoOut)
+  if (suffix === "VoIn") {
+    const castMatch = content.match(/\((\w+VoIn)\)\s*\w+/);
+    if (castMatch) return castMatch[1];
+  } else {
+    const newMatch = content.match(/new\s+(\w+VoOut)\s*\(/);
+    if (newMatch) return newMatch[1];
+  }
+
+  // Strategy 2: Explicit import
+  const importRegex = new RegExp(`import\\s+[\\w.]+\\.(\\w+${suffix})\\s*;`);
+  const importMatch = content.match(importRegex);
+  if (importMatch) return importMatch[1];
+
+  // Strategy 3: Naming convention — derive from UseCase class name
+  // ActiverCarteUC → ActiverCarteVoIn / ActiverCarteVoOut
+  // SouscrireContratEJB → SouscrireContratVoIn / SouscrireContratVoOut
+  const baseName = className.replace(/UC$/, "").replace(/EJB$/, "");
+  const conventionName = baseName + suffix;
+
+  // Check if this DTO exists in the project (dtoMap or typeRegistry)
+  if (dtoMap.has(conventionName)) return conventionName;
+  if (typeRegistry.has(conventionName)) return conventionName;
+
+  // Strategy 4: Wildcard import scan — if import *.dto.* exists,
+  // look for any DTO in the same domain package that matches the suffix
+  const wildcardImport = content.match(/import\s+([\w.]+)\.\*\s*;/g);
+  if (wildcardImport) {
+    for (const [dtoName] of dtoMap) {
+      if (suffixRegex.test(dtoName) && dtoName.startsWith(baseName)) {
+        return dtoName;
+      }
+    }
+    // Also check typeRegistry for DTOs not yet in dtoMap
+    for (const [typeName] of typeRegistry) {
+      if (suffixRegex.test(typeName) && typeName.startsWith(baseName)) {
+        return typeName;
+      }
+    }
+  }
+
+  // Fallback: return ValueObject (will trigger a warning in the caller)
+  return "ValueObject";
 }
 
 function extractDomain(packageName: string, className: string): string {
@@ -597,8 +673,10 @@ function parseDto(file: JavaFile, enumNames: Set<string>): DtoIR {
 
 function resolveJavaType(rawType: string, isEnum: boolean): string {
   if (isEnum) return rawType; // Keep enum name
+
   const typeMap: Record<string, string> = {
     "String": "String",
+    "string": "String",
     "int": "int",
     "Integer": "Integer",
     "long": "long",
@@ -613,12 +691,47 @@ function resolveJavaType(rawType: string, isEnum: boolean): string {
     "BigInteger": "BigInteger",
     "LocalDate": "LocalDate",
     "LocalDateTime": "LocalDateTime",
-    "Date": "Date",
+    "Date": "LocalDate",
+    "java.util.Date": "LocalDateTime",
     "byte[]": "byte[]",
+    "Byte[]": "byte[]",
   };
-  // Handle generics: List<String> -> List<String>
-  const baseType = rawType.replace(/<.*>/, "").trim();
-  return typeMap[baseType] || rawType;
+
+  // Handle generics: List<String>, Map<K,V>, Set<X>
+  const genericMatch = rawType.match(/^(\w+)<(.+)>$/);
+  if (genericMatch) {
+    const container = genericMatch[1];
+    const innerRaw = genericMatch[2];
+    if (container === "List" || container === "ArrayList" || container === "LinkedList") {
+      const innerResolved = resolveJavaType(innerRaw.trim(), false);
+      return `List<${innerResolved}>`;
+    }
+    if (container === "Set" || container === "HashSet" || container === "TreeSet") {
+      const innerResolved = resolveJavaType(innerRaw.trim(), false);
+      return `Set<${innerResolved}>`;
+    }
+    if (container === "Map" || container === "HashMap" || container === "TreeMap") {
+      const parts = innerRaw.split(",").map(p => p.trim());
+      if (parts.length === 2) {
+        return `Map<${resolveJavaType(parts[0], false)}, ${resolveJavaType(parts[1], false)}>`;
+      }
+    }
+    // Unknown generic container — preserve as-is
+    return rawType;
+  }
+
+  // Handle raw collection types without generics
+  if (rawType === "List" || rawType === "ArrayList") return "List<String>"; // Fallback, will generate WARNING
+  if (rawType === "Set" || rawType === "HashSet") return "Set<String>";
+  if (rawType === "Map" || rawType === "HashMap") return "Map<String, String>";
+
+  const baseType = rawType.replace(/\[\]$/, "").trim();
+  if (rawType.endsWith("[]") && typeMap[baseType]) return typeMap[baseType] + "[]";
+
+  // RULE: Never emit "Object" — preserve original type name
+  if (rawType === "Object" || rawType === "java.lang.Object") return rawType;
+
+  return typeMap[rawType] || rawType; // Preserve unknown types as-is
 }
 
 // ─── Service Parser ─────────────────────────────────────────────────────────

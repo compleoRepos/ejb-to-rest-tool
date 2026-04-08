@@ -1,6 +1,9 @@
 /**
  * Compleo API Routes — Express routes for EJB-to-Spring Boot migration.
- * Handles: ZIP upload, EJB parsing, Spring Boot generation, ZIP download.
+ * Handles: ZIP upload, EJB parsing, ambiguity detection, user choice resolution,
+ * Spring Boot generation, ZIP download.
+ *
+ * Pipeline: UPLOAD → PARSE → DETECT_AMBIGUITIES → WAITING_CHOICES → RESOLVE → GENERATE → DONE
  *
  * @author Hamza NORDINE
  */
@@ -11,12 +14,21 @@ import AdmZip from "adm-zip";
 import { nanoid } from "nanoid";
 import { parseEjbProject, type ProjectIR } from "./java-parser";
 import { generateSpringBootProject, type GenerationResult } from "./spring-generator";
+import { detectAmbiguities, applyChoicesToIR, type Ambiguity, type UserChoice } from "./ambiguity-detector";
 import { storagePut, storageGet } from "./storage";
 
 const router = Router();
 
-// In-memory store for analysis sessions (production would use DB)
-const sessions = new Map<string, {
+// ─── Session Model ──────────────────────────────────────────────────────────
+
+export type SessionStatus =
+  | "uploaded"
+  | "analyzed"
+  | "waiting_choices"
+  | "generated"
+  | "error";
+
+export interface CompleoSession {
   id: string;
   projectName: string;
   uploadedAt: Date;
@@ -24,11 +36,17 @@ const sessions = new Map<string, {
   pomXml?: string;
   bianYml?: string;
   ir?: ProjectIR;
+  ambiguities?: Ambiguity[];
+  userChoices?: UserChoice[];
+  resolvedIR?: ProjectIR;
   generation?: GenerationResult;
   zipUrl?: string;
-  status: "uploaded" | "analyzed" | "generated" | "error";
+  status: SessionStatus;
   error?: string;
-}>();
+}
+
+// In-memory store for analysis sessions (production would use DB)
+const sessions = new Map<string, CompleoSession>();
 
 // Multer config — store in memory for ZIP extraction
 const upload = multer({
@@ -114,7 +132,7 @@ router.post("/upload", upload.single("file"), async (req: Request, res: Response
 });
 
 // ─── POST /api/compleo/analyze ──────────────────────────────────────────────
-// Parse the uploaded EJB project and return the IR
+// Parse the uploaded EJB project, detect ambiguities, return IR + ambiguities
 router.post("/analyze", async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.body;
@@ -129,49 +147,181 @@ router.post("/analyze", async (req: Request, res: Response) => {
 
     const ir = parseEjbProject(session.files, session.pomXml, session.bianYml);
     session.ir = ir;
-    session.status = "analyzed";
 
-    return res.json({
-      sessionId,
-      projectName: ir.projectName,
-      groupId: ir.groupId,
-      artifactId: ir.artifactId,
-      version: ir.version,
-      stats: ir.stats,
-      warnings: ir.warnings,
-      useCases: ir.useCases.map(uc => ({
-        className: uc.className,
-        domain: uc.domain,
-        httpMethod: uc.httpMethod,
-        restPath: uc.restPath,
-        voInType: uc.voInType,
-        voOutType: uc.voOutType,
-        bianDomain: uc.bianDomain,
-        bianAction: uc.bianAction,
-      })),
-      dtos: ir.dtos.map(d => ({
-        className: d.className,
-        direction: d.direction,
-        fieldCount: d.fields.length,
-        requiredFields: d.fields.filter(f => f.required).length,
-      })),
-      enums: ir.enums.map(e => ({ className: e.className, valueCount: e.values.length })),
-      exceptions: ir.exceptions.map(e => ({ className: e.className, extendsClass: e.extendsClass })),
-      validators: ir.validators.map(v => ({ className: v.className, annotationName: v.annotationName })),
-      remoteInterfaces: ir.remoteInterfaces.map(r => ({
-        className: r.className,
-        methodCount: r.methods.length,
-      })),
-      domains: ir.stats.domains,
-    });
+    // Detect ambiguities
+    const ambiguities = detectAmbiguities(ir);
+    session.ambiguities = ambiguities;
+
+    if (ambiguities.length > 0) {
+      session.status = "waiting_choices";
+
+      return res.json({
+        sessionId,
+        status: "WAITING_CHOICES",
+        projectName: ir.projectName,
+        groupId: ir.groupId,
+        artifactId: ir.artifactId,
+        version: ir.version,
+        stats: ir.stats,
+        warnings: ir.warnings,
+        ambiguities: ambiguities,
+        irSummary: {
+          useCases: ir.useCases.map(uc => ({
+            className: uc.className,
+            domain: uc.domain,
+            httpMethod: uc.httpMethod,
+            restPath: uc.restPath,
+            voInType: uc.voInType,
+            voOutType: uc.voOutType,
+            bianDomain: uc.bianDomain,
+            bianAction: uc.bianAction,
+            useCaseDescription: uc.useCaseDescription,
+          })),
+          dtos: ir.dtos.map(d => ({
+            className: d.className,
+            direction: d.direction,
+            fieldCount: d.fields.length,
+            requiredFields: d.fields.filter(f => f.required).length,
+          })),
+          enums: ir.enums.map(e => ({ className: e.className, valueCount: e.values.length })),
+          exceptions: ir.exceptions.map(e => ({ className: e.className, extendsClass: e.extendsClass })),
+          validators: ir.validators.map(v => ({ className: v.className, annotationName: v.annotationName })),
+          remoteInterfaces: ir.remoteInterfaces.map(r => ({
+            className: r.className,
+            methodCount: r.methods.length,
+          })),
+          domains: ir.stats.domains,
+        },
+      });
+    } else {
+      // No ambiguities — go straight to analyzed
+      session.status = "analyzed";
+
+      return res.json({
+        sessionId,
+        status: "ANALYZED",
+        projectName: ir.projectName,
+        groupId: ir.groupId,
+        artifactId: ir.artifactId,
+        version: ir.version,
+        stats: ir.stats,
+        warnings: ir.warnings,
+        ambiguities: [],
+        irSummary: {
+          useCases: ir.useCases.map(uc => ({
+            className: uc.className,
+            domain: uc.domain,
+            httpMethod: uc.httpMethod,
+            restPath: uc.restPath,
+            voInType: uc.voInType,
+            voOutType: uc.voOutType,
+            bianDomain: uc.bianDomain,
+            bianAction: uc.bianAction,
+            useCaseDescription: uc.useCaseDescription,
+          })),
+          dtos: ir.dtos.map(d => ({
+            className: d.className,
+            direction: d.direction,
+            fieldCount: d.fields.length,
+            requiredFields: d.fields.filter(f => f.required).length,
+          })),
+          enums: ir.enums.map(e => ({ className: e.className, valueCount: e.values.length })),
+          exceptions: ir.exceptions.map(e => ({ className: e.className, extendsClass: e.extendsClass })),
+          validators: ir.validators.map(v => ({ className: v.className, annotationName: v.annotationName })),
+          remoteInterfaces: ir.remoteInterfaces.map(r => ({
+            className: r.className,
+            methodCount: r.methods.length,
+          })),
+          domains: ir.stats.domains,
+        },
+      });
+    }
   } catch (err: any) {
     console.error("[Compleo Analyze Error]", err);
     return res.status(500).json({ error: err.message || "Analysis failed" });
   }
 });
 
+// ─── POST /api/compleo/resolve/:sessionId ───────────────────────────────────
+// Resolve ambiguities with user choices, then generate
+router.post("/resolve/:sessionId", async (req: Request, res: Response) => {
+  try {
+    const session = sessions.get(req.params.sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+    if (!session.ir) {
+      return res.status(400).json({ error: "Project not analyzed yet. Call /analyze first." });
+    }
+    if (!session.ambiguities) {
+      return res.status(400).json({ error: "No ambiguities detected. Call /generate directly." });
+    }
+
+    const { choices } = req.body as { choices: UserChoice[] };
+    if (!choices || !Array.isArray(choices)) {
+      return res.status(400).json({ error: "choices array is required" });
+    }
+
+    // Validate that all blocking ambiguities are resolved
+    const blockingIds = new Set(
+      session.ambiguities.filter(a => a.severity === "blocking").map(a => a.id)
+    );
+    const resolvedIds = new Set(choices.map(c => c.ambiguityId));
+    const unresolvedBlocking = [...blockingIds].filter(id => !resolvedIds.has(id));
+    if (unresolvedBlocking.length > 0) {
+      return res.status(400).json({
+        error: "All blocking ambiguities must be resolved",
+        unresolvedIds: unresolvedBlocking,
+      });
+    }
+
+    // Store user choices
+    session.userChoices = choices;
+
+    // Apply choices to IR
+    const resolvedIR = applyChoicesToIR(session.ir, session.ambiguities, choices);
+    session.resolvedIR = resolvedIR;
+    session.status = "analyzed";
+
+    // Auto-generate after resolving
+    const result = generateSpringBootProject(resolvedIR);
+    session.generation = result;
+
+    // Create ZIP of generated files
+    const zip = new AdmZip();
+    for (const file of result.files) {
+      zip.addFile(file.path, Buffer.from(file.content, "utf8"));
+    }
+    const zipBuffer = zip.toBuffer();
+
+    // Upload ZIP to S3
+    const zipKey = `compleo/${session.id}/${resolvedIR.artifactId}-spring-boot.zip`;
+    const { url } = await storagePut(zipKey, zipBuffer, "application/zip");
+    session.zipUrl = url;
+    session.status = "generated";
+
+    return res.json({
+      sessionId: session.id,
+      status: "GENERATED",
+      stats: result.stats,
+      warnings: result.warnings,
+      downloadUrl: `/api/compleo/download/${session.id}`,
+      directUrl: url,
+      files: result.files.map(f => ({
+        path: f.path,
+        category: f.category,
+        lines: f.content.split("\n").length,
+      })),
+      choicesApplied: choices.length,
+    });
+  } catch (err: any) {
+    console.error("[Compleo Resolve Error]", err);
+    return res.status(500).json({ error: err.message || "Resolution failed" });
+  }
+});
+
 // ─── POST /api/compleo/generate ─────────────────────────────────────────────
-// Generate the Spring Boot project from the IR
+// Generate the Spring Boot project from the IR (no ambiguities or already resolved)
 router.post("/generate", async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.body;
@@ -187,7 +337,20 @@ router.post("/generate", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Project not analyzed yet. Call /analyze first." });
     }
 
-    const result = generateSpringBootProject(session.ir);
+    // If there are unresolved ambiguities, reject
+    if (session.status === "waiting_choices" && session.ambiguities && session.ambiguities.length > 0) {
+      const hasBlocking = session.ambiguities.some(a => a.severity === "blocking");
+      if (hasBlocking && !session.userChoices) {
+        return res.status(400).json({
+          error: "Blocking ambiguities must be resolved first. Call /resolve/:sessionId.",
+          ambiguityCount: session.ambiguities.length,
+        });
+      }
+    }
+
+    // Use resolved IR if available, otherwise original IR
+    const irToUse = session.resolvedIR || session.ir;
+    const result = generateSpringBootProject(irToUse);
     session.generation = result;
 
     // Create ZIP of generated files
@@ -198,13 +361,14 @@ router.post("/generate", async (req: Request, res: Response) => {
     const zipBuffer = zip.toBuffer();
 
     // Upload ZIP to S3
-    const zipKey = `compleo/${sessionId}/${session.ir.artifactId}-spring-boot.zip`;
+    const zipKey = `compleo/${sessionId}/${irToUse.artifactId}-spring-boot.zip`;
     const { url } = await storagePut(zipKey, zipBuffer, "application/zip");
     session.zipUrl = url;
     session.status = "generated";
 
     return res.json({
       sessionId,
+      status: "GENERATED",
       stats: result.stats,
       warnings: result.warnings,
       downloadUrl: `/api/compleo/download/${sessionId}`,
@@ -281,6 +445,31 @@ router.get("/preview/:sessionId/*", async (req: Request, res: Response) => {
   }
 });
 
+// ─── GET /api/compleo/source/:sessionId/:filePath ───────────────────────────
+// Preview a source file from the uploaded ZIP (for diff view)
+router.get("/source/:sessionId/*", async (req: Request, res: Response) => {
+  try {
+    const session = sessions.get(req.params.sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    const filePath = req.params[0];
+    const file = session.files.find(f => f.path === filePath || f.path.endsWith(filePath));
+    if (!file) {
+      return res.status(404).json({ error: `Source file not found: ${filePath}` });
+    }
+
+    return res.json({
+      path: file.path,
+      content: file.content,
+      lines: file.content.split("\n").length,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── GET /api/compleo/session/:sessionId ────────────────────────────────────
 // Get session status and summary
 router.get("/session/:sessionId", async (req: Request, res: Response) => {
@@ -299,13 +488,29 @@ router.get("/session/:sessionId", async (req: Request, res: Response) => {
       totalLines: session.files.reduce((sum, f) => sum + f.content.split("\n").length, 0),
       hasPom: !!session.pomXml,
       hasBian: !!session.bianYml,
+      ambiguityCount: session.ambiguities?.length ?? 0,
+      choicesResolved: session.userChoices?.length ?? 0,
       ir: session.ir ? {
         stats: session.ir.stats,
         warnings: session.ir.warnings,
+        useCases: session.ir.useCases.map(uc => ({
+          className: uc.className,
+          domain: uc.domain,
+          httpMethod: uc.httpMethod,
+          voInType: uc.voInType,
+          voOutType: uc.voOutType,
+        })),
       } : null,
+      ambiguities: session.ambiguities ?? [],
+      userChoices: session.userChoices ?? [],
       generation: session.generation ? {
         stats: session.generation.stats,
         warnings: session.generation.warnings,
+        files: session.generation.files.map(f => ({
+          path: f.path,
+          category: f.category,
+          lines: f.content.split("\n").length,
+        })),
       } : null,
       downloadUrl: session.generation ? `/api/compleo/download/${session.id}` : null,
     });
@@ -326,6 +531,7 @@ router.get("/sessions", async (_req: Request, res: Response) => {
     useCaseCount: s.ir?.stats.useCaseCount ?? 0,
     dtoCount: s.ir?.stats.dtoCount ?? 0,
     generatedFiles: s.generation?.stats.totalFiles ?? 0,
+    ambiguityCount: s.ambiguities?.length ?? 0,
   }));
   return res.json(list);
 });
