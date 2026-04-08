@@ -12,8 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import {
   Network, ZoomIn, ZoomOut, Maximize2, Download, Layers, Box,
-  Database, Globe, Server, Shield, Activity, ArrowRight, RefreshCw,
-  Loader2, Eye, Filter,
+  Eye, RefreshCw, Loader2,
 } from "lucide-react";
 import cytoscape from "cytoscape";
 
@@ -106,16 +105,84 @@ function generateDemoArchitecture(): ArchitectureData {
 }
 
 // ============================================================
+// Cytoscape Styles (stable)
+// ============================================================
+
+const CY_STYLE: cytoscape.Stylesheet[] = [
+  {
+    selector: "node",
+    style: {
+      label: "data(label)",
+      "text-valign": "center",
+      "text-halign": "center",
+      "font-size": "10px",
+      "font-family": "monospace",
+      color: "#e2e8f0",
+      "text-outline-color": "#0f172a",
+      "text-outline-width": 2,
+      width: 70,
+      height: 45,
+      "border-width": 2,
+      "border-color": "#334155",
+      "text-wrap": "wrap",
+      "text-max-width": "60px",
+    } as any,
+  },
+  ...Object.entries(NODE_COLORS).map(([type, color]) => ({
+    selector: `node[nodeType = "${type}"]`,
+    style: {
+      "background-color": color,
+      "border-color": color,
+      shape: NODE_SHAPES[type] || "ellipse",
+    } as any,
+  })),
+  {
+    selector: "edge",
+    style: {
+      width: 2,
+      "line-color": "#475569",
+      "target-arrow-color": "#475569",
+      "target-arrow-shape": "triangle",
+      "curve-style": "bezier",
+      label: "data(label)",
+      "font-size": "8px",
+      "font-family": "monospace",
+      color: "#94a3b8",
+      "text-outline-color": "#0f172a",
+      "text-outline-width": 1,
+      "text-rotation": "autorotate",
+    } as any,
+  },
+  {
+    selector: 'edge[edgeType = "async"]',
+    style: { "line-style": "dashed", "line-color": "#ef4444", "target-arrow-color": "#ef4444" } as any,
+  },
+  {
+    selector: 'edge[edgeType = "data"]',
+    style: { "line-color": "#f59e0b", "target-arrow-color": "#f59e0b" } as any,
+  },
+  {
+    selector: 'edge[edgeType = "sync"]',
+    style: { "line-color": "#3b82f6", "target-arrow-color": "#3b82f6" } as any,
+  },
+  {
+    selector: "node:selected",
+    style: { "border-width": 4, "border-color": "#22d3ee", "background-opacity": 1 } as any,
+  },
+];
+
+// ============================================================
 // Main Component
 // ============================================================
 
 export default function ArchitecturePage({ projectId }: { projectId: number }) {
-  const cyRef = useRef<HTMLDivElement>(null);
+  const cyContainerRef = useRef<HTMLDivElement>(null);
   const cyInstanceRef = useRef<cytoscape.Core | null>(null);
+
   const { data: project } = trpc.projects.getById.useQuery({ id: projectId });
   const { data: scans } = trpc.scans.list.useQuery({ projectId });
 
-  const [layout, setLayout] = useState<string>("cose");
+  const [layoutName, setLayoutName] = useState<string>("cose");
   const [selectedNode, setSelectedNode] = useState<ArchNode | null>(null);
   const [filterType, setFilterType] = useState<string>("all");
   const [archData, setArchData] = useState<ArchitectureData | null>(null);
@@ -125,7 +192,6 @@ export default function ArchitecturePage({ projectId }: { projectId: number }) {
   useEffect(() => {
     setIsLoading(true);
     const timer = setTimeout(() => {
-      // Check if latest scan has architecture data
       if (scans && scans.length > 0) {
         const latestScan = scans[0];
         if (latestScan.architectureGraph) {
@@ -136,19 +202,18 @@ export default function ArchitecturePage({ projectId }: { projectId: number }) {
             setArchData(parsed);
             setIsLoading(false);
             return;
-          } catch { /* fallthrough */ }
+          } catch { /* fallthrough to demo */ }
         }
       }
-      // Generate demo architecture
       setArchData(generateDemoArchitecture());
       setIsLoading(false);
-    }, 500);
+    }, 300);
     return () => clearTimeout(timer);
   }, [scans]);
 
-  // Initialize Cytoscape
-  useEffect(() => {
-    if (!cyRef.current || !archData || isLoading) return;
+  // Build Cytoscape elements from archData + filter
+  const cyElements = useMemo(() => {
+    if (!archData) return [];
 
     const filteredNodes = filterType === "all"
       ? archData.nodes
@@ -156,127 +221,177 @@ export default function ArchitecturePage({ projectId }: { projectId: number }) {
     const nodeIds = new Set(filteredNodes.map(n => n.id));
     const filteredEdges = archData.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
 
-    const cy = cytoscape({
-      container: cyRef.current,
-      elements: [
-        ...filteredNodes.map(n => ({
-          data: { id: n.id, label: n.label, nodeType: n.type, technology: n.technology || "", group: n.group || "" },
-        })),
-        ...filteredEdges.map((e, i) => ({
-          data: { id: `edge-${i}`, source: e.source, target: e.target, label: e.label || "", edgeType: e.type },
-        })),
-      ],
-      style: [
-        {
-          selector: "node",
-          style: {
-            label: "data(label)",
-            "text-valign": "center",
-            "text-halign": "center",
-            "font-size": "10px",
-            "font-family": "'JetBrains Mono', monospace",
-            color: "#e2e8f0",
-            "text-outline-color": "#0f172a",
-            "text-outline-width": 2,
-            width: 60,
-            height: 40,
-            "border-width": 2,
-            "border-color": "#334155",
-          } as any,
-        },
-        ...Object.entries(NODE_COLORS).map(([type, color]) => ({
-          selector: `node[nodeType = "${type}"]`,
-          style: {
-            "background-color": color,
-            "border-color": color,
-            shape: NODE_SHAPES[type] || "ellipse",
-          } as any,
-        })),
-        {
-          selector: "edge",
-          style: {
-            width: 2,
-            "line-color": "#475569",
-            "target-arrow-color": "#475569",
-            "target-arrow-shape": "triangle",
-            "curve-style": "bezier",
-            label: "data(label)",
-            "font-size": "8px",
-            "font-family": "'JetBrains Mono', monospace",
-            color: "#94a3b8",
-            "text-outline-color": "#0f172a",
-            "text-outline-width": 1,
-            "text-rotation": "autorotate",
-          } as any,
-        },
-        {
-          selector: 'edge[edgeType = "async"]',
-          style: { "line-style": "dashed", "line-color": "#ef4444", "target-arrow-color": "#ef4444" } as any,
-        },
-        {
-          selector: 'edge[edgeType = "data"]',
-          style: { "line-color": "#f59e0b", "target-arrow-color": "#f59e0b" } as any,
-        },
-        {
-          selector: 'edge[edgeType = "sync"]',
-          style: { "line-color": "#3b82f6", "target-arrow-color": "#3b82f6" } as any,
-        },
-        {
-          selector: "node:selected",
-          style: { "border-width": 4, "border-color": "#22d3ee", "background-opacity": 1 } as any,
-        },
-      ],
-      layout: { name: layout, animate: true, animationDuration: 500, padding: 40 } as any,
-    });
+    return [
+      ...filteredNodes.map(n => ({
+        data: { id: n.id, label: n.label, nodeType: n.type, technology: n.technology || "", group: n.group || "" },
+      })),
+      ...filteredEdges.map((e, i) => ({
+        data: { id: `e-${e.source}-${e.target}-${i}`, source: e.source, target: e.target, label: e.label || "", edgeType: e.type },
+      })),
+    ];
+  }, [archData, filterType]);
 
-    cy.on("tap", "node", (evt) => {
-      const nodeData = evt.target.data();
-      setSelectedNode({
-        id: nodeData.id,
-        label: nodeData.label,
-        type: nodeData.nodeType,
-        technology: nodeData.technology,
-        group: nodeData.group,
+  // Initialize Cytoscape and manage its lifecycle
+  useEffect(() => {
+    const container = cyContainerRef.current;
+    if (!container || isLoading || cyElements.length === 0) return;
+
+    // Ensure the container has actual dimensions before initializing
+    const initCytoscape = () => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width < 10 || rect.height < 10) {
+        // Container not ready yet, retry
+        const retryTimer = setTimeout(initCytoscape, 100);
+        return () => clearTimeout(retryTimer);
+      }
+
+      // Destroy previous instance
+      if (cyInstanceRef.current) {
+        try { cyInstanceRef.current.destroy(); } catch { /* ignore */ }
+        cyInstanceRef.current = null;
+      }
+
+      // Create new instance with elements
+      const cy = cytoscape({
+        container,
+        elements: cyElements,
+        style: CY_STYLE,
+        layout: { name: "preset" }, // start with preset, run layout after
+        minZoom: 0.1,
+        maxZoom: 5,
+        // wheelSensitivity left at default to avoid Cytoscape warning
       });
-    });
 
-    cy.on("tap", (evt) => {
-      if (evt.target === cy) setSelectedNode(null);
-    });
+      cy.on("tap", "node", (evt) => {
+        const d = evt.target.data();
+        setSelectedNode({
+          id: d.id,
+          label: d.label,
+          type: d.nodeType,
+          technology: d.technology,
+          group: d.group,
+        });
+      });
 
-    cyInstanceRef.current = cy;
+      cy.on("tap", (evt) => {
+        if (evt.target === cy) setSelectedNode(null);
+      });
+
+      cyInstanceRef.current = cy;
+
+      // Run layout after a small delay to ensure rendering
+      requestAnimationFrame(() => {
+        if (!cyInstanceRef.current) return;
+        try {
+          const layoutOpts = getLayoutOptions(layoutName);
+          const lay = cy.layout(layoutOpts);
+          lay.run();
+
+          // Fit after layout completes
+          setTimeout(() => {
+            if (cyInstanceRef.current) {
+              cyInstanceRef.current.fit(undefined, 50);
+              cyInstanceRef.current.resize();
+            }
+          }, 200);
+        } catch (err) {
+          console.warn("[Architecture] Layout error, falling back to grid:", err);
+          try {
+            cy.layout({ name: "grid", animate: false, padding: 50, fit: true }).run();
+          } catch { /* ignore */ }
+        }
+      });
+    };
+
+    // Use requestAnimationFrame to ensure DOM is painted
+    const rafId = requestAnimationFrame(() => {
+      initCytoscape();
+    });
 
     return () => {
-      cy.destroy();
-      cyInstanceRef.current = null;
+      cancelAnimationFrame(rafId);
+      if (cyInstanceRef.current) {
+        try { cyInstanceRef.current.destroy(); } catch { /* ignore */ }
+        cyInstanceRef.current = null;
+      }
     };
-  }, [archData, layout, filterType, isLoading]);
+  }, [cyElements, layoutName, isLoading]);
+
+  // Resize handler
+  useEffect(() => {
+    const container = cyContainerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver(() => {
+      const cy = cyInstanceRef.current;
+      if (cy) {
+        cy.resize();
+      }
+    });
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   const handleZoomIn = useCallback(() => {
-    cyInstanceRef.current?.zoom(cyInstanceRef.current.zoom() * 1.2);
+    const cy = cyInstanceRef.current;
+    if (cy) cy.zoom({ level: cy.zoom() * 1.3, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
   }, []);
 
   const handleZoomOut = useCallback(() => {
-    cyInstanceRef.current?.zoom(cyInstanceRef.current.zoom() * 0.8);
+    const cy = cyInstanceRef.current;
+    if (cy) cy.zoom({ level: cy.zoom() * 0.7, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
   }, []);
 
   const handleFit = useCallback(() => {
-    cyInstanceRef.current?.fit(undefined, 40);
+    const cy = cyInstanceRef.current;
+    if (cy) {
+      cy.resize();
+      cy.fit(undefined, 50);
+    }
   }, []);
 
   const handleRelayout = useCallback(() => {
-    cyInstanceRef.current?.layout({ name: layout, animate: true, animationDuration: 500, padding: 40 } as any).run();
-  }, [layout]);
+    const cy = cyInstanceRef.current;
+    if (!cy) return;
+    try {
+      const layoutOpts = getLayoutOptions(layoutName);
+      cy.layout(layoutOpts).run();
+      setTimeout(() => {
+        if (cyInstanceRef.current) cyInstanceRef.current.fit(undefined, 50);
+      }, 200);
+    } catch (err) {
+      console.warn("[Architecture] Relayout error:", err);
+    }
+  }, [layoutName]);
 
   const handleExportPng = useCallback(() => {
-    if (!cyInstanceRef.current) return;
-    const png = cyInstanceRef.current.png({ full: true, scale: 2, bg: "#0f172a" });
-    const link = document.createElement("a");
-    link.href = png;
-    link.download = `architecture-${project?.name || "project"}.png`;
-    link.click();
-    toast.success("Architecture exportée en PNG");
+    const cy = cyInstanceRef.current;
+    if (!cy) return;
+    try {
+      const png = cy.png({ full: true, scale: 2, bg: "#0f172a" });
+      const link = document.createElement("a");
+      link.href = png;
+      link.download = `architecture-${project?.name || "project"}.png`;
+      link.click();
+      toast.success("Architecture exportée en PNG");
+    } catch {
+      toast.error("Erreur lors de l'export PNG");
+    }
   }, [project]);
+
+  const handleNodeClick = useCallback((node: ArchNode) => {
+    setSelectedNode(node);
+    const cy = cyInstanceRef.current;
+    if (cy) {
+      cy.nodes().unselect();
+      const el = cy.$(`#${node.id}`);
+      if (el.length > 0) {
+        el.select();
+        cy.animate({ center: { eles: el }, duration: 300 });
+      }
+    }
+  }, []);
 
   const stats = useMemo(() => {
     if (!archData) return null;
@@ -292,9 +407,21 @@ export default function ArchitecturePage({ projectId }: { projectId: number }) {
     };
   }, [archData]);
 
+  const nodeCount = useMemo(() => {
+    if (!archData) return 0;
+    return filterType === "all" ? archData.nodes.length : archData.nodes.filter(n => n.type === filterType).length;
+  }, [archData, filterType]);
+
+  const edgeCount = useMemo(() => {
+    if (!archData) return 0;
+    if (filterType === "all") return archData.edges.length;
+    const nodeIds = new Set(archData.nodes.filter(n => n.type === filterType).map(n => n.id));
+    return archData.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target)).length;
+  }, [archData, filterType]);
+
   if (isLoading) {
     return (
-      <div className="h-full flex items-center justify-center">
+      <div style={{ height: "calc(100vh - 56px)" }} className="flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
           <span className="text-sm text-muted-foreground">Chargement de l'architecture...</span>
@@ -304,15 +431,15 @@ export default function ArchitecturePage({ projectId }: { projectId: number }) {
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div style={{ height: "calc(100vh - 56px)", display: "flex", flexDirection: "column" }}>
       {/* Toolbar */}
-      <div className="h-10 border-b border-border flex items-center px-4 gap-3 shrink-0 bg-secondary/20">
+      <div style={{ height: "40px", flexShrink: 0 }} className="border-b border-border flex items-center px-4 gap-3 bg-secondary/20">
         <Network className="w-4 h-4 text-cyan-400" />
         <span className="text-sm font-semibold">Architecture — {project?.name || "Projet"}</span>
 
         <div className="w-px h-5 bg-border mx-2" />
 
-        <Select value={layout} onValueChange={setLayout}>
+        <Select value={layoutName} onValueChange={setLayoutName}>
           <SelectTrigger className="w-32 h-7 text-[11px] bg-secondary border-border">
             <SelectValue />
           </SelectTrigger>
@@ -358,14 +485,23 @@ export default function ArchitecturePage({ projectId }: { projectId: number }) {
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Graph */}
-        <div className="flex-1 relative bg-[#0f172a]">
-          <div ref={cyRef} className="absolute inset-0" />
+      {/* Main content - use explicit flex with min-height 0 */}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
+        {/* Graph container - use explicit dimensions */}
+        <div style={{ flex: 1, position: "relative", backgroundColor: "#0f172a", minWidth: 0 }}>
+          <div
+            ref={cyContainerRef}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+            }}
+          />
 
-          {/* Legend */}
-          <div className="absolute bottom-4 left-4 bg-background/90 border border-border rounded-lg p-3 backdrop-blur-sm">
+          {/* Legend overlay */}
+          <div className="absolute bottom-4 left-4 bg-background/90 border border-border rounded-lg p-3 backdrop-blur-sm" style={{ zIndex: 10 }}>
             <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Légende</div>
             <div className="space-y-1.5">
               {Object.entries(NODE_COLORS).map(([type, color]) => (
@@ -380,7 +516,7 @@ export default function ArchitecturePage({ projectId }: { projectId: number }) {
                   <span className="text-[10px] text-muted-foreground">Sync</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="w-6 h-0.5 bg-red-500 border-dashed border-t border-red-500" />
+                  <div className="w-6 border-t-2 border-dashed border-red-500" />
                   <span className="text-[10px] text-muted-foreground">Async</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -390,10 +526,17 @@ export default function ArchitecturePage({ projectId }: { projectId: number }) {
               </div>
             </div>
           </div>
+
+          {/* Node count badge */}
+          <div className="absolute top-3 right-3 bg-background/80 border border-border rounded-md px-2.5 py-1 backdrop-blur-sm" style={{ zIndex: 10 }}>
+            <span className="text-[10px] text-muted-foreground font-mono">
+              {nodeCount} noeuds · {edgeCount} liens
+            </span>
+          </div>
         </div>
 
         {/* Side panel */}
-        <div className="w-64 border-l border-border shrink-0 overflow-hidden">
+        <div style={{ width: "256px", flexShrink: 0, borderLeft: "1px solid var(--border)", overflow: "hidden" }}>
           <ScrollArea className="h-full">
             <div className="p-4 space-y-4">
               {/* Stats */}
@@ -472,15 +615,7 @@ export default function ArchitecturePage({ projectId }: { projectId: number }) {
                   {archData?.nodes.map(n => (
                     <button
                       key={n.id}
-                      onClick={() => {
-                        setSelectedNode(n);
-                        const cy = cyInstanceRef.current;
-                        if (cy) {
-                          cy.nodes().unselect();
-                          cy.$(`#${n.id}`).select();
-                          cy.animate({ center: { eles: cy.$(`#${n.id}`) }, duration: 300 });
-                        }
-                      }}
+                      onClick={() => handleNodeClick(n)}
                       className={`w-full text-left flex items-center gap-2 px-2 py-1.5 rounded text-[11px] transition-colors ${
                         selectedNode?.id === n.id ? "bg-cyan-500/10 text-cyan-300" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
                       }`}
@@ -497,4 +632,44 @@ export default function ArchitecturePage({ projectId }: { projectId: number }) {
       </div>
     </div>
   );
+}
+
+// ============================================================
+// Layout Options Helper
+// ============================================================
+
+function getLayoutOptions(name: string): any {
+  const base = { name, animate: false, padding: 50, fit: true, nodeDimensionsIncludeLabels: true };
+
+  if (name === "cose") {
+    return {
+      ...base,
+      nodeRepulsion: () => 8000,
+      idealEdgeLength: () => 120,
+      edgeElasticity: () => 100,
+      gravity: 0.25,
+      numIter: 1000,
+      randomize: true,
+    };
+  }
+
+  if (name === "breadthfirst") {
+    return { ...base, directed: true, spacingFactor: 1.5 };
+  }
+
+  if (name === "concentric") {
+    return {
+      ...base,
+      concentric: (node: any) => {
+        const type = node.data("nodeType");
+        if (type === "gateway") return 4;
+        if (type === "service") return 3;
+        if (type === "queue") return 2;
+        return 1;
+      },
+      levelWidth: () => 2,
+    };
+  }
+
+  return base;
 }
