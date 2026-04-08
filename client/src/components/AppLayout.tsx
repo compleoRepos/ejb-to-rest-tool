@@ -9,12 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Terminal, FolderGit2, LayoutDashboard, Code2, Network,
-  GitBranch, MessageSquare, BookOpen, ChevronRight, Menu, X,
+  GitBranch, MessageSquare, BookOpen, ChevronRight, Menu, X, Package,
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { path: "/", label: "Accueil", icon: LayoutDashboard },
   { path: "/projects", label: "Projets", icon: FolderGit2 },
+  { path: "/compleo", label: "Compleo", icon: Package },
   { path: "/api-docs", label: "API", icon: BookOpen },
 ];
 
