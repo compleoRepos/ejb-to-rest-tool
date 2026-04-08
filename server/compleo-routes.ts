@@ -21,10 +21,15 @@ import { registerAllDetectors } from "./engine/detectors/index";
 import { registerAllGenerators } from "./engine/generators/index";
 import { registry } from "./engine/registry/index";
 import type { DetectedComponent, GeneratedFile, TechnologyType } from "./engine/registry/types";
+import { getEngine, type AnalysisResult } from "./engine/CompleoEngine";
+import { GitConnector, type GitProvider } from "./git/GitConnector";
 
 // Register all detectors and generators at startup
 registerAllDetectors(registry);
 registerAllGenerators(registry);
+
+// Initialize the engine singleton
+const engine = getEngine();
 
 const router = Router();
 
@@ -938,6 +943,111 @@ router.get("/sessions", async (_req: Request, res: Response) => {
   }));
   return res.json(list);
 });
+
+// ─── POST /api/compleo/clone ────────────────────────────────────────────────
+// Clone a Git repository and create a session from it
+router.post("/clone", async (req: Request, res: Response) => {
+  try {
+    const { url, provider, token, branch } = req.body as {
+      url: string;
+      provider?: GitProvider;
+      token?: string;
+      branch?: string;
+    };
+
+    if (!url) {
+      return res.status(400).json({ error: "Git repository URL is required" });
+    }
+
+    const gitProvider = provider || inferProvider(url);
+    const connector = new GitConnector({ provider: gitProvider, token });
+
+    // Clone the repo
+    const cloneResult = await connector.clone(url, token);
+
+    // Read source files from the cloned repo
+    const sourceFiles = await connector.readSourceFiles(cloneResult);
+
+    if (sourceFiles.length === 0) {
+      await connector.cleanup(cloneResult);
+      return res.status(400).json({ error: "No Java/JSP/XML files found in the repository" });
+    }
+
+    // Detect pom.xml and bian.yml
+    let pomXml: string | undefined;
+    let bianYml: string | undefined;
+    const javaFiles: { path: string; content: string }[] = [];
+
+    for (const file of sourceFiles) {
+      if (file.path.endsWith(".java") || file.path.endsWith(".jsp")) {
+        javaFiles.push(file);
+      }
+      if (file.path.endsWith("pom.xml") && !file.path.includes("/target/")) {
+        if (!pomXml || file.path.length < pomXml.length) {
+          pomXml = file.content;
+        }
+      }
+      if (file.path.match(/bian.*\.ya?ml$/i)) {
+        bianYml = file.content;
+      }
+    }
+
+    // Also include XML files for detection (web.xml, struts-config.xml, ejb-jar.xml, etc.)
+    const xmlFiles = sourceFiles.filter(f => f.path.endsWith(".xml") && !f.path.endsWith("pom.xml"));
+    const allFiles = [...javaFiles, ...xmlFiles];
+
+    const sessionId = nanoid(16);
+    const projectName = url.split("/").pop()?.replace(/\.git$/, "") || "git-project";
+
+    sessions.set(sessionId, {
+      id: sessionId,
+      projectName,
+      uploadedAt: new Date(),
+      files: allFiles,
+      pomXml,
+      bianYml,
+      status: "uploaded",
+      debugEvents: [],
+      sseClients: [],
+    });
+
+    const sess = sessions.get(sessionId)!;
+    emitDebugEvent(sess, "success", `Repo Git cloné : ${allFiles.length} fichiers détectés`);
+    emitDebugEvent(sess, "info", `Provider: ${gitProvider}, Branch: ${cloneResult.defaultBranch}`);
+    if (pomXml) emitDebugEvent(sess, "info", `pom.xml détecté`);
+    if (bianYml) emitDebugEvent(sess, "info", `bian.yml détecté`);
+
+    // Cleanup the cloned repo (files are already in memory)
+    await connector.cleanup(cloneResult);
+
+    return res.json({
+      sessionId,
+      projectName,
+      fileCount: allFiles.length,
+      hasPom: !!pomXml,
+      hasBian: !!bianYml,
+      totalLines: allFiles.reduce((sum, f) => sum + f.content.split("\n").length, 0),
+      gitInfo: {
+        provider: gitProvider,
+        branch: cloneResult.defaultBranch,
+        repoUrl: url,
+        totalRepoFiles: cloneResult.fileCount,
+        javaFileCount: cloneResult.javaFileCount,
+      },
+    });
+  } catch (err: any) {
+    console.error("[Compleo Clone Error]", err);
+    return res.status(500).json({ error: err.message || "Git clone failed" });
+  }
+});
+
+function inferProvider(url: string): GitProvider {
+  if (url.includes("github.com")) return "github";
+  if (url.includes("gitlab.com") || url.includes("gitlab")) return "gitlab";
+  if (url.includes("dev.azure.com") || url.includes("visualstudio.com")) return "azure";
+  if (url.includes("gitea")) return "gitea";
+  return "bare";
+}
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 

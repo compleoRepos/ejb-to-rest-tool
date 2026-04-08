@@ -18,8 +18,10 @@ import {
   ChevronDown, RefreshCw, History, BarChart3,
   Terminal, Zap, Server, Database, Shield, Box,
   HelpCircle, Star, ArrowLeft, Lightbulb, Info,
-  Columns2, GitCompare, Network,
+  Columns2, GitCompare, Network, GitBranch, Lock, Globe,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Link } from "wouter";
 import CodeDiff from "@/components/CodeDiff";
 import ArchitectureDiagram from "@/components/ArchitectureDiagram";
 import { DebugPanel } from "@/components/DebugPanel";
@@ -309,11 +311,20 @@ export default function CompleoPage() {
   // Step state — now includes "choices" between analyze and generate
   const [step, setStep] = useState<"upload" | "analyze" | "choices" | "generate" | "preview">("upload");
 
+  // Source mode toggle
+  const [sourceMode, setSourceMode] = useState<"zip" | "git">("zip");
+
   // Upload state
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Git state
+  const [gitUrl, setGitUrl] = useState("");
+  const [gitToken, setGitToken] = useState("");
+  const [gitBranch, setGitBranch] = useState("");
+  const [cloning, setCloning] = useState(false);
 
   // Analysis state
   const [analyzing, setAnalyzing] = useState(false);
@@ -407,6 +418,49 @@ export default function CompleoPage() {
     if (file) handleUpload(file);
     e.target.value = "";
   }, [handleUpload]);
+
+  // ─── Git Clone Handler ─────────────────────────────────────────────────
+
+  const handleClone = useCallback(async () => {
+    if (!gitUrl.trim()) {
+      toast.error("Veuillez saisir l'URL du repository Git");
+      return;
+    }
+
+    setCloning(true);
+    setUploadResult(null);
+    setAnalysisResult(null);
+    setGenerationResult(null);
+    setPreviewFile(null);
+    setUserChoices({});
+    setCurrentAmbiguityIndex(0);
+
+    try {
+      const res = await fetch("/api/compleo/clone", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: gitUrl.trim(),
+          token: gitToken.trim() || undefined,
+          branch: gitBranch.trim() || undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Clone failed");
+      }
+
+      const data: UploadResult = await res.json();
+      setUploadResult(data);
+      setStep("analyze");
+      toast.success(`Repository clone : ${data.fileCount} fichiers detectes`);
+    } catch (err: any) {
+      toast.error(err.message || "Erreur lors du clone Git");
+    } finally {
+      setCloning(false);
+    }
+  }, [gitUrl, gitToken, gitBranch]);
 
   // ─── Analyze Handler ────────────────────────────────────────────────────
 
@@ -650,6 +704,9 @@ export default function CompleoPage() {
     setCurrentAmbiguityIndex(0);
     setResultTab("code");
     setMultiTechResult(null);
+    setGitUrl("");
+    setGitToken("");
+    setGitBranch("");
   }, []);
 
   // ─── Toggle category ───────────────────────────────────────────────────
@@ -704,6 +761,16 @@ export default function CompleoPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <Link href="/compleo/agent">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-emerald-500/30 text-emerald-400 hover:text-white hover:bg-emerald-500/20 gap-1.5"
+                >
+                  <Zap className="w-4 h-4" />
+                  Mode Agent
+                </Button>
+              </Link>
               <Button
                 variant="outline"
                 size="sm"
@@ -793,62 +860,158 @@ export default function CompleoPage() {
 
       {/* Main content */}
       <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Step 1: Upload */}
+        {/* Step 1: Upload / Git Clone */}
         {step === "upload" && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
             <div className="max-w-2xl mx-auto">
               <div className="text-center mb-8">
-                <h2 className="text-2xl font-bold text-white mb-2">Uploadez votre projet Java Legacy</h2>
+                <h2 className="text-2xl font-bold text-white mb-2">Importez votre projet Java Legacy</h2>
                 <p className="text-[oklch(0.6_0.01_250)]">
-                  Glissez-deposez un fichier ZIP contenant votre projet Maven (EJB, Servlet, Struts, SOAP, JDBC, Hibernate, JMS, Batch...)
+                  Uploadez un ZIP ou connectez un repository Git (EJB, Servlet, Struts, SOAP, JDBC, Hibernate, JMS, Batch...)
                 </p>
               </div>
 
-              <div
-                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-                className={`relative cursor-pointer border-2 border-dashed rounded-xl p-16 text-center transition-all ${
-                  dragOver
-                    ? "border-emerald-400 bg-emerald-500/10"
-                    : "border-[oklch(0.3_0.01_250)] hover:border-emerald-500/50 hover:bg-[oklch(0.16_0.01_250)]"
-                }`}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".zip"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
-                {uploading ? (
-                  <div className="flex flex-col items-center gap-4">
-                    <Loader2 className="w-12 h-12 text-emerald-400 animate-spin" />
-                    <p className="text-[oklch(0.7_0.01_250)]">Extraction du ZIP en cours...</p>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-4">
-                    <div className="w-16 h-16 rounded-2xl bg-[oklch(0.2_0.01_250)] flex items-center justify-center">
-                      <FolderArchive className={`w-8 h-8 ${dragOver ? "text-emerald-400" : "text-[oklch(0.5_0.01_250)]"}`} />
-                    </div>
-                    <div>
-                      <p className="text-white font-medium mb-1">Glissez votre fichier ZIP ici</p>
-                      <p className="text-sm text-[oklch(0.5_0.01_250)]">ou cliquez pour parcourir</p>
-                    </div>
-                    <div className="flex items-center gap-4 text-xs text-[oklch(0.4_0.01_250)]">
-                      <span>Format: ZIP</span>
-                      <span>·</span>
-                      <span>Max: 100 MB</span>
-                      <span>·</span>
-                      <span>Projet Maven EJB</span>
-                    </div>
-                  </div>
-                )}
+              {/* Source mode toggle */}
+              <div className="flex items-center justify-center gap-2 mb-6">
+                <button
+                  onClick={() => setSourceMode("zip")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    sourceMode === "zip"
+                      ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                      : "text-[oklch(0.5_0.01_250)] hover:text-white hover:bg-[oklch(0.2_0.01_250)] border border-transparent"
+                  }`}
+                >
+                  <FolderArchive className="w-4 h-4" />
+                  Upload ZIP
+                </button>
+                <button
+                  onClick={() => setSourceMode("git")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    sourceMode === "git"
+                      ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                      : "text-[oklch(0.5_0.01_250)] hover:text-white hover:bg-[oklch(0.2_0.01_250)] border border-transparent"
+                  }`}
+                >
+                  <GitBranch className="w-4 h-4" />
+                  Repository Git
+                </button>
               </div>
 
+              {/* ZIP Upload */}
+              {sourceMode === "zip" && (
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`relative cursor-pointer border-2 border-dashed rounded-xl p-16 text-center transition-all ${
+                    dragOver
+                      ? "border-emerald-400 bg-emerald-500/10"
+                      : "border-[oklch(0.3_0.01_250)] hover:border-emerald-500/50 hover:bg-[oklch(0.16_0.01_250)]"
+                  }`}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".zip"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+                  {uploading ? (
+                    <div className="flex flex-col items-center gap-4">
+                      <Loader2 className="w-12 h-12 text-emerald-400 animate-spin" />
+                      <p className="text-[oklch(0.7_0.01_250)]">Extraction du ZIP en cours...</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="w-16 h-16 rounded-2xl bg-[oklch(0.2_0.01_250)] flex items-center justify-center">
+                        <FolderArchive className={`w-8 h-8 ${dragOver ? "text-emerald-400" : "text-[oklch(0.5_0.01_250)]"}`} />
+                      </div>
+                      <div>
+                        <p className="text-white font-medium mb-1">Glissez votre fichier ZIP ici</p>
+                        <p className="text-sm text-[oklch(0.5_0.01_250)]">ou cliquez pour parcourir</p>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-[oklch(0.4_0.01_250)]">
+                        <span>Format: ZIP</span>
+                        <span>·</span>
+                        <span>Max: 100 MB</span>
+                        <span>·</span>
+                        <span>Projet Maven</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Git Clone */}
+              {sourceMode === "git" && (
+                <div className="rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] p-6">
+                  <div className="space-y-4">
+                    {/* Repository URL */}
+                    <div>
+                      <label className="block text-sm font-medium text-[oklch(0.7_0.01_250)] mb-1.5">
+                        <Globe className="w-3.5 h-3.5 inline mr-1" />
+                        URL du repository
+                      </label>
+                      <Input
+                        value={gitUrl}
+                        onChange={(e) => setGitUrl(e.target.value)}
+                        placeholder="https://github.com/org/project.git"
+                        className="bg-[oklch(0.12_0.01_250)] border-[oklch(0.25_0.01_250)] text-white placeholder:text-[oklch(0.4_0.01_250)] focus:border-emerald-500/50"
+                      />
+                      <p className="text-xs text-[oklch(0.4_0.01_250)] mt-1">
+                        GitHub, GitLab, Azure DevOps, Gitea ou tout repo Git HTTPS
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      {/* Token */}
+                      <div>
+                        <label className="block text-sm font-medium text-[oklch(0.7_0.01_250)] mb-1.5">
+                          <Lock className="w-3.5 h-3.5 inline mr-1" />
+                          Token d'acces <span className="text-[oklch(0.4_0.01_250)]">(optionnel)</span>
+                        </label>
+                        <Input
+                          type="password"
+                          value={gitToken}
+                          onChange={(e) => setGitToken(e.target.value)}
+                          placeholder="ghp_xxxx ou glpat-xxxx"
+                          className="bg-[oklch(0.12_0.01_250)] border-[oklch(0.25_0.01_250)] text-white placeholder:text-[oklch(0.4_0.01_250)] focus:border-emerald-500/50"
+                        />
+                      </div>
+
+                      {/* Branch */}
+                      <div>
+                        <label className="block text-sm font-medium text-[oklch(0.7_0.01_250)] mb-1.5">
+                          <GitBranch className="w-3.5 h-3.5 inline mr-1" />
+                          Branche <span className="text-[oklch(0.4_0.01_250)]">(optionnel)</span>
+                        </label>
+                        <Input
+                          value={gitBranch}
+                          onChange={(e) => setGitBranch(e.target.value)}
+                          placeholder="main (par defaut)"
+                          className="bg-[oklch(0.12_0.01_250)] border-[oklch(0.25_0.01_250)] text-white placeholder:text-[oklch(0.4_0.01_250)] focus:border-emerald-500/50"
+                        />
+                      </div>
+                    </div>
+
+                    <Button
+                      onClick={handleClone}
+                      disabled={cloning || !gitUrl.trim()}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+                    >
+                      {cloning ? (
+                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Clonage en cours...</>
+                      ) : (
+                        <><GitBranch className="w-4 h-4 mr-2" /> Cloner et analyser</>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {/* Features grid */}
-                <div className="grid grid-cols-3 gap-4 mt-8">
+              <div className="grid grid-cols-3 gap-4 mt-8">
                 {[
                   { icon: Terminal, label: "13 Detecteurs", desc: "Servlet, EJB, Struts, SOAP, JDBC, JMS..." },
                   { icon: Layers, label: "Spring Boot 3.2", desc: "REST, JPA, Kafka, Spring Batch" },
@@ -1745,7 +1908,7 @@ export default function CompleoPage() {
         )}
       </div>
       {/* Debug Panel — visible only in development */}
-      <DebugPanel sessionId={sessionId} />
+      <DebugPanel sessionId={uploadResult?.sessionId ?? ""} />
     </div>
   );
 }

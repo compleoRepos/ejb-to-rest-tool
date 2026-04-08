@@ -12,6 +12,7 @@ import MigrationPage from "./pages/Migration";
 import CollaborationPage from "./pages/Collaboration";
 import ApiDocsPage from "./pages/ApiDocs";
 import CompleoPage from "./pages/Compleo";
+import CompleoAgentPage from "./pages/CompleoAgent";
 import AppLayout from "./components/AppLayout";
 
 function Router() {
@@ -32,6 +33,7 @@ function Router() {
         {(params) => <CollaborationPage projectId={Number(params.projectId)} />}
       </Route>
       <Route path={"/compleo"} component={CompleoPage} />
+      <Route path={"/compleo/agent"} component={CompleoAgentPage} />
       <Route path={"/api-docs"} component={ApiDocsPage} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />

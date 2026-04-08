@@ -5,6 +5,7 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerCompleoRoutes } from "../compleo-routes";
+import { registerAgentRoutes } from "../agent-routes";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -38,6 +39,8 @@ async function startServer() {
   registerOAuthRoutes(app);
   // Compleo API routes (upload, analyze, generate, download)
   registerCompleoRoutes(app);
+  // Agent API routes (SSE, status, choices, cancel, download)
+  registerAgentRoutes(app);
 
   // tRPC API
   app.use(
