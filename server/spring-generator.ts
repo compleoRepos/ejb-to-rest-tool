@@ -23,6 +23,7 @@ export type {
 import type { GeneratedFile, GenerationResult, GenerationStats, CompilationResult, CompilationError, MigrationReportContext } from "./spring/shared";
 
 // ─── Import sub-generators ──────────────────────────────────────────────────
+import { ImportResolver } from "./engine/ImportResolver";
 import { generateDto } from "./spring/dto-gen";
 import { generateEnum, generateException, generateGlobalExceptionHandler, generateValidator } from "./spring/model-gen";
 import { generateDomainService } from "./spring/service-gen";
@@ -169,6 +170,17 @@ public class BusinessRuleException extends RuntimeException {
 
   // 13. Generate Migration Report (enriched with ambiguity context)
   files.push(generateMigrationReport(ir, domainMap, dtoMap, reportContext));
+
+  // FIX v5.8.2: Resolve missing imports in all generated Java files
+  const importResolver = new ImportResolver();
+  for (const file of files) {
+    if (file.path.endsWith(".java")) {
+      const resolvedImports = importResolver.resolveImports(file.content, basePackage, ir);
+      if (resolvedImports.length > 0) {
+        file.content = importResolver.injectImports(file.content, resolvedImports);
+      }
+    }
+  }
 
   // Compute stats
   const stats: GenerationStats = {

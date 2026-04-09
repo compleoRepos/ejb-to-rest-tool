@@ -2,13 +2,22 @@
  * Controller Generator — Generates Spring @RestController classes.
  * Rules: R1 (semantic naming), R2 (PathVariable), R3 (HTTP status), R4 (no try/catch), R5 (OpenAPI).
  * Extracted from spring-generator.ts (v5.5).
+ *
+ * FIX v5.8.2: Uses determineHttpConfig() for proper REST URL semantics:
+ * - POST création → /resources (sans ID), 201 Created
+ * - POST action métier → /resources/{id}/action, 200 OK
+ * - GET consultation → /resources/{id}, 200 OK
+ * - GET liste → /resources, 200 OK
+ * - PUT modification → /resources/{id}, 200 OK
+ * - DELETE suppression → /resources/{id}, 204 No Content
  */
 
 import type { UseCaseIR, DtoIR, DtoFieldIR } from "../java-parser";
 import {
   type GeneratedFile,
+  type HttpConfig,
   toPascalCase, toMethodName, mapDtoClassName, pluralize,
-  inferSemanticEndpoint, detectIdParam, getIdParamName, getHttpAnnotation,
+  determineHttpConfig, getIdParamName, getHttpAnnotation,
 } from "./shared";
 
 export function generateDomainController(
@@ -41,34 +50,28 @@ export function generateDomainController(
     if (resType !== "Void") imports.add(`import ${basePackage}.dto.${resType};`);
     if (reqType) imports.add("import jakarta.validation.Valid;");
 
-    const semantic = inferSemanticEndpoint(uc, domain);
-    const httpMethod = semantic.method;
-    const controllerBasePath = `/api/v1/${pluralize(domain.toLowerCase())}`;
-    let endpointPath = semantic.path.startsWith(controllerBasePath)
-      ? semantic.path.substring(controllerBasePath.length)
-      : semantic.subPath || "";
-
-    const hasIdParam = detectIdParam(uc);
+    // FIX v5.8.2: Use determineHttpConfig for proper REST URL semantics
+    const httpConfig = determineHttpConfig(uc, domain);
+    const httpMethod = httpConfig.method;
+    const endpointPath = httpConfig.pathSuffix;
+    const hasIdParam = httpConfig.hasPathVariable;
     const idParamName = hasIdParam ? getIdParamName(uc) : "";
 
     let paramList = "";
-    let methodBodyPrefix = ""; // Extra code to build the DTO from params (GET only)
-    
+    let methodBodyPrefix = "";
+
     if (httpMethod === "GET" && reqType && reqDto) {
-      // FIX v5.8.1: GET methods NEVER have @RequestBody
-      // Convert DTO fields to @RequestParam/@RequestHeader
+      // GET methods NEVER have @RequestBody — convert DTO fields to @RequestParam/@RequestHeader
       const paramParts: string[] = [];
       if (hasIdParam) {
         paramParts.push(`@PathVariable String ${idParamName}`);
       }
-      // Add DTO fields as @RequestParam
       const contextualFields = new Set(["canal", "codeCanal", "channel", "userId", "idUtilisateur", "userAgent"]);
       const idFields = new Set(["id", "numCompte", "numCarte", "clientId", "numero"]);
       const builderParts: string[] = [];
-      
+
       for (const field of reqDto.fields) {
         const fieldName = field.name;
-        // Skip fields that are already @PathVariable
         if (hasIdParam && (fieldName === idParamName || idFields.has(fieldName))) {
           builderParts.push(`            .${fieldName}(${idParamName})`);
           continue;
@@ -76,8 +79,8 @@ export function generateDomainController(
         const isRequired = field.required;
         if (contextualFields.has(fieldName)) {
           imports.add("import org.springframework.web.bind.annotation.RequestHeader;");
-          const headerName = fieldName === "canal" || fieldName === "codeCanal" ? "X-Canal" : 
-                            fieldName === "userId" || fieldName === "idUtilisateur" ? "X-User-Id" : 
+          const headerName = fieldName === "canal" || fieldName === "codeCanal" ? "X-Canal" :
+                            fieldName === "userId" || fieldName === "idUtilisateur" ? "X-User-Id" :
                             "X-" + fieldName.replace(/([A-Z])/g, "-$1");
           paramParts.push(`@RequestHeader(value = "${headerName}", required = ${isRequired}) String ${fieldName}`);
         } else {
@@ -87,8 +90,7 @@ export function generateDomainController(
         builderParts.push(`            .${fieldName}(${fieldName})`);
       }
       paramList = paramParts.join(",\n            ");
-      
-      // Build the DTO from params inside the method body
+
       methodBodyPrefix = `        ${reqType} request = ${reqType}.builder()
 ${builderParts.join("\n")}
             .build();\n`;
@@ -100,14 +102,15 @@ ${builderParts.join("\n")}
       paramList = `@Valid @RequestBody ${reqType} request`;
     }
 
-    const isCreation = httpMethod === "POST" && /^(creer|create|ajouter|add)/i.test(uc.className.replace(/UC$/, ""));
+    // FIX v5.8.2: Use httpConfig.responseStatus for proper HTTP status codes
     let responseStatement: string;
-    if (isCreation) {
+    if (httpConfig.responseStatus === 201) {
       imports.add("import org.springframework.http.HttpStatus;");
-      imports.add("import java.net.URI;");
       responseStatement = resType !== "Void"
         ? `        ${resType} result = ${serviceVar}.${methodName}(${reqType ? "request" : ""});\n        return ResponseEntity.status(HttpStatus.CREATED).body(result);`
         : `        ${serviceVar}.${methodName}(${reqType ? "request" : ""});\n        return ResponseEntity.status(HttpStatus.CREATED).build();`;
+    } else if (httpConfig.responseStatus === 204) {
+      responseStatement = `        ${serviceVar}.${methodName}(${reqType ? "request" : ""});\n        return ResponseEntity.noContent().build();`;
     } else {
       responseStatement = resType !== "Void"
         ? `        ${resType} result = ${serviceVar}.${methodName}(${reqType ? "request" : ""});\n        return ResponseEntity.ok(result);`
@@ -115,16 +118,17 @@ ${builderParts.join("\n")}
     }
 
     const javadoc = (uc as any).useCaseDescription || (uc as any).javadoc || "";
-    // FIX v5.8.1: @Operation summary must be short (< 80 chars), description = full text
     const operationSummary = extractShortSummary(javadoc, methodName, domain);
     const operationDescription = javadoc ? javadoc.replace(/"/g, '\\"') : "";
 
+    const basePath2 = `/api/v1/${pluralize(domain.toLowerCase())}`;
+    const fullPath = `${basePath2}${endpointPath}`;
     const httpAnnotation = getHttpAnnotation(httpMethod, endpointPath || "/" + methodName.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase());
     const returnGeneric = resType !== "Void" ? resType : "Void";
 
     endpoints.push(`
     /**
-     * ${httpMethod} ${semantic.path}
+     * ${httpMethod} ${fullPath}
      * ${uc.bianDomain ? `BIAN: ${uc.bianDomain} / ${uc.bianAction}` : `UseCase: ${uc.className}`}
      * ${javadoc ? javadoc : ""}
      */
@@ -134,7 +138,7 @@ ${builderParts.join("\n")}
     )
     ${httpAnnotation}
     public ResponseEntity<${returnGeneric}> ${methodName}(${paramList}) {
-        log.info("${httpMethod} ${semantic.path}");
+        log.info("${httpMethod} ${fullPath}");
 ${methodBodyPrefix}${responseStatement}
     }`);
   }
@@ -184,7 +188,6 @@ function mapToSpringParamType(field: DtoFieldIR): string {
 
 function extractShortSummary(description: string, methodName: string, domain: string): string {
   if (description) {
-    // Take the first sentence (before . : or newline)
     const firstSentence = description.split(/[.:\n]/)[0].trim();
     if (firstSentence.length > 0 && firstSentence.length <= 80) {
       return firstSentence;
@@ -193,7 +196,6 @@ function extractShortSummary(description: string, methodName: string, domain: st
       return firstSentence.substring(0, 77) + "...";
     }
   }
-  // Fallback: generate from method name
   return methodName
     .replace(/([A-Z])/g, " $1")
     .trim()

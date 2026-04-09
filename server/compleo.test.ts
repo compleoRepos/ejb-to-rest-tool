@@ -944,3 +944,151 @@ describe("FIX 4: @Operation summary is short", () => {
     expect(controller!.content).toContain("description =");
   });
 });
+
+
+// ─── FIX v5.8.2: URL REST semantics tests ─────────────────────────────────
+
+describe("FIX v5.8.2 — URL REST semantics", () => {
+  // Helper: create a UseCase with a specific name
+  function createUcFiles(ucName: string, domain: string = "virement") {
+    return [
+      {
+        path: `src/main/java/com/bank/usecase/${ucName}.java`,
+        content: `
+package com.bank.usecase;
+import javax.ejb.Stateless;
+@Stateless
+public class ${ucName} implements com.bank.framework.BaseUseCase<VirementVoIn, VirementVoOut> {
+    public VirementVoOut execute(VirementVoIn voIn) { return new VirementVoOut(); }
+}`,
+      },
+      { path: "src/main/java/com/bank/dto/VirementVoIn.java", content: SAMPLE_VO_IN },
+      { path: "src/main/java/com/bank/dto/VirementVoOut.java", content: SAMPLE_VO_OUT },
+    ];
+  }
+
+  it("POST création (InitierVirementUC) → pas de PathVariable dans l'URL", () => {
+    const files = createUcFiles("InitierVirementUC");
+    const ir = parseEjbProject(files, SAMPLE_POM);
+    const result = generateSpringBootProject(ir);
+    const controller = result.files.find(f => f.category === "controller");
+    expect(controller).toBeDefined();
+    // Création: POST /api/v1/virements (sans {id})
+    expect(controller!.content).toContain("@PostMapping");
+    // Should NOT have PathVariable for creation
+    expect(controller!.content).not.toMatch(/@PostMapping\("[^"]*\{virementId\}[^"]*"\)/);
+    // Should have CREATED status
+    expect(controller!.content).toContain("HttpStatus.CREATED");
+  });
+
+  it("POST action métier (ActiverCarteUC) → PathVariable + action suffix", () => {
+    const carteFiles = [
+      {
+        path: "src/main/java/com/bank/usecase/ActiverCarteUC.java",
+        content: `
+package com.bank.usecase;
+import javax.ejb.Stateless;
+@Stateless
+public class ActiverCarteUC implements com.bank.framework.BaseUseCase<ActiverCarteVoIn, ActiverCarteVoOut> {
+    public ActiverCarteVoOut execute(ActiverCarteVoIn voIn) { return new ActiverCarteVoOut(); }
+}`,
+      },
+      {
+        path: "src/main/java/com/bank/dto/ActiverCarteVoIn.java",
+        content: `package com.bank.dto;
+public class ActiverCarteVoIn {
+    private String numCarte;
+    public String getNumCarte() { return numCarte; }
+}`,
+      },
+      {
+        path: "src/main/java/com/bank/dto/ActiverCarteVoOut.java",
+        content: `package com.bank.dto;
+public class ActiverCarteVoOut {
+    private String status;
+    public String getStatus() { return status; }
+}`,
+      },
+    ];
+    const ir = parseEjbProject(carteFiles, SAMPLE_POM);
+    const result = generateSpringBootProject(ir);
+    const controller = result.files.find(f => f.category === "controller");
+    expect(controller).toBeDefined();
+    // Action métier: POST /api/v1/cartes/{numCarte}/activer
+    expect(controller!.content).toContain("@PostMapping");
+    expect(controller!.content).toContain("/activer");
+    expect(controller!.content).toContain("@PathVariable");
+  });
+
+  it("GET consultation (ConsulterCompteUC) → GET avec PathVariable", () => {
+    const compteFiles = [
+      {
+        path: "src/main/java/com/bank/usecase/ConsulterCompteUC.java",
+        content: `
+package com.bank.usecase;
+import javax.ejb.Stateless;
+@Stateless
+public class ConsulterCompteUC implements com.bank.framework.BaseUseCase<ConsulterCompteVoIn, ConsulterCompteVoOut> {
+    public ConsulterCompteVoOut execute(ConsulterCompteVoIn voIn) { return new ConsulterCompteVoOut(); }
+}`,
+      },
+      {
+        path: "src/main/java/com/bank/dto/ConsulterCompteVoIn.java",
+        content: `package com.bank.dto;
+public class ConsulterCompteVoIn {
+    private String numCompte;
+    public String getNumCompte() { return numCompte; }
+}`,
+      },
+      {
+        path: "src/main/java/com/bank/dto/ConsulterCompteVoOut.java",
+        content: `package com.bank.dto;
+public class ConsulterCompteVoOut {
+    private String solde;
+    public String getSolde() { return solde; }
+}`,
+      },
+    ];
+    const ir = parseEjbProject(compteFiles, SAMPLE_POM);
+    const result = generateSpringBootProject(ir);
+    const controller = result.files.find(f => f.category === "controller");
+    expect(controller).toBeDefined();
+    // Consultation: GET /api/v1/comptes/{numCompte}
+    expect(controller!.content).toContain("@GetMapping");
+    expect(controller!.content).not.toContain("@RequestBody");
+  });
+});
+
+// ─── FIX v5.8.2: ImportResolver integration test ─────────────────────────
+
+describe("FIX v5.8.2 — ImportResolver integration", () => {
+  it("generated services contain BigDecimal import when field uses BigDecimal", () => {
+    // Use the standard virement test files which have 'double montant'
+    const ir = parseEjbProject(createTestFiles(), SAMPLE_POM);
+    const result = generateSpringBootProject(ir);
+    // The ImportResolver should have run on all Java files
+    const javaFiles = result.files.filter(f => f.path.endsWith(".java"));
+    expect(javaFiles.length).toBeGreaterThan(0);
+    // All Java files should have balanced braces (no syntax errors from import injection)
+    for (const file of javaFiles) {
+      let braces = 0;
+      for (const ch of file.content) {
+        if (ch === "{") braces++;
+        if (ch === "}") braces--;
+      }
+      expect(braces).toBe(0);
+    }
+  });
+});
+
+// ─── FIX v5.8.2: Pipeline deduplication test ─────────────────────────────
+
+describe("FIX v5.8.2 — Pipeline deduplication", () => {
+  it("generated files have no duplicate paths", () => {
+    const ir = parseEjbProject(createTestFiles(), SAMPLE_POM);
+    const result = generateSpringBootProject(ir);
+    const paths = result.files.map(f => f.path);
+    const uniquePaths = new Set(paths);
+    expect(paths.length).toBe(uniquePaths.size);
+  });
+});

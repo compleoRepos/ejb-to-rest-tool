@@ -72,6 +72,17 @@ export interface MigrationReportContext {
   userResolvedCount?: number;
 }
 
+// ─── HTTP Config for REST URL generation ────────────────────────────────────
+
+export interface HttpConfig {
+  method: string;
+  pathSuffix: string;
+  responseStatus: number;
+  hasRequestBody: boolean;
+  hasPathVariable: boolean;
+  actionSuffix?: string;
+}
+
 // ─── Utility Functions ─────────────────────────────────────────────────────
 
 export function toPascalCase(str: string): string {
@@ -103,63 +114,215 @@ export function pluralize(word: string): string {
   return word + "s";
 }
 
-// R1: Semantic endpoint naming
-export function inferSemanticEndpoint(uc: UseCaseIR, domain: string): { path: string; method: string; subPath?: string } {
+// ─── FIX v5.8.2: Proper REST URL semantics ─────────────────────────────────
+
+/**
+ * Determine the HTTP configuration for a UseCase based on its name.
+ * Implements proper REST URL rules:
+ * - CRÉATION (Initier, Créer, Ouvrir, Demander) → POST /resources (sans ID)
+ * - MISE À JOUR (Modifier, MettreAJour) → PUT /resources/{id}
+ * - ACTION MÉTIER (Activer, Bloquer, Valider) → POST /resources/{id}/action
+ * - CONSULTATION (Consulter, Charger, Lister) → GET /resources/{id} ou /resources
+ * - SUPPRESSION (Supprimer, Annuler) → DELETE /resources/{id}
+ */
+export function determineHttpConfig(uc: UseCaseIR, domain: string): HttpConfig {
   const name = uc.className.replace(/UC$/, "").replace(/UseCase$/, "");
   const lower = name.toLowerCase();
 
-  // Verb-to-HTTP mapping with path suffixes
-  const verbMap: Array<{ patterns: RegExp[]; method: string; pathSuffix?: string }> = [
-    { patterns: [/^consulter/i, /^get/i, /^lire/i, /^read/i, /^find/i, /^search/i, /^lister/i, /^list/i, /^afficher/i], method: "GET" },
-    { patterns: [/^creer/i, /^create/i, /^ajouter/i, /^add/i, /^nouveau/i, /^new/i, /^enregistrer/i, /^register/i], method: "POST" },
-    { patterns: [/^modifier/i, /^update/i, /^edit/i, /^changer/i, /^change/i, /^maj/i], method: "PUT" },
-    { patterns: [/^supprimer/i, /^delete/i, /^remove/i, /^annuler/i, /^cancel/i], method: "DELETE" },
-    { patterns: [/^activer/i, /^activate/i, /^enable/i], method: "PATCH", pathSuffix: "/activate" },
-    { patterns: [/^desactiver/i, /^deactivate/i, /^disable/i, /^bloquer/i, /^block/i], method: "PATCH", pathSuffix: "/deactivate" },
-    { patterns: [/^valider/i, /^validate/i, /^confirm/i, /^confirmer/i], method: "PATCH", pathSuffix: "/validate" },
-    { patterns: [/^renouveler/i, /^renew/i], method: "PATCH", pathSuffix: "/renew" },
-    { patterns: [/^opposer/i, /^oppose/i], method: "PATCH", pathSuffix: "/oppose" },
-    { patterns: [/^virement/i, /^transfer/i, /^virer/i], method: "POST", pathSuffix: "/transfer" },
-    { patterns: [/^retrait/i, /^withdraw/i], method: "POST", pathSuffix: "/withdraw" },
-    { patterns: [/^depot/i, /^deposit/i], method: "POST", pathSuffix: "/deposit" },
-    { patterns: [/^payer/i, /^pay/i, /^payment/i], method: "POST", pathSuffix: "/payment" },
+  // ── Patterns de CRÉATION → POST sans PathVariable, 201 Created ──
+  const creationPatterns = [
+    "initier", "creer", "ouvrir", "demander",
+    "enregistrer", "ajouter", "soumettre", "deposer",
+    "create", "add", "new", "register", "submit", "open",
   ];
+  if (creationPatterns.some(p => lower.startsWith(p) || lower.includes(p))) {
+    return {
+      method: "POST",
+      pathSuffix: "",
+      responseStatus: 201,
+      hasRequestBody: true,
+      hasPathVariable: false,
+    };
+  }
 
-  let method = "POST";
-  let pathSuffix = "";
-
-  for (const mapping of verbMap) {
-    if (mapping.patterns.some(p => p.test(lower))) {
-      method = mapping.method;
-      pathSuffix = mapping.pathSuffix || "";
-      break;
+  // ── Patterns d'ACTION MÉTIER sur ressource existante → POST avec ID + action ──
+  const actionPatterns: Array<{ pattern: string; suffix: string }> = [
+    { pattern: "activer", suffix: "activer" },
+    { pattern: "activate", suffix: "activate" },
+    { pattern: "bloquer", suffix: "bloquer" },
+    { pattern: "block", suffix: "block" },
+    { pattern: "annuler", suffix: "annuler" },
+    { pattern: "cancel", suffix: "cancel" },
+    { pattern: "valider", suffix: "valider" },
+    { pattern: "validate", suffix: "validate" },
+    { pattern: "approuver", suffix: "approuver" },
+    { pattern: "approve", suffix: "approve" },
+    { pattern: "rejeter", suffix: "rejeter" },
+    { pattern: "reject", suffix: "reject" },
+    { pattern: "cloturer", suffix: "cloturer" },
+    { pattern: "close", suffix: "close" },
+    { pattern: "suspendre", suffix: "suspendre" },
+    { pattern: "suspend", suffix: "suspend" },
+    { pattern: "renouveler", suffix: "renouveler" },
+    { pattern: "renew", suffix: "renew" },
+    { pattern: "opposer", suffix: "opposer" },
+    { pattern: "oppose", suffix: "oppose" },
+    { pattern: "desactiver", suffix: "desactiver" },
+    { pattern: "deactivate", suffix: "deactivate" },
+    { pattern: "confirmer", suffix: "confirmer" },
+    { pattern: "confirm", suffix: "confirm" },
+  ];
+  for (const { pattern, suffix } of actionPatterns) {
+    if (lower.startsWith(pattern) || lower.includes(pattern)) {
+      return {
+        method: "POST",
+        pathSuffix: `/{${getIdParamName(uc)}}/${suffix}`,
+        responseStatus: 200,
+        hasRequestBody: true,
+        hasPathVariable: true,
+        actionSuffix: suffix,
+      };
     }
   }
 
-  // Build the full path
-  const basePath = `/api/v1/${pluralize(domain.toLowerCase())}`;
-  const hasId = detectIdParam(uc);
-  const idParam = hasId ? `/{${getIdParamName(uc)}}` : "";
+  // ── Patterns de CONSULTATION → GET ──
+  const readPatterns = [
+    "consulter", "charger", "lister", "rechercher",
+    "get", "find", "read", "search", "list", "afficher",
+    "lire", "load",
+  ];
+  if (readPatterns.some(p => lower.startsWith(p) || lower.includes(p))) {
+    // Lister → GET /resources (sans ID)
+    const listPatterns = ["lister", "list", "rechercher", "search"];
+    const isList = listPatterns.some(p => lower.startsWith(p) || lower.includes(p));
+    if (isList) {
+      return {
+        method: "GET",
+        pathSuffix: "",
+        responseStatus: 200,
+        hasRequestBody: false,
+        hasPathVariable: false,
+      };
+    }
+    // Consulter/Get → GET /resources/{id}
+    return {
+      method: "GET",
+      pathSuffix: `/{${getIdParamName(uc)}}`,
+      responseStatus: 200,
+      hasRequestBody: false,
+      hasPathVariable: true,
+    };
+  }
 
+  // ── Patterns de MISE À JOUR → PUT avec ID ──
+  const updatePatterns = [
+    "modifier", "update", "edit", "changer", "change", "maj",
+    "mettre", "mettreajour",
+  ];
+  if (updatePatterns.some(p => lower.startsWith(p) || lower.includes(p))) {
+    return {
+      method: "PUT",
+      pathSuffix: `/{${getIdParamName(uc)}}`,
+      responseStatus: 200,
+      hasRequestBody: true,
+      hasPathVariable: true,
+    };
+  }
+
+  // ── Patterns de SUPPRESSION → DELETE avec ID ──
+  const deletePatterns = ["supprimer", "delete", "remove"];
+  if (deletePatterns.some(p => lower.startsWith(p) || lower.includes(p))) {
+    return {
+      method: "DELETE",
+      pathSuffix: `/{${getIdParamName(uc)}}`,
+      responseStatus: 204,
+      hasRequestBody: false,
+      hasPathVariable: true,
+    };
+  }
+
+  // ── Patterns de VÉRIFICATION → POST (action, pas de ressource CRUD) ──
+  const verifyPatterns = [
+    "verifier", "verify", "calculer", "calculate",
+    "estimer", "estimate", "simuler", "simulate",
+  ];
+  if (verifyPatterns.some(p => lower.startsWith(p) || lower.includes(p))) {
+    // Extract action name for the path suffix
+    const actionName = extractActionFromName(lower);
+    return {
+      method: "POST",
+      pathSuffix: actionName ? `/${actionName}` : "",
+      responseStatus: 200,
+      hasRequestBody: true,
+      hasPathVariable: false,
+      actionSuffix: actionName,
+    };
+  }
+
+  // ── Patterns de TRANSACTION FINANCIÈRE → POST sans ID ──
+  const txPatterns = [
+    "virement", "transfer", "virer",
+    "retrait", "withdraw",
+    "depot", "deposit",
+    "payer", "pay", "payment",
+  ];
+  if (txPatterns.some(p => lower.startsWith(p) || lower.includes(p))) {
+    return {
+      method: "POST",
+      pathSuffix: "",
+      responseStatus: 201,
+      hasRequestBody: true,
+      hasPathVariable: false,
+    };
+  }
+
+  // ── Défaut : POST sans ID ──
   return {
-    path: `${basePath}${idParam}${pathSuffix}`,
-    method,
-    subPath: `${idParam}${pathSuffix}`,
+    method: "POST",
+    pathSuffix: "",
+    responseStatus: 200,
+    hasRequestBody: true,
+    hasPathVariable: false,
   };
 }
 
-// R2: PathVariable detection
+/**
+ * Extract a short action name from the UseCase name for URL suffix.
+ */
+function extractActionFromName(lowerName: string): string {
+  const actionMap: Record<string, string> = {
+    "verifier": "verifier",
+    "verify": "verify",
+    "calculer": "calculer",
+    "calculate": "calculate",
+    "estimer": "estimer",
+    "estimate": "estimate",
+    "simuler": "simuler",
+    "simulate": "simulate",
+  };
+  for (const [pattern, action] of Object.entries(actionMap)) {
+    if (lowerName.startsWith(pattern)) return action;
+  }
+  return "";
+}
+
+// R1: Semantic endpoint naming (backward-compatible wrapper using new determineHttpConfig)
+export function inferSemanticEndpoint(uc: UseCaseIR, domain: string): { path: string; method: string; subPath?: string } {
+  const config = determineHttpConfig(uc, domain);
+  const basePath = `/api/v1/${pluralize(domain.toLowerCase())}`;
+
+  return {
+    path: `${basePath}${config.pathSuffix}`,
+    method: config.method,
+    subPath: config.pathSuffix || undefined,
+  };
+}
+
+// R2: PathVariable detection — now delegates to determineHttpConfig
 export function detectIdParam(uc: UseCaseIR): boolean {
-  const name = uc.className.toLowerCase();
-  // Operations that typically need an ID parameter
-  if (/^(consulter|get|modifier|update|supprimer|delete|activer|desactiver|bloquer|valider|renouveler|opposer)/i.test(name)) {
-    return true;
-  }
-  // Check if VoIn has an ID-like field
-  if (uc.voInType && uc.voInType !== "Void") {
-    return true; // Most operations with input need an identifier
-  }
-  return false;
+  const domain = uc.domain || "general";
+  const config = determineHttpConfig(uc, domain);
+  return config.hasPathVariable;
 }
 
 export function getIdParamName(uc: UseCaseIR): string {
@@ -168,6 +331,8 @@ export function getIdParamName(uc: UseCaseIR): string {
   if (domain.includes("compte") || domain.includes("account")) return "numCompte";
   if (domain.includes("client") || domain.includes("customer")) return "clientId";
   if (domain.includes("virement") || domain.includes("transfer")) return "virementId";
+  if (domain.includes("credit") || domain.includes("loan")) return "creditId";
+  if (domain.includes("cheque") || domain.includes("check")) return "numCheque";
   return `${domain || "resource"}Id`;
 }
 
