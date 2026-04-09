@@ -27,6 +27,7 @@ const statusLabels: Record<string, { label: string; color: string }> = {
   uploaded: { label: "Uploadé", color: "text-blue-400 border-blue-500/30" },
   analyzed: { label: "Analysé", color: "text-amber-400 border-amber-500/30" },
   waiting_choices: { label: "En attente", color: "text-purple-400 border-purple-500/30" },
+  missing_deps: { label: "Dépendances", color: "text-orange-400 border-orange-500/30" },
   generated: { label: "Généré", color: "text-emerald-400 border-emerald-500/30" },
   error: { label: "Erreur", color: "text-red-400 border-red-500/30" },
 };

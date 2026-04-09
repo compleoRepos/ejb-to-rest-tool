@@ -143,7 +143,7 @@ export default function ArchitecturePage({ projectId }: { projectId: number }) {
       .then((data) => {
         if (data.sessions) {
           const analyzed = data.sessions.filter(
-            (s: any) => s.status === "analyzed" || s.status === "generated" || s.status === "waiting_choices"
+            (s: any) => s.status === "analyzed" || s.status === "generated" || s.status === "waiting_choices" || s.status === "missing_deps"
           );
           setSessions(analyzed);
           if (analyzed.length > 0 && !selectedSessionId) {

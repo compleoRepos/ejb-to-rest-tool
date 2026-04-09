@@ -26,11 +26,14 @@ import { getEngine, type AnalysisResult } from "./engine/CompleoEngine";
 import { GitConnector, type GitProvider } from "./git/GitConnector";
 import { sessionStore } from "./session-store";
 import { LearningEngine } from "./learning/LearningEngine";
+import { MissingModuleAnalyzer } from "./engine/MissingModuleAnalyzer";
 import type { ChoiceWithAutoResolve } from "./learning/ConfidenceScorer";
 import type { AmbiguityResolution } from "./learning/LearningEngine";
 
 // Learning engine singleton
 const learningEngine = new LearningEngine();
+// Missing module analyzer singleton
+const missingModuleAnalyzer = new MissingModuleAnalyzer();
 
 // Register all detectors and generators at startup
 registerAllDetectors(registry);
@@ -47,6 +50,7 @@ export type SessionStatus =
   | "uploaded"
   | "analyzed"
   | "waiting_choices"
+  | "missing_deps"
   | "generated"
   | "error";
 
@@ -80,6 +84,7 @@ export interface CompleoSession {
   multiTechGeneration?: GeneratedFile[];
   maturityScore?: MaturityScore;
   technologiesDetected?: TechnologyType[];
+  missingDeps?: import("./engine/MissingModuleAnalyzer").MissingModule[];
 }
 
 // Persistent session store (survives HMR restarts)
@@ -298,16 +303,37 @@ router.post("/analyze-multitech", async (req: Request, res: Response) => {
     (session as any)._learningResolutions = learningResolutions;
     (session as any)._autoResolvedChoices = autoResolvedChoices;
 
-    if (ambiguities.length > 0) {
-      session.status = "waiting_choices";
-    } else {
-      session.status = "analyzed";
+    // ─── Missing Module Detection (v5.6.1) ──────────────────────────
+    let missingDeps: import("./engine/MissingModuleAnalyzer").MissingModule[] = [];
+    try {
+      missingDeps = missingModuleAnalyzer.analyze(ir, []);
+      if (missingDeps.length > 0) {
+        session.missingDeps = missingDeps;
+        emitDebugEvent(session, "warning",
+          `${missingDeps.length} dépendance(s) manquante(s) détectée(s)`,
+          missingDeps.map(d => `${d.moduleName} (${d.criticalityLevel})`).join(", ")
+        );
+      }
+    } catch (err) {
+      console.warn("[MissingModuleAnalyzer] Detection failed:", err);
     }
+    // ─── End Missing Module Detection ────────────────────────────────
+
+    // Determine final status
+    let finalStatus: SessionStatus;
+    if (ambiguities.length > 0) {
+      finalStatus = "waiting_choices";
+    } else if (missingDeps.length > 0) {
+      finalStatus = "missing_deps";
+    } else {
+      finalStatus = "analyzed";
+    }
+    session.status = finalStatus;
     sessions.persist(session.id);
 
     return res.json({
       sessionId,
-      status: ambiguities.length > 0 ? "WAITING_CHOICES" : "ANALYZED",
+      status: finalStatus.toUpperCase(),
       projectName: session.projectName,
       // Multi-tech results
       technologiesDetected: result.technologiesDetected,
@@ -353,6 +379,27 @@ router.post("/analyze-multitech", async (req: Request, res: Response) => {
       })),
       autoResolvedCount: autoResolvedChoices.length,
       totalAmbiguities: allAmbiguities.length,
+      // Missing dependencies (v5.6.1)
+      missingDeps: missingDeps.map(d => ({
+        moduleName: d.moduleName,
+        jndiPath: d.jndiPath,
+        inferredDomain: d.inferredDomain,
+        confidence: d.confidence,
+        criticalityLevel: d.criticalityLevel,
+        calledByCount: d.calledBy.length,
+        inferredClasses: d.inferredClasses.map(c => ({
+          className: c.className,
+          inferredMethodName: c.inferredMethodName,
+          inferredReturnType: c.inferredReturnType,
+          inferredParams: c.inferredParams,
+          evidences: c.evidences,
+        })),
+        generatedContract: {
+          hasInterface: !!d.generatedContract.interfaceCode,
+          hasStub: !!d.generatedContract.stubCode,
+          hasDocs: !!d.generatedContract.documentationMd,
+        },
+      })),
       irSummary: {
         useCases: ir.useCases.map(uc => ({
           className: uc.className,
@@ -387,8 +434,55 @@ router.post("/analyze-multitech", async (req: Request, res: Response) => {
   }
 });
 
-// ─── POST /api/compleo/generate-multitech ───────────────────────────────────
-// Generate from multi-tech pipeline results
+/// ─── POST /api/compleo/acknowledge-missing-deps ──────────────────────────
+// User acknowledges missing dependencies and chooses to continue with stubs
+router.post("/acknowledge-missing-deps", async (req: Request, res: Response) => {
+  try {
+    const { sessionId, action } = req.body;
+    // action: "generate_stubs" | "skip"
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId is required" });
+    }
+
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    if (action === "generate_stubs" && session.missingDeps && session.missingDeps.length > 0) {
+      // Include stub files in the generation
+      emitDebugEvent(session, "info",
+        `Génération des stubs pour ${session.missingDeps.length} module(s) manquant(s)...`
+      );
+
+      // Store the generated contracts for later inclusion in the ZIP
+      (session as any)._stubContracts = session.missingDeps.map(d => d.generatedContract);
+    }
+
+    // Transition to analyzed (ready for generation)
+    session.status = "analyzed";
+    sessions.persist(session.id);
+
+    emitDebugEvent(session, "success",
+      action === "generate_stubs"
+        ? "Stubs générés. Prêt pour la génération Spring Boot."
+        : "Dépendances manquantes ignorées. Prêt pour la génération."
+    );
+
+    return res.json({
+      sessionId,
+      status: "ANALYZED",
+      stubsGenerated: action === "generate_stubs",
+      missingDepsCount: session.missingDeps?.length ?? 0,
+    });
+  } catch (err: any) {
+    console.error("[Compleo Acknowledge Missing Deps Error]", err);
+    return res.status(500).json({ error: err.message || "Failed to acknowledge missing deps" });
+  }
+});
+
+// ─── POST /api/compleo/generate-multitech ───────────────────────────────
+// Generate from multi-tech pipeline resultslts
 router.post("/generate-multitech", async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.body;
@@ -1098,6 +1192,22 @@ router.get("/session/:sessionId", async (req: Request, res: Response) => {
       maturityScore: session.maturityScore ?? null,
       detectedComponents: session.detectedComponents ?? [],
       downloadUrl: session.generation ? `/api/compleo/download/${session.id}` : null,
+      // Missing dependencies (v5.6.1)
+      missingDeps: (session.missingDeps ?? []).map(d => ({
+        moduleName: d.moduleName,
+        jndiPath: d.jndiPath,
+        inferredDomain: d.inferredDomain,
+        confidence: d.confidence,
+        criticalityLevel: d.criticalityLevel,
+        calledByCount: d.calledBy.length,
+        inferredClasses: d.inferredClasses.map(c => ({
+          className: c.className,
+          inferredMethodName: c.inferredMethodName,
+          inferredReturnType: c.inferredReturnType,
+          inferredParams: c.inferredParams,
+          evidences: c.evidences,
+        })),
+      })),
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });

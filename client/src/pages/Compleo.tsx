@@ -323,14 +323,17 @@ export default function CompleoPage() {
       // Determine which step to restore to
       if (data.generation) {
         setPipelineStep("results");
-        setCompletedSteps(new Set(["idle", "analyzing", "choices", "results"] as PipelineStep[]));
+        setCompletedSteps(new Set(["idle", "analyzing", "missing_deps", "choices", "results"] as PipelineStep[]));
         // Load file contents for the explorer
         if (data.generation.files?.length > 0) {
           await loadFileContents(sid, data.generation.files);
         }
+      } else if (data.status === "missing_deps" && data.missingDeps?.length > 0) {
+        setPipelineStep("missing_deps");
+        setCompletedSteps(new Set(["idle", "analyzing"] as PipelineStep[]));
       } else if (data.ambiguities?.length > 0) {
         setPipelineStep("choices");
-        setCompletedSteps(new Set(["idle", "analyzing"] as PipelineStep[]));
+        setCompletedSteps(new Set(["idle", "analyzing", "missing_deps"] as PipelineStep[]));
       } else if (data.stats) {
         setPipelineStep("analyzing");
         setCompletedSteps(new Set(["idle"] as PipelineStep[]));
@@ -386,9 +389,13 @@ export default function CompleoPage() {
       if (data.ambiguities && data.ambiguities.length > 0) {
         setPipelineStep("choices");
         toast.success(`${techCount} technologies — ${data.ambiguities.length} choix à faire`);
+      } else if (data.missingDeps && data.missingDeps.length > 0) {
+        // Missing dependencies detected — show notification screen
+        setPipelineStep("missing_deps");
+        toast.warning(`${data.missingDeps.length} dépendance(s) manquante(s) détectée(s)`);
       } else {
-        // No ambiguities — auto-generate
-        setCompletedSteps(prev => new Set([...prev, "choices"] as PipelineStep[]));
+        // No ambiguities, no missing deps — auto-generate
+        setCompletedSteps(prev => new Set([...prev, "missing_deps", "choices"] as PipelineStep[]));
         await runGeneration(sid, []);
       }
     } catch (err: any) {
@@ -756,10 +763,168 @@ export default function CompleoPage() {
                 </div>
               )}
             </motion.div>
+          )}          {/* ═══ STATE: MISSING_DEPS ════════════════════════════════════════ */}
+          {pipelineStep === "missing_deps" && analysisResult && (analysisResult as any).missingDeps?.length > 0 && (
+            <motion.div
+              key="missing_deps"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="max-w-3xl mx-auto px-4 sm:px-6 py-6"
+            >
+              {/* Header */}
+              <div className="text-center mb-6">
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-orange-500/10 border border-orange-500/30 mb-4">
+                  <AlertTriangle className="w-4 h-4 text-orange-400" />
+                  <span className="text-sm text-orange-300">Dépendances détectées</span>
+                </div>
+                <h2 className="text-xl font-bold text-white mb-1">
+                  {analysisResult.projectName ?? "Projet"} appelle {((analysisResult as any).missingDeps ?? []).length} module(s) non encore uploadé(s)
+                </h2>
+                <p className="text-sm text-[oklch(0.55_0.01_250)]">
+                  Compleo a inféré les contrats d'interface depuis les usages détectés.
+                </p>
+              </div>
+
+              {/* Missing modules cards */}
+              <div className="space-y-4">
+                {((analysisResult as any).missingDeps ?? []).map((dep: any, i: number) => {
+                  const critColors: Record<string, string> = {
+                    BLOCKING: "border-red-500/40 bg-red-500/5",
+                    HIGH: "border-orange-500/40 bg-orange-500/5",
+                    MEDIUM: "border-amber-500/40 bg-amber-500/5",
+                    LOW: "border-blue-500/40 bg-blue-500/5",
+                  };
+                  const critLabels: Record<string, { label: string; icon: string }> = {
+                    BLOCKING: { label: "BLOQUANT", icon: "⚠" },
+                    HIGH: { label: "ÉLEVÉ", icon: "⚠" },
+                    MEDIUM: { label: "MOYEN", icon: "ℹ" },
+                    LOW: { label: "FAIBLE", icon: "ℹ" },
+                  };
+                  const crit = critLabels[dep.criticalityLevel] ?? critLabels.MEDIUM;
+
+                  return (
+                    <motion.div
+                      key={dep.moduleName}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.1 }}
+                      className={`rounded-lg border p-4 ${critColors[dep.criticalityLevel] ?? critColors.MEDIUM}`}
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">{crit.icon}</span>
+                          <span className="text-base font-semibold text-white">{dep.moduleName}</span>
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                            {crit.label}
+                          </Badge>
+                        </div>
+                        <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-500/30">
+                          {dep.inferredDomain}
+                        </Badge>
+                      </div>
+
+                      {/* Inferred classes */}
+                      {dep.inferredClasses?.map((cls: any) => (
+                        <div key={cls.className} className="mb-3">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Code2 className="w-3.5 h-3.5 text-white/40" />
+                            <span className="text-sm text-white/80">{cls.className}</span>
+                            <span className="text-xs text-white/30">— appelé par {dep.calledByCount} UseCase(s)</span>
+                          </div>
+                          <div className="ml-5 p-2 rounded bg-[oklch(0.13_0.01_250)] border border-[oklch(0.22_0.01_250)] font-mono text-xs text-emerald-300">
+                            {cls.inferredReturnType} {cls.inferredMethodName}(
+                            {cls.inferredParams?.map((p: any) => `${p.type} ${p.name}`).join(", ")})
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Confidence bar */}
+                      <div className="flex items-center gap-2 mt-3">
+                        <span className="text-xs text-white/40">Confiance :</span>
+                        <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-500/60 rounded-full transition-all"
+                            style={{ width: `${Math.round(dep.confidence * 100)}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-white/50">{Math.round(dep.confidence * 100)}%</span>
+                      </div>
+
+                      {/* Evidences */}
+                      {dep.inferredClasses?.[0]?.evidences?.length > 0 && (
+                        <div className="mt-2 space-y-0.5">
+                          {dep.inferredClasses[0].evidences.slice(0, 3).map((e: string, j: number) => (
+                            <div key={j} className="text-[10px] text-white/30 flex items-center gap-1">
+                              <Lightbulb className="w-2.5 h-2.5" />
+                              {e}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </motion.div>
+                  );
+                })}
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex items-center justify-center gap-3 mt-8">
+                <Button
+                  variant="outline"
+                  className="border-[oklch(0.3_0.01_250)] text-white/70 hover:text-white"
+                  onClick={async () => {
+                    if (!sessionId) return;
+                    try {
+                      await fetch("/api/compleo/acknowledge-missing-deps", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ sessionId, action: "skip" }),
+                      });
+                      setCompletedSteps(prev => new Set([...prev, "missing_deps"] as PipelineStep[]));
+                      if (ambiguities.length > 0) {
+                        setPipelineStep("choices");
+                      } else {
+                        setCompletedSteps(prev => new Set([...prev, "choices"] as PipelineStep[]));
+                        await runGeneration(sessionId, []);
+                      }
+                    } catch (err: any) {
+                      toast.error("Erreur : " + (err.message || "Impossible de continuer"));
+                    }
+                  }}
+                >
+                  Ignorer et continuer
+                </Button>
+                <Button
+                  className="bg-gradient-to-r from-emerald-600 to-cyan-600 text-white"
+                  onClick={async () => {
+                    if (!sessionId) return;
+                    try {
+                      await fetch("/api/compleo/acknowledge-missing-deps", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ sessionId, action: "generate_stubs" }),
+                      });
+                      toast.success("Stubs générés pour les modules manquants");
+                      setCompletedSteps(prev => new Set([...prev, "missing_deps"] as PipelineStep[]));
+                      if (ambiguities.length > 0) {
+                        setPipelineStep("choices");
+                      } else {
+                        setCompletedSteps(prev => new Set([...prev, "choices"] as PipelineStep[]));
+                        await runGeneration(sessionId, []);
+                      }
+                    } catch (err: any) {
+                      toast.error("Erreur : " + (err.message || "Impossible de générer les stubs"));
+                    }
+                  }}
+                >
+                  <Zap className="w-4 h-4 mr-1" />
+                  Générer les stubs et continuer
+                </Button>
+              </div>
+            </motion.div>
           )}
 
-          {/* ═══ STATE: CHOICES ═══════════════════════════════════════ */}
-          {pipelineStep === "choices" && analysisResult && ambiguities.length > 0 && (
+          {/* ═══ STATE: CHOICES ═════════════════════════════════════════════ */}       {pipelineStep === "choices" && analysisResult && ambiguities.length > 0 && (
             <motion.div
               key="choices"
               initial={{ opacity: 0, y: 10 }}
