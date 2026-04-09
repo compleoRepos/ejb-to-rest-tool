@@ -466,3 +466,112 @@ describe("T6e: log.log(Level.XXX) migration", () => {
     expect(result.code).toContain('log.warn("test")');
   });
 });
+
+// ─── FIX 1 v5.9.2: T10 — VoOut/VoIn dans variables locales et résiduels → DTO ───
+describe("T10: VoOut/VoIn type replacement in local variables and residuals", () => {
+  const transformer = new BusinessLogicTransformer();
+  const ctx: TransformContext = {
+    voInClass: "ActiverCarteVoIn",
+    voOutClass: "ActiverCarteVoOut",
+    requestDtoClass: "ActiverCarteRequestDTO",
+    responseDtoClass: "ActiverCarteResponseDTO",
+    sourceClassName: "ActiverCarteUC",
+  };
+
+  it("replaces VoOut type in local variable declarations", () => {
+    const body = `
+        ActiverCarteVoOut result = new ActiverCarteVoOut();
+        result.setCodeRetour("000");
+        return result;
+    `;
+    const result = transformer.transform(body, ctx);
+    expect(result.code).toContain("ActiverCarteResponseDTO");
+    expect(result.code).not.toContain("ActiverCarteVoOut");
+  });
+
+  it("replaces VoIn type in local variable declarations", () => {
+    const body = `
+        ActiverCarteVoIn copie = request;
+        String num = copie.getNumCarte();
+    `;
+    const result = transformer.transform(body, ctx);
+    expect(result.code).toContain("ActiverCarteRequestDTO copie");
+    expect(result.code).not.toContain("ActiverCarteVoIn");
+  });
+
+  it("replaces VoOut in method signatures and casts", () => {
+    const body = `
+        Object obj = getResult();
+        ActiverCarteVoOut typed = (ActiverCarteVoOut) obj;
+    `;
+    const result = transformer.transform(body, ctx);
+    expect(result.code).toContain("ActiverCarteResponseDTO typed");
+    expect(result.code).toContain("(ActiverCarteResponseDTO)");
+    expect(result.code).not.toContain("ActiverCarteVoOut");
+  });
+
+  it("replaces VoOut/VoIn in private method return types and parameters", () => {
+    const body = `
+        ActiverCarteVoOut processResult(ActiverCarteVoIn input) {
+            return new ActiverCarteVoOut();
+        }
+    `;
+    const result = transformer.transform(body, ctx);
+    expect(result.code).toContain("ActiverCarteResponseDTO processResult");
+    expect(result.code).toContain("ActiverCarteRequestDTO input");
+    expect(result.code).not.toContain("ActiverCarteVoOut");
+    expect(result.code).not.toContain("ActiverCarteVoIn");
+  });
+});
+
+// ─── FIX 5 v5.9.2: ImportResolver enriched types ───
+import { ImportResolver as IR } from "./ImportResolver";
+describe("ImportResolver enriched types", () => {
+  const resolver = new IR();
+
+  it("resolves RoundingMode import", () => {
+    const code = `package com.test;
+public class Calc {
+    BigDecimal amount = new BigDecimal("100").setScale(2, RoundingMode.HALF_UP);
+}`;
+    const imports = resolver.resolveImports(code, "com.test");
+    expect(imports.some((i: string) => i.includes("java.math.RoundingMode"))).toBe(true);
+    expect(imports.some((i: string) => i.includes("java.math.BigDecimal"))).toBe(true);
+  });
+
+  it("resolves DateTimeFormatter import", () => {
+    const code = `package com.test;
+public class DateUtil {
+    DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+}`;
+    const imports = resolver.resolveImports(code, "com.test");
+    expect(imports.some((i: string) => i.includes("java.time.format.DateTimeFormatter"))).toBe(true);
+  });
+
+  it("resolves JPA annotations (Entity, Table, Id)", () => {
+    const code = `package com.test;
+@Entity
+@Table(name = "comptes")
+public class Compte {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+}`;
+    const imports = resolver.resolveImports(code, "com.test");
+    expect(imports.some((i: string) => i.includes("jakarta.persistence.Entity"))).toBe(true);
+    expect(imports.some((i: string) => i.includes("jakarta.persistence.Table"))).toBe(true);
+    expect(imports.some((i: string) => i.includes("jakarta.persistence.Id"))).toBe(true);
+  });
+
+  it("resolves ObjectMapper and JsonProperty imports", () => {
+    const code = `package com.test;
+public class Mapper {
+    ObjectMapper mapper = new ObjectMapper();
+    @JsonProperty("name")
+    private String name;
+}`;
+    const imports = resolver.resolveImports(code, "com.test");
+    expect(imports.some((i: string) => i.includes("com.fasterxml.jackson.databind.ObjectMapper"))).toBe(true);
+    expect(imports.some((i: string) => i.includes("com.fasterxml.jackson.annotation.JsonProperty"))).toBe(true);
+  });
+});

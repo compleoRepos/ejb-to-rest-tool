@@ -11,6 +11,7 @@
  *   T7: Extraire les codes Magix
  *   T8: JDBC direct → TODO typé avec suggestion
  *   T9: Self-invocation this.xxx() → warning @Transactional
+ *   T10: VoOut/VoIn dans variables locales et résiduels → DTO
  *
  * Cas particuliers :
  *   A) Méthodes privées this.xxx() → extraites dans le Service
@@ -370,6 +371,34 @@ export class BusinessLogicTransformer {
       for (const [methodName] of resolvedCtx.privateMethodBodies) {
         extractedPrivateMethods.push(methodName);
       }
+    }
+
+    // ─── T10: Remplacer VoOut/VoIn dans les variables locales et partout ───
+    // Cas 1: Déclarations de variables locales (VoOut varName = ...)
+    if (resolvedCtx.voOutClass) {
+      result = result.replace(
+        new RegExp(`\\b${this.escapeRegex(resolvedCtx.voOutClass)}\\s+(\\w+)\\s*=`, 'g'),
+        `${resolvedCtx.responseDtoClass} $1 =`
+      );
+    }
+    if (resolvedCtx.voInClass) {
+      result = result.replace(
+        new RegExp(`\\b${this.escapeRegex(resolvedCtx.voInClass)}\\s+(\\w+)\\s*=`, 'g'),
+        `${resolvedCtx.requestDtoClass} $1 =`
+      );
+    }
+    // Cas 2: Tous les types VoOut/VoIn résiduels (return types, casts, etc.)
+    if (resolvedCtx.voOutClass) {
+      result = result.replace(
+        new RegExp(`\\b${this.escapeRegex(resolvedCtx.voOutClass)}\\b`, 'g'),
+        resolvedCtx.responseDtoClass
+      );
+    }
+    if (resolvedCtx.voInClass) {
+      result = result.replace(
+        new RegExp(`\\b${this.escapeRegex(resolvedCtx.voInClass)}\\b`, 'g'),
+        resolvedCtx.requestDtoClass
+      );
     }
 
     // ─── Nettoyage final ───

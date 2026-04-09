@@ -179,7 +179,19 @@ public class BusinessRuleException extends RuntimeException {
     path: f.path || f.className + ".java",
     content: f.content || "",
   })) ?? [];
-  const dsInfo: DataSourceInfo = detector.detect(sourceFiles);
+  let dsInfo: DataSourceInfo = detector.detect(sourceFiles);
+
+  // FIX v5.9.2: Fallback — si _rawFiles vide ou vendor UNKNOWN, détecter depuis le code migré des UseCases
+  if (dsInfo.vendor === "UNKNOWN" && ir.useCases.length > 0) {
+    const allMigratedCode = ir.useCases
+      .map((uc: UseCaseIR) => uc.rawSource ?? "")
+      .join("\n");
+    const dsInfoFromCode = detector.detect([{ path: "migrated-code.java", content: allMigratedCode }]);
+    if (dsInfoFromCode.vendor !== "UNKNOWN") {
+      dsInfo = dsInfoFromCode;
+    }
+  }
+
   const configGen = new ConfigGenerator();
 
   // 10a. Generate application.yml adapted to detected vendor

@@ -243,10 +243,16 @@ export function determineHttpConfig(uc: UseCaseIR, domain: string): HttpConfig {
     };
   }
 
-  // ── Patterns de VÉRIFICATION → POST (action, pas de ressource CRUD) ──
+  // ── Patterns de VÉRIFICATION / CALCUL → POST sans PathVariable (action pure) ──
   const verifyPatterns = [
     "verifier", "verify", "calculer", "calculate",
     "estimer", "estimate", "simuler", "simulate",
+    "controler", "control", "check",
+    "generer", "generate",
+    "notifier", "notify",
+    "envoyer", "send",
+    "imprimer", "print",
+    "exporter", "export",
   ];
   if (verifyPatterns.some(p => lower.startsWith(p) || lower.includes(p))) {
     // Extract action name for the path suffix
@@ -301,6 +307,19 @@ function extractActionFromName(lowerName: string): string {
     "estimate": "estimate",
     "simuler": "simuler",
     "simulate": "simulate",
+    "controler": "controler",
+    "control": "control",
+    "check": "check",
+    "generer": "generer",
+    "generate": "generate",
+    "notifier": "notifier",
+    "notify": "notify",
+    "envoyer": "envoyer",
+    "send": "send",
+    "imprimer": "imprimer",
+    "print": "print",
+    "exporter": "exporter",
+    "export": "export",
   };
   for (const [pattern, action] of Object.entries(actionMap)) {
     if (lowerName.startsWith(pattern)) return action;
