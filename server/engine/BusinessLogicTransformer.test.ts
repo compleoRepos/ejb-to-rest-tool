@@ -121,7 +121,7 @@ describe("BusinessLogicTransformer", () => {
     const body = extractExecuteBody(activerCarteSource)!;
     const result = transformer.transform(body, activerCtx);
     expect(result.body).not.toContain("new ActiverCarteVoOut()");
-    expect(result.body).toContain("Builder pattern");
+    expect(result.body).toContain("builder");
   });
 
   it("T4: replaces output.setXxx(val) with builder.xxx(val)", () => {

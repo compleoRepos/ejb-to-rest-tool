@@ -1,15 +1,16 @@
 /**
  * BusinessLogicTransformer — Transforme le corps de execute() EJB en code Spring Boot.
  *
- * 8 règles de transformation :
+ * 9 règles de transformation :
  *   T1: Cast VoIn → supprimer (request est déjà le bon type)
  *   T2: input.xxx → request.xxx
  *   T3: new VoOut() → ResponseDTO.builder()
  *   T4: output.setXxx(val) → builder.xxx(val)
  *   T5: return output → return builder.build()
  *   T6: javax. → jakarta.
- *   T7: Exceptions préservées (FwkRollbackException → BusinessRuleException)
- *   T8: Imports EJB obsolètes supprimés
+ *   T7: Extraire les codes Magix
+ *   T8: JDBC direct → TODO typé avec suggestion
+ *   T9: Self-invocation this.xxx() → warning @Transactional
  *
  * Cas particuliers :
  *   A) Méthodes privées this.xxx() → extraites dans le Service
@@ -18,7 +19,10 @@
  *   D) Auto-appel UseCases → injection Service correspondant
  *
  * @since v5.3.0
+ * @updated v5.3.1 — enrichissement AST (TransformTodo, magixCodes, migratedLines/manualLines)
  */
+
+import type { SymbolTable } from "./ast/SymbolTable";
 
 export interface TransformContext {
   voInClass: string;
@@ -26,25 +30,78 @@ export interface TransformContext {
   requestDtoClass: string;
   responseDtoClass: string;
   sourceClassName: string;
+  methodName?: string;
   privateMethodBodies?: Map<string, string>;
 }
 
+export interface TransformTodo {
+  type: "JDBC_DIRECT" | "EXTERNAL_API" | "COMPLEX_LOGIC" | "UNKNOWN_TYPE";
+  line: string;
+  suggestion: string;
+  priority: "HIGH" | "MEDIUM" | "LOW";
+}
+
 export interface TransformResult {
+  /** @deprecated Use `code` instead — kept for backward compatibility */
   body: string;
+  /** Code Java migré (identique à body) */
+  code: string;
   extractedConstants: Array<{ name: string; type: string; value: string }>;
   extractedPrivateMethods: string[];
   warnings: string[];
+  /** @deprecated Use `migratedLines` instead */
   linesTransformed: number;
+  /** TODOs résiduels légitimes */
+  todos: TransformTodo[];
+  /** Codes Magix identifiés */
+  magixCodes: string[];
+  /** Lignes migrées avec succès */
+  migratedLines: number;
+  /** Lignes nécessitant intervention manuelle */
+  manualLines: number;
 }
 
 export class BusinessLogicTransformer {
 
-  transform(body: string, ctx: TransformContext): TransformResult {
+  /**
+   * Transforme le corps de execute() en code Spring Boot.
+   * Supporte deux signatures :
+   *   - transform(body, ctx)                    — mode legacy (regex seul)
+   *   - transform(body, symbolTableOrCtx, ctx)  — mode enrichi (AST + SymbolTable)
+   */
+  transform(body: string, ctxOrSymbols: TransformContext | SymbolTable, ctx?: TransformContext): TransformResult {
+    // Détecter le mode d'appel
+    let resolvedCtx: TransformContext;
+    let symbolTable: SymbolTable | null = null;
+
+    if (ctx) {
+      // Mode enrichi : transform(body, symbolTable, ctx)
+      symbolTable = ctxOrSymbols as SymbolTable;
+      resolvedCtx = ctx;
+    } else {
+      // Mode legacy : transform(body, ctx)
+      resolvedCtx = ctxOrSymbols as TransformContext;
+    }
+
     const warnings: string[] = [];
     const extractedConstants: Array<{ name: string; type: string; value: string }> = [];
     const extractedPrivateMethods: string[] = [];
+    const todos: TransformTodo[] = [];
+    const magixCodes: string[] = [];
+    let migratedLines = 0;
+    let manualLines = 0;
     let result = body;
-    let linesTransformed = 0;
+
+    // Résolution des noms de variables via SymbolTable ou regex
+    let inputVar = "input";
+    let outputVar = "output";
+
+    if (symbolTable) {
+      const inputAlias = symbolTable.getInputAlias();
+      const outputDto = symbolTable.getOutputVar();
+      if (inputAlias) inputVar = inputAlias.name;
+      if (outputDto) outputVar = outputDto.name;
+    }
 
     // ─── T8: Supprimer les imports EJB obsolètes ───
     const importsBefore = (result.match(/import\s+(javax\.ejb|ma\.eai\.midw\.usecases|ma\.eai\.midw\.annotations)\.[^;]+;\n?/g) || []).length;
@@ -52,48 +109,47 @@ export class BusinessLogicTransformer {
       /import\s+(javax\.ejb|ma\.eai\.midw\.usecases|ma\.eai\.midw\.annotations)\.[^;]+;\n?/g,
       ""
     );
-    linesTransformed += importsBefore;
+    migratedLines += importsBefore;
 
     // ─── T1: Cast du VoIn → supprimer ───
-    // Pattern: VoInClass varName = (VoInClass) voIn;
     const castPattern = new RegExp(
-      `${this.escapeRegex(ctx.voInClass)}\\s+(\\w+)\\s*=\\s*\\(${this.escapeRegex(ctx.voInClass)}\\)\\s*voIn\\s*;`,
+      `${this.escapeRegex(resolvedCtx.voInClass)}\\s+(\\w+)\\s*=\\s*\\(${this.escapeRegex(resolvedCtx.voInClass)}\\)\\s*voIn\\s*;`,
       "g"
     );
     const castMatch = castPattern.exec(result);
-    const inputVar = castMatch ? castMatch[1] : "input";
+    if (castMatch) inputVar = castMatch[1];
     result = result.replace(
       new RegExp(
-        `${this.escapeRegex(ctx.voInClass)}\\s+\\w+\\s*=\\s*\\(${this.escapeRegex(ctx.voInClass)}\\)\\s*voIn\\s*;`,
+        `${this.escapeRegex(resolvedCtx.voInClass)}\\s+\\w+\\s*=\\s*\\(${this.escapeRegex(resolvedCtx.voInClass)}\\)\\s*voIn\\s*;`,
         "g"
       ),
-      `// Paramètre migré : request (${ctx.requestDtoClass})`
+      `// Paramètre migré : request (${resolvedCtx.requestDtoClass})`
     );
-    linesTransformed++;
+    migratedLines++;
 
     // ─── T2: input.xxx → request.xxx ───
     if (inputVar && inputVar !== "request") {
       const inputRefPattern = new RegExp(`\\b${this.escapeRegex(inputVar)}\\.`, "g");
       const inputRefCount = (result.match(inputRefPattern) || []).length;
       result = result.replace(inputRefPattern, "request.");
-      linesTransformed += inputRefCount;
+      migratedLines += inputRefCount;
     }
 
     // ─── T3: new VoOut() → builder pattern ───
     const voOutPattern = new RegExp(
-      `${this.escapeRegex(ctx.voOutClass)}\\s+(\\w+)\\s*=\\s*new\\s+${this.escapeRegex(ctx.voOutClass)}\\(\\)\\s*;`,
+      `${this.escapeRegex(resolvedCtx.voOutClass)}\\s+(\\w+)\\s*=\\s*new\\s+${this.escapeRegex(resolvedCtx.voOutClass)}\\(\\)\\s*;`,
       "g"
     );
     const voOutMatch = voOutPattern.exec(result);
-    const outputVar = voOutMatch ? voOutMatch[1] : "output";
+    if (voOutMatch) outputVar = voOutMatch[1];
     result = result.replace(
       new RegExp(
-        `${this.escapeRegex(ctx.voOutClass)}\\s+\\w+\\s*=\\s*new\\s+${this.escapeRegex(ctx.voOutClass)}\\(\\)\\s*;`,
+        `${this.escapeRegex(resolvedCtx.voOutClass)}\\s+\\w+\\s*=\\s*new\\s+${this.escapeRegex(resolvedCtx.voOutClass)}\\(\\)\\s*;`,
         "g"
       ),
-      `// Builder pattern — ${ctx.responseDtoClass}`
+      `${resolvedCtx.responseDtoClass}.${resolvedCtx.responseDtoClass}Builder builder = ${resolvedCtx.responseDtoClass}.builder();`
     );
-    linesTransformed++;
+    migratedLines++;
 
     // ─── T4: output.setXxx(val) → builder.xxx(val) ───
     const setterPattern = new RegExp(
@@ -102,30 +158,68 @@ export class BusinessLogicTransformer {
     );
     result = result.replace(setterPattern, (match, setter) => {
       const field = setter.charAt(0).toLowerCase() + setter.slice(1);
-      linesTransformed++;
+      migratedLines++;
       return `builder.${field}(`;
     });
 
     // ─── T5: return output → return builder.build() ───
     const returnPattern = new RegExp(`return\\s+${this.escapeRegex(outputVar)}\\s*;`, "g");
     result = result.replace(returnPattern, "return builder.build();");
-    linesTransformed++;
+    migratedLines++;
 
     // ─── T6: javax. → jakarta. ───
     const javaxCount = (result.match(/javax\./g) || []).length;
     result = result.replace(/javax\./g, "jakarta.");
-    linesTransformed += javaxCount;
+    migratedLines += javaxCount;
 
-    // ─── T7: FwkRollbackException → BusinessRuleException ───
+    // ─── T7: Extraire les codes Magix ───
+    const magixPattern = /"([A-Z]{2,6}[0-9]{1,3})"/g;
+    let magixMatch;
+    while ((magixMatch = magixPattern.exec(result)) !== null) {
+      magixCodes.push(magixMatch[1]);
+    }
+
+    // ─── T7 (legacy): FwkRollbackException → BusinessRuleException ───
     result = result.replace(/FwkRollbackException/g, "BusinessRuleException");
     result = result.replace(/new EaiLog\([^)]+\)/g, "// Logger migré vers @Slf4j");
 
-    // ─── Cas B: JDBC legacy detection ───
-    if (result.includes("getConnection()") || result.includes("DataSource") || result.includes("PreparedStatement")) {
-      warnings.push("MIGRATION: JDBC direct détecté — recommander Spring Data JPA (règle JDBC-001)");
-      result = result.replace(
-        /(.*(?:getConnection|PreparedStatement|ResultSet).*)/g,
-        "        // MIGRATION: JDBC direct détecté — recommander Spring Data JPA\n$1"
+    // ─── T8: JDBC direct → TODO typé ───
+    const jdbcLines = result.split("\n");
+    const processedLines: string[] = [];
+    for (const line of jdbcLines) {
+      if (
+        line.includes("getConnection()") ||
+        line.includes("PreparedStatement") ||
+        line.includes("executeQuery") ||
+        line.includes("executeUpdate") ||
+        line.includes("DataSource")
+      ) {
+        todos.push({
+          type: "JDBC_DIRECT",
+          line: line.trim(),
+          suggestion: "Migrer vers Spring Data JPA Repository",
+          priority: "HIGH",
+        });
+        processedLines.push(`        // TODO [JDBC_DIRECT]: ${line.trim()}`);
+        processedLines.push(`        // → Migrer vers @Repository Spring Data JPA`);
+        manualLines++;
+      } else {
+        processedLines.push(line);
+      }
+    }
+    result = processedLines.join("\n");
+
+    // ─── T9: Self-invocation → warning ───
+    const selfInvocationPattern = /this\.(\w+)\s*\(/g;
+    let selfMatch;
+    while ((selfMatch = selfInvocationPattern.exec(result)) !== null) {
+      // Skip if it's a comment line
+      const lineStart = result.lastIndexOf("\n", selfMatch.index) + 1;
+      const lineText = result.substring(lineStart, selfMatch.index).trim();
+      if (lineText.startsWith("//")) continue;
+
+      warnings.push(
+        `Self-invocation détectée : this.${selfMatch[1]}() — @Transactional ignoré. Extraire dans un @Service séparé.`
       );
     }
 
@@ -145,28 +239,32 @@ export class BusinessLogicTransformer {
     );
 
     // ─── Cas A: Extraction méthodes privées this.xxx() ───
-    if (ctx.privateMethodBodies) {
-      for (const [methodName, methodBody] of ctx.privateMethodBodies) {
+    if (resolvedCtx.privateMethodBodies) {
+      for (const [methodName] of resolvedCtx.privateMethodBodies) {
         extractedPrivateMethods.push(methodName);
       }
     }
 
     // ─── Nettoyage final ───
-    // Remove EaiLog references (migrated to @Slf4j)
     result = result.replace(/\blog\.info\(/g, "log.info(");
     result = result.replace(/\blog\.error\(/g, "log.error(");
     result = result.replace(/\blog\.debug\(/g, "log.debug(");
     result = result.replace(/\blog\.warn\(/g, "log.warn(");
-
-    // Clean up double blank lines
     result = result.replace(/\n{3,}/g, "\n\n");
 
+    const trimmed = result.trim();
+
     return {
-      body: result.trim(),
+      body: trimmed,
+      code: trimmed,
       extractedConstants,
       extractedPrivateMethods,
       warnings,
-      linesTransformed,
+      linesTransformed: migratedLines,
+      todos,
+      magixCodes: [...new Set(magixCodes)],
+      migratedLines,
+      manualLines,
     };
   }
 

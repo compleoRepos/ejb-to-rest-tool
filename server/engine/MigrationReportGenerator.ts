@@ -34,6 +34,18 @@ export interface MigrationReportInput {
   userChoices?: MigrationChoice[];
   securityIssues?: SecurityIssue[];
   domain?: string;
+  /** v5.3.1: Business logic migration metrics */
+  businessLogicMigration?: BusinessLogicMigrationEntry[];
+}
+
+/** v5.3.1: Per-UseCase migration metrics for the report */
+export interface BusinessLogicMigrationEntry {
+  sourceClassName: string;
+  migratedLines: number;
+  manualLines: number;
+  magixCodes: string[];
+  todosCount: number;
+  warnings: string[];
 }
 
 export interface MigrationUseCase {
@@ -118,6 +130,11 @@ export class MigrationReportGenerator {
 
     // ── Section 9 : Prochaines étapes ───────────────────────────
     sections.push(this.generateNextSteps(input));
+
+    // ── Section 10 : Logique métier migrée (v5.3.1) ────────────
+    if (input.businessLogicMigration && input.businessLogicMigration.length > 0) {
+      sections.push(this.generateBusinessLogicSection(input));
+    }
 
     return sections.join("\n\n---\n\n");
   }
@@ -446,5 +463,49 @@ Configurer le monitoring (Actuator + Prometheus).
 ---
 
 *Rapport généré automatiquement par Compleo v${input.engineVersion}*`;
+  }
+
+  // ── Section 10 ────────────────────────────────────────────────
+
+  private generateBusinessLogicSection(input: MigrationReportInput): string {
+    const entries = input.businessLogicMigration || [];
+    const totalMigrated = entries.reduce((s, e) => s + e.migratedLines, 0);
+    const totalManual = entries.reduce((s, e) => s + e.manualLines, 0);
+    const totalTodos = entries.reduce((s, e) => s + e.todosCount, 0);
+    const totalLines = totalMigrated + totalManual;
+    const migrationRate = totalLines > 0 ? Math.round((totalMigrated / totalLines) * 100) : 0;
+    const allMagix = [...new Set(entries.flatMap(e => e.magixCodes))];
+
+    let table = "| UseCase source | Lignes migrées | Lignes manuelles | Taux | Codes Magix | TODOs |\n";
+    table += "|----------------|----------------|------------------|------|-------------|-------|\n";
+
+    for (const entry of entries) {
+      const entryTotal = entry.migratedLines + entry.manualLines;
+      const entryRate = entryTotal > 0 ? Math.round((entry.migratedLines / entryTotal) * 100) : 0;
+      table += `| ${entry.sourceClassName} | ${entry.migratedLines} | ${entry.manualLines} | ${entryRate}% | ${entry.magixCodes.join(", ") || "—"} | ${entry.todosCount} |\n`;
+    }
+
+    let content = `## 10. Logique métier migrée (v5.3.1)\n\n`;
+    content += `Le moteur AST a analysé ${entries.length} UseCase(s) et extrait la logique métier de la méthode \`execute()\`.\n\n`;
+    content += `| Métrique | Valeur |\n`;
+    content += `|----------|--------|\n`;
+    content += `| UseCases avec logique migrée | ${entries.length} |\n`;
+    content += `| Lignes totales migrées | ${totalMigrated} |\n`;
+    content += `| Lignes nécessitant intervention manuelle | ${totalManual} |\n`;
+    content += `| **Taux de migration automatique** | **${migrationRate}%** |\n`;
+    content += `| Codes Magix identifiés | ${allMagix.length > 0 ? allMagix.join(", ") : "Aucun"} |\n`;
+    content += `| TODOs générés | ${totalTodos} |\n`;
+    content += `\n### Détail par UseCase\n\n`;
+    content += table;
+
+    if (allMagix.length > 0) {
+      content += `\n### Codes Magix détectés\n\n`;
+      content += `Les codes de transaction Magix suivants ont été identifiés dans la logique métier :\n\n`;
+      for (const code of allMagix) {
+        content += `- \`${code}\` — voir le stub MagixService pour l'implémentation\n`;
+      }
+    }
+
+    return content;
   }
 }

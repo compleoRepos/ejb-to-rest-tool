@@ -31,8 +31,17 @@ import {
   BusinessLogicTransformer,
   extractExecuteBody,
   extractConstants,
+  extractPrivateMethods,
   type TransformContext,
 } from "./engine/BusinessLogicTransformer";
+import { JavaASTParser } from "./engine/ast/JavaASTParser";
+import { SymbolTable } from "./engine/ast/SymbolTable";
+import { ServiceMethodGenerator } from "./engine/ServiceMethodGenerator";
+
+// Singleton instances for the AST pipeline
+const astParser = new JavaASTParser();
+const astSymbolTable = new SymbolTable();
+const serviceMethodGenerator = new ServiceMethodGenerator("");
 
 export interface GeneratedFile {
   path: string;
@@ -885,7 +894,85 @@ function generateServiceMethodBody(
   uc: UseCaseIR, reqDto: DtoIR | undefined, resDto: DtoIR | undefined,
   reqType: string, resType: string
 ): string {
-  // ─── v5.3: Try to extract and transform real execute() body ───
+  // ─── v5.3.1: AST pipeline — parse, build symbol table, transform ───
+  let astUsed = false;
+  try {
+    if (uc.rawSource && uc.rawSource.length > 50) {
+      const classAST = astParser.parse(uc.rawSource);
+      const executeMethod = classAST.methods.find(m =>
+        m.name === "execute" && !m.isPrivate
+      );
+
+      if (executeMethod && executeMethod.body && executeMethod.body.length > 15) {
+        // Build symbol table from AST
+        astSymbolTable.buildFromMethod(executeMethod, classAST, /VoIn$/, /VoOut$/);
+
+        // Transform with enriched mode (3-arg: body, symbolTable, ctx)
+        const transformer = new BusinessLogicTransformer();
+        const ctx: TransformContext = {
+          voInClass: uc.voInType,
+          voOutClass: uc.voOutType,
+          requestDtoClass: reqType,
+          responseDtoClass: resType,
+          sourceClassName: uc.className,
+          methodName: toMethodName(uc.className),
+        };
+        const result = transformer.transform(executeMethod.body, astSymbolTable, ctx);
+
+        // Extract constants from the source and prepend them
+        const constants = extractConstants(uc.rawSource);
+        const constantLines = constants.map(c =>
+          `        // Migrated constant from ${uc.className}\n        final ${c.type} ${c.name} = ${c.value};`
+        );
+
+        const lines: string[] = [];
+
+        // Add constants if any
+        if (constantLines.length > 0) {
+          lines.push(...constantLines);
+          lines.push("");
+        }
+
+        // Add the builder initialization for response DTO (only if not already in migrated code)
+        if (resDto && resType !== "Void" && !result.code.includes("builder")) {
+          lines.push(`        var builder = ${resType}.builder();`);
+        }
+
+        // Add the transformed body (indented)
+        const bodyLines = result.code.split("\n").map(line => {
+          if (line.trim() === "") return "";
+          if (line.startsWith("        ")) return line;
+          return "        " + line;
+        });
+        lines.push(...bodyLines);
+
+        // Add TODOs as comments
+        for (const todo of result.todos) {
+          lines.push(`        // TODO [${todo.type}]: ${todo.suggestion} (priority: ${todo.priority})`);
+        }
+
+        // Add warnings as comments
+        for (const warning of result.warnings) {
+          lines.push(`        // WARNING: ${warning}`);
+        }
+
+        // Add Magix codes comment if any
+        if (result.magixCodes.length > 0) {
+          lines.push(`        // Codes Magix identifiés : ${result.magixCodes.join(", ")}`);
+        }
+
+        // Add migration stats comment
+        lines.push(`        // Migrated from: ${uc.className}.execute() — ${result.migratedLines} lignes migrées, ${result.manualLines} manuelles, ${result.todos.length} TODOs`);
+
+        astUsed = true;
+        return lines.join("\n");
+      }
+    }
+  } catch {
+    // AST pipeline failed — fall through to legacy extraction
+  }
+
+  // ─── v5.3 legacy fallback: regex-based extraction ───
   const executeBody = extractExecuteBody(uc.rawSource);
 
   if (executeBody) {
@@ -903,8 +990,7 @@ function generateServiceMethodBody(
     // Extract constants from the source and prepend them
     const constants = extractConstants(uc.rawSource);
     const constantLines = constants.map(c =>
-      `        // Migrated constant from ${uc.className}
-        final ${c.type} ${c.name} = ${c.value};`
+      `        // Migrated constant from ${uc.className}\n        final ${c.type} ${c.name} = ${c.value};`
     );
 
     const lines: string[] = [];
@@ -922,7 +1008,6 @@ function generateServiceMethodBody(
 
     // Add the transformed body (indented)
     const bodyLines = result.body.split("\n").map(line => {
-      // Already indented lines stay as-is, others get 8 spaces
       if (line.trim() === "") return "";
       if (line.startsWith("        ")) return line;
       return "        " + line;
