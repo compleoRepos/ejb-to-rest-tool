@@ -765,8 +765,8 @@ export function ArchitectureViewer({
 
   return (
     <div className="flex flex-col h-full gap-3">
-      {/* Header Controls */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      {/* Header Controls — only shown for interactive sub-tab */}
+      {activeTab === "interactive" && <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-1.5">
           {/* Back button for drill-down */}
           {(selectedDomain || viewLevel === "detail") && (
@@ -889,10 +889,10 @@ export function ArchitectureViewer({
             </SelectContent>
           </Select>
         </div>
-      </div>
+      </div>}
 
       {/* Help message */}
-      {helpMessage && viewLevel !== "detail" && (
+      {activeTab === "interactive" && helpMessage && viewLevel !== "detail" && (
         <div className="text-xs text-muted-foreground px-1">
           {helpMessage}
         </div>
@@ -910,7 +910,9 @@ export function ArchitectureViewer({
           <TabsTrigger value="overview">Vue d'ensemble</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="interactive" className="flex-1 flex gap-3 mt-2 min-h-0">
+        <TabsContent value="interactive" className="flex-1 flex flex-col gap-3 mt-2 min-h-0">
+          {/* Graph row: canvas + optional side panel */}
+          <div className="flex gap-3 flex-1 min-h-0">
           {/* Cytoscape Canvas */}
           <div className="flex-1 relative min-h-0">
             {viewLevel !== "detail" ? (
@@ -1153,6 +1155,48 @@ export function ArchitectureViewer({
               </CardContent>
             </Card>
           )}
+          </div>{/* end graph row */}
+
+          {/* Microservices Summary Cards — below the graph */}
+          {microservices.length > 0 && viewLevel !== "detail" && (
+            <div className="w-full">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {microservices.slice(0, 8).map((svc) => (
+                  <Card key={svc.id} className="p-3 cursor-pointer hover:border-primary/50 transition-colors"
+                    onClick={() => {
+                      setViewLevel("microservices");
+                      setSelectedDomain(null);
+                      if (cyRef.current) {
+                        const msNode = cyRef.current.$(`#ms-${svc.id}`);
+                        if (msNode.length > 0) {
+                          cyRef.current.fit(msNode, 40);
+                          msNode.select();
+                        }
+                      }
+                    }}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <div
+                        className="w-3 h-3 rounded-full"
+                        style={{
+                          backgroundColor:
+                            DOMAIN_COLORS[svc.boundedContext.split("+")[0]] || DOMAIN_COLORS.UNKNOWN,
+                        }}
+                      />
+                      <span className="text-sm font-medium truncate">{svc.name}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground space-y-0.5">
+                      <div>{svc.classCount} classes | {svc.endpoints} endpoints</div>
+                      <div>
+                        Cohésion: {(svc.cohesion * 100).toFixed(0)}% | Couplage:{" "}
+                        {(svc.coupling * 100).toFixed(0)}%
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="dependency" className="flex-1 mt-2">
@@ -1206,46 +1250,6 @@ export function ArchitectureViewer({
           )}
         </TabsContent>
       </Tabs>
-
-      {/* Microservices Summary Cards */}
-      {microservices.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {microservices.slice(0, 8).map((svc) => (
-            <Card key={svc.id} className="p-3 cursor-pointer hover:border-primary/50 transition-colors"
-              onClick={() => {
-                setViewLevel("microservices");
-                setSelectedDomain(null);
-                // Focus on this microservice in the graph
-                if (cyRef.current) {
-                  const msNode = cyRef.current.$(`#ms-${svc.id}`);
-                  if (msNode.length > 0) {
-                    cyRef.current.fit(msNode, 40);
-                    msNode.select();
-                  }
-                }
-              }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <div
-                  className="w-3 h-3 rounded-full"
-                  style={{
-                    backgroundColor:
-                      DOMAIN_COLORS[svc.boundedContext.split("+")[0]] || DOMAIN_COLORS.UNKNOWN,
-                  }}
-                />
-                <span className="text-sm font-medium truncate">{svc.name}</span>
-              </div>
-              <div className="text-xs text-muted-foreground space-y-0.5">
-                <div>{svc.classCount} classes | {svc.endpoints} endpoints</div>
-                <div>
-                  Cohésion: {(svc.cohesion * 100).toFixed(0)}% | Couplage:{" "}
-                  {(svc.coupling * 100).toFixed(0)}%
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
