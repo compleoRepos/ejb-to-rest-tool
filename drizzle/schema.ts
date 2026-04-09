@@ -204,7 +204,7 @@ export const compleoSessions = mysqlTable("compleo_sessions", {
   id: varchar("id", { length: 36 }).primaryKey(),
   projectName: varchar("project_name", { length: 255 }).notNull(),
   status: mysqlEnum("status", [
-    "uploaded", "analyzed", "waiting_choices", "generated", "error"
+    "uploaded", "analyzed", "waiting_choices", "generated", "error", "missing_deps"
   ]).default("uploaded").notNull(),
 
   // Pipeline data (JSON blobs)
@@ -227,6 +227,9 @@ export const compleoSessions = mysqlTable("compleo_sessions", {
 
   // Debug events
   debugEventsData: json("debug_events_data").$type<any[]>(),
+
+  // Missing dependencies (v5.6.1)
+  missingDepsData: json("missing_deps_data"),
 
   // Error tracking
   errorMessage: text("error_message"),

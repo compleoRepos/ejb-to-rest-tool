@@ -93,7 +93,7 @@ export default function WorkspacePage() {
       if (res.ok) {
         const sessions = await res.json();
         setAvailableSessions(sessions.filter((s: any) =>
-          s.status === "analyzed" || s.status === "waiting_choices" || s.status === "generated"
+          s.status === "analyzed" || s.status === "waiting_choices" || s.status === "generated" || s.status === "missing_deps"
         ));
       }
     } catch (err) {

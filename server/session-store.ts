@@ -61,6 +61,8 @@ export class SessionStore {
           multiTechGeneration: row.multiTechGenerationData as GeneratedFile[] | undefined,
           maturityScore: row.maturityScoreData as MaturityScore | undefined,
           technologiesDetected: row.technologiesDetected as TechnologyType[] | undefined,
+          // Missing dependencies (v5.6.1)
+          missingDeps: (row as any).missingDepsData as any[] | undefined,
         };
         this.cache.set(row.id, session);
       }
@@ -92,6 +94,7 @@ export class SessionStore {
         maturityScoreData: session.maturityScore as any ?? null,
         technologiesDetected: session.technologiesDetected as any ?? null,
         debugEventsData: session.debugEvents as any ?? null,
+        missingDepsData: (session as any).missingDeps as any ?? null,
         errorMessage: session.error ?? null,
       };
 

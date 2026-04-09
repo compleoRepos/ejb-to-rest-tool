@@ -401,13 +401,21 @@ export class MissingModuleAnalyzer {
     inferredClasses: InferredClass[]
   ): "BLOCKING" | "HIGH" | "MEDIUM" | "LOW" {
     const callerCount = callers.length;
+
+    // Check for blocking evidence in both callSiteCode AND surroundingCode
     const hasBlockingEvidence = callers.some(c =>
       c.callSiteCode.includes("throw") ||
       c.callSiteCode.includes("return") ||
-      c.surroundingCode.includes("@Transactional")
+      c.surroundingCode.includes("@Transactional") ||
+      c.surroundingCode.includes("throw") ||
+      c.surroundingCode.includes("return")
     );
 
-    if (hasBlockingEvidence && callerCount >= 2) return "BLOCKING";
+    // Multiple inferred classes = more critical dependency
+    const multiClass = inferredClasses.length >= 2;
+
+    if (hasBlockingEvidence && callerCount >= 1) return "BLOCKING";
+    if (multiClass && callerCount >= 1) return "HIGH";
     if (callerCount >= 3) return "HIGH";
     if (callerCount >= 2) return "MEDIUM";
     return "LOW";

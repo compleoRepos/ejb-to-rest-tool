@@ -395,6 +395,10 @@ router.post("/analyze-multitech", async (req: Request, res: Response) => {
           evidences: c.evidences,
         })),
         generatedContract: {
+          interfaceCode: d.generatedContract.interfaceCode ?? null,
+          stubCode: d.generatedContract.stubCode ?? null,
+          dtoCode: d.generatedContract.dtoCode ?? [],
+          documentationMd: d.generatedContract.documentationMd ?? null,
           hasInterface: !!d.generatedContract.interfaceCode,
           hasStub: !!d.generatedContract.stubCode,
           hasDocs: !!d.generatedContract.documentationMd,
@@ -471,7 +475,7 @@ router.post("/acknowledge-missing-deps", async (req: Request, res: Response) => 
 
     return res.json({
       sessionId,
-      status: "ANALYZED",
+      status: session.status,
       stubsGenerated: action === "generate_stubs",
       missingDepsCount: session.missingDeps?.length ?? 0,
     });
@@ -1348,6 +1352,34 @@ function normalizeZipPath(entryName: string): string {
   }
   return entryName;
 }
+
+// ─── Test injection endpoint (for validation scripts) ─────────────────────
+router.post("/test-inject-session", async (req: Request, res: Response) => {
+  try {
+    const { id, projectName, files, ir, status } = req.body;
+    if (!id || !projectName) {
+      return res.status(400).json({ error: "id and projectName are required" });
+    }
+
+    const session: CompleoSession = {
+      id,
+      projectName,
+      uploadedAt: new Date(),
+      files: files ?? [],
+      ir: ir ?? undefined,
+      status: status ?? "analyzed",
+      debugEvents: [],
+      sseClients: [],
+      ambiguities: [],
+    };
+
+    sessions.set(id, session);
+    return res.json({ injected: true, id, projectName });
+  } catch (err: any) {
+    console.error("[Test] Inject session error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 export function registerCompleoRoutes(app: import("express").Express) {
   app.use("/api/compleo", router);
