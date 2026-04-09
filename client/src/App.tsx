@@ -57,9 +57,9 @@ function App() {
             theme="dark"
             toastOptions={{
               style: {
-                background: "oklch(0.16 0.01 250)",
-                border: "1px solid oklch(0.25 0.01 250)",
-                color: "oklch(0.92 0.01 250)",
+                background: "oklch(0.20 0.01 250)",
+                border: "1px solid oklch(0.30 0.01 250)",
+                color: "oklch(0.93 0.01 250)",
               },
             }}
           />
