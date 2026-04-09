@@ -220,11 +220,19 @@ router.post("/analyze-multitech", async (req: Request, res: Response) => {
     // Also include JSP/XML files from the upload for detection
     const allFiles = [...session.files];
 
-    // Detect base package from pom.xml
+    // Detect base package from pom.xml — align with Spring generator (groupId + artifactId)
     let basePackage = "com.app";
     if (session.pomXml) {
       const groupMatch = session.pomXml.match(/<groupId>([^<]+)<\/groupId>/);
-      if (groupMatch) basePackage = groupMatch[1];
+      const artifactMatch = session.pomXml.match(/<artifactId>([^<]+)<\/artifactId>/);
+      if (groupMatch) {
+        basePackage = groupMatch[1];
+        // Append artifactId (normalized) to match Spring generator's basePackage calculation
+        if (artifactMatch) {
+          const normalizedArtifact = artifactMatch[1].replace(/-/g, "");
+          basePackage = `${groupMatch[1]}.${normalizedArtifact}`;
+        }
+      }
     }
 
     // Run the multi-tech pipeline

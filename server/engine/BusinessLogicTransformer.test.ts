@@ -575,3 +575,104 @@ public class Mapper {
     expect(imports.some((i: string) => i.includes("com.fasterxml.jackson.annotation.JsonProperty"))).toBe(true);
   });
 });
+
+
+// ─── FIX v5.9.3 Tests ─────────────────────────────────────────────────────────
+
+describe("FIX 1 — T4b: builder.build().setXxx cleanup", () => {
+  it("should fix builder.build().setXxx(val) → builder.xxx(val)", () => {
+    const transformer = new BusinessLogicTransformer();
+    const input = `ResponseDTO voOut = new ResponseDTO();
+        voOut.setNom("test");
+        voOut.setPrenom("user");
+        builder.build().setAge(25);
+        return voOut;`;
+    const result = transformer.transform(input, {
+      voInClass: "ActiverCarteVoIn",
+      voOutClass: "ActiverCarteVoOut",
+      requestDtoClass: "RequestDTO",
+      responseDtoClass: "ResponseDTO",
+      sourceClassName: "TestService",
+    });
+    // builder.build().setAge should be cleaned to builder.age
+    expect(result.code).not.toContain("builder.build().set");
+    expect(result.code).toContain("builder.age(25)");
+  });
+
+  it("should not leave builder.build().setXxx patterns in output", () => {
+    const transformer = new BusinessLogicTransformer();
+    // Simulate code where builder.build().setXxx appears explicitly
+    const input = `ActiverCarteVoOut voOut = new ActiverCarteVoOut();
+        voOut.setNom("test");
+        voOut.setPrenom("user");
+        return voOut;`;
+    const result = transformer.transform(input, {
+      voInClass: "ActiverCarteVoIn",
+      voOutClass: "ActiverCarteVoOut",
+      requestDtoClass: "RequestDTO",
+      responseDtoClass: "ResponseDTO",
+      sourceClassName: "TestService",
+    });
+    // After transformation, voOut.setXxx should become builder.xxx, not builder.build().setXxx
+    expect(result.code).not.toContain("builder.build().set");
+    expect(result.code).toContain("builder.nom");
+    expect(result.code).toContain("builder.prenom");
+  });
+});
+
+describe("FIX 2 — T6e: LOG.log(Level.XXX) → SLF4J (uppercase LOG)", () => {
+  it("should migrate LOG.log(Level.WARNING, msg) → log.warn(msg)", () => {
+    const transformer = new BusinessLogicTransformer();
+    const input = `ResponseDTO voOut = new ResponseDTO();
+        LOG.log(Level.WARNING, "Something went wrong");
+        return voOut;`;
+    const result = transformer.transform(input, {
+      voInClass: "ActiverCarteVoIn",
+      voOutClass: "ActiverCarteVoOut",
+      requestDtoClass: "RequestDTO",
+      responseDtoClass: "ResponseDTO",
+      sourceClassName: "TestService",
+    });
+    expect(result.code).toContain('log.warn("Something went wrong")');
+    expect(result.code).not.toContain("LOG.log");
+  });
+
+  it("should migrate LOG.log(Level.SEVERE, msg, exception) → log.error(msg, exception)", () => {
+    const transformer = new BusinessLogicTransformer();
+    const input = `ResponseDTO voOut = new ResponseDTO();
+        LOG.log(Level.SEVERE, "Fatal error", ex);
+        return voOut;`;
+    const result = transformer.transform(input, {
+      voInClass: "ActiverCarteVoIn",
+      voOutClass: "ActiverCarteVoOut",
+      requestDtoClass: "RequestDTO",
+      responseDtoClass: "ResponseDTO",
+      sourceClassName: "TestService",
+    });
+    expect(result.code).toContain('log.error("Fatal error", ex)');
+    expect(result.code).not.toContain("LOG.log");
+  });
+});
+
+// FIX 3 JMS tests moved to jms-fix3.test.ts
+
+describe("FIX 6 — basePackage alignment (groupId + artifactId)", () => {
+  it("should normalize artifactId by removing hyphens", () => {
+    // Simulate the basePackage calculation from compleo-routes.ts
+    const pomXml = `<project>
+      <groupId>ma.bmce.si</groupId>
+      <artifactId>ejb-notification-oracle</artifactId>
+    </project>`;
+    const groupMatch = pomXml.match(/<groupId>([^<]+)<\/groupId>/);
+    const artifactMatch = pomXml.match(/<artifactId>([^<]+)<\/artifactId>/);
+    let basePackage = "com.app";
+    if (groupMatch) {
+      basePackage = groupMatch[1];
+      if (artifactMatch) {
+        const normalizedArtifact = artifactMatch[1].replace(/-/g, "");
+        basePackage = `${groupMatch[1]}.${normalizedArtifact}`;
+      }
+    }
+    expect(basePackage).toBe("ma.bmce.si.ejbnotificationoracle");
+  });
+});

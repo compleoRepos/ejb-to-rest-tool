@@ -25,13 +25,23 @@ export class JmsGenerator implements CodeGenerator {
 
   validate(generated: GeneratedFile[]): ValidationResult { return { valid: true, errors: [], warnings: [] }; }
 
+  /** Convert JNDI name to clean Kafka topic: jms/queue/BMCE_NOTIFICATIONS → bmce-notifications */
+  private cleanTopicName(destinationName: string): string {
+    return destinationName
+      .replace(/jms\/(queue|topic)\//i, '')
+      .replace(/\//g, '.')
+      .replace(/^jms\./, '')
+      .toLowerCase()
+      .replace(/_/g, '-');
+  }
+
   private genListener(c: JmsComponent, listenerName: string, pkg: string): string {
-    const topic = c.metadata.destinationName.replace(/\//g, ".").replace(/^jms\./, "");
+    const topic = this.cleanTopicName(c.metadata.destinationName);
     return `package ${pkg}.messaging;\n\nimport lombok.RequiredArgsConstructor;\nimport lombok.extern.slf4j.Slf4j;\nimport org.springframework.kafka.annotation.KafkaListener;\nimport org.springframework.stereotype.Component;\n\n/** Kafka Listener migre depuis JMS ${c.metadata.role}: ${c.className}\n * Destination legacy: ${c.metadata.destinationName} (${c.metadata.destinationType})\n * Type de message: ${c.metadata.messageType}\n */\n@Component\n@RequiredArgsConstructor\n@Slf4j\npublic class ${listenerName} {\n\n    @KafkaListener(topics = "${topic}", groupId = "${pkg.split(".").pop()}-group")\n    public void onMessage(String message) {\n        log.info("Message recu sur topic {}: {}", "${topic}", message);\n        // TODO: Migrer la logique de ${c.className}.onMessage\n    }\n}\n`;
   }
 
   private genProducer(c: JmsComponent, producerName: string, pkg: string): string {
-    const topic = c.metadata.destinationName.replace(/\//g, ".").replace(/^jms\./, "");
+    const topic = this.cleanTopicName(c.metadata.destinationName);
     return `package ${pkg}.messaging;\n\nimport lombok.RequiredArgsConstructor;\nimport lombok.extern.slf4j.Slf4j;\nimport org.springframework.kafka.core.KafkaTemplate;\nimport org.springframework.stereotype.Component;\n\n/** Kafka Producer migre depuis JMS Producer: ${c.className}\n * Destination legacy: ${c.metadata.destinationName} (${c.metadata.destinationType})\n */\n@Component\n@RequiredArgsConstructor\n@Slf4j\npublic class ${producerName} {\n\n    private final KafkaTemplate<String, String> kafkaTemplate;\n\n    public void send(String message) {\n        log.info("Envoi message sur topic {}", "${topic}");\n        kafkaTemplate.send("${topic}", message);\n    }\n}\n`;
   }
 

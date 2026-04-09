@@ -240,14 +240,49 @@ export class BusinessLogicTransformer {
       }
     }
     // Also replace any remaining outputVar. references (e.g. voOut.getXxx() in other positions)
-    const remainingOutputRefs = new RegExp(`\\b${this.escapeRegex(outputVar)}\\.`, "g");
-    if (remainingOutputRefs.test(result)) {
-      // If we haven't inserted a result variable yet, these are orphan references
-      // Replace with builder pattern getter equivalent or add a TODO
+    const remainingOutputRefs2 = new RegExp(`\\b${this.escapeRegex(outputVar)}\\.`, "g");
+    if (remainingOutputRefs2.test(result)) {
+      // If we haven't inserted a result variable yet, insert one before the first orphan reference
       if (!result.includes(`${resolvedCtx.responseDtoClass} result = builder.build()`)) {
-        result = result.replace(remainingOutputRefs, "builder.build().");
-        warnings.push(`Référence résiduelle à ${outputVar} remplacée par builder.build() — vérifier manuellement`);
+        // Insert result = builder.build() before the first remaining reference
+        const orphanLines = result.split("\n");
+        const orphanRefRe = new RegExp(`\\b${this.escapeRegex(outputVar)}\\.`);
+        let orphanInsertIdx = -1;
+        for (let i = 0; i < orphanLines.length; i++) {
+          if (orphanRefRe.test(orphanLines[i])) {
+            orphanInsertIdx = i;
+            break;
+          }
+        }
+        if (orphanInsertIdx >= 0) {
+          orphanLines.splice(orphanInsertIdx, 0, `        ${resolvedCtx.responseDtoClass} result = builder.build();`);
+          result = orphanLines.join("\n");
+        }
+        // Now replace all remaining outputVar. with result.
+        result = result.replace(new RegExp(`\\b${this.escapeRegex(outputVar)}\\.`, "g"), "result.");
+        // Also replace return outputVar; with return result;
+        result = result.replace(
+          new RegExp(`return\\s+${this.escapeRegex(outputVar)}\\s*;`, "g"),
+          "return result;"
+        );
       }
+    }
+
+    // ─── T4b: Cleanup — builder.build().setXxx(val) → builder.xxx(val) ───
+    // Safety net: if any builder.build().setXxx() patterns slipped through, fix them
+    result = result.replace(
+      /builder\.build\(\)\.set([A-Z][a-zA-Z0-9]*)\s*\(([^;]+)\)\s*;/g,
+      (_, setter, value) => {
+        const field = setter.charAt(0).toLowerCase() + setter.slice(1);
+        return `builder.${field}(${value});`;
+      }
+    );
+    // Also fix builder.build().getXxx() → result.getXxx() (if result variable exists)
+    if (result.includes(`${resolvedCtx.responseDtoClass} result = builder.build()`)) {
+      result = result.replace(
+        /builder\.build\(\)\.get([A-Z][a-zA-Z0-9]*)\s*\(/g,
+        'result.get$1('
+      );
     }
     migratedLines++;
 
@@ -278,21 +313,20 @@ export class BusinessLogicTransformer {
     result = result.replace(/\blog\.finer\s*\(/g, "log.trace(");
     result = result.replace(/\blog\.finest\s*\(/g, "log.trace(");
 
-    // T6e: Migrer log.log(Level.XXX, msg) et log.log(Level.XXX, msg, exception) → SLF4J
-    // Pattern: log.log(Level.WARNING, "msg", exception) → log.warn("msg", exception)
+    // T6e: Migrer log.log(Level.XXX, msg[, exception]) et LOG.log(Level.XXX, msg[, exception]) → SLF4J
+    const levelMap: Record<string, string> = { WARNING: "warn", SEVERE: "error", INFO: "info", FINE: "debug", FINER: "trace", FINEST: "trace" };
+    // Pattern 1: (log|LOG).log(Level.XXX, msg, exception) → log.xxx(msg, exception)
     result = result.replace(
-      /\blog\.log\s*\(\s*Level\.(WARNING|SEVERE|INFO|FINE|FINER|FINEST)\s*,\s*("(?:[^"\\]|\\.)*")\s*,\s*(\w+)\s*\)/g,
+      /\b(?:log|LOG)\.log\s*\(\s*Level\.(WARNING|SEVERE|INFO|FINE|FINER|FINEST)\s*,\s*("(?:[^"\\]|\\.)*"[^,)]*),\s*(\w+)\s*\)/g,
       (_, level: string, msg: string, ex: string) => {
-        const map: Record<string, string> = { WARNING: "warn", SEVERE: "error", INFO: "info", FINE: "debug", FINER: "trace", FINEST: "trace" };
-        return `log.${map[level] ?? "info"}(${msg}, ${ex})`;
+        return `log.${levelMap[level] ?? "info"}(${msg.trim()}, ${ex})`;
       }
     );
-    // Pattern: log.log(Level.WARNING, "msg") → log.warn("msg")
+    // Pattern 2: (log|LOG).log(Level.XXX, msg) sans exception → log.xxx(msg)
     result = result.replace(
-      /\blog\.log\s*\(\s*Level\.(WARNING|SEVERE|INFO|FINE|FINER|FINEST)\s*,\s*("(?:[^"\\]|\\.)*")\s*\)/g,
+      /\b(?:log|LOG)\.log\s*\(\s*Level\.(WARNING|SEVERE|INFO|FINE|FINER|FINEST)\s*,\s*("(?:[^"\\]|\\.)*"[^)]*)\s*\)/g,
       (_, level: string, msg: string) => {
-        const map: Record<string, string> = { WARNING: "warn", SEVERE: "error", INFO: "info", FINE: "debug", FINER: "trace", FINEST: "trace" };
-        return `log.${map[level] ?? "info"}(${msg})`;
+        return `log.${levelMap[level] ?? "info"}(${msg.trim()})`;
       }
     );
 

@@ -63,6 +63,18 @@ export class JmsDetector implements TechnologyDetector {
       if (destinationName === "unknown") destinationName = topicJndi[1];
     }
 
+    // @Resource(name = "jms/queue/BMCE_NOTIFICATIONS") or @Resource(name = "jms/topic/...")
+    const resourceMatch = content.match(/@Resource\s*\([^)]*name\s*=\s*["']([^"']*jms\/(?:queue|topic)\/[^"']+)["']/);
+    if (resourceMatch && destinationName === "unknown") {
+      destinationName = resourceMatch[1];
+      if (resourceMatch[1].includes("/topic/")) destinationType = "TOPIC";
+    }
+    // Also match @Resource(name = "jdbc/...") patterns that reference queues
+    const resourceQueue = content.match(/@Resource\s*\([^)]*name\s*=\s*["']([^"']+)["']\s*\)[^;]*Queue/);
+    if (resourceQueue && destinationName === "unknown") {
+      destinationName = resourceQueue[1];
+    }
+
     // Extraire le type de message
     let messageType = "TextMessage";
     if (/ObjectMessage/.test(content)) messageType = "ObjectMessage";

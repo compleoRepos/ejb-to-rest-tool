@@ -145,11 +145,18 @@ export class CompleoEngine {
     // 2. Detect ambiguities
     const ambiguities = detectAmbiguities(ir);
 
-    // 3. Run multi-tech pipeline
+    // 3. Run multi-tech pipeline — align basePackage with Spring generator (groupId + artifactId)
     let basePackage = "com.app";
     if (pomXml) {
       const groupMatch = pomXml.match(/<groupId>([^<]+)<\/groupId>/);
-      if (groupMatch) basePackage = groupMatch[1];
+      const artifactMatch = pomXml.match(/<artifactId>([^<]+)<\/artifactId>/);
+      if (groupMatch) {
+        basePackage = groupMatch[1];
+        if (artifactMatch) {
+          const normalizedArtifact = artifactMatch[1].replace(/-/g, "");
+          basePackage = `${groupMatch[1]}.${normalizedArtifact}`;
+        }
+      }
     }
 
     const pipelineResult = runPipeline({
