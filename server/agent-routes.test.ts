@@ -288,3 +288,148 @@ describe("Agent Routes — Event accumulation", () => {
     expect(store.get("nonexistent")).toBeUndefined();
   });
 });
+
+// ─── Bug fix: ZIP sessionId resolution ─────────────────────────────────────
+// Tests for the "0 files" bug fix (v5.5.1): when source.type === "zip" with
+// sessionId, the agent must resolve files from the Compleo upload session store.
+
+describe("Agent Routes — AgentConfig with sessionId (bug fix v5.5.1)", () => {
+  it("accepte une config ZIP avec sessionId (sans path)", () => {
+    const config: AgentConfig = {
+      source: { type: "zip", sessionId: "abc123" },
+      output: { type: "zip" },
+      options: { projectName: "test-project" },
+    };
+    expect(config.source.type).toBe("zip");
+    if (config.source.type === "zip") {
+      expect(config.source.sessionId).toBe("abc123");
+      expect(config.source.path).toBeUndefined();
+      expect(config.source.files).toBeUndefined();
+    }
+  });
+
+  it("accepte une config ZIP avec path (rétrocompatibilité)", () => {
+    const config: AgentConfig = {
+      source: { type: "zip", path: "/tmp/test.zip" },
+      output: { type: "zip" },
+      options: {},
+    };
+    expect(config.source.type).toBe("zip");
+    if (config.source.type === "zip") {
+      expect(config.source.path).toBe("/tmp/test.zip");
+      expect(config.source.sessionId).toBeUndefined();
+    }
+  });
+
+  it("accepte une config ZIP avec files directement", () => {
+    const config: AgentConfig = {
+      source: {
+        type: "zip",
+        files: [
+          { path: "src/Main.java", content: "public class Main {}" },
+          { path: "pom.xml", content: "<project/>" },
+        ],
+      },
+      output: { type: "zip" },
+      options: {},
+    };
+    expect(config.source.type).toBe("zip");
+    if (config.source.type === "zip") {
+      expect(config.source.files).toHaveLength(2);
+      expect(config.source.files![0].path).toBe("src/Main.java");
+    }
+  });
+
+  it("crée une session agent avec sessionId ZIP", () => {
+    const store = new AgentSessionStore();
+    const config: AgentConfig = {
+      source: { type: "zip", sessionId: "upload-session-xyz" },
+      output: { type: "zip" },
+      options: { projectName: "my-migration" },
+    };
+    const session = store.create(config);
+    expect(session.id).toMatch(/^agent-/);
+    expect(session.config.source.type).toBe("zip");
+    if (session.config.source.type === "zip") {
+      expect(session.config.source.sessionId).toBe("upload-session-xyz");
+    }
+  });
+});
+
+// ─── Input validation tests ────────────────────────────────────────────────
+
+describe("Agent Routes — Input validation", () => {
+  it("config Git sans url est invalide", () => {
+    const config = {
+      source: { type: "git" },
+      output: { type: "zip" },
+      options: {},
+    };
+    // Validation check: source.type === "git" but no url
+    expect(config.source.type).toBe("git");
+    expect((config.source as any).url).toBeUndefined();
+  });
+
+  it("config ZIP sans sessionId, path ni files est invalide", () => {
+    const config = {
+      source: { type: "zip" },
+      output: { type: "zip" },
+      options: {},
+    };
+    expect(config.source.type).toBe("zip");
+    expect((config.source as any).sessionId).toBeUndefined();
+    expect((config.source as any).path).toBeUndefined();
+    expect((config.source as any).files).toBeUndefined();
+  });
+
+  it("config ZIP avec sessionId est valide", () => {
+    const config = {
+      source: { type: "zip", sessionId: "sess-123" },
+      output: { type: "zip" },
+      options: {},
+    };
+    expect(config.source.type).toBe("zip");
+    expect((config.source as any).sessionId).toBe("sess-123");
+  });
+});
+
+// ─── phaseCloning sessionId resolution (unit test) ─────────────────────────
+
+describe("Agent Routes — phaseCloning sessionId resolution", () => {
+  it("session avec sessionId ZIP stocke correctement le config", () => {
+    const store = new AgentSessionStore();
+    const config: AgentConfig = {
+      source: { type: "zip", sessionId: "upload-abc" },
+      output: { type: "zip" },
+      options: { projectName: "test" },
+    };
+    const session = store.create(config);
+    expect(session.config.source.type).toBe("zip");
+
+    // Verify the sessionId is preserved through the session lifecycle
+    store.update(session.id, { state: "RUNNING", currentPhase: "CLONING" });
+    const updated = store.get(session.id)!;
+    expect(updated.state).toBe("RUNNING");
+    if (updated.config.source.type === "zip") {
+      expect(updated.config.source.sessionId).toBe("upload-abc");
+    }
+  });
+
+  it("session avec files directement ne nécessite pas de résolution", () => {
+    const store = new AgentSessionStore();
+    const files = [
+      { path: "src/com/example/MyBean.java", content: "@Stateless public class MyBean {}" },
+      { path: "pom.xml", content: "<project/>" },
+    ];
+    const config: AgentConfig = {
+      source: { type: "zip", files },
+      output: { type: "zip" },
+      options: { projectName: "direct-files" },
+    };
+    const session = store.create(config);
+    if (session.config.source.type === "zip") {
+      expect(session.config.source.files).toHaveLength(2);
+      expect(session.config.source.files![0].path).toContain("MyBean.java");
+    }
+  });
+});

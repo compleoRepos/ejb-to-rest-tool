@@ -35,7 +35,7 @@ export type AgentPhase =
 
 export interface AgentConfig {
   source:
-    | { type: "zip"; path: string; files?: SourceFile[] }
+    | { type: "zip"; path?: string; files?: SourceFile[]; sessionId?: string }
     | { type: "git"; url: string; branch?: string; token?: string; provider?: string };
   output:
     | { type: "zip" }
@@ -423,17 +423,51 @@ export class CompleoAgent {
         phase: "CLONING",
       });
     } else {
-      // ZIP source — files already provided or read from path
+      // ZIP source — files already provided, read from path, or resolved from sessionId
       let files: SourceFile[] = [];
-      if (session.config.source.files) {
-        files = session.config.source.files;
-      } else if (session.config.source.path) {
-        files = this.readSourceFiles(session.config.source.path);
+      const src = session.config.source as { type: "zip"; path?: string; files?: SourceFile[]; sessionId?: string };
+      if (src.files && src.files.length > 0) {
+        files = src.files;
+      } else if (src.sessionId) {
+        // Resolve files from the Compleo upload session store
+        try {
+          const { sessionStore } = require("../session-store");
+          const compleoSession = sessionStore.get(src.sessionId);
+          if (compleoSession && compleoSession.files && compleoSession.files.length > 0) {
+            files = [...compleoSession.files];
+            // Also inject pomXml and bianYml if stored separately in the compleo session
+            if (compleoSession.pomXml && !files.some((f: SourceFile) => f.path.endsWith("pom.xml"))) {
+              files.push({ path: "pom.xml", content: compleoSession.pomXml });
+            }
+            if (compleoSession.bianYml && !files.some((f: SourceFile) => f.path.endsWith("bian.yml") || f.path.endsWith("bian.yaml"))) {
+              files.push({ path: "bian.yml", content: compleoSession.bianYml });
+            }
+            yield this.event("LOG", {
+              level: "info",
+              message: `Session upload ${src.sessionId} résolue : ${files.length} fichiers (projet: ${compleoSession.projectName || "inconnu"})`,
+              phase: "CLONING",
+            });
+          } else {
+            yield this.event("LOG", {
+              level: "warn",
+              message: `Session upload ${src.sessionId} introuvable ou vide`,
+              phase: "CLONING",
+            });
+          }
+        } catch (err) {
+          yield this.event("LOG", {
+            level: "error",
+            message: `Erreur résolution session upload : ${err instanceof Error ? err.message : String(err)}`,
+            phase: "CLONING",
+          });
+        }
+      } else if (src.path) {
+        files = this.readSourceFiles(src.path);
       }
       (session as any)._sourceFiles = files;
 
       yield this.event("LOG", {
-        level: "success",
+        level: files.length > 0 ? "success" : "warn",
         message: `Sources chargées : ${files.length} fichiers (${Date.now() - startTime}ms)`,
         phase: "CLONING",
       });

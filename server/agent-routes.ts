@@ -22,13 +22,23 @@ export function registerAgentRoutes(app: Express) {
   const router = Router();
 
   // ─── POST /api/agent/start ──────────────────────────────────────────────────
-  router.post("/start", async (req: Request, res: Response) => {
+   router.post("/start", async (req: Request, res: Response) => {
     try {
       const config = req.body as AgentConfig;
 
       if (!config.source || !config.output) {
         return res.status(400).json({ error: "source et output sont requis" });
       }
+
+      // Validate source config
+      if (config.source.type === "git" && !(config.source as any).url) {
+        return res.status(400).json({ error: "source.url est requis pour le mode git" });
+      }
+      if (config.source.type === "zip" && !(config.source as any).sessionId && !(config.source as any).path && !(config.source as any).files) {
+        return res.status(400).json({ error: "source.sessionId, source.path ou source.files est requis pour le mode zip" });
+      }
+
+      console.log(`[Agent] D\u00e9marrage: source.type=${config.source.type}, options.projectName=${config.options?.projectName || "N/A"}`);
 
       const agent = getAgent();
       const store = getAgentStore();
