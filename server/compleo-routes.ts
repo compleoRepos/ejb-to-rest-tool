@@ -331,6 +331,25 @@ router.post("/analyze-multitech", async (req: Request, res: Response) => {
     session.status = finalStatus;
     sessions.persist(session.id);
 
+    // ─── Persist project to DB for Accueil/Projets pages ─────────────
+    try {
+      const { upsertProjectFromAgent } = await import("./db");
+      const totalLines = session.files.reduce((sum: number, f: any) => sum + (f.content?.split("\n").length || 0), 0);
+      await upsertProjectFromAgent({
+        name: session.projectName,
+        description: `Projet analys\u00e9 (${ir.stats.useCaseCount} UC, ${ir.stats.dtoCount} DTOs, ${result.technologiesDetected.length} technologies)`,
+        technologies: result.technologiesDetected,
+        fileCount: session.files.length,
+        totalLines,
+        gitUrl: (session as any).gitUrl,
+        gitProvider: (session as any).gitProvider,
+        gitBranch: (session as any).gitBranch,
+      });
+      console.log(`[Compleo→DB] Project '${session.projectName}' persisted to projects table`);
+    } catch (dbErr) {
+      console.warn("[Compleo→DB] Project persistence failed:", dbErr);
+    }
+
     return res.json({
       sessionId,
       status: finalStatus.toUpperCase(),

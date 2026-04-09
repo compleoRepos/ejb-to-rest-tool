@@ -94,6 +94,56 @@ export async function updateProject(id: number, data: Partial<InsertProject>) {
   return getProjectById(id);
 }
 
+/**
+ * Create or update a project from Agent analysis results.
+ * Uses projectName as unique key to avoid duplicates.
+ */
+export async function upsertProjectFromAgent(data: {
+  name: string;
+  description?: string;
+  technologies?: string[];
+  fileCount?: number;
+  totalLines?: number;
+  gitUrl?: string;
+  gitProvider?: "github" | "gitlab" | "bitbucket" | "azure_devops";
+  gitBranch?: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  // Check if project already exists by name
+  const existing = await db.select().from(projects).where(eq(projects.name, data.name)).limit(1);
+  if (existing.length > 0) {
+    // Update existing project
+    await db.update(projects).set({
+      technologies: data.technologies,
+      fileCount: data.fileCount ?? existing[0].fileCount,
+      totalLines: data.totalLines ?? existing[0].totalLines,
+      gitUrl: data.gitUrl ?? existing[0].gitUrl,
+      gitProvider: data.gitProvider ?? existing[0].gitProvider,
+      gitBranch: data.gitBranch ?? existing[0].gitBranch,
+      lastAnalyzedAt: new Date(),
+      status: "active",
+    }).where(eq(projects.id, existing[0].id));
+    return (await db.select().from(projects).where(eq(projects.id, existing[0].id)).limit(1))[0];
+  } else {
+    // Create new project
+    const result = await db.insert(projects).values({
+      name: data.name,
+      description: data.description || `Projet migr\u00e9 via Agent IA`,
+      technologies: data.technologies,
+      fileCount: data.fileCount ?? 0,
+      totalLines: data.totalLines ?? 0,
+      gitUrl: data.gitUrl,
+      gitProvider: data.gitProvider,
+      gitBranch: data.gitBranch,
+      lastAnalyzedAt: new Date(),
+      status: "active",
+    });
+    const id = result[0].insertId;
+    return (await db.select().from(projects).where(eq(projects.id, id)).limit(1))[0];
+  }
+}
+
 export async function deleteProject(id: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");

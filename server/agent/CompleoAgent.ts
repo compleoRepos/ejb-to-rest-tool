@@ -18,6 +18,9 @@ import type { ProjectIR } from "../java-parser";
 import { LearningEngine, type AmbiguityResolution } from "../learning/LearningEngine";
 import * as fs from "fs";
 import * as path from "path";
+import { sessionStore } from "../session-store";
+import type { CompleoSession, SessionStatus } from "../compleo-routes";
+import { upsertProjectFromAgent } from "../db";
 
 // ─── Types publics ────────────────────────────────────────────────────────────
 
@@ -529,6 +532,102 @@ export class CompleoAgent {
       phase: "ANALYZING",
       message: `Analyse terminée (${Date.now() - startTime}ms)`,
     });
+
+    // ─── Persist to CompleoSession DB ──────────────────────────────────
+    try {
+      const hasAmbiguities = analysisResult.ambiguities.length > 0;
+      this.syncToCompleoSession(session, hasAmbiguities ? "waiting_choices" : "analyzed");
+    } catch (syncErr) {
+      console.warn("[Agent→Compleo] Sync after analysis failed:", syncErr);
+    }
+
+    // ─── Persist project to DB for Accueil/Projets pages ─────────────
+    try {
+      const techs = analysisResult.multiTech?.technologiesDetected || [];
+      const totalLines = files.reduce((sum, f) => sum + (f.content?.split("\n").length || 0), 0);
+      const gitSource = session.config.source;
+      await upsertProjectFromAgent({
+        name: session.config.options.projectName || "agent-migration",
+        description: `Projet analys\u00e9 via Agent IA (${analysisResult.summary.useCaseCount} UC, ${analysisResult.summary.dtoCount} DTOs)`,
+        technologies: techs,
+        fileCount: files.length,
+        totalLines,
+        gitUrl: gitSource.type === "git" ? (gitSource as any).url : undefined,
+        gitProvider: gitSource.type === "git" ? (gitSource as any).provider : undefined,
+        gitBranch: gitSource.type === "git" ? (gitSource as any).branch : undefined,
+      });
+      console.log(`[Agent→DB] Project '${session.config.options.projectName}' persisted to projects table`);
+    } catch (dbErr) {
+      console.warn("[Agent→DB] Project persistence failed:", dbErr);
+    }
+  }
+
+  /**
+   * Synchronise les données de l'AgentSession vers une CompleoSession persistée en DB.
+   * Crée la session si elle n'existe pas, ou la met à jour.
+   */
+  private syncToCompleoSession(session: AgentSession, status: SessionStatus): void {
+    const compleoId = `agent-compleo-${session.id}`;
+    const files: { path: string; content: string }[] = (session as any)._sourceFiles || [];
+    const pomFile = files.find((f) => f.path.endsWith("pom.xml"));
+    const bianFile = files.find((f) => f.path.endsWith("bian.yml") || f.path.endsWith("bian.yaml"));
+
+    const existing = sessionStore.get(compleoId);
+    if (existing) {
+      // Update existing session
+      existing.status = status;
+      if (session.ir) existing.ir = session.ir;
+      if (session.pendingAmbiguities) existing.ambiguities = session.pendingAmbiguities;
+      if (session.userChoices) existing.userChoices = session.userChoices;
+      if (session.analysisResult?.multiTech) {
+        existing.pipelineResult = session.analysisResult.multiTech as any;
+        existing.detectedComponents = session.analysisResult.multiTech.detectedComponents as any;
+        existing.technologiesDetected = session.analysisResult.multiTech.technologiesDetected as any;
+        existing.maturityScore = session.analysisResult.multiTech.maturityScore as any;
+        existing.multiTechGeneration = session.analysisResult.multiTech.generatedFiles as any;
+      }
+      if (session.generatedProject) {
+        existing.generation = {
+          files: session.generatedProject.files,
+          warnings: session.generatedProject.warnings,
+          migrationReport: session.generatedProject.migrationReport,
+        } as any;
+      }
+      if (session.downloadUrl) existing.zipUrl = session.downloadUrl;
+      if (session.errorMessage) existing.error = session.errorMessage;
+      sessionStore.persist(compleoId);
+    } else {
+      // Create new CompleoSession
+      const compleoSession: CompleoSession = {
+        id: compleoId,
+        projectName: session.config.options.projectName || "agent-migration",
+        uploadedAt: new Date(session.createdAt),
+        files,
+        pomXml: pomFile?.content,
+        bianYml: bianFile?.content,
+        ir: session.ir,
+        ambiguities: session.pendingAmbiguities,
+        userChoices: session.userChoices,
+        resolvedIR: undefined,
+        generation: session.generatedProject ? {
+          files: session.generatedProject.files,
+          warnings: session.generatedProject.warnings,
+          migrationReport: session.generatedProject.migrationReport,
+        } as any : undefined,
+        zipUrl: session.downloadUrl,
+        status,
+        error: session.errorMessage,
+        debugEvents: [],
+        sseClients: [],
+        pipelineResult: session.analysisResult?.multiTech as any,
+        detectedComponents: session.analysisResult?.multiTech?.detectedComponents as any,
+        multiTechGeneration: session.analysisResult?.multiTech?.generatedFiles as any,
+        maturityScore: session.analysisResult?.multiTech?.maturityScore as any,
+        technologiesDetected: session.analysisResult?.multiTech?.technologiesDetected as any,
+      };
+      sessionStore.set(compleoId, compleoSession);
+    }
+    console.log(`[Agent→Compleo] Session ${compleoId} synced with status=${status}`);
   }
 
   private async *phaseAwaitingInput(session: AgentSession): AsyncGenerator<AgentEvent> {
@@ -624,6 +723,13 @@ export class CompleoAgent {
       phase: "GENERATING",
       message: `Génération terminée (${Date.now() - startTime}ms)`,
     });
+
+    // ─── Persist to CompleoSession DB ──────────────────────────────────
+    try {
+      this.syncToCompleoSession(session, "generated");
+    } catch (syncErr) {
+      console.warn("[Agent→Compleo] Sync after generation failed:", syncErr);
+    }
   }
 
   private async *phaseCompiling(session: AgentSession): AsyncGenerator<AgentEvent> {
