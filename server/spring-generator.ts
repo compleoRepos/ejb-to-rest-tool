@@ -137,22 +137,39 @@ public class BusinessRuleException extends RuntimeException {
     files.push(generateRemoteServiceAdapter(basePackage, basePath, remote));
   }
 
-  // CORRECTION v5.2: Generate stub adapters for injected services not covered by @Remote interfaces
+  // CORRECTION v5.2+v5.9.1: Generate stub adapters for injected services not covered by @Remote interfaces
+  // FIX 3: Infer methods by actual usage in UseCase bodies (not all methods from the interface)
   const remoteTypeNames = new Set(ir.remoteInterfaces.map(r => r.className));
-  const injectedServiceTypes = new Set<string>();
+  // Collect per-service: which methods are actually called in UseCase bodies
+  const serviceMethodUsages = new Map<string, Set<string>>();
+  const serviceVarNames = new Map<string, Set<string>>(); // svcType -> variable names used
   for (const uc of ir.useCases) {
     for (const svc of uc.injectedServices) {
       if (!remoteTypeNames.has(svc.type) && !svc.type.endsWith("DAO") && !svc.type.endsWith("Repository")) {
-        injectedServiceTypes.add(svc.type);
+        if (!serviceMethodUsages.has(svc.type)) {
+          serviceMethodUsages.set(svc.type, new Set());
+          serviceVarNames.set(svc.type, new Set());
+        }
+        serviceVarNames.get(svc.type)!.add(svc.name);
+        // Scan the UseCase rawSource for calls on this variable
+        if (uc.rawSource) {
+          const callPattern = new RegExp(`\\b${svc.name}\\.(\\w+)\\s*\\(`, "g");
+          let callMatch;
+          while ((callMatch = callPattern.exec(uc.rawSource)) !== null) {
+            serviceMethodUsages.get(svc.type)!.add(callMatch[1]);
+          }
+        }
       }
     }
   }
-  for (const svcType of injectedServiceTypes) {
+  for (const [svcType, usedMethods] of serviceMethodUsages) {
     const sourceFile = (ir as any)._rawFiles?.find((f: any) => f.className === svcType);
     if (sourceFile) {
-      files.push(generateInjectedServiceStub(basePackage, basePath, svcType, sourceFile.content));
+      // Filter the source content to only include methods that are actually used
+      files.push(generateInjectedServiceStub(basePackage, basePath, svcType, sourceFile.content, usedMethods));
     } else {
-      files.push(generateInjectedServiceStub(basePackage, basePath, svcType, ""));
+      // No source file — generate stubs from inferred usage
+      files.push(generateInjectedServiceStub(basePackage, basePath, svcType, "", usedMethods));
     }
   }
 
@@ -228,10 +245,22 @@ function generatePomXmlWithVendor(
   const vendorDep = configGen.generateMavenDependencyXml(dsInfo);
 
   // Replace the hardcoded MySQL dependency with the vendor-specific one
-  const content = basePom.content.replace(
-    /        <!-- Database -->\n        <dependency>\n            <groupId>com\.mysql<\/groupId>\n            <artifactId>mysql-connector-j<\/artifactId>\n            <scope>runtime<\/scope>\n        <\/dependency>/,
-    vendorDep
-  );
+  // Use a more robust regex that handles varying whitespace
+  let content = basePom.content;
+  if (dsInfo.vendor !== "MYSQL" && dsInfo.vendor !== "MARIADB") {
+    // Replace the entire MySQL dependency block
+    content = content.replace(
+      /\s*<!-- Database -->\s*\n\s*<dependency>\s*\n\s*<groupId>com\.mysql<\/groupId>\s*\n\s*<artifactId>mysql-connector-j<\/artifactId>\s*\n\s*<scope>runtime<\/scope>\s*\n\s*<\/dependency>/,
+      `\n        <!-- Database (${dsInfo.vendor}) -->\n${vendorDep}`
+    );
+  } else if (dsInfo.vendor === "MARIADB") {
+    // Replace MySQL with MariaDB
+    content = content.replace(
+      /\s*<!-- Database -->\s*\n\s*<dependency>\s*\n\s*<groupId>com\.mysql<\/groupId>\s*\n\s*<artifactId>mysql-connector-j<\/artifactId>\s*\n\s*<scope>runtime<\/scope>\s*\n\s*<\/dependency>/,
+      `\n        <!-- Database (MariaDB) -->\n${vendorDep}`
+    );
+  }
+  // else: MySQL stays as-is
 
   return { ...basePom, content };
 }

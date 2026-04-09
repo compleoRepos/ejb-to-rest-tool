@@ -277,6 +277,28 @@ export class BusinessLogicTransformer {
     result = result.replace(/\blog\.finer\s*\(/g, "log.trace(");
     result = result.replace(/\blog\.finest\s*\(/g, "log.trace(");
 
+    // T6e: Migrer log.log(Level.XXX, msg) et log.log(Level.XXX, msg, exception) → SLF4J
+    // Pattern: log.log(Level.WARNING, "msg", exception) → log.warn("msg", exception)
+    result = result.replace(
+      /\blog\.log\s*\(\s*Level\.(WARNING|SEVERE|INFO|FINE|FINER|FINEST)\s*,\s*("(?:[^"\\]|\\.)*")\s*,\s*(\w+)\s*\)/g,
+      (_, level: string, msg: string, ex: string) => {
+        const map: Record<string, string> = { WARNING: "warn", SEVERE: "error", INFO: "info", FINE: "debug", FINER: "trace", FINEST: "trace" };
+        return `log.${map[level] ?? "info"}(${msg}, ${ex})`;
+      }
+    );
+    // Pattern: log.log(Level.WARNING, "msg") → log.warn("msg")
+    result = result.replace(
+      /\blog\.log\s*\(\s*Level\.(WARNING|SEVERE|INFO|FINE|FINER|FINEST)\s*,\s*("(?:[^"\\]|\\.)*")\s*\)/g,
+      (_, level: string, msg: string) => {
+        const map: Record<string, string> = { WARNING: "warn", SEVERE: "error", INFO: "info", FINE: "debug", FINER: "trace", FINEST: "trace" };
+        return `log.${map[level] ?? "info"}(${msg})`;
+      }
+    );
+
+    // T6f: Supprimer les imports java.util.logging
+    result = result.replace(/import\s+java\.util\.logging\.[^;]+;\n?/g, "");
+    result = result.replace(/import\s+java\.util\.logging;\n?/g, "");
+
     // ─── T7: Extraire les codes Magix ───
     const magixPattern = /"([A-Z]{2,6}[0-9]{1,3})"/g;
     let magixMatch;

@@ -96,20 +96,31 @@ ${methods}
 // ─── Injected Service Stub Generator ──────────────────────────────────────
 
 export function generateInjectedServiceStub(
-  basePackage: string, basePath: string, serviceType: string, sourceContent: string
+  basePackage: string, basePath: string, serviceType: string, sourceContent: string,
+  usedMethods?: Set<string>
 ): GeneratedFile {
   const adapterName = serviceType.endsWith("Service")
     ? serviceType.replace(/Service$/, "Adapter")
     : serviceType + "Adapter";
 
   const methods: string[] = [];
+  const seenMethods = new Set<string>();
+
   if (sourceContent) {
-    const methodRegex = /^\s*(?:public\s+)?([\w<>,\s]+?)\s+(\w+)\s*\(([^)]*)\)\s*(?:throws\s+[\w,\s]+)?\s*;/gm;
+    // Robust regex: only match lines that look like interface method declarations
+    const methodRegex = /^\s*(?:public\s+)?([A-Z]\w*(?:<[^>]+>)?(?:\[\])?|void|boolean|int|long|double|float|char|byte|short|String)\s+(\w+)\s*\(([^)]*)\)\s*(?:throws\s+[\w,\s]+)?\s*;/gm;
     let mm;
     while ((mm = methodRegex.exec(sourceContent)) !== null) {
       const returnType = mm[1].trim();
       const methodName = mm[2];
       const params = mm[3].trim();
+      // Validate: return type must be a valid Java type
+      if (!/^(?:void|boolean|int|long|double|float|char|byte|short|String|[A-Z]\w*)/.test(returnType)) continue;
+      // Skip duplicates
+      if (seenMethods.has(methodName)) continue;
+      // FIX 3: If usedMethods is provided, only include methods that are actually called
+      if (usedMethods && usedMethods.size > 0 && !usedMethods.has(methodName)) continue;
+      seenMethods.add(methodName);
       const springReturn = returnType === "void" ? "void" : returnType;
       const defaultReturn = springReturn === "void" ? "" : springReturn === "String" ? "return \"\";" : springReturn === "boolean" ? "return false;" : `return null;`;
       methods.push(`
@@ -121,6 +132,24 @@ export function generateInjectedServiceStub(
         log.warn("STUB: ${serviceType}.${methodName} called — not yet implemented");
         // TODO: Replace with actual core banking API call
         ${springReturn === "void" ? "// No return needed" : defaultReturn}
+    }`);
+    }
+  }
+
+  // If no source content but we have usedMethods from inference, generate stubs from method names
+  if (methods.length === 0 && usedMethods && usedMethods.size > 0) {
+    for (const methodName of usedMethods) {
+      if (seenMethods.has(methodName)) continue;
+      seenMethods.add(methodName);
+      methods.push(`
+    /**
+     * ${methodName} — Stub inferred from usage in UseCase.
+     * TODO: Implement the call to core banking system.
+     */
+    public Object ${methodName}(Object... args) {
+        log.warn("STUB: ${serviceType}.${methodName} called — not yet implemented");
+        // TODO: Replace with actual core banking API call — infer correct signature from legacy code
+        throw new UnsupportedOperationException("${serviceType}.${methodName} not yet implemented");
     }`);
     }
   }

@@ -1092,3 +1092,112 @@ describe("FIX v5.8.2 — Pipeline deduplication", () => {
     expect(paths.length).toBe(uniquePaths.size);
   });
 });
+
+// ─── FIX v5.9.1 — Adapter generation fixes ───
+
+import { generateInjectedServiceStub } from "./spring/infra-gen";
+
+describe("FIX v5.9.1 — FIX 1: No 'public tails' in generated adapters", () => {
+  it("generates valid method signatures from interface declarations", () => {
+    const sourceContent = `
+public interface KycServiceRemote {
+    boolean verifierClientPourCredit(String clientId) throws Exception;
+    void envoyerNotification(String message);
+    String consulterStatus(String dossierRef);
+}`;
+    const result = generateInjectedServiceStub("ma.bmce.si", "src/main/java/ma/bmce/si", "KycService", sourceContent);
+    // Verify no 'public tails' or other garbage before return type
+    expect(result.content).not.toMatch(/public\s+tails/);
+    expect(result.content).not.toMatch(/public\s+[a-z]+ails/);
+    // Verify valid method signatures
+    expect(result.content).toContain("public boolean verifierClientPourCredit(");
+    expect(result.content).toContain("public void envoyerNotification(");
+    expect(result.content).toContain("public String consulterStatus(");
+  });
+
+  it("rejects lines that don't look like method declarations", () => {
+    const sourceContent = `
+/**
+ * This interface provides details about the service.
+ * Implementation details are in the concrete class.
+ */
+public interface ScoringServiceRemote {
+    int calculerScore(String clientId);
+}`;
+    const result = generateInjectedServiceStub("ma.bmce.si", "src/main/java/ma/bmce/si", "ScoringService", sourceContent);
+    expect(result.content).toContain("public int calculerScore(");
+    // Should NOT contain "details" or "tails" as a return type
+    expect(result.content).not.toMatch(/public\s+details/);
+    expect(result.content).not.toMatch(/public\s+tails/);
+  });
+
+  it("handles generic return types like List<String>", () => {
+    const sourceContent = `
+public interface CompteServiceRemote {
+    List<String> listerComptes(String clientId);
+}`;
+    const result = generateInjectedServiceStub("ma.bmce.si", "src/main/java/ma/bmce/si", "CompteService", sourceContent);
+    expect(result.content).toContain("public List<String> listerComptes(");
+  });
+});
+
+describe("FIX v5.9.1 — FIX 3: Adapter methods filtered by actual usage", () => {
+  it("only includes methods that are actually used when usedMethods is provided", () => {
+    const sourceContent = `
+public interface CreditServiceRemote {
+    boolean verifierClientPourCredit(String clientId);
+    void envoyerSmsDecisionCredit(String clientId, String message);
+    int calculerScore(String clientId);
+    String consulterSolde(String compteId);
+    void verifierIncidents(String clientId);
+}`;
+    const usedMethods = new Set(["verifierClientPourCredit", "calculerScore"]);
+    const result = generateInjectedServiceStub("ma.bmce.si", "src/main/java/ma/bmce/si", "CreditService", sourceContent, usedMethods);
+    expect(result.content).toContain("verifierClientPourCredit");
+    expect(result.content).toContain("calculerScore");
+    expect(result.content).not.toContain("envoyerSmsDecisionCredit");
+    expect(result.content).not.toContain("consulterSolde");
+    expect(result.content).not.toContain("verifierIncidents");
+  });
+
+  it("includes all methods when usedMethods is empty (backward compat)", () => {
+    const sourceContent = `
+public interface KycServiceRemote {
+    boolean verifierKyc(String clientId);
+    void envoyerNotification(String msg);
+}`;
+    const result = generateInjectedServiceStub("ma.bmce.si", "src/main/java/ma/bmce/si", "KycService", sourceContent);
+    expect(result.content).toContain("verifierKyc");
+    expect(result.content).toContain("envoyerNotification");
+  });
+
+  it("generates inferred stubs when no source content but usedMethods provided", () => {
+    const usedMethods = new Set(["calculerScore", "verifierIncidents"]);
+    const result = generateInjectedServiceStub("ma.bmce.si", "src/main/java/ma/bmce/si", "ScoringService", "", usedMethods);
+    expect(result.content).toContain("calculerScore");
+    expect(result.content).toContain("verifierIncidents");
+    // Inferred stubs use Object return type
+    expect(result.content).toContain("public Object calculerScore(");
+    expect(result.content).toContain("public Object verifierIncidents(");
+  });
+});
+
+describe("FIX v5.9.1 — FIX 4: POM.xml uses vendor-specific DB dependency", () => {
+  it("replaces MySQL with Oracle when Oracle is detected", () => {
+    const ir = parseEjbProject(createTestFiles(), SAMPLE_POM);
+    // Simulate Oracle detection by adding Oracle-specific code
+    (ir as any)._rawFiles = [{
+      className: "CreditDAO",
+      content: `
+        String sql = "SELECT SEQ_DOSSIER_CREDIT.NEXTVAL FROM DUAL";
+        connection = DriverManager.getConnection("jdbc:oracle:thin:@localhost:1521:ORCL");
+      `,
+      path: "CreditDAO.java"
+    }];
+    const result = generateSpringBootProject(ir);
+    const pomFile = result.files.find(f => f.path === "pom.xml");
+    expect(pomFile).toBeDefined();
+    expect(pomFile!.content).toContain("ojdbc");
+    expect(pomFile!.content).not.toContain("mysql-connector-j");
+  });
+});

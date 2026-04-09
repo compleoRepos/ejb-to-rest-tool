@@ -420,3 +420,49 @@ public class TestUC {
     expect(methods.has("logOperation")).toBe(true);
   });
 });
+
+// ─── FIX 2: T6e — log.log(Level.XXX) migration ───
+describe("T6e: log.log(Level.XXX) migration", () => {
+  const transformer = new BusinessLogicTransformer();
+  const baseCtx: TransformContext = {
+    voInClass: "CreditVoIn",
+    voOutClass: "CreditVoOut",
+    requestDtoClass: "CreditRequest",
+    responseDtoClass: "CreditResponse",
+    useCaseName: "DemanderCreditUC",
+    serviceName: "DemanderCreditService",
+    symbolTable: undefined,
+  };
+
+  it("migrates log.log(Level.WARNING, msg, exception) to log.warn(msg, exception)", () => {
+    const code = `log.log(Level.WARNING, "GED non disponible (non bloquant)", e);`;
+    const result = transformer.transform(code, baseCtx);
+    expect(result.code).toContain('log.warn("GED non disponible (non bloquant)", e)');
+    expect(result.code).not.toContain("Level.WARNING");
+  });
+
+  it("migrates log.log(Level.SEVERE, msg, ex) to log.error(msg, ex)", () => {
+    const code = `log.log(Level.SEVERE, "Erreur critique", ex);`;
+    const result = transformer.transform(code, baseCtx);
+    expect(result.code).toContain('log.error("Erreur critique", ex)');
+  });
+
+  it("migrates log.log(Level.INFO, msg) to log.info(msg)", () => {
+    const code = `log.log(Level.INFO, "Traitement en cours");`;
+    const result = transformer.transform(code, baseCtx);
+    expect(result.code).toContain('log.info("Traitement en cours")');
+  });
+
+  it("migrates log.log(Level.FINE, msg) to log.debug(msg)", () => {
+    const code = `log.log(Level.FINE, "Debug trace");`;
+    const result = transformer.transform(code, baseCtx);
+    expect(result.code).toContain('log.debug("Debug trace")');
+  });
+
+  it("removes import java.util.logging statements", () => {
+    const code = `import java.util.logging.Level;\nimport java.util.logging.Logger;\nlog.log(Level.WARNING, "test");`;
+    const result = transformer.transform(code, baseCtx);
+    expect(result.code).not.toContain("java.util.logging");
+    expect(result.code).toContain('log.warn("test")');
+  });
+});
