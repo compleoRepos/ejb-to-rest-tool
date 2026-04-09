@@ -18,9 +18,9 @@ import {
   Terminal, Zap, Server, Database, Shield, Box,
   ChevronDown, ChevronRight, Eye, FileCode2, Layers,
   ArrowLeft, RefreshCw, Globe, Lock, Info, Star,
-  Activity, Radio, Pause, SkipForward,
+  Activity, Radio, Pause, SkipForward, Network,
 } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -618,14 +618,26 @@ export default function CompleoAgentPage() {
                   </Button>
                 )}
                 {isCompleted && (
-                  <Button
-                    size="sm"
-                    className="w-full gap-1.5 bg-emerald-600 hover:bg-emerald-700"
-                    onClick={handleDownload}
-                  >
-                    <Download className="w-4 h-4" />
-                    Télécharger le projet
-                  </Button>
+                  <>
+                    <Button
+                      size="sm"
+                      className="w-full gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+                      onClick={handleDownload}
+                    >
+                      <Download className="w-4 h-4" />
+                      Télécharger le projet
+                    </Button>
+                    <Link href="/compleo/architecture">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full gap-1.5 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10"
+                      >
+                        <Network className="w-4 h-4" />
+                        Analyser l'architecture
+                      </Button>
+                    </Link>
+                  </>
                 )}
                 {(isCompleted || isFailed) && (
                   <Button

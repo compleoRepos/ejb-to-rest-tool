@@ -128,8 +128,11 @@ const DOMAIN_COLORS: Record<string, string> = {
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
-export default function ArchitecturePage({ projectId }: { projectId: number }) {
-  const { data: project } = trpc.projects.getById.useQuery({ id: projectId });
+export default function ArchitecturePage({ projectId }: { projectId?: number }) {
+  const { data: project } = trpc.projects.getById.useQuery(
+    { id: projectId! },
+    { enabled: !!projectId }
+  );
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const [analysisResult, setAnalysisResult] = useState<ArchitectureAnalysisResult | null>(null);
@@ -141,14 +144,14 @@ export default function ArchitecturePage({ projectId }: { projectId: number }) {
     fetch("/api/compleo/sessions")
       .then((r) => r.json())
       .then((data) => {
-        if (data.sessions) {
-          const analyzed = data.sessions.filter(
-            (s: any) => s.status === "analyzed" || s.status === "generated" || s.status === "waiting_choices" || s.status === "missing_deps"
-          );
-          setSessions(analyzed);
-          if (analyzed.length > 0 && !selectedSessionId) {
-            setSelectedSessionId(analyzed[0].id);
-          }
+        // API returns a flat array, not { sessions: [...] }
+        const sessionList = Array.isArray(data) ? data : (data.sessions || []);
+        const analyzed = sessionList.filter(
+          (s: any) => s.status === "analyzed" || s.status === "generated" || s.status === "waiting_choices" || s.status === "missing_deps"
+        );
+        setSessions(analyzed);
+        if (analyzed.length > 0 && !selectedSessionId) {
+          setSelectedSessionId(analyzed[0].id);
         }
       })
       .catch(() => {});
@@ -226,7 +229,7 @@ export default function ArchitecturePage({ projectId }: { projectId: number }) {
           <Network className="w-5 h-5 text-cyan-400" />
           <div>
             <h1 className="text-sm font-bold">
-              Architecture Discovery — {project?.name || "Projet"}
+              Architecture Discovery — {project?.name || sessions.find(s => s.id === selectedSessionId)?.projectName || "Projet"}
             </h1>
             <p className="text-[10px] text-muted-foreground">
               Analyse de graphe de dépendances, clustering de domaines, extraction de microservices

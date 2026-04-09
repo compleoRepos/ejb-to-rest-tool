@@ -697,8 +697,8 @@ export default function CompleoPage() {
                 ))}
               </div>
 
-              {/* Workspace link */}
-              <div className="mt-6">
+              {/* Workspace & Architecture links */}
+              <div className="mt-6 space-y-3">
                 <Link href="/compleo/workspace">
                   <div className="p-4 rounded-lg border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] hover:border-emerald-500/40 transition-all cursor-pointer group">
                     <div className="flex items-center gap-3">
@@ -710,6 +710,20 @@ export default function CompleoPage() {
                         </p>
                       </div>
                       <ChevronRight className="w-4 h-4 text-[oklch(0.4_0.01_250)] ml-auto group-hover:text-emerald-400 transition-colors" />
+                    </div>
+                  </div>
+                </Link>
+                <Link href="/compleo/architecture">
+                  <div className="p-4 rounded-lg border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] hover:border-cyan-500/40 transition-all cursor-pointer group">
+                    <div className="flex items-center gap-3">
+                      <GitBranch className="w-5 h-5 text-cyan-400 group-hover:scale-110 transition-transform" />
+                      <div>
+                        <p className="text-sm font-medium text-white">Architecture Discovery</p>
+                        <p className="text-xs text-[oklch(0.5_0.01_250)]">
+                          Graphe de dépendances, clustering de domaines, extraction de microservices
+                        </p>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-[oklch(0.4_0.01_250)] ml-auto group-hover:text-cyan-400 transition-colors" />
                     </div>
                   </div>
                 </Link>

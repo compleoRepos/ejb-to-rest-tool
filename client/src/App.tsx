@@ -38,6 +38,9 @@ function Router() {
       <Route path={"/compleo/agent"} component={CompleoAgentPage} />
       <Route path={"/compleo/rules"} component={LearningRulesPage} />
       <Route path={"/compleo/workspace"} component={WorkspacePage} />
+      <Route path={"/compleo/architecture"}>
+        {() => <ArchitecturePage />}
+      </Route>
       <Route path={"/api-docs"} component={ApiDocsPage} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
