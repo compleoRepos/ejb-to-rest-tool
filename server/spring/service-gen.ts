@@ -92,17 +92,31 @@ ${methodBody}${endingLines}
   }
 
   // R6: Collect all injected services for constructor injection
-  const allInjected = new Set<string>();
+  const allInjected = new Map<string, { type: string; crossModule?: boolean; sourceModule?: string }>();
   for (const uc of useCases) {
     for (const svc of uc.injectedServices) {
-      allInjected.add(svc.type);
+      if (!allInjected.has(svc.type)) {
+        allInjected.set(svc.type, {
+          type: svc.type,
+          crossModule: (svc as any).crossModule ?? false,
+          sourceModule: (svc as any).sourceModule,
+        });
+      }
     }
   }
 
-  const injectedFields = [...allInjected].map(s => {
-    const fieldName = s.charAt(0).toLowerCase() + s.slice(1);
-    return `    private final ${s} ${fieldName};`;
-  });
+  // Separate local and cross-module dependencies
+  const localFields: string[] = [];
+  const crossModuleFields: string[] = [];
+  for (const [, svc] of allInjected) {
+    const fieldName = svc.type.charAt(0).toLowerCase() + svc.type.slice(1);
+    if (svc.crossModule) {
+      crossModuleFields.push(`    /** Cross-module dependency from ${svc.sourceModule ?? "external"} */\n    private final ${svc.type} ${fieldName};`);
+    } else {
+      localFields.push(`    private final ${svc.type} ${fieldName};`);
+    }
+  }
+  const injectedFields = [...localFields, ...crossModuleFields];
 
   return {
     path: `${basePath}/service/${serviceName}.java`,

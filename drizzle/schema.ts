@@ -237,3 +237,58 @@ export const compleoSessions = mysqlTable("compleo_sessions", {
 
 export type CompleoSessionRow = typeof compleoSessions.$inferSelect;
 export type InsertCompleoSession = typeof compleoSessions.$inferInsert;
+
+// ============================================================
+// Workspaces (Multi-module project groups)
+// ============================================================
+
+export const workspaces = mysqlTable("workspaces", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Workspace = typeof workspaces.$inferSelect;
+export type InsertWorkspace = typeof workspaces.$inferInsert;
+
+// ============================================================
+// Workspace Sessions (Projects within a workspace)
+// ============================================================
+
+export const workspaceSessions = mysqlTable("workspace_sessions", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  workspaceId: varchar("workspace_id", { length: 36 }).notNull(),
+  sessionId: varchar("session_id", { length: 36 }).notNull(),
+  projectName: varchar("project_name", { length: 255 }),
+  artifactId: varchar("artifact_id", { length: 255 }),
+  addedAt: timestamp("added_at").defaultNow().notNull(),
+  analysisStatus: mysqlEnum("analysis_status", [
+    "PENDING", "ANALYZED", "LINKED"
+  ]).default("PENDING").notNull(),
+});
+
+export type WorkspaceSession = typeof workspaceSessions.$inferSelect;
+export type InsertWorkspaceSession = typeof workspaceSessions.$inferInsert;
+
+// ============================================================
+// Cross-Module Links (Dependencies between workspace projects)
+// ============================================================
+
+export const crossModuleLinks = mysqlTable("cross_module_links", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  workspaceId: varchar("workspace_id", { length: 36 }).notNull(),
+  sourceSessionId: varchar("source_session_id", { length: 36 }).notNull(),
+  sourceClass: varchar("source_class", { length: 255 }).notNull(),
+  targetSessionId: varchar("target_session_id", { length: 36 }),
+  targetClass: varchar("target_class", { length: 255 }).notNull(),
+  jndiPath: text("jndi_path"),
+  status: mysqlEnum("status", [
+    "UNRESOLVED", "RESOLVED", "NEWLY_RESOLVED", "STUB"
+  ]).default("UNRESOLVED").notNull(),
+  resolvedAt: timestamp("resolved_at"),
+});
+
+export type CrossModuleLink = typeof crossModuleLinks.$inferSelect;
+export type InsertCrossModuleLink = typeof crossModuleLinks.$inferInsert;

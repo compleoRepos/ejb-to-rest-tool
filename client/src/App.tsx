@@ -14,6 +14,7 @@ import ApiDocsPage from "./pages/ApiDocs";
 import CompleoPage from "./pages/Compleo";
 import CompleoAgentPage from "./pages/CompleoAgent";
 import LearningRulesPage from "./pages/LearningRules";
+import WorkspacePage from "./pages/Workspace";
 import AppLayout from "./components/AppLayout";
 
 function Router() {
@@ -36,6 +37,7 @@ function Router() {
       <Route path={"/compleo"} component={CompleoPage} />
       <Route path={"/compleo/agent"} component={CompleoAgentPage} />
       <Route path={"/compleo/rules"} component={LearningRulesPage} />
+      <Route path={"/compleo/workspace"} component={WorkspacePage} />
       <Route path={"/api-docs"} component={ApiDocsPage} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />

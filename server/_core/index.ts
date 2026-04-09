@@ -10,6 +10,7 @@ import learningRoutes from "../learning-routes";
 import { intelligenceRoutes } from "../intelligence-routes";
 import { authRoutes } from "../auth-routes";
 import { registerArchitectureRoutes } from "../architecture-routes";
+import { registerWorkspaceRoutes } from "../workspace-routes";
 import { authMiddleware } from "../middleware/auth-middleware";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -70,6 +71,8 @@ async function startServer() {
   app.use("/api/intelligence", intelligenceRoutes);
   // Architecture discovery routes (analyze, export, result)
   registerArchitectureRoutes(app);
+  // Workspace multi-module routes (CRUD, add-project, generate)
+  registerWorkspaceRoutes(app);
 
   // tRPC API
   app.use(

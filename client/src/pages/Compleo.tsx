@@ -690,8 +690,26 @@ export default function CompleoPage() {
                 ))}
               </div>
 
+              {/* Workspace link */}
+              <div className="mt-6">
+                <Link href="/compleo/workspace">
+                  <div className="p-4 rounded-lg border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] hover:border-emerald-500/40 transition-all cursor-pointer group">
+                    <div className="flex items-center gap-3">
+                      <Network className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" />
+                      <div>
+                        <p className="text-sm font-medium text-white">Workspace Multi-Modules</p>
+                        <p className="text-xs text-[oklch(0.5_0.01_250)]">
+                          Regroupez plusieurs EJB interconnectés et résolvez les dépendances JNDI
+                        </p>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-[oklch(0.4_0.01_250)] ml-auto group-hover:text-emerald-400 transition-colors" />
+                    </div>
+                  </div>
+                </Link>
+              </div>
+
               {/* Session history */}
-              <div className="mt-8">
+              <div className="mt-6">
                 <SessionList onRestore={handleRestoreSession} />
               </div>
             </motion.div>
