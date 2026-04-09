@@ -280,15 +280,22 @@ export class ServletDetector implements TechnologyDetector {
   }
 
   /**
-   * Convertir un URL pattern en nom de handler Java.
+   * Convertir un URL pattern en nom de handler Java valide.
    * /comptes/solde → handleGetComptesSolde
+   * /api/v1/comptes/{id}/solde → handleGetComptesSolde
+   * v5.10.1: FIX 4b — filtre api, vN, {params} pour éviter les noms invalides.
    */
   private routeToHandlerName(urlPattern: string, httpVerb: string): string {
     const verb = httpVerb.charAt(0).toUpperCase() + httpVerb.slice(1).toLowerCase();
     const segments = urlPattern
+      .replace(/^\/+/, "")          // Supprimer slashes de début
       .split("/")
       .filter(Boolean)
+      .filter(s => s !== "api")            // Enlever "api"
+      .filter(s => !/^v\d+$/.test(s))      // Enlever "v1", "v2"
+      .filter(s => !/^\{.*\}$/.test(s))    // Enlever les {params}
       .map(s => s.replace(/[^a-zA-Z0-9]/g, ""))
+      .filter(s => s.length > 0)
       .map(s => s.charAt(0).toUpperCase() + s.slice(1));
     return `handle${verb}${segments.join("") || "Root"}`;
   }

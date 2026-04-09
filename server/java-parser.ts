@@ -338,32 +338,34 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
 function isUseCase(content: string): boolean {
   // BOA pattern: @UseCase + BaseUseCase
   if (/@UseCase/.test(content) && /implements\s+BaseUseCase/.test(content)) return true;
-  // Standard Java EE pattern: @Stateless with a public method (not a Service class)
-  if (/@Stateless/.test(content) && /public\s+class/.test(content)) {
-    // Exclure les DAOs — @Stateless ne signifie pas UseCase pour les couches DAO
+  // Standard Java EE pattern: @Stateless with BaseUseCase (single execute() UseCase)
+  if (/@Stateless/.test(content) && /implements\s+BaseUseCase/.test(content) && /public\s+class/.test(content)) {
     const classNameMatch = content.match(/public\s+class\s+(\w+)/);
     const className = classNameMatch ? classNameMatch[1] : "";
     if (isDao(content, className)) return false;
     return true;
   }
+  // @Stateless WITHOUT BaseUseCase → handled by isDirectEjb() / parseDirectEjbUseCases()
+  // Do NOT match here to avoid parseUseCase() producing empty stubs
   return false;
 }
 
 /**
- * Détecte les EJB directs multi-méthodes — @Stateless sans BaseUseCase,
- * avec plusieurs méthodes publiques business (non-lifecycle).
+ * Détecte les EJB directs — @Stateless sans BaseUseCase,
+ * avec au moins une méthode publique business (non-lifecycle).
  * Chaque méthode publique non-lifecycle = 1 UseCase distinct.
+ * v5.10.1: seuil abaissé de >1 à >=1 pour couvrir les EJB à méthode unique.
  */
 function isDirectEjb(content: string): boolean {
-  if (!/@Stateless/.test(content)) return false;
-  if (/implements\s+BaseUseCase/.test(content)) return false; // BOA pattern → single UseCase
+  if (!/@Stateless/.test(content) && !/@Stateful/.test(content)) return false;
+  if (/implements\s+BaseUseCase/.test(content)) return false; // BOA pattern → single UseCase via parseUseCase
   if (!(/public\s+class/.test(content))) return false;
   const classNameMatch = content.match(/public\s+class\s+(\w+)/);
   const className = classNameMatch ? classNameMatch[1] : "";
   if (isDao(content, className)) return false;
   // Count business methods (public, non-lifecycle, non-constructor)
   const businessMethods = extractBusinessMethods(content, className);
-  return businessMethods.length > 1;
+  return businessMethods.length >= 1;
 }
 
 interface DirectEjbMethod {

@@ -42,6 +42,31 @@ export class ServletGenerator implements CodeGenerator {
   private mn(doMethod: string): string { return doMethod.replace(/^do/, "handle"); }
 
   /**
+   * Nettoie un nom de méthode pour qu'il soit un identifiant Java valide.
+   * Supprime les caractères invalides (/, -, .) et convertit en camelCase.
+   * v5.10.1: FIX 4b — évite les noms comme handlePost/api/connexion.
+   */
+  private sanitizeJavaMethodName(name: string): string {
+    // Si le nom contient des / ou des caractères non-Java, le nettoyer
+    if (/[^a-zA-Z0-9_]/.test(name)) {
+      return name
+        .replace(/^\/+/, "")          // Supprimer slashes de début
+        .split(/[\/\-.]/)              // Découper par / - .
+        .filter(s => s.length > 0)     // Enlever les parties vides
+        .filter(s => !/^v\d+$/.test(s))   // Enlever "v1", "v2"
+        .filter(s => !/^\{.*\}$/.test(s)) // Enlever les {params}
+        .filter(s => s !== "api")          // Enlever "api"
+        .map((s, i) => i === 0
+          ? s.charAt(0).toLowerCase() + s.slice(1)  // Premier segment en lowerCamelCase
+          : s.charAt(0).toUpperCase() + s.slice(1))  // Suivants en UpperCamelCase
+        .join("")
+        .replace(/[^a-zA-Z0-9_]/g, "") // Supprimer tout caractère restant invalide
+        || "handle";
+    }
+    return name;
+  }
+
+  /**
    * Détermine si une méthode a un urlPattern (multi-route).
    */
   private hasSubRoute(m: DetectedMethod): boolean {
@@ -56,7 +81,8 @@ export class ServletGenerator implements CodeGenerator {
       const subPath = this.hasSubRoute(m) ? `("${m.urlPattern}")` : "";
       const params = c.metadata.requestParams.map(p => "@RequestParam String " + p.name).join(", ");
       const args = c.metadata.requestParams.map(p => p.name).join(", ");
-      const handlerName = this.hasSubRoute(m) ? m.name : this.mn(m.name);
+      const rawHandlerName = this.hasSubRoute(m) ? m.name : this.mn(m.name);
+      const handlerName = this.sanitizeJavaMethodName(rawHandlerName);
 
       return `    /** Migré depuis ${c.className}.${m.name}${m.urlPattern ? ` — route: ${m.urlPattern}` : ""} */
     ${map}${subPath}
@@ -91,7 +117,8 @@ ${methods}
     const methods = c.metadata.methods.map(m => {
       const isRead = m.httpVerb === "GET";
       const params = c.metadata.requestParams.map(p => "String " + p.name).join(", ");
-      const handlerName = this.hasSubRoute(m) ? m.name : this.mn(m.name);
+        const rawHandlerName = m.urlPattern ? m.name : this.mn(m.name);
+      const handlerName = this.sanitizeJavaMethodName(rawHandlerName);
 
       return `    @Transactional${isRead ? "(readOnly = true)" : ""}
     public Object ${handlerName}(${params}) {
@@ -141,7 +168,8 @@ ${fields}
     const testMethods = methods.map((m, idx) => {
       const route = m.urlPattern ? basePath + m.urlPattern : basePath;
       const verb = m.httpVerb?.toLowerCase() || "get";
-      const handlerName = m.urlPattern ? m.name : this.mn(m.name);
+      const rawHandlerName = m.urlPattern ? m.name : this.mn(m.name);
+      const handlerName = this.sanitizeJavaMethodName(rawHandlerName);
 
       return `    @Test
     void shouldReturn200For${handlerName.charAt(0).toUpperCase() + handlerName.slice(1)}() throws Exception {

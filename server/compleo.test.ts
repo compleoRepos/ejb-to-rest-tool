@@ -648,22 +648,24 @@ describe("Phase 1.2 — VoIn/VoOut Fallback Resolution", () => {
 });
 
 describe("Phase 1.3 — @Stateless EJB Detection", () => {
-  it("detects @Stateless EJBs as UseCases", () => {
+  it("detects @Stateless EJBs as UseCases (direct EJB → ClassName_methodName)", () => {
     const files = [
       { path: "src/main/java/ma/eai/boa/xbanking/payment/ProcessPaymentEJB.java", content: STATELESS_ONLY_EJB },
     ];
     const ir = parseEjbProject(files);
     expect(ir.useCases.length).toBe(1);
-    expect(ir.useCases[0].className).toBe("ProcessPaymentEJB");
+    // v5.10.1: @Stateless sans BaseUseCase → direct EJB, className = Class_method
+    expect(ir.useCases[0].className).toBe("ProcessPaymentEJB_process");
   });
 
-  it("@Stateless EJB falls back to ValueObject when no DTO exists", () => {
+  it("@Stateless EJB direct: voIn/voOut inferred from method signature", () => {
     const files = [
       { path: "src/main/java/ma/eai/boa/xbanking/payment/ProcessPaymentEJB.java", content: STATELESS_ONLY_EJB },
     ];
     const ir = parseEjbProject(files);
-    expect(ir.useCases[0].voInType).toBe("ValueObject");
-    expect(ir.useCases[0].voOutType).toBe("ValueObject");
+    // v5.10.1: direct EJB → voIn/voOut from method signature: process(String orderId) → String
+    expect(ir.useCases[0].voInType).toBe("String");
+    expect(ir.useCases[0].voOutType).toBe("String");
   });
 });
 
@@ -780,16 +782,17 @@ describe("BUG 1 — DAO/Repository exclusion from UseCase detection", () => {
     expect(ir.useCases.length).toBe(0);
   });
 
-  it("@Stateless business EJB is still detected as UseCase", () => {
+  it("@Stateless business EJB is still detected as UseCase (direct EJB)", () => {
     const files = [
       { path: "src/main/java/ma/eai/boa/xbanking/payment/ProcessPaymentEJB.java", content: STATELESS_ONLY_EJB },
     ];
     const ir = parseEjbProject(files);
     expect(ir.useCases.length).toBe(1);
-    expect(ir.useCases[0].className).toBe("ProcessPaymentEJB");
+    // v5.10.1: direct EJB naming convention
+    expect(ir.useCases[0].className).toBe("ProcessPaymentEJB_process");
   });
 
-  it("mixed project: DAO excluded, business EJB included", () => {
+  it("mixed project: DAO excluded, business EJB included (direct EJB)", () => {
     const files = [
       { path: "src/main/java/ma/eai/boa/xbanking/dao/CompteDAO.java", content: DAO_WITH_STATELESS },
       { path: "src/main/java/ma/eai/boa/xbanking/repository/ClientRepository.java", content: DAO_REPOSITORY_PATTERN },
@@ -797,7 +800,8 @@ describe("BUG 1 — DAO/Repository exclusion from UseCase detection", () => {
     ];
     const ir = parseEjbProject(files);
     expect(ir.useCases.length).toBe(1);
-    expect(ir.useCases[0].className).toBe("ProcessPaymentEJB");
+    // v5.10.1: direct EJB naming convention
+    expect(ir.useCases[0].className).toBe("ProcessPaymentEJB_process");
   });
 });
 
