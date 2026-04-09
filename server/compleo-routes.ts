@@ -1381,6 +1381,45 @@ router.post("/test-inject-session", async (req: Request, res: Response) => {
   }
 });
 
+// ─── Debug endpoint: check IR rawSource content ─────────────────────
+router.get("/debug-ir/:id", async (req: Request, res: Response) => {
+  const session = sessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: "Session not found" });
+  if (!session.ir) return res.json({ hasIr: false });
+
+  const ir = session.ir;
+  const useCases = ir.useCases || [];
+  const dtos = ir.dtos || [];
+
+  const summary = useCases.map((uc: any) => {
+    const raw = uc.rawSource || "";
+    return {
+      className: uc.className,
+      rawSourceLength: raw.length,
+      hasLookup: raw.includes("lookup"),
+      hasEJB: raw.includes("@EJB"),
+      hasFrom: /FROM\s+/i.test(raw),
+      hasInto: /INTO\s+/i.test(raw),
+      hasPreparedStatement: raw.includes("PreparedStatement"),
+      hasMessageDriven: raw.includes("@MessageDriven"),
+      hasWebService: raw.includes("@WebService"),
+      hasRestTemplate: raw.includes("RestTemplate"),
+      hasDataSource: raw.includes("DataSource"),
+      hasEntityManager: raw.includes("EntityManager"),
+      hasJMS: raw.includes("JMS") || raw.includes("Queue") || raw.includes("Topic"),
+      injectedServices: uc.injectedServices?.length || 0,
+      rawSourcePreview: raw.substring(0, 300),
+    };
+  });
+
+  return res.json({
+    hasIr: true,
+    useCaseCount: useCases.length,
+    dtoCount: dtos.length,
+    useCases: summary,
+  });
+});
+
 export function registerCompleoRoutes(app: import("express").Express) {
   app.use("/api/compleo", router);
 }

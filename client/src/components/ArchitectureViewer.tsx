@@ -217,7 +217,9 @@ export function ArchitectureViewer({
     if (!containerRef.current || !cytoscapeData) return;
 
     if (cyRef.current) {
+      try { cyRef.current.stop(); } catch { /* ignore */ }
       cyRef.current.destroy();
+      cyRef.current = null;
     }
 
     const elements: cytoscape.ElementDefinition[] = [];
@@ -343,11 +345,31 @@ export function ArchitectureViewer({
   function createCytoscapeInstance(elements: cytoscape.ElementDefinition[]) {
     if (!containerRef.current) return;
 
-    const layoutConfig = getLayoutConfig(layout);
+    // Validate edges: remove any edge whose source or target doesn't exist as a node.
+    // This prevents dagre layout crashes ("Cannot set properties of undefined (setting 'order')")
+    const nodeIds = new Set(
+      elements.filter((el) => !el.data.source && !el.data.target).map((el) => el.data.id)
+    );
+    const validatedElements = elements.filter((el) => {
+      // Keep all nodes
+      if (!el.data.source && !el.data.target) return true;
+      // For edges: keep only if both source and target exist
+      return nodeIds.has(el.data.source as string) && nodeIds.has(el.data.target as string);
+    });
 
-    const cy = cytoscape({
+    // Determine if we have compound nodes (parent-child relationships)
+    const hasCompoundNodes = validatedElements.some((el) => el.data.parent);
+    // Dagre doesn't support compound nodes well — force cose for compound views
+    const effectiveLayout = hasCompoundNodes && (layout === "dagre" || layout === "breadthfirst")
+      ? "cose"
+      : layout;
+    const layoutConfig = getLayoutConfig(effectiveLayout);
+
+    let cy: Core;
+    try {
+    cy = cytoscape({
       container: containerRef.current,
-      elements,
+      elements: validatedElements,
       style: [
         // Microservice compound nodes
         {
@@ -426,7 +448,7 @@ export function ArchitectureViewer({
               return ROLE_ICONS[role] || "ellipse";
             },
             "border-width": 1.5,
-            "border-color": "#ffffff40",
+            "border-color": "rgba(255,255,255,0.25)",
           } as any,
         },
         // External nodes
@@ -442,7 +464,7 @@ export function ArchitectureViewer({
             width: 22,
             height: 22,
             "border-width": 1.5,
-            "border-color": "#ffffff60",
+            "border-color": "rgba(255,255,255,0.38)",
           },
         },
         // Edges — base style
@@ -530,6 +552,24 @@ export function ArchitectureViewer({
     });
 
     cyRef.current = cy;
+    } catch (err) {
+      // Fallback: if layout crashes, retry with preset (no layout algorithm)
+      console.warn("[ArchitectureViewer] Layout crashed, falling back to grid:", err);
+      try {
+        cy = cytoscape({
+          container: containerRef.current,
+          elements: validatedElements,
+          style: [],
+          layout: { name: "grid" },
+          minZoom: 0.05,
+          maxZoom: 8,
+          wheelSensitivity: 0.3,
+        });
+        cyRef.current = cy;
+      } catch (fallbackErr) {
+        console.error("[ArchitectureViewer] Even fallback layout failed:", fallbackErr);
+      }
+    }
   }
 
   // ─── Layout configs ───────────────────────────────────────────────────
@@ -595,6 +635,10 @@ export function ArchitectureViewer({
     }
     return () => {
       if (cyRef.current) {
+        // Stop any running layout animations before destroying
+        try {
+          cyRef.current.stop();
+        } catch { /* ignore */ }
         cyRef.current.destroy();
         cyRef.current = null;
       }

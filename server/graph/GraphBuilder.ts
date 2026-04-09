@@ -474,6 +474,31 @@ export class GraphBuilder {
             label: de.label,
           });
         }
+      } else {
+        // Unresolved dependency → create EXTERNAL node (exit point)
+        // This handles @EJB/@Inject services not found in the project (e.g., MagixService, external APIs)
+        const extId = `ext:${de.target}`;
+        if (!nodeIds.has(extId)) {
+          addNode({
+            id: extId,
+            type: "EXTERNAL",
+            systemName: de.target,
+            externalType: "WEBSERVICE",
+            protocol: "EJB_INJECT",
+          } as ExternalNode);
+        }
+        const edgeId = createEdgeId(de.source, extId, de.type);
+        if (!edgeIds.has(edgeId)) {
+          edgeIds.add(edgeId);
+          edges.push({
+            id: edgeId,
+            source: de.source,
+            target: extId,
+            type: de.type,
+            weight: getEdgeWeight(de.type),
+            label: de.label,
+          });
+        }
       }
     }
 

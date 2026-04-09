@@ -196,10 +196,12 @@ export class ArchitectureDiscovery {
 
   private findExitPoints(graph: DependencyGraph): ExitPoint[] {
     const exitPoints: ExitPoint[] = [];
+    const exitNodeIds = new Set<string>();
+
+    // ─── Strategy 1: EXTERNAL nodes (databases, queues, web services) ─────
     const externalNodes = graph.nodes.filter((n) => n.type === "EXTERNAL") as ExternalNode[];
 
     for (const ext of externalNodes) {
-      // Trouver les classes qui pointent vers ce nœud externe
       const incomingEdges = graph.edges.filter((e) => e.target === ext.id);
 
       for (const edge of incomingEdges) {
@@ -223,6 +225,7 @@ export class ArchitectureDiscovery {
             type = "EXTERNAL_SYSTEM";
         }
 
+        exitNodeIds.add(sourceNode.id);
         exitPoints.push({
           nodeId: sourceNode.id,
           className,
@@ -230,6 +233,78 @@ export class ArchitectureDiscovery {
           target: ext.systemName,
           targetSystem: this.inferTargetSystem(ext.systemName, ext.externalType, ext.protocol),
           protocol: ext.protocol || "UNKNOWN",
+        });
+      }
+    }
+
+    // ─── Strategy 2: Leaf CLASS nodes that are dependency targets ──────────
+    // These are services injected via @EJB/@Inject that have incoming DEPENDS_ON
+    // edges but no outgoing edges to other CLASS nodes. They act as gateways
+    // to external systems (e.g., MagixService, adapters, connectors).
+    const classNodes = graph.nodes.filter((n) => n.type === "CLASS") as ClassNode[];
+
+    // Gateway/middleware naming patterns
+    const gatewayPatterns = /(?:Service|Gateway|Adapter|Connector|Client|Proxy|Facade|Bridge|Delegate|Provider|Handler|Manager|Mediator|Wrapper|Remote|External|Integration|Middleware)/i;
+
+    for (const node of classNodes) {
+      // Skip nodes already identified as exit points
+      if (exitNodeIds.has(node.id)) continue;
+
+      // Must have incoming DEPENDS_ON or TRANSACTION_WITH edges (i.e., it's a dependency target)
+      const incomingDeps = graph.edges.filter(
+        (e) => e.target === node.id && (e.type === "DEPENDS_ON" || e.type === "TRANSACTION_WITH")
+      );
+      if (incomingDeps.length === 0) continue;
+
+      // Must have NO outgoing edges to other CLASS nodes (leaf node)
+      const outgoingToClass = graph.edges.filter(
+        (e) => e.source === node.id && (
+          e.type === "DEPENDS_ON" || e.type === "CALLS" ||
+          e.type === "JNDI_LOOKUP" || e.type === "DB_ACCESS" ||
+          e.type === "EMITS_EVENT" || e.type === "SOAP_CALLS"
+        )
+      );
+      if (outgoingToClass.length > 0) continue;
+
+      // Must not be a simple value type
+      if (node.role === "VALUE_OBJECT" || node.role === "ENUM_TYPE" || node.role === "EXCEPTION_TYPE") continue;
+
+      // Determine exit point type based on naming and role
+      const className = node.className;
+      let type: ExitPoint["type"] = "EXTERNAL_SYSTEM";
+      let protocol = "EJB_INJECT";
+
+      if (className.toLowerCase().includes("magix") || className.toLowerCase().includes("middleware")) {
+        type = "WEBSERVICE";
+        protocol = "MIDDLEWARE";
+      } else if (className.toLowerCase().includes("adapter") || className.toLowerCase().includes("connector")) {
+        type = "WEBSERVICE";
+        protocol = "ADAPTER";
+      } else if (className.toLowerCase().includes("gateway") || className.toLowerCase().includes("proxy")) {
+        type = "WEBSERVICE";
+        protocol = "GATEWAY";
+      } else if (gatewayPatterns.test(className)) {
+        type = "EXTERNAL_SYSTEM";
+        protocol = "SERVICE";
+      }
+
+      // Create one exit point per incoming dependency (each caller has its own exit path)
+      for (const edge of incomingDeps) {
+        const callerNode = graph.nodes.find((n) => n.id === edge.source);
+        if (!callerNode || callerNode.type !== "CLASS") continue;
+
+        const callerClassName = (callerNode as ClassNode).className;
+        const epKey = `${callerNode.id}→${node.id}`;
+        if (exitNodeIds.has(epKey)) continue;
+        exitNodeIds.add(epKey);
+
+        exitPoints.push({
+          nodeId: callerNode.id,
+          className: callerClassName,
+          type,
+          target: className,
+          targetSystem: this.inferTargetSystem(className, "WEBSERVICE", protocol),
+          protocol,
         });
       }
     }
