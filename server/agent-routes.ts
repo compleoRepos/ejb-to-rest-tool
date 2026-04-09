@@ -255,24 +255,31 @@ export function registerAgentRoutes(app: Express) {
     const archive = archiver("zip", { zlib: { level: 9 } });
     archive.pipe(res);
 
-    // Add generated files (filter out MIGRATION_REPORT to avoid duplication)
-    const reportPath = "MIGRATION_REPORT.md";
-    let reportIncludedInFiles = false;
+    // FIX v5.8.1: Deduplicate ALL files in the ZIP using a Map (path → content)
+    // Priority: spring-generator files > multiTech files > migration report
+    const zipEntries = new Map<string, string>();
+    
+    // 1. Add spring-generator files (highest priority)
     for (const file of session.generatedProject.files) {
-      if (file.path === reportPath || file.path.endsWith("/" + reportPath)) {
-        reportIncludedInFiles = true;
-      }
-      archive.append(file.content, { name: file.path });
+      zipEntries.set(file.path, file.content);
     }
 
-    // Add multi-tech files
+    // 2. Add multi-tech files (skip duplicates from spring-generator)
     for (const file of session.generatedProject.multiTechFiles) {
-      archive.append(file.content, { name: file.path });
+      if (!zipEntries.has(file.path)) {
+        zipEntries.set(file.path, file.content);
+      }
     }
 
-    // Add migration report only if not already included in generated files
-    if (session.migrationReport && !reportIncludedInFiles) {
-      archive.append(session.migrationReport, { name: reportPath });
+    // 3. Add migration report only if not already included
+    const reportPath = "MIGRATION_REPORT.md";
+    if (session.migrationReport && !zipEntries.has(reportPath)) {
+      zipEntries.set(reportPath, session.migrationReport);
+    }
+
+    // Write all unique entries to the archive
+    for (const [path, content] of zipEntries) {
+      archive.append(content, { name: path });
     }
 
     archive.finalize();

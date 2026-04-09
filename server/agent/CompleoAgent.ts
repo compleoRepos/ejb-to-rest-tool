@@ -847,28 +847,29 @@ export class CompleoAgent {
         const branchName = `compleo/migration-${Date.now()}`;
         await gitConnector.createBranch(session.gitWorkingDir, branchName);
 
-        // Write generated files
-        const filesToWrite = [
-          ...session.generatedProject!.files.map((f) => ({
-            path: `modernized/${f.path}`,
-            content: f.content,
-          })),
-          ...session.generatedProject!.multiTechFiles.map((f) => ({
-            path: `modernized/${f.path}`,
-            content: f.content,
-          })),
-        ];
-
-        // Add migration report only if not already in generated files
-        const hasReportInFiles = session.generatedProject!.files.some(
-          (f) => f.path === "MIGRATION_REPORT.md" || f.path.endsWith("/MIGRATION_REPORT.md")
-        );
-        if (session.migrationReport && !hasReportInFiles) {
-          filesToWrite.push({
-            path: "modernized/MIGRATION_REPORT.md",
-            content: session.migrationReport,
-          });
+        // FIX v5.8.1: Deduplicate ALL files using a Map (path → content)
+        // Priority: spring-generator files > multiTech files > migration report
+        const gitEntries = new Map<string, string>();
+        
+        // 1. Spring-generator files (highest priority)
+        for (const f of session.generatedProject!.files) {
+          gitEntries.set(f.path, f.content);
         }
+        // 2. Multi-tech files (skip duplicates)
+        for (const f of session.generatedProject!.multiTechFiles) {
+          if (!gitEntries.has(f.path)) {
+            gitEntries.set(f.path, f.content);
+          }
+        }
+        // 3. Migration report (if not already present)
+        if (session.migrationReport && !gitEntries.has("MIGRATION_REPORT.md")) {
+          gitEntries.set("MIGRATION_REPORT.md", session.migrationReport);
+        }
+        
+        const filesToWrite = Array.from(gitEntries, ([p, c]) => ({
+          path: `modernized/${p}`,
+          content: c,
+        }));
 
         await gitConnector.writeFiles(session.gitWorkingDir, filesToWrite);
         await gitConnector.commit(session.gitWorkingDir, "feat: migration Spring Boot par Compleo Agent");

@@ -800,3 +800,147 @@ describe("BUG 1 — DAO/Repository exclusion from UseCase detection", () => {
     expect(ir.useCases[0].className).toBe("ProcessPaymentEJB");
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// FIX 2 — GET endpoints should NOT have @RequestBody
+// ═══════════════════════════════════════════════════════════════
+
+describe("FIX 2: GET endpoints use @RequestParam instead of @RequestBody", () => {
+  const CONSULTER_UC = `
+package com.bank.usecase;
+
+import javax.ejb.Stateless;
+
+@Stateless
+public class ConsulterCompteUC implements BaseUseCase<ConsulterCompteVoIn, ConsulterCompteVoOut> {
+    public ConsulterCompteVoOut execute(ConsulterCompteVoIn voIn) throws FwkRollbackException {
+        ConsulterCompteVoOut voOut = new ConsulterCompteVoOut();
+        voOut.setSolde(1000.0);
+        return voOut;
+    }
+}
+`;
+
+  const CONSULTER_VO_IN = `
+package com.bank.dto;
+
+import javax.xml.bind.annotation.XmlElement;
+import javax.xml.bind.annotation.XmlRootElement;
+
+@XmlRootElement
+public class ConsulterCompteVoIn {
+    @XmlElement(required = true)
+    private String numCompte;
+
+    @XmlElement
+    private String canal;
+
+    public String getNumCompte() { return numCompte; }
+    public void setNumCompte(String v) { this.numCompte = v; }
+    public String getCanal() { return canal; }
+    public void setCanal(String v) { this.canal = v; }
+}
+`;
+
+  const CONSULTER_VO_OUT = `
+package com.bank.dto;
+
+import javax.xml.bind.annotation.XmlElement;
+import javax.xml.bind.annotation.XmlRootElement;
+
+@XmlRootElement
+public class ConsulterCompteVoOut {
+    @XmlElement
+    private double solde;
+
+    public double getSolde() { return solde; }
+    public void setSolde(double v) { this.solde = v; }
+}
+`;
+
+  function createConsulterFiles() {
+    return [
+      { path: "src/main/java/com/bank/usecase/ConsulterCompteUC.java", content: CONSULTER_UC },
+      { path: "src/main/java/com/bank/dto/ConsulterCompteVoIn.java", content: CONSULTER_VO_IN },
+      { path: "src/main/java/com/bank/dto/ConsulterCompteVoOut.java", content: CONSULTER_VO_OUT },
+    ];
+  }
+
+  it("GET controller does NOT contain @RequestBody", () => {
+    const ir = parseEjbProject(createConsulterFiles());
+    const result = generateSpringBootProject(ir);
+    const controller = result.files.find(f => f.category === "controller");
+    expect(controller).toBeDefined();
+    // GET endpoint should use @RequestParam/@RequestHeader, NOT @RequestBody
+    expect(controller!.content).toContain("@GetMapping");
+    expect(controller!.content).not.toContain("@RequestBody");
+  });
+
+  it("GET controller uses @RequestParam for query fields", () => {
+    const ir = parseEjbProject(createConsulterFiles());
+    const result = generateSpringBootProject(ir);
+    const controller = result.files.find(f => f.category === "controller");
+    expect(controller).toBeDefined();
+    // Should have @RequestParam or @RequestHeader
+    const content = controller!.content;
+    const hasRequestParam = content.includes("@RequestParam") || content.includes("@RequestHeader");
+    expect(hasRequestParam).toBe(true);
+  });
+
+  it("POST controller still uses @RequestBody", () => {
+    // VirementUC is POST — should keep @RequestBody
+    const ir = parseEjbProject(createTestFiles(), SAMPLE_POM, SAMPLE_BIAN);
+    const result = generateSpringBootProject(ir);
+    const controller = result.files.find(f => f.category === "controller");
+    expect(controller).toBeDefined();
+    expect(controller!.content).toContain("@RequestBody");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// FIX 3 — No duplicate file paths in generated output
+// ═══════════════════════════════════════════════════════════════
+
+describe("FIX 3: No duplicate file paths in generated output", () => {
+  it("spring-generator produces no duplicate paths", () => {
+    const ir = parseEjbProject(createTestFiles(), SAMPLE_POM, SAMPLE_BIAN);
+    const result = generateSpringBootProject(ir);
+    const paths = result.files.map(f => f.path);
+    const uniquePaths = new Set(paths);
+    expect(paths.length).toBe(uniquePaths.size);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// FIX 4 — @Operation summary is short (< 80 chars)
+// ═══════════════════════════════════════════════════════════════
+
+describe("FIX 4: @Operation summary is short", () => {
+  it("@Operation summary is under 80 characters", () => {
+    const ir = parseEjbProject(createTestFiles(), SAMPLE_POM, SAMPLE_BIAN);
+    const result = generateSpringBootProject(ir);
+    const controller = result.files.find(f => f.category === "controller");
+    expect(controller).toBeDefined();
+    // Extract all summary = "..." values
+    const summaryMatches = controller!.content.match(/summary\s*=\s*"([^"]*)"/g) || [];
+    expect(summaryMatches.length).toBeGreaterThan(0);
+    for (const match of summaryMatches) {
+      const value = match.replace(/summary\s*=\s*"/, "").replace(/"$/, "");
+      expect(value.length).toBeLessThanOrEqual(80);
+    }
+  });
+
+  it("@Operation has separate description when javadoc is present", () => {
+    const ir = parseEjbProject(createTestFiles(), SAMPLE_POM, SAMPLE_BIAN);
+    // Add a useCaseDescription to trigger description field
+    if (ir.useCases.length > 0) {
+      (ir.useCases[0] as any).useCaseDescription = "This is a very long description that explains the full business logic of the virement operation including all edge cases and validation rules.";
+    }
+    const result = generateSpringBootProject(ir);
+    const controller = result.files.find(f => f.category === "controller");
+    expect(controller).toBeDefined();
+    // Should have both summary and description
+    expect(controller!.content).toContain("summary =");
+    expect(controller!.content).toContain("description =");
+  });
+});

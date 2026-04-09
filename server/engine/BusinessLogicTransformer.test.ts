@@ -308,6 +308,83 @@ describe("BusinessLogicTransformer", () => {
   });
 });
 
+// ═════════════════════════════════════════════════════════════
+// FIX 1 — T5: voOut référencé après setters → variable result
+// ═════════════════════════════════════════════════════════════
+
+describe("FIX 1: voOut post-setter reference → result variable", () => {
+  const transformer = new BusinessLogicTransformer();
+
+  it("inserts 'result = builder.build()' when voOut is referenced after setters", () => {
+    const body = `
+        ActiverCarteVoOut voOut = new ActiverCarteVoOut();
+        voOut.setCodeRetour("000");
+        voOut.setMessage("OK");
+        LOG.info("Résultat: " + voOut.getCodeRetour());
+        return voOut;
+    `;
+    const ctx: TransformContext = {
+      voInClass: "ActiverCarteVoIn",
+      voOutClass: "ActiverCarteVoOut",
+      requestDtoClass: "ActiverCarteRequestDTO",
+      responseDtoClass: "ActiverCarteResponseDTO",
+      sourceClassName: "ActiverCarteUC",
+    };
+    const result = transformer.transform(body, ctx);
+    // Should insert result variable
+    expect(result.body).toContain("ActiverCarteResponseDTO result = builder.build();");
+    // Should replace voOut.getCodeRetour() with result.getCodeRetour()
+    expect(result.body).toContain("result.getCodeRetour()");
+    expect(result.body).not.toContain("voOut.getCodeRetour()");
+    // Should return result (not builder.build())
+    expect(result.body).toContain("return result;");
+  });
+
+  it("does NOT insert result variable when voOut is NOT referenced after setters", () => {
+    const body = `
+        ActiverCarteVoOut voOut = new ActiverCarteVoOut();
+        voOut.setCodeRetour("000");
+        voOut.setMessage("OK");
+        return voOut;
+    `;
+    const ctx: TransformContext = {
+      voInClass: "ActiverCarteVoIn",
+      voOutClass: "ActiverCarteVoOut",
+      requestDtoClass: "ActiverCarteRequestDTO",
+      responseDtoClass: "ActiverCarteResponseDTO",
+      sourceClassName: "ActiverCarteUC",
+    };
+    const result = transformer.transform(body, ctx);
+    // No result variable needed
+    expect(result.body).not.toContain("ActiverCarteResponseDTO result = builder.build();");
+    // Should use builder.build() directly
+    expect(result.body).toContain("return builder.build();");
+  });
+
+  it("handles multiple post-setter references to voOut", () => {
+    const body = `
+        ActiverCarteVoOut voOut = new ActiverCarteVoOut();
+        voOut.setCodeRetour("000");
+        voOut.setMessage("Activation réussie");
+        LOG.info("Code: " + voOut.getCodeRetour());
+        LOG.info("Message: " + voOut.getMessage());
+        return voOut;
+    `;
+    const ctx: TransformContext = {
+      voInClass: "ActiverCarteVoIn",
+      voOutClass: "ActiverCarteVoOut",
+      requestDtoClass: "ActiverCarteRequestDTO",
+      responseDtoClass: "ActiverCarteResponseDTO",
+      sourceClassName: "ActiverCarteUC",
+    };
+    const result = transformer.transform(body, ctx);
+    expect(result.body).toContain("ActiverCarteResponseDTO result = builder.build();");
+    expect(result.body).toContain("result.getCodeRetour()");
+    expect(result.body).toContain("result.getMessage()");
+    expect(result.body).toContain("return result;");
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════
 // Utility functions
 // ═══════════════════════════════════════════════════════════════

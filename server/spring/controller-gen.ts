@@ -4,7 +4,7 @@
  * Extracted from spring-generator.ts (v5.5).
  */
 
-import type { UseCaseIR, DtoIR } from "../java-parser";
+import type { UseCaseIR, DtoIR, DtoFieldIR } from "../java-parser";
 import {
   type GeneratedFile,
   toPascalCase, toMethodName, mapDtoClassName, pluralize,
@@ -52,7 +52,47 @@ export function generateDomainController(
     const idParamName = hasIdParam ? getIdParamName(uc) : "";
 
     let paramList = "";
-    if (hasIdParam && reqType) {
+    let methodBodyPrefix = ""; // Extra code to build the DTO from params (GET only)
+    
+    if (httpMethod === "GET" && reqType && reqDto) {
+      // FIX v5.8.1: GET methods NEVER have @RequestBody
+      // Convert DTO fields to @RequestParam/@RequestHeader
+      const paramParts: string[] = [];
+      if (hasIdParam) {
+        paramParts.push(`@PathVariable String ${idParamName}`);
+      }
+      // Add DTO fields as @RequestParam
+      const contextualFields = new Set(["canal", "codeCanal", "channel", "userId", "idUtilisateur", "userAgent"]);
+      const idFields = new Set(["id", "numCompte", "numCarte", "clientId", "numero"]);
+      const builderParts: string[] = [];
+      
+      for (const field of reqDto.fields) {
+        const fieldName = field.name;
+        // Skip fields that are already @PathVariable
+        if (hasIdParam && (fieldName === idParamName || idFields.has(fieldName))) {
+          builderParts.push(`            .${fieldName}(${idParamName})`);
+          continue;
+        }
+        const isRequired = field.required;
+        if (contextualFields.has(fieldName)) {
+          imports.add("import org.springframework.web.bind.annotation.RequestHeader;");
+          const headerName = fieldName === "canal" || fieldName === "codeCanal" ? "X-Canal" : 
+                            fieldName === "userId" || fieldName === "idUtilisateur" ? "X-User-Id" : 
+                            "X-" + fieldName.replace(/([A-Z])/g, "-$1");
+          paramParts.push(`@RequestHeader(value = "${headerName}", required = ${isRequired}) String ${fieldName}`);
+        } else {
+          imports.add("import org.springframework.web.bind.annotation.RequestParam;");
+          paramParts.push(`@RequestParam(required = ${isRequired}) ${mapToSpringParamType(field)} ${fieldName}`);
+        }
+        builderParts.push(`            .${fieldName}(${fieldName})`);
+      }
+      paramList = paramParts.join(",\n            ");
+      
+      // Build the DTO from params inside the method body
+      methodBodyPrefix = `        ${reqType} request = ${reqType}.builder()
+${builderParts.join("\n")}
+            .build();\n`;
+    } else if (hasIdParam && reqType) {
       paramList = `@PathVariable String ${idParamName}, @Valid @RequestBody ${reqType} request`;
     } else if (hasIdParam) {
       paramList = `@PathVariable String ${idParamName}`;
@@ -75,7 +115,9 @@ export function generateDomainController(
     }
 
     const javadoc = (uc as any).useCaseDescription || (uc as any).javadoc || "";
-    const operationSummary = javadoc || `${methodName} — ${domain}`;
+    // FIX v5.8.1: @Operation summary must be short (< 80 chars), description = full text
+    const operationSummary = extractShortSummary(javadoc, methodName, domain);
+    const operationDescription = javadoc ? javadoc.replace(/"/g, '\\"') : "";
 
     const httpAnnotation = getHttpAnnotation(httpMethod, endpointPath || "/" + methodName.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase());
     const returnGeneric = resType !== "Void" ? resType : "Void";
@@ -86,11 +128,14 @@ export function generateDomainController(
      * ${uc.bianDomain ? `BIAN: ${uc.bianDomain} / ${uc.bianAction}` : `UseCase: ${uc.className}`}
      * ${javadoc ? javadoc : ""}
      */
-    @Operation(summary = "${operationSummary}")
+    @Operation(
+        summary = "${operationSummary}"${operationDescription ? `,
+        description = "${operationDescription}"` : ""}
+    )
     ${httpAnnotation}
     public ResponseEntity<${returnGeneric}> ${methodName}(${paramList}) {
         log.info("${httpMethod} ${semantic.path}");
-${responseStatement}
+${methodBodyPrefix}${responseStatement}
     }`);
   }
 
@@ -120,4 +165,38 @@ ${endpoints.join("\n")}
 }
 `,
   };
+}
+
+// ─── Helper: Map DTO field type to a simple @RequestParam type ───────────────
+
+function mapToSpringParamType(field: DtoFieldIR): string {
+  const t = field.resolvedType || field.type;
+  if (t === "BigDecimal") return "java.math.BigDecimal";
+  if (t === "Long" || t === "long") return "Long";
+  if (t === "Integer" || t === "int") return "Integer";
+  if (t === "Double" || t === "double") return "Double";
+  if (t === "Boolean" || t === "boolean") return "Boolean";
+  if (t.startsWith("List<")) return "String"; // Simplified: pass as comma-separated string
+  return "String";
+}
+
+// ─── Helper: Extract short summary for @Operation (< 80 chars) ──────────────
+
+function extractShortSummary(description: string, methodName: string, domain: string): string {
+  if (description) {
+    // Take the first sentence (before . : or newline)
+    const firstSentence = description.split(/[.:\n]/)[0].trim();
+    if (firstSentence.length > 0 && firstSentence.length <= 80) {
+      return firstSentence;
+    }
+    if (firstSentence.length > 80) {
+      return firstSentence.substring(0, 77) + "...";
+    }
+  }
+  // Fallback: generate from method name
+  return methodName
+    .replace(/([A-Z])/g, " $1")
+    .trim()
+    .replace(/^./, (c) => c.toUpperCase())
+    + " \u2014 " + domain;
 }

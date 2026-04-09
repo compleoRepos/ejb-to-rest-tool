@@ -174,8 +174,80 @@ export class BusinessLogicTransformer {
     });
 
     // ─── T5: return output → return builder.build() ───
+    // FIX v5.8.1: Si des logs/instructions référencent outputVar APRÈS les setters
+    // et AVANT le return, on doit stocker builder.build() dans une variable "result"
+    // pour que ces logs puissent accéder aux getters du DTO.
     const returnPattern = new RegExp(`return\\s+${this.escapeRegex(outputVar)}\\s*;`, "g");
-    result = result.replace(returnPattern, "return builder.build();");
+    if (returnPattern.test(result)) {
+      // Chercher si outputVar est encore référencé APRÈS le dernier setter et AVANT le return
+      const lines = result.split("\n");
+      let lastSetterIdx = -1;
+      let returnIdx = -1;
+      const returnRe = new RegExp(`^\\s*return\\s+${this.escapeRegex(outputVar)}\\s*;`);
+      const outputRefRe = new RegExp(`\\b${this.escapeRegex(outputVar)}\\.`);
+      
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes("builder.") && lines[i].includes("(")) lastSetterIdx = i;
+        if (returnRe.test(lines[i])) returnIdx = i;
+      }
+      
+      // Check if outputVar is referenced between last setter and return
+      let hasPostSetterRef = false;
+      if (lastSetterIdx >= 0 && returnIdx > lastSetterIdx) {
+        for (let i = lastSetterIdx + 1; i < returnIdx; i++) {
+          if (outputRefRe.test(lines[i])) {
+            hasPostSetterRef = true;
+            break;
+          }
+        }
+      }
+      
+      if (hasPostSetterRef && returnIdx >= 0) {
+        // Insert "ResponseDTO result = builder.build();" before the first post-setter reference
+        const resultDecl = `        ${resolvedCtx.responseDtoClass} result = builder.build();`;
+        let insertIdx = -1;
+        for (let i = lastSetterIdx + 1; i < returnIdx; i++) {
+          if (outputRefRe.test(lines[i])) {
+            insertIdx = i;
+            break;
+          }
+        }
+        if (insertIdx >= 0) {
+          lines.splice(insertIdx, 0, resultDecl);
+          // Re-find returnIdx after insertion
+          returnIdx++;
+        }
+        // Replace outputVar. with result. in lines between insertIdx and returnIdx
+        for (let i = (insertIdx >= 0 ? insertIdx + 1 : lastSetterIdx + 1); i <= returnIdx; i++) {
+          lines[i] = lines[i].replace(
+            new RegExp(`\\b${this.escapeRegex(outputVar)}\\.`, "g"),
+            "result."
+          );
+        }
+        // Replace return outputVar; with return result;
+        lines[returnIdx] = lines[returnIdx].replace(
+          new RegExp(`return\\s+${this.escapeRegex(outputVar)}\\s*;`),
+          "return result;"
+        );
+        result = lines.join("\n");
+      } else {
+        // Simple case: no post-setter references, just replace return
+        result = result.replace(
+          new RegExp(`return\\s+${this.escapeRegex(outputVar)}\\s*;`, "g"),
+          "return builder.build();"
+        );
+      }
+    }
+    // Also replace any remaining outputVar. references (e.g. voOut.getXxx() in other positions)
+    const remainingOutputRefs = new RegExp(`\\b${this.escapeRegex(outputVar)}\\.`, "g");
+    if (remainingOutputRefs.test(result)) {
+      // If we haven't inserted a result variable yet, these are orphan references
+      // Replace with builder pattern getter equivalent or add a TODO
+      if (!result.includes(`${resolvedCtx.responseDtoClass} result = builder.build()`)) {
+        result = result.replace(remainingOutputRefs, "builder.build().");
+        warnings.push(`Référence résiduelle à ${outputVar} remplacée par builder.build() — vérifier manuellement`);
+      }
+    }
     migratedLines++;
 
     // ─── T6: javax. → jakarta. + LOG → log (@Slf4j) ───
