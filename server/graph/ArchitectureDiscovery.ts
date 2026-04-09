@@ -178,7 +178,15 @@ export class ArchitectureDiscovery {
       }
 
       // EJB Remote (entry point if no incoming CALLS)
-      if ((tech === "EJB_3X" || tech === "EJB_2X") && inEdges.length === 0 && role !== "VALUE_OBJECT" && role !== "ENUM_TYPE" && role !== "EXCEPTION_TYPE") {
+      // Filter out INFRASTRUCTURE roles (UtilHash, EaiLog, validators) — they are utilities, not business entry points
+      if (
+        (tech === "EJB_3X" || tech === "EJB_2X") &&
+        inEdges.length === 0 &&
+        role !== "VALUE_OBJECT" &&
+        role !== "ENUM_TYPE" &&
+        role !== "EXCEPTION_TYPE" &&
+        role !== "INFRASTRUCTURE"
+      ) {
         entryPoints.push({
           nodeId: node.id,
           className,

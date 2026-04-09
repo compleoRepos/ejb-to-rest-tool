@@ -122,13 +122,23 @@ export class GraphBuilder {
     // ── Step 2: Create ClassNode for each Service ──────────────────────────
     for (const svc of ir.services) {
       const nodeId = createNodeId(svc.className, svc.packageName);
+      const svcDomainCtx: ClassDomainContext = {
+        className: svc.className,
+        packageName: svc.packageName,
+        fieldNames: svc.injectedDependencies.map((d) => d.name),
+        methodNames: svc.methods.map((m) => m.name),
+        body: "",
+        javadoc: "",
+        imports: [],
+      };
+      const svcDomain = this.domainInferrer.inferDomain(svcDomainCtx);
       const classNode: ClassNode = {
         id: nodeId,
         type: "CLASS",
         className: svc.className,
         packageName: svc.packageName,
         role: "DOMAIN_SERVICE",
-        domain: "UNKNOWN",
+        domain: svcDomain.domain,
         linesOfCode: 0,
         complexity: 1,
         technologyType: "EJB_3X",
@@ -145,13 +155,23 @@ export class GraphBuilder {
     // ── Step 3: Create ClassNode for each DTO ──────────────────────────────
     for (const dto of ir.dtos) {
       const nodeId = createNodeId(dto.className, dto.packageName);
+      const dtoDomainCtx: ClassDomainContext = {
+        className: dto.className,
+        packageName: dto.packageName,
+        fieldNames: dto.fields.map((f) => f.name),
+        methodNames: [],
+        body: "",
+        javadoc: "",
+        imports: [],
+      };
+      const dtoDomain = this.domainInferrer.inferDomain(dtoDomainCtx);
       const classNode: ClassNode = {
         id: nodeId,
         type: "CLASS",
         className: dto.className,
         packageName: dto.packageName,
         role: "VALUE_OBJECT",
-        domain: "UNKNOWN",
+        domain: dtoDomain.domain,
         linesOfCode: 0,
         complexity: 1,
         technologyType: "UNKNOWN",
@@ -163,13 +183,23 @@ export class GraphBuilder {
     // ── Step 4: Create ClassNode for each Enum ─────────────────────────────
     for (const en of ir.enums) {
       const nodeId = createNodeId(en.className, en.packageName);
+      const enumDomainCtx: ClassDomainContext = {
+        className: en.className,
+        packageName: en.packageName,
+        fieldNames: en.values,
+        methodNames: [],
+        body: en.values.join(" "),
+        javadoc: "",
+        imports: [],
+      };
+      const enumDomain = this.domainInferrer.inferDomain(enumDomainCtx);
       const classNode: ClassNode = {
         id: nodeId,
         type: "CLASS",
         className: en.className,
         packageName: en.packageName,
         role: "ENUM_TYPE",
-        domain: "UNKNOWN",
+        domain: enumDomain.domain,
         linesOfCode: 0,
         complexity: 1,
         technologyType: "UNKNOWN",
@@ -181,13 +211,23 @@ export class GraphBuilder {
     // ── Step 5: Create ClassNode for each Exception ────────────────────────
     for (const ex of ir.exceptions) {
       const nodeId = createNodeId(ex.className, ex.packageName);
+      const exDomainCtx: ClassDomainContext = {
+        className: ex.className,
+        packageName: ex.packageName,
+        fieldNames: [],
+        methodNames: [],
+        body: "",
+        javadoc: "",
+        imports: [],
+      };
+      const exDomain = this.domainInferrer.inferDomain(exDomainCtx);
       const classNode: ClassNode = {
         id: nodeId,
         type: "CLASS",
         className: ex.className,
         packageName: ex.packageName,
         role: "EXCEPTION_TYPE",
-        domain: "UNKNOWN",
+        domain: exDomain.domain,
         linesOfCode: 0,
         complexity: 1,
         technologyType: "UNKNOWN",
