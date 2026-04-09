@@ -6,6 +6,7 @@
 import type {
   UseCaseIR, DtoIR, DtoFieldIR, EnumIR,
 } from "../java-parser";
+import type { DataSourceInfo } from "../engine/detectors/DataSourceDetector";
 
 // ─── Shared Interfaces ─────────────────────────────────────────────────────
 
@@ -22,6 +23,7 @@ export interface GenerationResult {
   stats: GenerationStats;
   warnings: string[];
   compilationResult?: CompilationResult;
+  dsInfo?: DataSourceInfo;
 }
 
 export interface GenerationStats {
