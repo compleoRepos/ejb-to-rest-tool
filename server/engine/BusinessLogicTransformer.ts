@@ -135,6 +135,17 @@ export class BusinessLogicTransformer {
       migratedLines += inputRefCount;
     }
 
+    // ─── T0: Remplacer voIn → request quand il n'y a PAS de cast (fallback) ───
+    // Si T1 n'a pas trouvé de cast, voIn est utilisé directement comme paramètre
+    if (/\bvoIn\./.test(result) || /\bvoIn\b/.test(result)) {
+      const voInDotPattern = /\bvoIn\./g;
+      const voInDotCount = (result.match(voInDotPattern) || []).length;
+      result = result.replace(voInDotPattern, "request.");
+      const voInAlonePattern = /\bvoIn\b(?!\.)/g;
+      result = result.replace(voInAlonePattern, "request");
+      migratedLines += voInDotCount;
+    }
+
     // ─── T3: new VoOut() → builder pattern ───
     const voOutPattern = new RegExp(
       `${this.escapeRegex(resolvedCtx.voOutClass)}\\s+(\\w+)\\s*=\\s*new\\s+${this.escapeRegex(resolvedCtx.voOutClass)}\\(\\)\\s*;`,
@@ -167,10 +178,32 @@ export class BusinessLogicTransformer {
     result = result.replace(returnPattern, "return builder.build();");
     migratedLines++;
 
-    // ─── T6: javax. → jakarta. ───
+    // ─── T6: javax. → jakarta. + LOG → log (@Slf4j) ───
     const javaxCount = (result.match(/javax\./g) || []).length;
     result = result.replace(/javax\./g, "jakarta.");
     migratedLines += javaxCount;
+
+    // T6b: Migrer LOG (majuscule) → log (minuscule) pour @Slf4j
+    const logUpperCount = (result.match(/\bLOG\./g) || []).length;
+    result = result.replace(/\bLOG\./g, "log.");
+    migratedLines += logUpperCount;
+
+    // T6c: Supprimer les déclarations de Logger obsolètes (@Slf4j les remplace)
+    result = result.replace(
+      /private\s+static\s+final\s+Logger\s+LOG\s*=\s*[^;]+;\n?/g,
+      ""
+    );
+    result = result.replace(
+      /private\s+static\s+final\s+EaiLog\s+\w+\s*=\s*[^;]+;\n?/g,
+      ""
+    );
+
+    // T6d: Migrer les méthodes java.util.logging → SLF4J
+    result = result.replace(/\blog\.warning\s*\(/g, "log.warn(");
+    result = result.replace(/\blog\.severe\s*\(/g, "log.error(");
+    result = result.replace(/\blog\.fine\s*\(/g, "log.debug(");
+    result = result.replace(/\blog\.finer\s*\(/g, "log.trace(");
+    result = result.replace(/\blog\.finest\s*\(/g, "log.trace(");
 
     // ─── T7: Extraire les codes Magix ───
     const magixPattern = /"([A-Z]{2,6}[0-9]{1,3})"/g;
@@ -266,6 +299,38 @@ export class BusinessLogicTransformer {
       migratedLines,
       manualLines,
     };
+  }
+
+  /**
+   * Détecte le nom du paramètre original de execute() dans le corps de la méthode.
+   * Cherche d'abord le cast (XxxVoIn varName = (XxxVoIn) voIn), puis les patterns courants.
+   */
+  private findExecuteParamName(body: string, ctx: TransformContext): string {
+    // Chercher le cast : "XxxVoIn varName = (XxxVoIn) voIn"
+    if (ctx.voInClass) {
+      const castMatch = body.match(
+        new RegExp(`${this.escapeRegex(ctx.voInClass)}\\s+(\\w+)\\s*=`)
+      );
+      if (castMatch) {
+        // Le nom après le cast est l'alias local, mais le paramètre original est "voIn"
+        // On doit renommer "voIn" (le param d'execute) en "request"
+        if (body.includes("voIn.") || body.includes("voIn;") || body.includes("voIn)")) {
+          return "voIn";
+        }
+        return castMatch[1];
+      }
+    }
+
+    // Chercher l'utilisation directe de voIn
+    if (/\bvoIn\./.test(body)) return "voIn";
+
+    // Chercher d'autres patterns courants
+    const paramPatterns = ["input.", "param.", "vo."];
+    for (const p of paramPatterns) {
+      if (body.includes(p)) return p.replace(".", "");
+    }
+
+    return ""; // Pas de paramètre détecté
   }
 
   private escapeRegex(str: string): string {

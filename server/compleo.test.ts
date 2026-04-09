@@ -717,3 +717,86 @@ describe("Phase 1.2 — Type Inference Quality", () => {
     expect(objectOccurrences.length).toBe(0);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// BUG 1 — DAO classes with @Stateless should NOT be UseCases
+// ═══════════════════════════════════════════════════════════════
+
+const DAO_WITH_STATELESS = `
+package ma.eai.boa.xbanking.dao;
+
+import javax.ejb.Stateless;
+import javax.persistence.EntityManager;
+import javax.persistence.PersistenceContext;
+
+@Stateless
+public class CompteDAO {
+    @PersistenceContext
+    private EntityManager em;
+
+    public Object findById(Long id) {
+        return em.find(Object.class, id);
+    }
+
+    public void save(Object entity) {
+        em.persist(entity);
+    }
+
+    public void delete(Object entity) {
+        em.remove(entity);
+    }
+}
+`;
+
+const DAO_REPOSITORY_PATTERN = `
+package ma.eai.boa.xbanking.repository;
+
+import javax.ejb.Stateless;
+import java.util.List;
+
+@Stateless
+public class ClientRepository {
+    public List<Object> findAll() { return null; }
+    public Object findByNumero(String numero) { return null; }
+    public void create(Object entity) {}
+    public void update(Object entity) {}
+}
+`;
+
+describe("BUG 1 — DAO/Repository exclusion from UseCase detection", () => {
+  it("@Stateless DAO class is NOT detected as UseCase", () => {
+    const files = [
+      { path: "src/main/java/ma/eai/boa/xbanking/dao/CompteDAO.java", content: DAO_WITH_STATELESS },
+    ];
+    const ir = parseEjbProject(files);
+    expect(ir.useCases.length).toBe(0);
+  });
+
+  it("@Stateless Repository class is NOT detected as UseCase", () => {
+    const files = [
+      { path: "src/main/java/ma/eai/boa/xbanking/repository/ClientRepository.java", content: DAO_REPOSITORY_PATTERN },
+    ];
+    const ir = parseEjbProject(files);
+    expect(ir.useCases.length).toBe(0);
+  });
+
+  it("@Stateless business EJB is still detected as UseCase", () => {
+    const files = [
+      { path: "src/main/java/ma/eai/boa/xbanking/payment/ProcessPaymentEJB.java", content: STATELESS_ONLY_EJB },
+    ];
+    const ir = parseEjbProject(files);
+    expect(ir.useCases.length).toBe(1);
+    expect(ir.useCases[0].className).toBe("ProcessPaymentEJB");
+  });
+
+  it("mixed project: DAO excluded, business EJB included", () => {
+    const files = [
+      { path: "src/main/java/ma/eai/boa/xbanking/dao/CompteDAO.java", content: DAO_WITH_STATELESS },
+      { path: "src/main/java/ma/eai/boa/xbanking/repository/ClientRepository.java", content: DAO_REPOSITORY_PATTERN },
+      { path: "src/main/java/ma/eai/boa/xbanking/payment/ProcessPaymentEJB.java", content: STATELESS_ONLY_EJB },
+    ];
+    const ir = parseEjbProject(files);
+    expect(ir.useCases.length).toBe(1);
+    expect(ir.useCases[0].className).toBe("ProcessPaymentEJB");
+  });
+});

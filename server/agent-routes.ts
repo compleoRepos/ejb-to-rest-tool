@@ -255,8 +255,13 @@ export function registerAgentRoutes(app: Express) {
     const archive = archiver("zip", { zlib: { level: 9 } });
     archive.pipe(res);
 
-    // Add generated files
+    // Add generated files (filter out MIGRATION_REPORT to avoid duplication)
+    const reportPath = "MIGRATION_REPORT.md";
+    let reportIncludedInFiles = false;
     for (const file of session.generatedProject.files) {
+      if (file.path === reportPath || file.path.endsWith("/" + reportPath)) {
+        reportIncludedInFiles = true;
+      }
       archive.append(file.content, { name: file.path });
     }
 
@@ -265,9 +270,9 @@ export function registerAgentRoutes(app: Express) {
       archive.append(file.content, { name: file.path });
     }
 
-    // Add migration report
-    if (session.migrationReport) {
-      archive.append(session.migrationReport, { name: "MIGRATION_REPORT.md" });
+    // Add migration report only if not already included in generated files
+    if (session.migrationReport && !reportIncludedInFiles) {
+      archive.append(session.migrationReport, { name: reportPath });
     }
 
     archive.finalize();

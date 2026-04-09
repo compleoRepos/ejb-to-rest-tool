@@ -190,6 +190,122 @@ describe("BusinessLogicTransformer", () => {
     const result = transformer.transform(body, activerCtx);
     expect(result.linesTransformed).toBeGreaterThan(5);
   });
+
+  // ═══════════════════════════════════════════════════════════════
+  // BUG 2 — T0: voIn → request fallback (no cast scenario)
+  // ═══════════════════════════════════════════════════════════════
+
+  it("T0: replaces voIn. → request. when no cast exists", () => {
+    const noCastBody = `
+        voIn.getNumCarte();
+        voIn.getCodeActivation();
+        String result = voIn.toString();
+    `;
+    const ctx: TransformContext = {
+      voInClass: "SomeVoIn",
+      voOutClass: "SomeVoOut",
+      requestDtoClass: "SomeRequestDTO",
+      responseDtoClass: "SomeResponseDTO",
+      sourceClassName: "SomeUC",
+    };
+    const result = transformer.transform(noCastBody, ctx);
+    expect(result.body).toContain("request.getNumCarte()");
+    expect(result.body).toContain("request.getCodeActivation()");
+    expect(result.body).not.toContain("voIn.getNumCarte()");
+    expect(result.body).not.toContain("voIn.getCodeActivation()");
+  });
+
+  it("T0: does NOT interfere with T1 cast removal", () => {
+    // When T1 finds a cast, voIn should already be replaced by T1+T2
+    const body = extractExecuteBody(activerCarteSource)!;
+    const result = transformer.transform(body, activerCtx);
+    expect(result.body).not.toContain("voIn.");
+    expect(result.body).toContain("Paramètre migré : request");
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // BUG 3 — T6b/c/d: LOG → log, Logger removal, warning → warn
+  // ═══════════════════════════════════════════════════════════════
+
+  it("T6b: replaces LOG. with log. for @Slf4j", () => {
+    const body = `
+        LOG.info("Starting operation");
+        LOG.warning("Something happened");
+        LOG.severe("Error occurred");
+    `;
+    const ctx: TransformContext = {
+      voInClass: "XVoIn",
+      voOutClass: "XVoOut",
+      requestDtoClass: "XRequestDTO",
+      responseDtoClass: "XResponseDTO",
+      sourceClassName: "XUC",
+    };
+    const result = transformer.transform(body, ctx);
+    expect(result.body).toContain("log.info");
+    expect(result.body).not.toContain("LOG.info");
+    expect(result.body).not.toContain("LOG.warning");
+    expect(result.body).not.toContain("LOG.severe");
+  });
+
+  it("T6c: removes Logger/EaiLog declarations", () => {
+    const body = `
+        private static final Logger LOG = Logger.getLogger(MyClass.class.getName());
+        private static final EaiLog eaiLog = new EaiLog(MyClass.class);
+        LOG.info("test");
+    `;
+    const ctx: TransformContext = {
+      voInClass: "XVoIn",
+      voOutClass: "XVoOut",
+      requestDtoClass: "XRequestDTO",
+      responseDtoClass: "XResponseDTO",
+      sourceClassName: "XUC",
+    };
+    const result = transformer.transform(body, ctx);
+    expect(result.body).not.toContain("private static final Logger LOG");
+    expect(result.body).not.toContain("private static final EaiLog");
+    expect(result.body).toContain("log.info");
+  });
+
+  it("T6d: migrates java.util.logging methods to SLF4J", () => {
+    const body = `
+        log.warning("deprecated warning");
+        log.severe("critical error");
+        log.fine("debug info");
+        log.finer("trace info");
+        log.finest("deep trace");
+        log.info("should stay");
+    `;
+    const ctx: TransformContext = {
+      voInClass: "XVoIn",
+      voOutClass: "XVoOut",
+      requestDtoClass: "XRequestDTO",
+      responseDtoClass: "XResponseDTO",
+      sourceClassName: "XUC",
+    };
+    const result = transformer.transform(body, ctx);
+    expect(result.body).toContain('log.warn("deprecated warning")');
+    expect(result.body).toContain('log.error("critical error")');
+    expect(result.body).toContain('log.debug("debug info")');
+    expect(result.body).toContain('log.trace("trace info")');
+    expect(result.body).toContain('log.trace("deep trace")');
+    expect(result.body).toContain('log.info("should stay")');
+    expect(result.body).not.toContain("log.warning");
+    expect(result.body).not.toContain("log.severe");
+    expect(result.body).not.toContain("log.fine(");
+    expect(result.body).not.toContain("log.finer");
+    expect(result.body).not.toContain("log.finest");
+  });
+
+  it("T6: real file — EaiLog declaration removed and LOG migrated", () => {
+    const body = extractExecuteBody(activerCarteSource)!;
+    const result = transformer.transform(body, activerCtx);
+    // EaiLog is in the class body but extractExecuteBody only gets execute() body
+    // Inside execute(), log.info/log.error should use lowercase log (from T6b)
+    expect(result.body).toContain("log.info");
+    expect(result.body).toContain("log.error");
+    expect(result.body).not.toContain("LOG.info");
+    expect(result.body).not.toContain("LOG.error");
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════

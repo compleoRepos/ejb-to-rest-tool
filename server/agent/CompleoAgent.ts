@@ -859,8 +859,11 @@ export class CompleoAgent {
           })),
         ];
 
-        // Add migration report
-        if (session.migrationReport) {
+        // Add migration report only if not already in generated files
+        const hasReportInFiles = session.generatedProject!.files.some(
+          (f) => f.path === "MIGRATION_REPORT.md" || f.path.endsWith("/MIGRATION_REPORT.md")
+        );
+        if (session.migrationReport && !hasReportInFiles) {
           filesToWrite.push({
             path: "modernized/MIGRATION_REPORT.md",
             content: session.migrationReport,

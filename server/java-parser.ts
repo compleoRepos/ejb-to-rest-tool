@@ -326,7 +326,33 @@ function isUseCase(content: string): boolean {
   // BOA pattern: @UseCase + BaseUseCase
   if (/@UseCase/.test(content) && /implements\s+BaseUseCase/.test(content)) return true;
   // Standard Java EE pattern: @Stateless with a public method (not a Service class)
-  if (/@Stateless/.test(content) && /public\s+class/.test(content)) return true;
+  if (/@Stateless/.test(content) && /public\s+class/.test(content)) {
+    // Exclure les DAOs — @Stateless ne signifie pas UseCase pour les couches DAO
+    const classNameMatch = content.match(/public\s+class\s+(\w+)/);
+    const className = classNameMatch ? classNameMatch[1] : "";
+    if (isDao(content, className)) return false;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Détecte les classes DAO/Repository — couche persistance, pas UseCase.
+ * Patterns : nommage *DAO/*Dao/*Repository/*Persistence,
+ *            ou @Stateless avec accès JDBC/EntityManager sans execute().
+ */
+function isDao(content: string, className: string): boolean {
+  // Pattern de nommage DAO
+  const isDaoName = /DAO$|Dao$|Repository$|Persistence$/.test(className);
+  if (isDaoName) return true;
+
+  // @Stateless avec accès données mais sans méthode execute()
+  if (/@Stateless/.test(content)) {
+    const hasDataAccess = /EntityManager|getConnection|PreparedStatement|DataSource|@PersistenceContext/.test(content);
+    const hasExecute = /public\s+\w+\s+execute\s*\(/.test(content);
+    if (hasDataAccess && !hasExecute) return true;
+  }
+
   return false;
 }
 
