@@ -180,8 +180,28 @@ export default function ArchitecturePage({ projectId }: { projectId?: number }) 
       }
 
       const data = await res.json();
+
+      // Normalize cytoscapeData: backend returns Cytoscape native format
+      // { elements: [{group:"nodes",...}, {group:"edges",...}] }
+      // but ArchitectureViewer expects { nodes: [...], edges: [...] }
+      if (data.visualizations?.cytoscapeData) {
+        const cd = data.visualizations.cytoscapeData;
+        if (cd.elements && !cd.nodes) {
+          const elems = Array.isArray(cd.elements) ? cd.elements : [];
+          cd.nodes = elems
+            .filter((e: any) => e.group === "nodes")
+            .map((e: any) => ({ data: e.data }));
+          cd.edges = elems
+            .filter((e: any) => e.group === "edges")
+            .map((e: any) => ({ data: e.data }));
+        }
+        // Ensure nodes and edges are always arrays
+        cd.nodes = cd.nodes || [];
+        cd.edges = cd.edges || [];
+      }
+
       setAnalysisResult(data);
-      toast.success(`Analyse terminée en ${data.duration}ms — ${data.microservices.length} microservices identifiés`);
+      toast.success(`Analyse terminée en ${data.duration}ms — ${data.microservices?.length ?? 0} microservices identifiés`);
     } catch (error: any) {
       toast.error(error.message || "Erreur lors de l'analyse d'architecture");
     } finally {
