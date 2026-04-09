@@ -114,6 +114,7 @@ export default function CompleoAgentPage() {
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [ambiguities, setAmbiguities] = useState<AgentAmbiguity[]>([]);
   const [choices, setChoices] = useState<Record<string, string>>({});
+  const [activeTab, setActiveTab] = useState<string>("logs");
   const [isStarting, setIsStarting] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -198,9 +199,11 @@ export default function CompleoAgentPage() {
           const event: AgentEvent = JSON.parse(e.data);
           setEvents((prev) => [...prev, event]);
 
-          // Handle ambiguity detection
-          if (event.type === "AMBIGUITY_DETECTED" && event.data?.ambiguities) {
+          // Handle ambiguity detection (from both AMBIGUITY_DETECTED and AWAITING_INPUT events)
+          if ((event.type === "AMBIGUITY_DETECTED" || event.type === "AWAITING_INPUT") && event.data?.ambiguities) {
             setAmbiguities(event.data.ambiguities as AgentAmbiguity[]);
+            // Auto-switch to ambiguities tab so user sees the choices immediately
+            setActiveTab("ambiguities");
           }
 
           // Handle completion/failure
@@ -640,7 +643,7 @@ export default function CompleoAgentPage() {
 
             {/* Right: Logs + Ambiguities */}
             <div className="lg:col-span-2 space-y-4">
-              <Tabs defaultValue="logs">
+              <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="bg-card/50">
                   <TabsTrigger value="logs" className="gap-1.5">
                     <Terminal className="w-3.5 h-3.5" />
