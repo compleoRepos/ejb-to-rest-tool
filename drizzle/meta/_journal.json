@@ -43,6 +43,13 @@
       "when": 1775738727465,
       "tag": "0005_amused_dreadnoughts",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1775776491896,
+      "tag": "0006_bumpy_joseph",
+      "breakpoints": true
     }
   ]
 }

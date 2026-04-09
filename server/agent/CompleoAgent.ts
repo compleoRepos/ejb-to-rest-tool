@@ -10,7 +10,7 @@
  * @author Hamza NORDINE
  */
 
-import { CompleoEngine, type AnalysisResult, type GeneratedProject, type SourceFile } from "../engine/CompleoEngine";
+import { CompleoEngine, getEngine, type AnalysisResult, type GeneratedProject, type SourceFile } from "../engine/CompleoEngine";
 import { GitConnector, type CloneResult, type PRResult, type WorkingDir } from "../git/GitConnector";
 import { CompilationLoop, type LoopResult, type GeneratedFile as CompLoopFile } from "./CompilationLoop";
 import type { Ambiguity, UserChoice } from "../ambiguity-detector";
@@ -434,7 +434,6 @@ export class CompleoAgent {
       } else if (src.sessionId) {
         // Resolve files from the Compleo upload session store
         try {
-          const { sessionStore } = require("../session-store");
           const compleoSession = sessionStore.get(src.sessionId);
           if (compleoSession && compleoSession.files && compleoSession.files.length > 0) {
             files = [...compleoSession.files];
@@ -1006,7 +1005,6 @@ export function getAgentStore(): AgentSessionStore {
 
 export function getAgent(): CompleoAgent {
   if (!_agent) {
-    const { getEngine } = require("../engine/CompleoEngine");
     _agent = new CompleoAgent(getEngine(), getAgentStore());
   }
   return _agent;

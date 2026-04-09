@@ -201,7 +201,7 @@ export type InsertLearningRule = typeof learningRules.$inferInsert;
 // ============================================================
 
 export const compleoSessions = mysqlTable("compleo_sessions", {
-  id: varchar("id", { length: 36 }).primaryKey(),
+  id: varchar("id", { length: 128 }).primaryKey(),
   projectName: varchar("project_name", { length: 255 }).notNull(),
   status: mysqlEnum("status", [
     "uploaded", "analyzed", "waiting_choices", "generated", "error", "missing_deps"
