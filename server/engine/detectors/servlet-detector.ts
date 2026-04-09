@@ -103,10 +103,11 @@ export class ServletDetector implements TechnologyDetector {
     // Détecter les request.getParameter
     const requestParams: { name: string; type: string }[] = [];
     const paramRegex = /request\.getParameter\s*\(\s*"([^"]+)"\s*\)/g;
-    let pm;
+    let pm: RegExpExecArray | null;
     while ((pm = paramRegex.exec(content)) !== null) {
-      if (!requestParams.find((p) => p.name === pm[1])) {
-        requestParams.push({ name: pm[1], type: "String" });
+      const paramName = pm[1];
+      if (!requestParams.find((p) => p.name === paramName)) {
+        requestParams.push({ name: paramName, type: "String" });
       }
     }
 

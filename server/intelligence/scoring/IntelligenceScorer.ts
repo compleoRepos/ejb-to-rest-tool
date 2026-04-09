@@ -6,7 +6,7 @@
  * @author Hamza NORDINE
  */
 
-import type { RuleHit, RuleSeverity } from "../knowledge/rules/RuleEngine";
+import type { RuleHit } from "../knowledge/rules/RuleEngine";
 
 export interface ScoreBreakdown {
   category: string;
@@ -42,11 +42,15 @@ export interface IntelligenceScore {
 
 // ── Severity weights ───────────────────────────────────────────
 
-const SEVERITY_WEIGHT: Record<RuleSeverity, number> = {
+const SEVERITY_WEIGHT: Record<string, number> = {
   CRITICAL: 10,
   HIGH: 5,
   MEDIUM: 2,
   LOW: 1,
+  critical: 10,
+  major: 5,
+  minor: 2,
+  info: 1,
 };
 
 // ── Category max scores ────────────────────────────────────────
@@ -88,7 +92,7 @@ export class IntelligenceScorer {
     // Group hits by category
     const hitsByCategory = new Map<string, RuleHit[]>();
     for (const hit of hits) {
-      const cat = hit.category;
+      const cat = hit.category || "UNKNOWN";
       if (!hitsByCategory.has(cat)) hitsByCategory.set(cat, []);
       hitsByCategory.get(cat)!.push(hit);
     }

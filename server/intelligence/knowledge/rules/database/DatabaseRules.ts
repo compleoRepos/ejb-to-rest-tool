@@ -605,7 +605,7 @@ while ((m = regex.exec(ctx.rawSource)) !== null) {
     description: "Pattern de deadlock potentiel",
     evaluate(ctx): RuleHit[] {
       const hits: RuleHit[] = [];
-      const regex = /UPDATE\s+\w+[\s\S]{0,500}UPDATE\s+(?!\1)\w+/gi;
+      const regex = /UPDATE\s+(\w+)[\s\S]{0,500}UPDATE\s+(?!\1)\w+/gi;
 let m;
 while ((m = regex.exec(ctx.rawSource)) !== null) {
         hits.push({ ruleId: this.id, severity: this.severity, location: `line ~${ctx.rawSource.substring(0, m.index).split("\n").length}`, message: this.description, suggestion: "" });

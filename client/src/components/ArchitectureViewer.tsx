@@ -178,7 +178,7 @@ export function ArchitectureViewer({
   const exportSVG = useCallback(() => {
     if (!cyRef.current) return;
     const cy = cyRef.current;
-    const svgContent = cy.svg({
+    const svgContent = (cy as any).svg({
       full: true,
       scale: 1,
       bg: "#0f0f23",

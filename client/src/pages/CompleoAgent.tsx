@@ -716,9 +716,9 @@ export default function CompleoAgentPage() {
                               <div key={i} className="flex items-center gap-2 py-2 text-emerald-400 font-bold">
                                 <CheckCircle2 className="w-4 h-4" />
                                 <span>Migration terminée avec succès</span>
-                                {event.data?.fileCount && (
+                                {(event.data as any)?.fileCount && (
                                   <Badge variant="secondary" className="text-xs">
-                                    {String(event.data.fileCount)} fichiers
+                                    {String((event.data as any).fileCount)} fichiers
                                   </Badge>
                                 )}
                               </div>

@@ -1,0 +1,287 @@
+/**
+ * Service Generator — Generates Spring @Service classes with business logic migration.
+ * Rules: R6 (constructor injection), R7 (@Transactional), R8 (stubs).
+ * Extracted from spring-generator.ts (v5.5).
+ */
+
+import type { ProjectIR, UseCaseIR, DtoIR } from "../java-parser";
+import {
+  BusinessLogicTransformer,
+  extractExecuteBody,
+  extractConstants,
+  type TransformContext,
+} from "../engine/BusinessLogicTransformer";
+import { JavaASTParser } from "../engine/ast/JavaASTParser";
+import { SymbolTable } from "../engine/ast/SymbolTable";
+import { ServiceMethodGenerator } from "../engine/ServiceMethodGenerator";
+import {
+  type GeneratedFile,
+  toPascalCase, toMethodName, capitalize, mapDtoClassName,
+  inferSemanticEndpoint, mapToSpringType,
+} from "./shared";
+
+// Singleton instances for the AST pipeline
+const astParser = new JavaASTParser();
+const astSymbolTable = new SymbolTable();
+const serviceMethodGenerator = new ServiceMethodGenerator("");
+
+export function generateDomainService(
+  basePackage: string, basePath: string, domain: string,
+  useCases: UseCaseIR[], dtoMap: Map<string, DtoIR>, ir: ProjectIR
+): GeneratedFile {
+  const serviceName = toPascalCase(domain) + "Service";
+  const imports = new Set<string>();
+  imports.add("import lombok.RequiredArgsConstructor;");
+  imports.add("import lombok.extern.slf4j.Slf4j;");
+  imports.add("import org.springframework.stereotype.Service;");
+  imports.add("import org.springframework.transaction.annotation.Transactional;");
+
+  const methods: string[] = [];
+
+  for (const uc of useCases) {
+    const methodName = toMethodName(uc.className);
+    const reqDto = dtoMap.get(uc.voInType);
+    const resDto = dtoMap.get(uc.voOutType);
+
+    const reqType = reqDto ? mapDtoClassName(reqDto.className) : "Void";
+    const resType = resDto ? mapDtoClassName(resDto.className) : "Void";
+
+    if (reqDto) imports.add(`import ${basePackage}.dto.${reqType};`);
+    if (resDto) imports.add(`import ${basePackage}.dto.${resType};`);
+
+    // R7: @Transactional at the right level
+    let txAnnotation = "";
+    if (uc.transactional) {
+      if (uc.transactional.readOnly) {
+        txAnnotation = "    @Transactional(readOnly = true)\n";
+      } else if (uc.transactional.rollbackFor) {
+        txAnnotation = `    @Transactional(rollbackFor = ${uc.transactional.rollbackFor}.class)\n`;
+      } else {
+        txAnnotation = "    @Transactional\n";
+      }
+    } else {
+      const semantic = inferSemanticEndpoint(uc, domain);
+      if (semantic.method === "GET") {
+        txAnnotation = "    @Transactional(readOnly = true)\n";
+      } else {
+        txAnnotation = "    @Transactional\n";
+      }
+    }
+
+    const paramType = reqType !== "Void" ? `${reqType} request` : "";
+    const returnType = resType !== "Void" ? resType : "void";
+
+    const javadoc = (uc as any).useCaseDescription || (uc as any).javadoc || "";
+    const javadocLine = javadoc ? `\n     * ${javadoc}` : "";
+
+    const methodBody = generateServiceMethodBody(uc, reqDto, resDto, reqType, resType);
+    const isMigrated = methodBody.includes("return builder.build()") || methodBody.includes("Migrated from:");
+    const endingLines = isMigrated
+      ? ""
+      : `\n        log.info("=== Ending ${methodName} ===");\n${returnType !== "void" ? "        return response;" : ""}`;
+
+    methods.push(`
+${txAnnotation}    /**
+     * ${uc.className} — ${uc.bianDomain || domain} / ${uc.bianAction || methodName}.${javadocLine}
+     * Migrated from legacy UseCase: ${uc.className}
+     */
+    public ${returnType} ${methodName}(${paramType}) {
+        log.info("=== Starting ${methodName} ===");
+${methodBody}${endingLines}
+    }`);
+  }
+
+  // R6: Collect all injected services for constructor injection
+  const allInjected = new Set<string>();
+  for (const uc of useCases) {
+    for (const svc of uc.injectedServices) {
+      allInjected.add(svc.type);
+    }
+  }
+
+  const injectedFields = [...allInjected].map(s => {
+    const fieldName = s.charAt(0).toLowerCase() + s.slice(1);
+    return `    private final ${s} ${fieldName};`;
+  });
+
+  return {
+    path: `${basePath}/service/${serviceName}.java`,
+    category: "service",
+    content: `package ${basePackage}.service;
+
+${[...imports].sort().join("\n")}
+
+/**
+ * ${serviceName} — Domain service for ${domain}.
+ * Contains ${useCases.length} migrated use case(s).
+ * Auto-generated from EJB legacy project by Compleo Modernizer.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class ${serviceName} {
+
+${injectedFields.length > 0 ? injectedFields.join("\n") + "\n" : "    // No external dependencies detected\n"}
+${methods.join("\n")}
+}
+`,
+  };
+}
+
+function generateServiceMethodBody(
+  uc: UseCaseIR, reqDto: DtoIR | undefined, resDto: DtoIR | undefined,
+  reqType: string, resType: string
+): string {
+  // ─── v5.3.1: AST pipeline — parse, build symbol table, transform ───
+  let astUsed = false;
+  try {
+    if (uc.rawSource && uc.rawSource.length > 50) {
+      const classAST = astParser.parse(uc.rawSource);
+      const executeMethod = classAST.methods.find(m =>
+        m.name === "execute" && !m.isPrivate
+      );
+
+      if (executeMethod && executeMethod.body && executeMethod.body.length > 15) {
+        astSymbolTable.buildFromMethod(executeMethod, classAST, /VoIn$/, /VoOut$/);
+
+        const transformer = new BusinessLogicTransformer();
+        const ctx: TransformContext = {
+          voInClass: uc.voInType,
+          voOutClass: uc.voOutType,
+          requestDtoClass: reqType,
+          responseDtoClass: resType,
+          sourceClassName: uc.className,
+          methodName: toMethodName(uc.className),
+        };
+        const result = transformer.transform(executeMethod.body, astSymbolTable, ctx);
+
+        const constants = extractConstants(uc.rawSource);
+        const constantLines = constants.map(c =>
+          `        // Migrated constant from ${uc.className}\n        final ${c.type} ${c.name} = ${c.value};`
+        );
+
+        const lines: string[] = [];
+
+        if (constantLines.length > 0) {
+          lines.push(...constantLines);
+          lines.push("");
+        }
+
+        if (resDto && resType !== "Void" && !result.code.includes("builder")) {
+          lines.push(`        var builder = ${resType}.builder();`);
+        }
+
+        const bodyLines = result.code.split("\n").map(line => {
+          if (line.trim() === "") return "";
+          if (line.startsWith("        ")) return line;
+          return "        " + line;
+        });
+        lines.push(...bodyLines);
+
+        for (const todo of result.todos) {
+          lines.push(`        // TODO [${todo.type}]: ${todo.suggestion} (priority: ${todo.priority})`);
+        }
+
+        for (const warning of result.warnings) {
+          lines.push(`        // WARNING: ${warning}`);
+        }
+
+        if (result.magixCodes.length > 0) {
+          lines.push(`        // Codes Magix identifiés : ${result.magixCodes.join(", ")}`);
+        }
+
+        lines.push(`        // Migrated from: ${uc.className}.execute() — ${result.migratedLines} lignes migrées, ${result.manualLines} manuelles, ${result.todos.length} TODOs`);
+
+        astUsed = true;
+        return lines.join("\n");
+      }
+    }
+  } catch {
+    // AST pipeline failed — fall through to legacy extraction
+  }
+
+  // ─── v5.3 legacy fallback: regex-based extraction ───
+  const executeBody = extractExecuteBody(uc.rawSource);
+
+  if (executeBody) {
+    const transformer = new BusinessLogicTransformer();
+    const ctx: TransformContext = {
+      voInClass: uc.voInType,
+      voOutClass: uc.voOutType,
+      requestDtoClass: reqType,
+      responseDtoClass: resType,
+      sourceClassName: uc.className,
+    };
+    const result = transformer.transform(executeBody, ctx);
+
+    const constants = extractConstants(uc.rawSource);
+    const constantLines = constants.map(c =>
+      `        // Migrated constant from ${uc.className}\n        final ${c.type} ${c.name} = ${c.value};`
+    );
+
+    const lines: string[] = [];
+
+    if (constantLines.length > 0) {
+      lines.push(...constantLines);
+      lines.push("");
+    }
+
+    if (resDto && resType !== "Void") {
+      lines.push(`        var builder = ${resType}.builder();`);
+    }
+
+    const bodyLines = result.body.split("\n").map(line => {
+      if (line.trim() === "") return "";
+      if (line.startsWith("        ")) return line;
+      return "        " + line;
+    });
+    lines.push(...bodyLines);
+
+    for (const warning of result.warnings) {
+      lines.push(`        // WARNING: ${warning}`);
+    }
+
+    lines.push(`        // Migrated from: ${uc.className}.execute() — ${result.linesTransformed} transformations applied`);
+
+    return lines.join("\n");
+  }
+
+  // ─── Fallback: No execute() body found — generate builder + TODO ───
+  const lines: string[] = [];
+
+  if (resDto && resType !== "Void") {
+    lines.push(`        ${resType} response = ${resType}.builder()`);
+
+    if (reqDto) {
+      for (const outField of resDto.fields) {
+        const inField = reqDto.fields.find(f => f.name === outField.name);
+        if (inField) {
+          lines.push(`            .${outField.name}(request.get${capitalize(outField.name)}())`);
+        }
+      }
+    }
+
+    for (const field of resDto.fields) {
+      if (field.name === "codeRetour") {
+        lines.push(`            .codeRetour("000")`);
+      } else if (field.name === "messageRetour") {
+        lines.push(`            .messageRetour("Operation completed successfully")`);
+      }
+    }
+
+    lines.push(`            .build();`);
+  }
+
+  const magixService = uc.injectedServices.find(s =>
+    s.type.toLowerCase().includes("magix") || s.type.toLowerCase().includes("service")
+  );
+  if (magixService) {
+    const fieldName = (magixService as any).fieldName || magixService.type.charAt(0).toLowerCase() + magixService.type.slice(1);
+    lines.push(`        // TODO: Implement call to ${magixService.type} — migrated from @EJB ${fieldName}`);
+    lines.push(`        // Original transaction code: see legacy ${uc.className}`);
+  } else {
+    lines.push(`        // TODO: Implement business logic from legacy ${uc.className}`);
+  }
+
+  return lines.join("\n");
+}

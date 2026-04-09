@@ -24,7 +24,7 @@ export interface RuleHit {
 }
 
 export interface RuleFix {
-  type: "ADD_ANNOTATION" | "CHANGE_TYPE" | "ADD_IMPORT" | "REPLACE_CODE" | "ADD_COMMENT" | "GENERATE_CLASS" | "ADD_METHOD";
+  type: "ADD_ANNOTATION" | "CHANGE_TYPE" | "ADD_IMPORT" | "REPLACE_CODE" | "ADD_COMMENT" | "GENERATE_CLASS" | "ADD_METHOD" | "REPLACE_ANNOTATION";
   target?: string;
   newValue: string;
   additionalImports?: string[];
@@ -43,7 +43,7 @@ export interface RuleContext {
   injectedBeans: string[];
   role?: string;
   domain?: string;
-  rawSource?: string;
+  rawSource: string;
   // Extended fields used by orchestrator
   classType?: string;
   modifiers?: string[];
@@ -131,13 +131,17 @@ export class RuleEngine {
     return result;
   }
 
-  getRulesBySeverity(): Record<Severity, Rule[]> {
-    const result: Record<Severity, Rule[]> = {
+  getRulesBySeverity(): Record<string, Rule[]> {
+    const result: Record<string, Rule[]> = {
       CRITICAL: [],
       HIGH: [],
       MEDIUM: [],
       LOW: [],
       INFO: [],
+      critical: [],
+      major: [],
+      minor: [],
+      info: [],
     };
     for (const rule of this.rules) {
       result[rule.severity].push(rule);

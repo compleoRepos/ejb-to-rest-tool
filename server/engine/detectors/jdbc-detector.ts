@@ -37,7 +37,7 @@ export class JdbcDetector implements TechnologyDetector {
     const sqlRegex = /(?:prepareStatement|executeQuery|executeUpdate)\s*\(\s*"([^"]+(?:"[^"]*"[^"]*)*?)"/g;
     // Also match multi-line SQL with string concatenation
     const sqlConcatRegex = /(?:prepareStatement|executeQuery|executeUpdate)\s*\(\s*\n?\s*"([\s\S]*?)"\s*\)/g;
-    let m;
+    let m: RegExpExecArray | null;
 
     const processedSqls = new Set<string>();
 
@@ -67,11 +67,12 @@ export class JdbcDetector implements TechnologyDetector {
     const rsRegex = /rs\.get(\w+)\s*\(\s*"([^"]+)"\s*\)/g;
     while ((m = rsRegex.exec(content)) !== null) {
       const javaType = this.rsTypeToJava(m[1]);
-      if (!fields.find((f) => f.columnName === m[2])) {
+      const colName = m[2];
+      if (!fields.find((f) => f.columnName === colName)) {
         fields.push({
-          name: this.columnToField(m[2]),
+          name: this.columnToField(colName),
           type: javaType,
-          columnName: m[2],
+          columnName: colName,
         });
       }
     }

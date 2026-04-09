@@ -24,7 +24,9 @@ export type { DataProfile, FieldProfile, FieldContext } from "./semantic/DataPro
 export { KnowledgeBase } from "./knowledge/KnowledgeBase";
 export type { KnowledgeBaseStats } from "./knowledge/KnowledgeBase";
 
-export type { Rule, RuleHit, RuleContext, RuleCategory, RuleSeverity } from "./knowledge/rules/RuleEngine";
+export type { Rule, RuleHit, RuleContext, Severity, RuleFix } from "./knowledge/rules/RuleEngine";
+export type RuleCategory = string;
+export type RuleSeverity = string;
 
 export { IntelligenceScorer } from "./scoring/IntelligenceScorer";
 export type { IntelligenceScore } from "./scoring/IntelligenceScorer";

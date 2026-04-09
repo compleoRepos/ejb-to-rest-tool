@@ -348,10 +348,12 @@ export class IntelligenceOrchestrator {
     const hitsByCategory: Record<string, RuleHit[]> = {};
     const hitsBySeverity: Record<string, RuleHit[]> = {};
     for (const hit of allHits) {
-      if (!hitsByCategory[hit.category]) hitsByCategory[hit.category] = [];
-      hitsByCategory[hit.category].push(hit);
-      if (!hitsBySeverity[hit.severity]) hitsBySeverity[hit.severity] = [];
-      hitsBySeverity[hit.severity].push(hit);
+      const cat = hit.category || "UNKNOWN";
+      const sev = hit.severity || "LOW";
+      if (!hitsByCategory[cat]) hitsByCategory[cat] = [];
+      hitsByCategory[cat].push(hit);
+      if (!hitsBySeverity[sev]) hitsBySeverity[sev] = [];
+      hitsBySeverity[sev].push(hit);
     }
 
     // 8. Top 10 violations

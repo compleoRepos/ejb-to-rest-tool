@@ -244,9 +244,9 @@ export default function ArchitectureDiagram({
     }
 
     // Edges: Controller → Service → DTO
-    const controllers = files => files.filter(f => f.category === "controller");
-    const services = files => files.filter(f => f.category === "service");
-    const dtosGen = files => files.filter(f => f.category === "dto");
+    const controllers = (files: any[]) => files.filter((f: any) => f.category === "controller");
+    const services = (files: any[]) => files.filter((f: any) => f.category === "service");
+    const dtosGen = (files: any[]) => files.filter((f: any) => f.category === "dto");
 
     for (const ctrl of generatedFiles.filter(f => f.category === "controller")) {
       const ctrlName = ctrl.path.split("/").pop()?.replace("Controller.java", "") || "";
@@ -372,7 +372,7 @@ export default function ArchitectureDiagram({
           style: {
             "background-color": color,
             shape: legacyShapes[type] || "rectangle",
-          },
+          } as any,
         })),
         {
           selector: "edge",
@@ -384,14 +384,14 @@ export default function ArchitectureDiagram({
             "curve-style": "bezier",
             "font-size": "8px",
             color: "#64748b",
-          },
+          } as any,
         },
         {
           selector: "node:selected",
           style: {
             "border-color": "#10b981",
             "border-width": 3,
-          },
+          } as any,
         },
       ],
       layout: {

@@ -6,7 +6,8 @@
  * @author Hamza NORDINE
  */
 
-import type { Rule, RuleCategory, RuleContext, RuleHit } from "./rules/RuleEngine";
+import type { Rule, RuleContext, RuleHit } from "./rules/RuleEngine";
+type RuleCategory = string;
 
 // ─── Catégories originales (Prompt 7) ───
 import { financialRules } from "./rules/financial/FinancialRules";

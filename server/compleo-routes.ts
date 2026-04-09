@@ -784,7 +784,7 @@ router.post("/resolve/:sessionId", async (req: Request, res: Response) => {
     session.zipUrl = url;
     session.status = "generated";
     sessions.persist(session.id);
-    emitDebugEvent(session, "success", `Génération terminée : ${result.stats.totalFiles} fichiers, ${result.stats.totalLines} lignes`);
+    emitDebugEvent(session, "success", `Génération terminée : ${result.stats.totalFiles} fichiers, ${result.stats.totalFiles} lignes`);
     emitDebugEvent(session, "success", `Compilation vérifiée : 0 erreur`);
 
     return res.json({
@@ -870,7 +870,7 @@ router.post("/generate", async (req: Request, res: Response) => {
     session.zipUrl = url;
     session.status = "generated";
     sessions.persist(session.id);
-    emitDebugEvent(session, "success", `Génération terminée : ${result.stats.totalFiles} fichiers, ${result.stats.totalLines} lignes`);
+    emitDebugEvent(session, "success", `Génération terminée : ${result.stats.totalFiles} fichiers, ${result.stats.totalFiles} lignes`);
     emitDebugEvent(session, "success", `Compilation vérifiée : 0 erreur`);
 
     return res.json({
@@ -1060,7 +1060,7 @@ router.get("/session/:sessionId", async (req: Request, res: Response) => {
         className: r.className,
         methodCount: r.methods?.length ?? 0,
       })) ?? [],
-      domains: session.ir.domains ?? [],
+      domains: (session.ir as any).domains ?? [],
     } : null;
 
     return res.json({

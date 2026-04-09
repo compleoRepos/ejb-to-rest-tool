@@ -222,7 +222,7 @@ export interface EaiComponent extends DetectedComponent {
 export interface GeneratedFile {
   path: string;
   content: string;
-  category: "controller" | "service" | "dto" | "entity" | "repository" | "config" | "test" | "migration_note" | "infrastructure" | "exception" | "enum" | "adapter";
+  category: "controller" | "service" | "dto" | "entity" | "repository" | "config" | "test" | "migration_note" | "infrastructure" | "exception" | "enum" | "adapter" | "validator" | "cloud" | "pom" | "report" | "main" | "other";
   technology: TechnologyType;
   sourceRef?: string;
 }
