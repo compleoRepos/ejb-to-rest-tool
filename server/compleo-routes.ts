@@ -1017,13 +1017,51 @@ router.get("/source/:sessionId/*", async (req: Request, res: Response) => {
 });
 
 // ─── GET /api/compleo/session/:sessionId ────────────────────────────────────
-// Get session status and summary
+// Get session status and summary (enriched for v5.4 restore)
 router.get("/session/:sessionId", async (req: Request, res: Response) => {
   try {
     const session = sessions.get(req.params.sessionId);
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
     }
+
+    // Build IR summary for frontend (same format as analyze-multitech response)
+    const irSummary = session.ir ? {
+      useCases: session.ir.useCases.map(uc => ({
+        className: uc.className,
+        domain: uc.domain,
+        httpMethod: uc.httpMethod,
+        restPath: (uc as any).restPath ?? `/${uc.domain.toLowerCase()}`,
+        voInType: uc.voInType,
+        voOutType: uc.voOutType,
+        bianDomain: (uc as any).bianDomain ?? uc.domain,
+        bianAction: (uc as any).bianAction ?? uc.httpMethod,
+        useCaseDescription: (uc as any).useCaseDescription ?? uc.className,
+      })),
+      dtos: session.ir.dtos?.map(d => ({
+        className: d.className,
+        direction: d.direction,
+        fieldCount: d.fields?.length ?? 0,
+        requiredFields: d.fields?.filter((f: any) => f.required).length ?? 0,
+      })) ?? [],
+      enums: session.ir.enums?.map(e => ({
+        className: e.className,
+        valueCount: e.values?.length ?? 0,
+      })) ?? [],
+      exceptions: session.ir.exceptions?.map(e => ({
+        className: e.className,
+        extendsClass: (e as any).extendsClass ?? "Exception",
+      })) ?? [],
+      validators: session.ir.validators?.map(v => ({
+        className: v.className,
+        annotationName: (v as any).annotationName ?? "Validator",
+      })) ?? [],
+      remoteInterfaces: session.ir.remoteInterfaces?.map(r => ({
+        className: r.className,
+        methodCount: r.methods?.length ?? 0,
+      })) ?? [],
+      domains: session.ir.domains ?? [],
+    } : null;
 
     return res.json({
       id: session.id,
@@ -1034,30 +1072,31 @@ router.get("/session/:sessionId", async (req: Request, res: Response) => {
       totalLines: session.files.reduce((sum, f) => sum + f.content.split("\n").length, 0),
       hasPom: !!session.pomXml,
       hasBian: !!session.bianYml,
-      ambiguityCount: session.ambiguities?.length ?? 0,
-      choicesResolved: session.userChoices?.length ?? 0,
-      ir: session.ir ? {
-        stats: session.ir.stats,
-        warnings: session.ir.warnings,
-        useCases: session.ir.useCases.map(uc => ({
-          className: uc.className,
-          domain: uc.domain,
-          httpMethod: uc.httpMethod,
-          voInType: uc.voInType,
-          voOutType: uc.voOutType,
-        })),
-      } : null,
+      // Full analysis data for restore
+      stats: session.ir?.stats ?? null,
+      warnings: session.ir?.warnings ?? [],
+      irSummary,
       ambiguities: session.ambiguities ?? [],
       userChoices: session.userChoices ?? [],
+      // Generation data for restore
       generation: session.generation ? {
+        sessionId: session.id,
+        status: "generated",
         stats: session.generation.stats,
         warnings: session.generation.warnings,
+        downloadUrl: `/api/compleo/download/${session.id}`,
+        directUrl: `/api/compleo/download/${session.id}`,
         files: session.generation.files.map(f => ({
           path: f.path,
           category: f.category,
           lines: f.content.split("\n").length,
         })),
+        choicesApplied: session.userChoices?.length ?? 0,
       } : null,
+      // Multi-tech data for restore
+      technologiesDetected: session.technologiesDetected ?? [],
+      maturityScore: session.maturityScore ?? null,
+      detectedComponents: session.detectedComponents ?? [],
       downloadUrl: session.generation ? `/api/compleo/download/${session.id}` : null,
     });
   } catch (err: any) {

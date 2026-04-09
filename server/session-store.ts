@@ -1,18 +1,19 @@
 /**
  * SessionStore — Persistent session store for Compleo sessions.
  *
- * Problem: In-memory Map is cleared on every HMR/tsx watch restart.
- * Solution: Write sessions to a JSON file in /tmp so they survive restarts.
+ * v5.4: Migrated from /tmp JSON file to MySQL database (compleo_sessions table).
+ * Sessions survive server restarts, deploys, and HMR reloads.
  *
- * The store serializes only the essential session data (IR, ambiguities,
- * user choices, generation results, etc.) and excludes non-serializable
- * fields like SSE clients.
+ * The store keeps an in-memory cache for fast reads and writes through
+ * to the database asynchronously. SSE clients (non-serializable) are
+ * managed in-memory only.
  *
  * @author Hamza NORDINE
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import { getDb } from "./db";
+import { compleoSessions } from "../drizzle/schema";
+import { eq } from "drizzle-orm";
 import type { CompleoSession, SessionStatus, DebugEvent } from "./compleo-routes";
 import type { ProjectIR } from "./java-parser";
 import type { Ambiguity, UserChoice } from "./ambiguity-detector";
@@ -20,126 +21,169 @@ import type { GenerationResult } from "./spring-generator";
 import type { PipelineResult, MaturityScore } from "./engine/pipeline/index";
 import type { DetectedComponent, GeneratedFile, TechnologyType } from "./engine/registry/types";
 
-const SESSION_FILE = path.join("/tmp", "compleo-sessions.json");
-
-// Serializable subset of CompleoSession (no SSE clients, no Response objects)
-interface SerializedSession {
-  id: string;
-  projectName: string;
-  uploadedAt: string;
-  files: { path: string; content: string }[];
-  pomXml?: string;
-  bianYml?: string;
-  ir?: any;
-  ambiguities?: any[];
-  userChoices?: any[];
-  resolvedIR?: any;
-  generation?: any;
-  zipUrl?: string;
-  status: SessionStatus;
-  error?: string;
-  debugEvents: DebugEvent[];
-  // Multi-tech v3.0 fields
-  pipelineResult?: any;
-  detectedComponents?: any[];
-  multiTechGeneration?: any[];
-  maturityScore?: any;
-  technologiesDetected?: string[];
-}
-
-class SessionStore {
-  private sessions = new Map<string, CompleoSession>();
+export class SessionStore {
+  private cache = new Map<string, CompleoSession>();
   private loaded = false;
 
   constructor() {
-    this.loadFromDisk();
+    // Load from DB on startup (async, non-blocking)
+    this.loadFromDB().catch(err => {
+      console.warn("[SessionStore] Failed to load sessions from DB:", err);
+    });
   }
 
-  private loadFromDisk(): void {
+  private async loadFromDB(): Promise<void> {
     try {
-      if (fs.existsSync(SESSION_FILE)) {
-        const raw = fs.readFileSync(SESSION_FILE, "utf-8");
-        const parsed: SerializedSession[] = JSON.parse(raw);
-        for (const s of parsed) {
-          this.sessions.set(s.id, {
-            ...s,
-            uploadedAt: new Date(s.uploadedAt),
-            sseClients: [], // Non-serializable, always empty on reload
-          } as CompleoSession);
-        }
-        console.log(`[SessionStore] Restored ${parsed.length} sessions from disk`);
+      const db = await getDb();
+      if (!db) { this.loaded = true; return; }
+      const rows = await db.select().from(compleoSessions);
+      for (const row of rows) {
+        const session: CompleoSession = {
+          id: row.id,
+          projectName: row.projectName,
+          uploadedAt: row.createdAt,
+          files: (row.filesData as any[]) ?? [],
+          pomXml: row.pomXml ?? undefined,
+          bianYml: row.bianYml ?? undefined,
+          ir: row.irData as ProjectIR | undefined,
+          ambiguities: row.ambiguitiesData as Ambiguity[] | undefined,
+          userChoices: row.userChoicesData as UserChoice[] | undefined,
+          resolvedIR: row.resolvedIrData as ProjectIR | undefined,
+          generation: row.generationData as GenerationResult | undefined,
+          zipUrl: row.zipUrl ?? undefined,
+          status: row.status as SessionStatus,
+          error: row.errorMessage ?? undefined,
+          debugEvents: (row.debugEventsData as DebugEvent[]) ?? [],
+          sseClients: [], // Non-serializable, always empty on reload
+          // Multi-tech v3.0 fields
+          pipelineResult: row.pipelineResultData as PipelineResult | undefined,
+          detectedComponents: row.detectedComponentsData as DetectedComponent[] | undefined,
+          multiTechGeneration: row.multiTechGenerationData as GeneratedFile[] | undefined,
+          maturityScore: row.maturityScoreData as MaturityScore | undefined,
+          technologiesDetected: row.technologiesDetected as TechnologyType[] | undefined,
+        };
+        this.cache.set(row.id, session);
       }
+      console.log(`[SessionStore] Restored ${rows.length} sessions from DB`);
     } catch (err) {
-      console.warn("[SessionStore] Failed to load sessions from disk:", err);
+      console.warn("[SessionStore] DB load failed, starting with empty store:", err);
     }
     this.loaded = true;
   }
 
-  private saveToDisk(): void {
+  private async saveToDB(session: CompleoSession): Promise<void> {
     try {
-      const serializable: SerializedSession[] = [...this.sessions.values()].map(s => ({
-        id: s.id,
-        projectName: s.projectName,
-        uploadedAt: s.uploadedAt.toISOString(),
-        files: s.files,
-        pomXml: s.pomXml,
-        bianYml: s.bianYml,
-        ir: s.ir,
-        ambiguities: s.ambiguities,
-        userChoices: s.userChoices,
-        resolvedIR: s.resolvedIR,
-        generation: s.generation,
-        zipUrl: s.zipUrl,
-        status: s.status,
-        error: s.error,
-        debugEvents: s.debugEvents,
-        pipelineResult: s.pipelineResult,
-        detectedComponents: s.detectedComponents,
-        multiTechGeneration: s.multiTechGeneration,
-        maturityScore: s.maturityScore,
-        technologiesDetected: s.technologiesDetected,
-      }));
-      fs.writeFileSync(SESSION_FILE, JSON.stringify(serializable), "utf-8");
+      const row = {
+        id: session.id,
+        projectName: session.projectName,
+        status: session.status as any,
+        filesData: session.files as any,
+        pomXml: session.pomXml ?? null,
+        bianYml: session.bianYml ?? null,
+        irData: session.ir as any ?? null,
+        ambiguitiesData: session.ambiguities as any ?? null,
+        userChoicesData: session.userChoices as any ?? null,
+        resolvedIrData: session.resolvedIR as any ?? null,
+        generationData: session.generation as any ?? null,
+        zipUrl: session.zipUrl ?? null,
+        pipelineResultData: session.pipelineResult as any ?? null,
+        detectedComponentsData: session.detectedComponents as any ?? null,
+        multiTechGenerationData: session.multiTechGeneration as any ?? null,
+        maturityScoreData: session.maturityScore as any ?? null,
+        technologiesDetected: session.technologiesDetected as any ?? null,
+        debugEventsData: session.debugEvents as any ?? null,
+        errorMessage: session.error ?? null,
+      };
+
+      // Upsert: insert or update on conflict
+      const db = await getDb();
+      if (!db) return;
+
+      const existing = await db.select({ id: compleoSessions.id })
+        .from(compleoSessions)
+        .where(eq(compleoSessions.id, session.id));
+
+      if (existing.length > 0) {
+        await db.update(compleoSessions)
+          .set(row)
+          .where(eq(compleoSessions.id, session.id));
+      } else {
+        await db.insert(compleoSessions).values(row);
+      }
     } catch (err) {
-      console.warn("[SessionStore] Failed to save sessions to disk:", err);
+      console.warn("[SessionStore] Failed to save session to DB:", err);
     }
   }
 
   get(id: string): CompleoSession | undefined {
-    return this.sessions.get(id);
+    return this.cache.get(id);
   }
 
   set(id: string, session: CompleoSession): void {
-    this.sessions.set(id, session);
-    this.saveToDisk();
+    this.cache.set(id, session);
+    // Async DB write (fire and forget)
+    this.saveToDB(session).catch(err => {
+      console.warn("[SessionStore] Async save failed:", err);
+    });
   }
 
   /**
-   * Update a session and persist to disk.
+   * Update a session and persist to DB.
    * Use this after modifying session fields (e.g., after analyze, resolve, generate).
    */
   persist(id: string): void {
-    if (this.sessions.has(id)) {
-      this.saveToDisk();
+    const session = this.cache.get(id);
+    if (session) {
+      this.saveToDB(session).catch(err => {
+        console.warn("[SessionStore] Async persist failed:", err);
+      });
     }
   }
 
   delete(id: string): boolean {
-    const result = this.sessions.delete(id);
-    if (result) this.saveToDisk();
+    const result = this.cache.delete(id);
+    if (result) {
+      getDb().then(db => {
+        if (db) db.delete(compleoSessions)
+          .where(eq(compleoSessions.id, id))
+          .catch(err => console.warn("[SessionStore] Async delete failed:", err));
+      });
+    }
     return result;
   }
 
   values(): IterableIterator<CompleoSession> {
-    return this.sessions.values();
+    return this.cache.values();
   }
 
   has(id: string): boolean {
-    return this.sessions.has(id);
+    return this.cache.has(id);
   }
 
   get size(): number {
-    return this.sessions.size;
+    return this.cache.size;
+  }
+
+  /**
+   * List all sessions (for the unified /compleo IDLE state).
+   * Returns a lightweight summary without full file contents.
+   */
+  listSessions(): Array<{
+    id: string;
+    projectName: string;
+    status: SessionStatus;
+    createdAt: Date;
+    fileCount: number;
+    technologies: string[];
+  }> {
+    return [...this.cache.values()].map(s => ({
+      id: s.id,
+      projectName: s.projectName,
+      status: s.status,
+      createdAt: s.uploadedAt,
+      fileCount: s.files.length,
+      technologies: s.technologiesDetected ?? [],
+    })).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 }
 

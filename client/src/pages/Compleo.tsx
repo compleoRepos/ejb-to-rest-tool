@@ -1,41 +1,36 @@
 /**
- * Compleo v2.0 — IHM de migration EJB → Spring Boot
- * Pipeline interactif : Upload → Analyse → Choix Difficiles → Génération → Résultats
+ * Compleo v5.4 — Page unifiée de migration Java Legacy → Spring Boot
+ * 4 états : idle → analyzing → choices → results
+ * Persistance sessionId dans localStorage + DB.
  * @author Hamza NORDINE
  */
 
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Upload, FileCode2, Play, Download, Eye, FolderArchive,
+  Play, Download, Eye, FolderArchive,
   CheckCircle2, AlertTriangle, Loader2, ArrowRight, Package,
   Layers, Code2, TestTube, Cloud, FileText, ChevronRight,
-  ChevronDown, RefreshCw, History, BarChart3,
+  ChevronDown, RefreshCw, BarChart3,
   Terminal, Zap, Server, Database, Shield, Box,
   HelpCircle, Star, ArrowLeft, Lightbulb, Info,
-  Columns2, GitCompare, Network, GitBranch, Lock, Globe,
+  Columns2, GitCompare, Network, GitBranch, FileCode2,
+  Bot,
 } from "lucide-react";
-import { Input } from "@/components/ui/input";
 import { Link } from "wouter";
 import CodeDiff from "@/components/CodeDiff";
 import ArchitectureDiagram from "@/components/ArchitectureDiagram";
-import { DebugPanel } from "@/components/DebugPanel";
+import DropZone from "@/components/compleo/DropZone";
+import FileExplorer from "@/components/compleo/FileExplorer";
+import CodeViewer from "@/components/compleo/CodeViewer";
+import StepProgress, { type PipelineStep } from "@/components/compleo/StepProgress";
+import SessionList from "@/components/compleo/SessionList";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
-
-interface UploadResult {
-  sessionId: string;
-  projectName: string;
-  fileCount: number;
-  hasPom: boolean;
-  hasBian: boolean;
-  totalLines: number;
-}
 
 interface AmbiguityOption {
   id: string;
@@ -126,87 +121,25 @@ interface GenerationResult {
   warnings: string[];
   downloadUrl: string;
   directUrl: string;
-  files: { path: string; category: string; lines: number }[];
+  files: { path: string; category: string; lines: number; content?: string }[];
   choicesApplied?: number;
-}
-
-interface FilePreview {
-  path: string;
-  category: string;
-  content: string;
-  lines: number;
-}
-
-interface SessionInfo {
-  id: string;
-  projectName: string;
-  uploadedAt: string;
-  status: string;
-  fileCount: number;
-  useCaseCount: number;
-  dtoCount: number;
-  generatedFiles: number;
-  ambiguityCount: number;
-}
-
-// Multi-tech v3.0 types
-interface MultiTechComponent {
-  className: string;
-  technology: string;
-  confidence: number;
-  filePath: string;
-  methods: { name: string; returnType: string; parameters: any[] }[];
-}
-
-interface MaturityScore {
-  global: number;
-  dimensions: {
-    technicalComplexity: number;
-    codeCoverage: number;
-    breakingRisk: number;
-    addedValue: number;
-    engineConfidence: number;
-  };
-  label: string;
-  attentionPoints: string[];
-  estimatedEffort: string;
-}
-
-interface MigrationNote {
-  title: string;
-  content: string;
-  severity: string;
-  technology: string;
-  affectedFiles: string[];
 }
 
 interface MultiTechResult {
   technologiesDetected: string[];
-  maturityScore: MaturityScore;
-  detectedComponents: MultiTechComponent[];
-  migrationNotes: MigrationNote[];
-  generatedFiles: { path: string; category: string; technology: string; lines: number }[];
+  maturityScore: {
+    global: number;
+    dimensions: Record<string, number>;
+    label: string;
+    attentionPoints: string[];
+    estimatedEffort: string;
+  };
+  detectedComponents: any[];
+  migrationNotes: any[];
+  generatedFiles: any[];
 }
 
-// ─── Category helpers ───────────────────────────────────────────────────────
-
-const categoryColors: Record<string, string> = {
-  controller: "text-emerald-400",
-  service: "text-cyan-400",
-  dto: "text-amber-400",
-  test: "text-violet-400",
-  enum: "text-pink-400",
-  exception: "text-red-400",
-  validator: "text-orange-400",
-  config: "text-blue-400",
-  cloud: "text-teal-400",
-  main: "text-green-400",
-  migration: "text-yellow-400",
-  infrastructure: "text-slate-400",
-  entity: "text-indigo-400",
-  repository: "text-sky-400",
-  migration_note: "text-yellow-400",
-};
+// ─── Constants ──────────────────────────────────────────────────────────────
 
 const techColors: Record<string, string> = {
   SERVLET: "bg-orange-500/20 text-orange-300 border-orange-500/30",
@@ -229,74 +162,11 @@ const techColors: Record<string, string> = {
 };
 
 const techLabels: Record<string, string> = {
-  SERVLET: "Servlet",
-  JSP: "JSP",
-  EJB_2X: "EJB 2.x",
-  EJB_3X_STATELESS: "EJB 3.x",
-  EJB_3X_STATEFUL: "EJB 3.x Stateful",
-  EJB_3X_MDB: "EJB MDB",
-  STRUTS_1: "Struts 1",
-  STRUTS_2: "Struts 2",
-  SOAP: "SOAP/JAX-WS",
-  JAX_RS: "JAX-RS",
-  JDBC: "JDBC",
-  HIBERNATE: "Hibernate",
-  JPA: "JPA",
-  JMS: "JMS",
-  BATCH: "Java Batch",
-  EAI_BOA: "EAI/BOA",
-  SPRING_BOOT: "Spring Boot",
-};
-
-const categoryIcons: Record<string, typeof Code2> = {
-  controller: Server,
-  service: Layers,
-  dto: Database,
-  test: TestTube,
-  enum: Box,
-  exception: Shield,
-  validator: CheckCircle2,
-  config: FileText,
-  cloud: Cloud,
-  main: Zap,
-  migration: FileText,
-};
-
-function getCategoryLabel(cat: string): string {
-  const labels: Record<string, string> = {
-    controller: "Controller",
-    service: "Service",
-    dto: "DTO",
-    test: "Test",
-    enum: "Enum",
-    exception: "Exception",
-    validator: "Validator",
-    config: "Config",
-    cloud: "Cloud",
-    main: "Main",
-    migration: "Report",
-  };
-  return labels[cat] || cat;
-}
-
-const ambiguityTypeLabels: Record<string, string> = {
-  HTTP_VERB_AMBIGUOUS: "Methode HTTP",
-  URL_STRUCTURE_AMBIGUOUS: "Structure URL",
-  RETURN_TYPE_AMBIGUOUS: "Type de retour",
-  CLASS_GROUPING_AMBIGUOUS: "Regroupement",
-  TRANSACTION_AMBIGUOUS: "Transaction",
-  EXTERNAL_DEPENDENCY: "Dependance externe",
-  DOMAIN_NAME_AMBIGUOUS: "Nom de domaine",
-};
-
-const ambiguityTypeIcons: Record<string, typeof Code2> = {
-  HTTP_VERB_AMBIGUOUS: Server,
-  URL_STRUCTURE_AMBIGUOUS: Code2,
-  RETURN_TYPE_AMBIGUOUS: Database,
-  CLASS_GROUPING_AMBIGUOUS: Layers,
-  TRANSACTION_AMBIGUOUS: Shield,
-  EXTERNAL_DEPENDENCY: Box,
-  DOMAIN_NAME_AMBIGUOUS: HelpCircle,
+  SERVLET: "Servlet", JSP: "JSP", EJB_2X: "EJB 2.x", EJB_3X_STATELESS: "EJB 3.x",
+  EJB_3X_STATEFUL: "EJB 3.x Stateful", EJB_3X_MDB: "EJB MDB", STRUTS_1: "Struts 1",
+  STRUTS_2: "Struts 2", SOAP: "SOAP/JAX-WS", JAX_RS: "JAX-RS", JDBC: "JDBC",
+  HIBERNATE: "Hibernate", JPA: "JPA", JMS: "JMS", BATCH: "Java Batch",
+  EAI_BOA: "EAI/BOA", SPRING_BOOT: "Spring Boot",
 };
 
 const severityColors: Record<string, { bg: string; text: string; border: string }> = {
@@ -305,26 +175,17 @@ const severityColors: Record<string, { bg: string; text: string; border: string 
   info: { bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/30" },
 };
 
+const SESSION_KEY = "compleo_session_id";
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function CompleoPage() {
-  // Step state — now includes "choices" between analyze and generate
-  const [step, setStep] = useState<"upload" | "analyze" | "choices" | "generate" | "preview">("upload");
+  // Pipeline state — 4 states
+  const [pipelineStep, setPipelineStep] = useState<PipelineStep>("idle");
+  const [completedSteps, setCompletedSteps] = useState<Set<PipelineStep>>(new Set());
 
-  // Source mode toggle
-  const [sourceMode, setSourceMode] = useState<"zip" | "git">("zip");
-
-  // Upload state
-  const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Git state
-  const [gitUrl, setGitUrl] = useState("");
-  const [gitToken, setGitToken] = useState("");
-  const [gitBranch, setGitBranch] = useState("");
-  const [cloning, setCloning] = useState(false);
+  // Session ID
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   // Analysis state
   const [analyzing, setAnalyzing] = useState(false);
@@ -338,17 +199,11 @@ export default function CompleoPage() {
   const [generating, setGenerating] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResult | null>(null);
 
-  // Preview state
-  const [previewFile, setPreviewFile] = useState<FilePreview | null>(null);
-  const [loadingPreview, setLoadingPreview] = useState(false);
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
-  const [resultTab, setResultTab] = useState<"code" | "diff" | "architecture">("code");
+  // File viewer state
+  const [selectedFile, setSelectedFile] = useState<{ path: string; content: string } | null>(null);
   const [sourceFile, setSourceFile] = useState<{ path: string; content: string } | null>(null);
   const [loadingSource, setLoadingSource] = useState(false);
-
-  // History state
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
+  const [resultTab, setResultTab] = useState<"code" | "diff" | "architecture">("code");
 
   // Multi-tech v3.0 state
   const [multiTechResult, setMultiTechResult] = useState<MultiTechResult | null>(null);
@@ -365,115 +220,147 @@ export default function CompleoPage() {
     .length;
   const canGenerate = blockingCount === 0 || blockingResolved === blockingCount;
 
-  // ─── Upload Handler ─────────────────────────────────────────────────────
+  // Files for FileExplorer
+  const explorerFiles = useMemo(() =>
+    generationResult?.files.map(f => ({
+      path: f.path,
+      content: (f as any).content || "",
+      category: f.category,
+    })) ?? [],
+  [generationResult]);
 
-  const handleUpload = useCallback(async (file: File) => {
-    if (!file.name.endsWith(".zip")) {
-      toast.error("Seuls les fichiers ZIP sont acceptes");
-      return;
-    }
+  // ─── File Content Loader (must be declared before restoreSession) ─────
 
-    setUploading(true);
-    setUploadResult(null);
-    setAnalysisResult(null);
-    setGenerationResult(null);
-    setPreviewFile(null);
-    setUserChoices({});
-    setCurrentAmbiguityIndex(0);
+  const loadFileContents = useCallback(async (sid: string, files: { path: string; category: string; lines: number }[]) => {
+    const updated = await Promise.all(
+      files.map(async (f) => {
+        try {
+          const res = await fetch(`/api/compleo/preview/${sid}/${f.path}`);
+          if (res.ok) {
+            const data = await res.json();
+            return { ...f, content: data.content || "" };
+          }
+        } catch {}
+        return { ...f, content: "" };
+      })
+    );
 
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
+    setGenerationResult(prev => prev ? { ...prev, files: updated } : prev);
 
-      const res = await fetch("/api/compleo/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Upload failed");
-      }
-
-      const data: UploadResult = await res.json();
-      setUploadResult(data);
-      setStep("analyze");
-      toast.success(`${data.fileCount} fichiers Java extraits`);
-    } catch (err: any) {
-      toast.error(err.message || "Erreur lors de l'upload");
-    } finally {
-      setUploading(false);
+    // Auto-select first file
+    if (updated.length > 0 && updated[0].content) {
+      setSelectedFile({ path: updated[0].path, content: updated[0].content });
     }
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleUpload(file);
-  }, [handleUpload]);
+  // ─── Session persistence ───────────────────────────────────────────────
 
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) handleUpload(file);
-    e.target.value = "";
-  }, [handleUpload]);
-
-  // ─── Git Clone Handler ─────────────────────────────────────────────────
-
-  const handleClone = useCallback(async () => {
-    if (!gitUrl.trim()) {
-      toast.error("Veuillez saisir l'URL du repository Git");
-      return;
+  useEffect(() => {
+    if (sessionId) {
+      localStorage.setItem(SESSION_KEY, sessionId);
     }
+  }, [sessionId]);
 
-    setCloning(true);
-    setUploadResult(null);
-    setAnalysisResult(null);
-    setGenerationResult(null);
-    setPreviewFile(null);
-    setUserChoices({});
-    setCurrentAmbiguityIndex(0);
+  // Restore session on mount
+  useEffect(() => {
+    const savedId = localStorage.getItem(SESSION_KEY);
+    if (savedId && !sessionId) {
+      restoreSession(savedId);
+    }
+  }, []);
 
+  const restoreSession = useCallback(async (sid: string) => {
     try {
-      const res = await fetch("/api/compleo/clone", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: gitUrl.trim(),
-          token: gitToken.trim() || undefined,
-          branch: gitBranch.trim() || undefined,
-        }),
-      });
-
+      const res = await fetch(`/api/compleo/session/${sid}`);
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Clone failed");
+        localStorage.removeItem(SESSION_KEY);
+        return;
+      }
+      const data = await res.json();
+      setSessionId(sid);
+
+      // Restore analysis result from API format
+      if (data.stats || data.irSummary) {
+        setAnalysisResult({
+          sessionId: sid,
+          status: data.status,
+          projectName: data.projectName,
+          groupId: "",
+          artifactId: "",
+          version: "",
+          stats: data.stats ?? {},
+          warnings: data.warnings ?? [],
+          ambiguities: data.ambiguities ?? [],
+          irSummary: data.irSummary ?? { useCases: [], dtos: [], enums: [], exceptions: [], validators: [], remoteInterfaces: [], domains: [] },
+        });
       }
 
-      const data: UploadResult = await res.json();
-      setUploadResult(data);
-      setStep("analyze");
-      toast.success(`Repository clone : ${data.fileCount} fichiers detectes`);
-    } catch (err: any) {
-      toast.error(err.message || "Erreur lors du clone Git");
-    } finally {
-      setCloning(false);
+      // Restore generation result
+      if (data.generation) {
+        setGenerationResult(data.generation);
+      }
+
+      // Restore multi-tech data
+      if (data.technologiesDetected?.length > 0) {
+        setMultiTechResult({
+          technologiesDetected: data.technologiesDetected,
+          maturityScore: data.maturityScore,
+          detectedComponents: data.detectedComponents ?? [],
+          migrationNotes: [],
+          generatedFiles: [],
+        });
+      }
+
+      // Restore user choices (convert array to map)
+      if (data.userChoices?.length > 0) {
+        const choiceMap: Record<string, string> = {};
+        for (const c of data.userChoices) {
+          choiceMap[c.ambiguityId] = c.choiceId;
+        }
+        setUserChoices(choiceMap);
+      }
+
+      // Determine which step to restore to
+      if (data.generation) {
+        setPipelineStep("results");
+        setCompletedSteps(new Set(["idle", "analyzing", "choices", "results"] as PipelineStep[]));
+        // Load file contents for the explorer
+        if (data.generation.files?.length > 0) {
+          await loadFileContents(sid, data.generation.files);
+        }
+      } else if (data.ambiguities?.length > 0) {
+        setPipelineStep("choices");
+        setCompletedSteps(new Set(["idle", "analyzing"] as PipelineStep[]));
+      } else if (data.stats) {
+        setPipelineStep("analyzing");
+        setCompletedSteps(new Set(["idle"] as PipelineStep[]));
+      }
+    } catch {
+      localStorage.removeItem(SESSION_KEY);
     }
-  }, [gitUrl, gitToken, gitBranch]);
+  }, [loadFileContents]);
 
-  // ─── Analyze Handler ────────────────────────────────────────────────────
+  // ─── Upload Complete Handler (from DropZone) ───────────────────────────
 
-  const handleAnalyze = useCallback(async () => {
-    if (!uploadResult) return;
+  const handleUploadComplete = useCallback(async (newSessionId: string) => {
+    setSessionId(newSessionId);
+    setCompletedSteps(new Set(["idle"] as PipelineStep[]));
+
+    // Auto-trigger analysis
+    await runAnalysis(newSessionId);
+  }, []);
+
+  // ─── Analysis Handler ──────────────────────────────────────────────────
+
+  const runAnalysis = useCallback(async (sid: string) => {
     setAnalyzing(true);
+    setPipelineStep("analyzing");
 
     try {
-      // Use multi-tech endpoint (v3.0)
       const res = await fetch("/api/compleo/analyze-multitech", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: uploadResult.sessionId }),
+        body: JSON.stringify({ sessionId: sid }),
       });
 
       if (!res.ok) {
@@ -483,7 +370,6 @@ export default function CompleoPage() {
 
       const data = await res.json();
 
-      // Store multi-tech results
       setMultiTechResult({
         technologiesDetected: data.technologiesDetected || [],
         maturityScore: data.maturityScore,
@@ -492,27 +378,28 @@ export default function CompleoPage() {
         generatedFiles: data.generatedFiles || [],
       });
 
-      // Also store as AnalysisResult for backward compatibility
       setAnalysisResult(data as AnalysisResult);
+      setCompletedSteps(prev => new Set([...prev, "analyzing"] as PipelineStep[]));
 
       const techCount = data.technologiesDetected?.length || 0;
-      const compCount = data.detectedComponents?.length || 0;
 
       if (data.ambiguities && data.ambiguities.length > 0) {
-        setStep("choices");
-        toast.success(`${techCount} technologies, ${compCount} composants — ${data.ambiguities.length} choix a faire`);
+        setPipelineStep("choices");
+        toast.success(`${techCount} technologies — ${data.ambiguities.length} choix à faire`);
       } else {
-        setStep("generate");
-        toast.success(`${techCount} technologies, ${compCount} composants detectes`);
+        // No ambiguities — auto-generate
+        setCompletedSteps(prev => new Set([...prev, "choices"] as PipelineStep[]));
+        await runGeneration(sid, []);
       }
     } catch (err: any) {
       toast.error(err.message || "Erreur lors de l'analyse");
+      setPipelineStep("idle");
     } finally {
       setAnalyzing(false);
     }
-  }, [uploadResult]);
+  }, []);
 
-  // ─── Choice Handlers ───────────────────────────────────────────────────
+  // ─── Choice Handlers ──────────────────────────────────────────────────
 
   const handleChoice = useCallback((ambiguityId: string, choiceId: string) => {
     setUserChoices(prev => ({ ...prev, [ambiguityId]: choiceId }));
@@ -526,109 +413,98 @@ export default function CompleoPage() {
       }
     }
     setUserChoices(newChoices);
-    toast.success("Toutes les recommandations appliquees");
+    toast.success("Toutes les recommandations appliquées");
   }, [ambiguities, userChoices]);
 
-  // ─── Generate Handler (with choices) ───────────────────────────────────
+  // ─── Generate Handler ─────────────────────────────────────────────────
 
-  const handleGenerateWithChoices = useCallback(async () => {
-    if (!uploadResult) return;
+  const runGeneration = useCallback(async (sid: string, choices: { ambiguityId: string; choiceId: string }[]) => {
     setGenerating(true);
 
     try {
-      // If there are ambiguities, use the resolve endpoint
-      if (ambiguities.length > 0) {
-        // Fill in recommendations for any unresolved non-blocking ambiguities
-        const finalChoices = ambiguities.map(amb => ({
-          ambiguityId: amb.id,
-          choiceId: userChoices[amb.id] || amb.recommendation,
-        }));
+      let res: Response;
 
-        const res = await fetch(`/api/compleo/resolve/${uploadResult.sessionId}`, {
+      if (choices.length > 0) {
+        res = await fetch(`/api/compleo/resolve/${sid}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ choices: finalChoices }),
+          body: JSON.stringify({ choices }),
         });
-
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || "Resolution failed");
-        }
-
-        const data: GenerationResult = await res.json();
-        setGenerationResult(data);
-        setStep("preview");
-        toast.success(`${data.stats.totalFiles} fichiers Spring Boot generes`);
       } else {
-        // No ambiguities — use the generate endpoint directly
-        const res = await fetch("/api/compleo/generate", {
+        res = await fetch("/api/compleo/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId: uploadResult.sessionId }),
+          body: JSON.stringify({ sessionId: sid }),
         });
-
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || "Generation failed");
-        }
-
-        const data: GenerationResult = await res.json();
-        setGenerationResult(data);
-        setStep("preview");
-        toast.success(`${data.stats.totalFiles} fichiers Spring Boot generes`);
       }
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Generation failed");
+      }
+
+      const data: GenerationResult = await res.json();
+      setGenerationResult(data);
+      setCompletedSteps(prev => new Set([...prev, "choices", "results"] as PipelineStep[]));
+      setPipelineStep("results");
+
+      // Load file contents for the explorer
+      await loadFileContents(sid, data.files);
+
+      toast.success(`${data.stats.totalFiles} fichiers Spring Boot générés`);
     } catch (err: any) {
-      toast.error(err.message || "Erreur lors de la generation");
+      toast.error(err.message || "Erreur lors de la génération");
     } finally {
       setGenerating(false);
     }
-  }, [uploadResult, ambiguities, userChoices]);
+  }, []);
 
-  // ─── Source File Fetch Handler ──────────────────────────────────────────
+  const handleGenerateWithChoices = useCallback(async () => {
+    if (!sessionId) return;
+
+    const finalChoices = ambiguities.map(amb => ({
+      ambiguityId: amb.id,
+      choiceId: userChoices[amb.id] || amb.recommendation,
+    }));
+
+    await runGeneration(sessionId, finalChoices);
+  }, [sessionId, ambiguities, userChoices, runGeneration]);
+
+  // ─── Source File Fetch ────────────────────────────────────────────────
 
   const fetchSourceFile = useCallback(async (generatedPath: string) => {
-    if (!uploadResult || !analysisResult) return;
+    if (!sessionId || !analysisResult) return;
     setLoadingSource(true);
     setSourceFile(null);
 
-    // Infer source file name from generated file name
     const fileName = generatedPath.split("/").pop()?.replace(".java", "") || "";
     let sourceClassName = "";
 
-    // Controller → UseCase mapping
     if (fileName.endsWith("Controller")) {
       const domain = fileName.replace("Controller", "");
       const uc = analysisResult.irSummary.useCases.find(u =>
         u.domain.toLowerCase() === domain.toLowerCase()
       );
       if (uc) sourceClassName = uc.className;
-    }
-    // RequestDTO → VoIn mapping
-    else if (fileName.endsWith("RequestDTO")) {
+    } else if (fileName.endsWith("RequestDTO")) {
       const baseName = fileName.replace("RequestDTO", "");
       const dto = analysisResult.irSummary.dtos.find(d =>
         d.className.replace("VoIn", "").replace("Dto", "") === baseName && d.direction === "in"
       );
       if (dto) sourceClassName = dto.className;
-    }
-    // ResponseDTO → VoOut mapping
-    else if (fileName.endsWith("ResponseDTO")) {
+    } else if (fileName.endsWith("ResponseDTO")) {
       const baseName = fileName.replace("ResponseDTO", "");
       const dto = analysisResult.irSummary.dtos.find(d =>
         d.className.replace("VoOut", "").replace("Dto", "") === baseName && d.direction === "out"
       );
       if (dto) sourceClassName = dto.className;
-    }
-    // Service → RemoteInterface mapping
-    else if (fileName.endsWith("Service") || fileName.endsWith("ServiceAdapter")) {
+    } else if (fileName.endsWith("Service") || fileName.endsWith("ServiceAdapter")) {
       const baseName = fileName.replace("ServiceAdapter", "").replace("Service", "");
       const svc = analysisResult.irSummary.remoteInterfaces.find(r =>
         r.className.replace("Remote", "").replace("Service", "").toLowerCase().includes(baseName.toLowerCase())
       );
       if (svc) sourceClassName = svc.className;
-    }
-    // Enum → same name
-    else {
+    } else {
       const en = analysisResult.irSummary.enums.find(e => e.className === fileName);
       if (en) sourceClassName = en.className;
       const ex = analysisResult.irSummary.exceptions.find(e => e.className === fileName);
@@ -637,514 +513,280 @@ export default function CompleoPage() {
 
     if (sourceClassName) {
       try {
-        const res = await fetch(`/api/compleo/source/${uploadResult.sessionId}/${sourceClassName}.java`);
+        const res = await fetch(`/api/compleo/source/${sessionId}/${sourceClassName}.java`);
         if (res.ok) {
           const data = await res.json();
           setSourceFile({ path: data.path, content: data.content });
         }
-      } catch {
-        // No source found — that's OK
-      }
+      } catch {}
     }
     setLoadingSource(false);
-  }, [uploadResult, analysisResult]);
+  }, [sessionId, analysisResult]);
 
-  // ─── Preview Handler ────────────────────────────────────────────────────
+  // ─── File Select Handler ──────────────────────────────────────────────
 
-  const handlePreviewFile = useCallback(async (filePath: string) => {
-    if (!uploadResult) return;
-    setLoadingPreview(true);
-
-    try {
-      const res = await fetch(`/api/compleo/preview/${uploadResult.sessionId}/${filePath}`);
-      if (!res.ok) throw new Error("Preview failed");
-      const data: FilePreview = await res.json();
-      setPreviewFile(data);
-      // Also fetch the source file for diff view
-      fetchSourceFile(filePath);
-    } catch (err: any) {
-      toast.error("Impossible de charger le fichier");
-    } finally {
-      setLoadingPreview(false);
+  const handleFileSelect = useCallback(async (file: { path: string; content: string }) => {
+    if (file.content) {
+      setSelectedFile(file);
+      fetchSourceFile(file.path);
+    } else if (sessionId) {
+      try {
+        const res = await fetch(`/api/compleo/preview/${sessionId}/${file.path}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSelectedFile({ path: file.path, content: data.content || "" });
+          fetchSourceFile(file.path);
+        }
+      } catch {
+        toast.error("Impossible de charger le fichier");
+      }
     }
-  }, [uploadResult, fetchSourceFile]);
+  }, [sessionId, fetchSourceFile]);
 
-  // ─── Download Handler ───────────────────────────────────────────────────
+  // ─── Download Handler ─────────────────────────────────────────────────
 
   const handleDownload = useCallback(() => {
-    if (!uploadResult) return;
-    window.open(`/api/compleo/download/${uploadResult.sessionId}`, "_blank");
-  }, [uploadResult]);
+    if (!sessionId) return;
+    window.open(`/api/compleo/download/${sessionId}`, "_blank");
+  }, [sessionId]);
 
-  // ─── History Handler ────────────────────────────────────────────────────
+  // ─── Session Restore Handler ──────────────────────────────────────────
 
-  const loadHistory = useCallback(async () => {
-    try {
-      const res = await fetch("/api/compleo/sessions");
-      if (res.ok) {
-        const data = await res.json();
-        setSessions(data);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
+  const handleRestoreSession = useCallback((sid: string) => {
+    restoreSession(sid);
+  }, [restoreSession]);
 
-  // ─── Reset Handler ──────────────────────────────────────────────────────
+  // ─── Reset Handler ────────────────────────────────────────────────────
 
-  const handleReset = useCallback(() => {
-    setStep("upload");
-    setUploadResult(null);
+  const resetState = useCallback(() => {
+    setSessionId(null);
     setAnalysisResult(null);
     setGenerationResult(null);
-    setPreviewFile(null);
+    setSelectedFile(null);
     setSourceFile(null);
-    setExpandedCategories(new Set());
     setUserChoices({});
     setCurrentAmbiguityIndex(0);
     setResultTab("code");
     setMultiTechResult(null);
-    setGitUrl("");
-    setGitToken("");
-    setGitBranch("");
+    setPipelineStep("idle");
+    setCompletedSteps(new Set());
+    localStorage.removeItem(SESSION_KEY);
   }, []);
 
-  // ─── Toggle category ───────────────────────────────────────────────────
+  // ─── Step navigation ──────────────────────────────────────────────────
 
-  const toggleCategory = (cat: string) => {
-    setExpandedCategories(prev => {
-      const next = new Set(prev);
-      if (next.has(cat)) next.delete(cat);
-      else next.add(cat);
-      return next;
-    });
-  };
+  const handleStepNavigate = useCallback((step: PipelineStep) => {
+    setPipelineStep(step);
+  }, []);
 
-  // ─── Group files by category ──────────────────────────────────────────
-
-  const filesByCategory = useMemo(() =>
-    generationResult?.files.reduce((acc, f) => {
-      if (!acc[f.category]) acc[f.category] = [];
-      acc[f.category].push(f);
-      return acc;
-    }, {} as Record<string, typeof generationResult.files>) ?? {},
-  [generationResult]);
-
-  // ─── Steps indicator ──────────────────────────────────────────────────
-
-  const steps = [
-    { id: "upload", label: "Upload", icon: Upload },
-    { id: "analyze", label: "Analyse", icon: BarChart3 },
-    { id: "choices", label: "Choix", icon: HelpCircle },
-    { id: "generate", label: "Generation", icon: Zap },
-    { id: "preview", label: "Resultats", icon: Eye },
-  ] as const;
-
-  const stepIndex = steps.findIndex(s => s.id === step);
+  // ═══════════════════════════════════════════════════════════════════════
+  // RENDER
+  // ═══════════════════════════════════════════════════════════════════════
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-[oklch(0.13_0.01_250)]">
-      {/* Header */}
-      <div className="border-b border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)]">
-        <div className="max-w-7xl mx-auto px-6 py-4">
+    <div className="h-full flex flex-col bg-[oklch(0.13_0.01_250)]">
+      {/* ─── Header ─────────────────────────────────────────────────── */}
+      <div className="border-b border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] shrink-0">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center">
-                <Package className="w-5 h-5 text-white" />
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center">
+                <Package className="w-4.5 h-4.5 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-white flex items-center gap-2">
+                <h1 className="text-lg font-bold text-white flex items-center gap-2">
                   Compleo
-                  <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 text-xs">v3.0</Badge>
+                  <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 text-[10px]">v5.4</Badge>
                 </h1>
-                <p className="text-sm text-[oklch(0.6_0.01_250)]">Multi-Technology → Spring Boot Migration Engine</p>
+                <p className="text-xs text-[oklch(0.5_0.01_250)]">Java Legacy → Spring Boot</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Link href="/compleo/agent">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="border-emerald-500/30 text-emerald-400 hover:text-white hover:bg-emerald-500/20 gap-1.5"
-                >
-                  <Zap className="w-4 h-4" />
-                  Mode Agent
-                </Button>
-              </Link>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => { setShowHistory(!showHistory); if (!showHistory) loadHistory(); }}
-                className="border-[oklch(0.25_0.01_250)] text-[oklch(0.7_0.01_250)] hover:text-white hover:bg-[oklch(0.2_0.01_250)]"
-              >
-                <History className="w-4 h-4 mr-1" />
-                Historique
-              </Button>
-              {step !== "upload" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleReset}
-                  className="border-[oklch(0.25_0.01_250)] text-[oklch(0.7_0.01_250)] hover:text-white hover:bg-[oklch(0.2_0.01_250)]"
-                >
-                  <RefreshCw className="w-4 h-4 mr-1" />
-                  Nouveau
-                </Button>
-              )}
-            </div>
-          </div>
 
-          {/* Steps indicator */}
-          <div className="flex items-center gap-2 mt-4">
-            {steps.map((s, i) => {
-              const Icon = s.icon;
-              const isActive = i === stepIndex;
-              const isDone = i < stepIndex;
-              // Skip "choices" step in indicator if no ambiguities
-              if (s.id === "choices" && ambiguities.length === 0 && step !== "choices") return null;
-              return (
-                <div key={s.id} className="flex items-center gap-2">
-                  {i > 0 && (
-                    <ArrowRight className={`w-4 h-4 ${isDone ? "text-emerald-400" : "text-[oklch(0.3_0.01_250)]"}`} />
-                  )}
-                  <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                    isActive
-                      ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                      : isDone
-                        ? "bg-emerald-500/10 text-emerald-500"
-                        : "text-[oklch(0.4_0.01_250)]"
-                  }`}>
-                    {isDone ? <CheckCircle2 className="w-4 h-4" /> : <Icon className="w-4 h-4" />}
-                    {s.label}
-                  </div>
+            <div className="flex items-center gap-2">
+              {/* Step Progress — visible when not idle */}
+              {pipelineStep !== "idle" && (
+                <div className="hidden md:block">
+                  <StepProgress
+                    current={pipelineStep}
+                    onNavigate={handleStepNavigate}
+                    completed={completedSteps}
+                  />
                 </div>
-              );
-            })}
+              )}
+
+              <div className="flex items-center gap-1.5 ml-4">
+                <Link href="/compleo/agent">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-emerald-500/30 text-emerald-400 hover:text-white hover:bg-emerald-500/20 gap-1 h-8 text-xs"
+                  >
+                    <Bot className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Agent</span>
+                  </Button>
+                </Link>
+                <Link href="/compleo/rules">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-[oklch(0.25_0.01_250)] text-[oklch(0.6_0.01_250)] hover:text-white h-8 text-xs"
+                  >
+                    <Lightbulb className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Règles</span>
+                  </Button>
+                </Link>
+                {pipelineStep !== "idle" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={resetState}
+                    className="border-[oklch(0.25_0.01_250)] text-[oklch(0.6_0.01_250)] hover:text-white h-8 text-xs"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Nouveau</span>
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* History panel */}
-      <AnimatePresence>
-        {showHistory && sessions.length > 0 && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="border-b border-[oklch(0.25_0.01_250)] bg-[oklch(0.14_0.01_250)] overflow-hidden"
-          >
-            <div className="max-w-7xl mx-auto px-6 py-4">
-              <h3 className="text-sm font-semibold text-[oklch(0.7_0.01_250)] mb-3">Sessions precedentes</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {sessions.map(s => (
-                  <div key={s.id} className="p-3 rounded-lg border border-[oklch(0.25_0.01_250)] bg-[oklch(0.16_0.01_250)]">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium text-white truncate">{s.projectName}</span>
-                      <Badge variant="outline" className={`text-xs ${
-                        s.status === "generated" ? "text-emerald-400 border-emerald-500/30" :
-                        s.status === "waiting_choices" ? "text-amber-400 border-amber-500/30" :
-                        s.status === "analyzed" ? "text-cyan-400 border-cyan-500/30" :
-                        "text-[oklch(0.5_0.01_250)] border-[oklch(0.3_0.01_250)]"
-                      }`}>{s.status}</Badge>
-                    </div>
-                    <div className="text-xs text-[oklch(0.5_0.01_250)]">
-                      {s.fileCount} fichiers · {s.useCaseCount} UC · {s.ambiguityCount > 0 ? `${s.ambiguityCount} choix` : ""} {s.generatedFiles > 0 ? `· ${s.generatedFiles} generes` : ""}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* ─── Main Content ───────────────────────────────────────────── */}
+      <div className="flex-1 overflow-auto">
+        <AnimatePresence mode="wait">
 
-      {/* Main content */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Step 1: Upload / Git Clone */}
-        {step === "upload" && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <div className="max-w-2xl mx-auto">
+          {/* ═══ STATE: IDLE ═══════════════════════════════════════════ */}
+          {pipelineStep === "idle" && (
+            <motion.div
+              key="idle"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="max-w-2xl mx-auto px-4 sm:px-6 py-8"
+            >
               <div className="text-center mb-8">
                 <h2 className="text-2xl font-bold text-white mb-2">Importez votre projet Java Legacy</h2>
-                <p className="text-[oklch(0.6_0.01_250)]">
-                  Uploadez un ZIP ou connectez un repository Git (EJB, Servlet, Struts, SOAP, JDBC, Hibernate, JMS, Batch...)
+                <p className="text-[oklch(0.55_0.01_250)] text-sm">
+                  EJB, Servlet, Struts, SOAP, JDBC, Hibernate, JMS, Batch...
                 </p>
               </div>
 
-              {/* Source mode toggle */}
-              <div className="flex items-center justify-center gap-2 mb-6">
-                <button
-                  onClick={() => setSourceMode("zip")}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                    sourceMode === "zip"
-                      ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                      : "text-[oklch(0.5_0.01_250)] hover:text-white hover:bg-[oklch(0.2_0.01_250)] border border-transparent"
-                  }`}
-                >
-                  <FolderArchive className="w-4 h-4" />
-                  Upload ZIP
-                </button>
-                <button
-                  onClick={() => setSourceMode("git")}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                    sourceMode === "git"
-                      ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                      : "text-[oklch(0.5_0.01_250)] hover:text-white hover:bg-[oklch(0.2_0.01_250)] border border-transparent"
-                  }`}
-                >
-                  <GitBranch className="w-4 h-4" />
-                  Repository Git
-                </button>
-              </div>
-
-              {/* ZIP Upload */}
-              {sourceMode === "zip" && (
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`relative cursor-pointer border-2 border-dashed rounded-xl p-16 text-center transition-all ${
-                    dragOver
-                      ? "border-emerald-400 bg-emerald-500/10"
-                      : "border-[oklch(0.3_0.01_250)] hover:border-emerald-500/50 hover:bg-[oklch(0.16_0.01_250)]"
-                  }`}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".zip"
-                    onChange={handleFileSelect}
-                    className="hidden"
-                  />
-                  {uploading ? (
-                    <div className="flex flex-col items-center gap-4">
-                      <Loader2 className="w-12 h-12 text-emerald-400 animate-spin" />
-                      <p className="text-[oklch(0.7_0.01_250)]">Extraction du ZIP en cours...</p>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-4">
-                      <div className="w-16 h-16 rounded-2xl bg-[oklch(0.2_0.01_250)] flex items-center justify-center">
-                        <FolderArchive className={`w-8 h-8 ${dragOver ? "text-emerald-400" : "text-[oklch(0.5_0.01_250)]"}`} />
-                      </div>
-                      <div>
-                        <p className="text-white font-medium mb-1">Glissez votre fichier ZIP ici</p>
-                        <p className="text-sm text-[oklch(0.5_0.01_250)]">ou cliquez pour parcourir</p>
-                      </div>
-                      <div className="flex items-center gap-4 text-xs text-[oklch(0.4_0.01_250)]">
-                        <span>Format: ZIP</span>
-                        <span>·</span>
-                        <span>Max: 100 MB</span>
-                        <span>·</span>
-                        <span>Projet Maven</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Git Clone */}
-              {sourceMode === "git" && (
-                <div className="rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] p-6">
-                  <div className="space-y-4">
-                    {/* Repository URL */}
-                    <div>
-                      <label className="block text-sm font-medium text-[oklch(0.7_0.01_250)] mb-1.5">
-                        <Globe className="w-3.5 h-3.5 inline mr-1" />
-                        URL du repository
-                      </label>
-                      <Input
-                        value={gitUrl}
-                        onChange={(e) => setGitUrl(e.target.value)}
-                        placeholder="https://github.com/org/project.git"
-                        className="bg-[oklch(0.12_0.01_250)] border-[oklch(0.25_0.01_250)] text-white placeholder:text-[oklch(0.4_0.01_250)] focus:border-emerald-500/50"
-                      />
-                      <p className="text-xs text-[oklch(0.4_0.01_250)] mt-1">
-                        GitHub, GitLab, Azure DevOps, Gitea ou tout repo Git HTTPS
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      {/* Token */}
-                      <div>
-                        <label className="block text-sm font-medium text-[oklch(0.7_0.01_250)] mb-1.5">
-                          <Lock className="w-3.5 h-3.5 inline mr-1" />
-                          Token d'acces <span className="text-[oklch(0.4_0.01_250)]">(optionnel)</span>
-                        </label>
-                        <Input
-                          type="password"
-                          value={gitToken}
-                          onChange={(e) => setGitToken(e.target.value)}
-                          placeholder="ghp_xxxx ou glpat-xxxx"
-                          className="bg-[oklch(0.12_0.01_250)] border-[oklch(0.25_0.01_250)] text-white placeholder:text-[oklch(0.4_0.01_250)] focus:border-emerald-500/50"
-                        />
-                      </div>
-
-                      {/* Branch */}
-                      <div>
-                        <label className="block text-sm font-medium text-[oklch(0.7_0.01_250)] mb-1.5">
-                          <GitBranch className="w-3.5 h-3.5 inline mr-1" />
-                          Branche <span className="text-[oklch(0.4_0.01_250)]">(optionnel)</span>
-                        </label>
-                        <Input
-                          value={gitBranch}
-                          onChange={(e) => setGitBranch(e.target.value)}
-                          placeholder="main (par defaut)"
-                          className="bg-[oklch(0.12_0.01_250)] border-[oklch(0.25_0.01_250)] text-white placeholder:text-[oklch(0.4_0.01_250)] focus:border-emerald-500/50"
-                        />
-                      </div>
-                    </div>
-
-                    <Button
-                      onClick={handleClone}
-                      disabled={cloning || !gitUrl.trim()}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
-                    >
-                      {cloning ? (
-                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Clonage en cours...</>
-                      ) : (
-                        <><GitBranch className="w-4 h-4 mr-2" /> Cloner et analyser</>
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              )}
+              {/* DropZone — handles ZIP upload + Git clone internally */}
+              <DropZone onUpload={handleUploadComplete} />
 
               {/* Features grid */}
-              <div className="grid grid-cols-3 gap-4 mt-8">
+              <div className="grid grid-cols-3 gap-3 mt-8">
                 {[
-                  { icon: Terminal, label: "13 Detecteurs", desc: "Servlet, EJB, Struts, SOAP, JDBC, JMS..." },
-                  { icon: Layers, label: "Spring Boot 3.2", desc: "REST, JPA, Kafka, Spring Batch" },
-                  { icon: Cloud, label: "Score de Maturite", desc: "5 dimensions, effort estime" },
+                  { icon: Terminal, label: "13 Détecteurs", desc: "Servlet, EJB, Struts, SOAP..." },
+                  { icon: Layers, label: "Spring Boot 3.2", desc: "REST, JPA, Kafka, Batch" },
+                  { icon: Cloud, label: "Score Maturité", desc: "5 dimensions, effort estimé" },
                 ].map(f => (
-                  <div key={f.label} className="p-4 rounded-lg border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)]">
-                    <f.icon className="w-5 h-5 text-emerald-400 mb-2" />
+                  <div key={f.label} className="p-3 rounded-lg border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)]">
+                    <f.icon className="w-4 h-4 text-emerald-400 mb-1.5" />
                     <p className="text-sm font-medium text-white">{f.label}</p>
                     <p className="text-xs text-[oklch(0.5_0.01_250)]">{f.desc}</p>
                   </div>
                 ))}
               </div>
-            </div>
-          </motion.div>
-        )}
 
-        {/* Step 2: Analyze */}
-        {step === "analyze" && uploadResult && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <div className="max-w-3xl mx-auto">
-              {/* Upload summary */}
-              <div className="p-6 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] mb-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                    Projet uploade
-                  </h3>
-                  <Badge variant="outline" className="text-emerald-400 border-emerald-500/30">
-                    {uploadResult.projectName}
-                  </Badge>
-                </div>
-                <div className="grid grid-cols-4 gap-4">
-                  {[
-                    { label: "Fichiers Java", value: uploadResult.fileCount },
-                    { label: "Lignes de code", value: uploadResult.totalLines.toLocaleString() },
-                    { label: "pom.xml", value: uploadResult.hasPom ? "Detecte" : "Non trouve" },
-                    { label: "BIAN mapping", value: uploadResult.hasBian ? "Detecte" : "Non trouve" },
-                  ].map(s => (
-                    <div key={s.label} className="text-center">
-                      <div className="text-xl font-bold text-white">{s.value}</div>
-                      <div className="text-xs text-[oklch(0.5_0.01_250)]">{s.label}</div>
-                    </div>
-                  ))}
-                </div>
+              {/* Session history */}
+              <div className="mt-8">
+                <SessionList onRestore={handleRestoreSession} />
               </div>
+            </motion.div>
+          )}
 
-              {/* Analyze button */}
-              <div className="text-center">
-                <Button
-                  size="lg"
-                  onClick={handleAnalyze}
-                  disabled={analyzing}
-                  className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white px-8"
-                >
-                  {analyzing ? (
-                    <>
-                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                      Analyse multi-technologies en cours...
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-5 h-5 mr-2" />
-                      Lancer l'analyse multi-technologies
-                    </>
-                  )}
-                </Button>
-                <p className="text-sm text-[oklch(0.5_0.01_250)] mt-2">
-                  Detection automatique : EJB, Servlet, Struts, SOAP, JDBC, Hibernate, JMS, Batch, JPA, JAX-RS
-                </p>
-              </div>
-            </div>
-          </motion.div>
-        )}
+          {/* ═══ STATE: ANALYZING ═══════════════════════════════════════ */}
+          {pipelineStep === "analyzing" && (
+            <motion.div
+              key="analyzing"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="max-w-3xl mx-auto px-4 sm:px-6 py-8"
+            >
+              {/* Analyzing indicator */}
+              {analyzing && (
+                <div className="flex flex-col items-center gap-4 py-16">
+                  <div className="relative">
+                    <div className="w-16 h-16 rounded-full border-4 border-emerald-500/20 border-t-emerald-400 animate-spin" />
+                    <BarChart3 className="w-6 h-6 text-emerald-400 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-white font-medium">Analyse multi-technologies en cours...</p>
+                    <p className="text-sm text-[oklch(0.5_0.01_250)] mt-1">
+                      Détection : EJB, Servlet, Struts, SOAP, JDBC, Hibernate, JMS, Batch
+                    </p>
+                  </div>
+                </div>
+              )}
 
-        {/* Step 2.5: Choix Difficiles */}
-        {step === "choices" && analysisResult && ambiguities.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <div className="max-w-4xl mx-auto">
+              {/* Auto-generating (no ambiguities) */}
+              {!analyzing && generating && (
+                <div className="flex flex-col items-center gap-4 py-16">
+                  <div className="relative">
+                    <div className="w-16 h-16 rounded-full border-4 border-cyan-500/20 border-t-cyan-400 animate-spin" />
+                    <Zap className="w-6 h-6 text-cyan-400 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-white font-medium">Génération Spring Boot en cours...</p>
+                    <p className="text-sm text-[oklch(0.5_0.01_250)] mt-1">
+                      {multiTechResult?.technologiesDetected.length || 0} technologies détectées
+                    </p>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {/* ═══ STATE: CHOICES ═══════════════════════════════════════ */}
+          {pipelineStep === "choices" && analysisResult && ambiguities.length > 0 && (
+            <motion.div
+              key="choices"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="max-w-4xl mx-auto px-4 sm:px-6 py-6"
+            >
               {/* Header banner */}
-              <div className="p-5 rounded-xl border border-amber-500/30 bg-amber-500/5 mb-6">
-                <div className="flex items-start gap-4">
-                  <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <AlertTriangle className="w-5 h-5 text-amber-400" />
+              <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/5 mb-5">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                    <AlertTriangle className="w-4 h-4 text-amber-400" />
                   </div>
                   <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-white mb-1">
-                      {ambiguities.length} point{ambiguities.length > 1 ? "s" : ""} necessitent votre attention
+                    <h3 className="text-base font-semibold text-white mb-1">
+                      {ambiguities.length} choix à faire
                     </h3>
-                    <p className="text-sm text-[oklch(0.6_0.01_250)] mb-3">
-                      Le moteur a detecte des ambiguites qu'il ne peut pas resoudre automatiquement.
-                      Vos choix guideront la generation du code.
-                    </p>
                     <div className="flex items-center gap-3">
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={handleApplyAllRecommendations}
-                        className="border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+                        className="border-amber-500/30 text-amber-400 hover:bg-amber-500/10 h-7 text-xs"
                       >
-                        <Star className="w-4 h-4 mr-1" />
-                        Appliquer toutes les recommandations
+                        <Star className="w-3 h-3 mr-1" />
+                        Appliquer recommandations
                       </Button>
-                      <div className="text-sm text-[oklch(0.5_0.01_250)]">
-                        {resolvedCount}/{ambiguities.length} resolues
-                      </div>
+                      <span className="text-xs text-[oklch(0.5_0.01_250)]">
+                        {resolvedCount}/{ambiguities.length} résolues
+                      </span>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Analysis summary (collapsed) */}
-              <div className="p-4 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] mb-6">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                    <span className="text-sm font-medium text-white">{analysisResult.projectName}</span>
-                  </div>
-                  <div className="flex items-center gap-4 text-xs text-[oklch(0.5_0.01_250)]">
-                    <span>{analysisResult.stats?.useCaseCount || 0} UseCases</span>
-                    <span>{analysisResult.stats?.dtoCount || 0} DTOs</span>
-                    <span>{multiTechResult?.detectedComponents?.length || 0} composants</span>
-                  </div>
+              {/* Technologies detected summary */}
+              {multiTechResult && multiTechResult.technologiesDetected.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-4">
+                  {multiTechResult.technologiesDetected.map(tech => (
+                    <span key={tech} className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${techColors[tech] || "bg-gray-500/20 text-gray-300 border-gray-500/30"}`}>
+                      {techLabels[tech] || tech}
+                    </span>
+                  ))}
                 </div>
-                {multiTechResult && multiTechResult.technologiesDetected.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {multiTechResult.technologiesDetected.map(tech => (
-                      <span key={tech} className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${techColors[tech] || "bg-gray-500/20 text-gray-300 border-gray-500/30"}`}>
-                        {techLabels[tech] || tech}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
+              )}
 
               {/* Current ambiguity card */}
               {currentAmbiguity && (
@@ -1152,16 +794,15 @@ export default function CompleoPage() {
                   key={currentAmbiguity.id}
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
-                  className="rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] overflow-hidden mb-6"
+                  className="rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] overflow-hidden mb-5"
                 >
-                  {/* Card header */}
                   <div className="p-4 border-b border-[oklch(0.25_0.01_250)] flex items-center justify-between">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                       <span className="text-sm font-bold text-white">
                         {currentAmbiguityIndex + 1}/{ambiguities.length}
                       </span>
-                      <span className="text-sm text-[oklch(0.7_0.01_250)]">
-                        {ambiguityTypeLabels[currentAmbiguity.type] || currentAmbiguity.type}
+                      <span className="text-sm text-[oklch(0.6_0.01_250)]">
+                        {currentAmbiguity.type.replace(/_/g, " ")}
                       </span>
                     </div>
                     <Badge
@@ -1173,49 +814,31 @@ export default function CompleoPage() {
                     </Badge>
                   </div>
 
-                  {/* Context */}
-                  <div className="p-5">
-                    <div className="mb-4 space-y-2">
+                  <div className="p-4">
+                    {/* Context */}
+                    <div className="mb-3 space-y-1">
                       <div className="flex items-center gap-2 text-sm">
                         <span className="text-[oklch(0.5_0.01_250)]">Classe :</span>
-                        <span className="text-white font-mono">{currentAmbiguity.context.className}</span>
+                        <span className="text-white font-mono text-xs">{currentAmbiguity.context.className}</span>
                       </div>
                       {currentAmbiguity.context.methodName && (
                         <div className="flex items-center gap-2 text-sm">
-                          <span className="text-[oklch(0.5_0.01_250)]">Methode :</span>
-                          <span className="text-[oklch(0.7_0.01_250)] font-mono">{currentAmbiguity.context.signature || currentAmbiguity.context.methodName}</span>
-                        </div>
-                      )}
-                      {currentAmbiguity.context.packageName && (
-                        <div className="flex items-center gap-2 text-sm">
-                          <span className="text-[oklch(0.5_0.01_250)]">Package :</span>
-                          <span className="text-[oklch(0.6_0.01_250)] font-mono text-xs">{currentAmbiguity.context.packageName}</span>
-                        </div>
-                      )}
-                      {currentAmbiguity.context.javadoc && (
-                        <div className="flex items-start gap-2 text-sm mt-2">
-                          <FileText className="w-4 h-4 text-[oklch(0.5_0.01_250)] mt-0.5 flex-shrink-0" />
-                          <span className="text-[oklch(0.7_0.01_250)] italic">"{currentAmbiguity.context.javadoc}"</span>
-                        </div>
-                      )}
-                      {currentAmbiguity.context.injectedType && (
-                        <div className="flex items-center gap-2 text-sm">
-                          <span className="text-[oklch(0.5_0.01_250)]">Dependance :</span>
-                          <span className="text-amber-400 font-mono">{currentAmbiguity.context.injectedType}</span>
+                          <span className="text-[oklch(0.5_0.01_250)]">Méthode :</span>
+                          <span className="text-[oklch(0.7_0.01_250)] font-mono text-xs">{currentAmbiguity.context.signature || currentAmbiguity.context.methodName}</span>
                         </div>
                       )}
                     </div>
 
                     {/* Question */}
-                    <div className="p-3 rounded-lg bg-[oklch(0.18_0.01_250)] border border-[oklch(0.25_0.01_250)] mb-5">
-                      <div className="flex items-center gap-2 text-white font-medium">
-                        <HelpCircle className="w-4 h-4 text-amber-400" />
+                    <div className="p-3 rounded-lg bg-[oklch(0.18_0.01_250)] border border-[oklch(0.25_0.01_250)] mb-4">
+                      <div className="flex items-center gap-2 text-white text-sm font-medium">
+                        <HelpCircle className="w-4 h-4 text-amber-400 shrink-0" />
                         {currentAmbiguity.question}
                       </div>
                     </div>
 
-                    {/* Options grid */}
-                    <div className="grid grid-cols-2 gap-3 mb-5">
+                    {/* Options */}
+                    <div className="grid grid-cols-2 gap-3 mb-4">
                       {currentAmbiguity.options.map(option => {
                         const isSelected = userChoices[currentAmbiguity.id] === option.id;
                         const isRecommended = currentAmbiguity.recommendation === option.id;
@@ -1223,7 +846,7 @@ export default function CompleoPage() {
                           <button
                             key={option.id}
                             onClick={() => handleChoice(currentAmbiguity.id, option.id)}
-                            className={`relative p-4 rounded-lg border-2 text-left transition-all ${
+                            className={`relative p-3 rounded-lg border-2 text-left transition-all ${
                               isSelected
                                 ? "border-emerald-400 bg-emerald-500/10"
                                 : isRecommended
@@ -1232,37 +855,34 @@ export default function CompleoPage() {
                             }`}
                           >
                             {isRecommended && (
-                              <div className="absolute -top-2.5 left-3">
-                                <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[10px] px-1.5 py-0">
-                                  <Star className="w-3 h-3 mr-0.5" />
-                                  RECOMMANDE
+                              <div className="absolute -top-2 left-3">
+                                <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[9px] px-1 py-0">
+                                  <Star className="w-2.5 h-2.5 mr-0.5" />
+                                  REC
                                 </Badge>
                               </div>
                             )}
-                            <div className="flex items-center gap-2 mb-1.5">
-                              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
                                 isSelected ? "border-emerald-400 bg-emerald-400" : "border-[oklch(0.4_0.01_250)]"
                               }`}>
-                                {isSelected && <CheckCircle2 className="w-3 h-3 text-white" />}
+                                {isSelected && <CheckCircle2 className="w-2.5 h-2.5 text-white" />}
                               </div>
-                              <span className={`font-semibold ${isSelected ? "text-emerald-400" : "text-white"}`}>
+                              <span className={`text-sm font-semibold ${isSelected ? "text-emerald-400" : "text-white"}`}>
                                 {option.label}
                               </span>
                             </div>
-                            <p className="text-xs text-[oklch(0.6_0.01_250)] ml-7">{option.description}</p>
+                            <p className="text-xs text-[oklch(0.6_0.01_250)] ml-6">{option.description}</p>
                           </button>
                         );
                       })}
                     </div>
 
                     {/* Recommendation reason */}
-                    <div className="p-3 rounded-lg bg-[oklch(0.12_0.01_250)] border border-[oklch(0.22_0.01_250)]">
+                    <div className="p-2.5 rounded-lg bg-[oklch(0.12_0.01_250)] border border-[oklch(0.22_0.01_250)]">
                       <div className="flex items-start gap-2">
-                        <Lightbulb className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <span className="text-xs font-medium text-amber-400">Pourquoi le moteur recommande {currentAmbiguity.recommendation} :</span>
-                          <p className="text-xs text-[oklch(0.6_0.01_250)] mt-0.5">{currentAmbiguity.recommendationReason}</p>
-                        </div>
+                        <Lightbulb className="w-3.5 h-3.5 text-amber-400 mt-0.5 flex-shrink-0" />
+                        <p className="text-xs text-[oklch(0.6_0.01_250)]">{currentAmbiguity.recommendationReason}</p>
                       </div>
                     </div>
                   </div>
@@ -1277,47 +897,40 @@ export default function CompleoPage() {
                     size="sm"
                     onClick={() => setCurrentAmbiguityIndex(Math.max(0, currentAmbiguityIndex - 1))}
                     disabled={currentAmbiguityIndex === 0}
-                    className="border-[oklch(0.25_0.01_250)] text-[oklch(0.7_0.01_250)] hover:text-white"
+                    className="border-[oklch(0.25_0.01_250)] text-[oklch(0.7_0.01_250)] hover:text-white h-8"
                   >
-                    <ArrowLeft className="w-4 h-4 mr-1" />
-                    Precedent
+                    <ArrowLeft className="w-3.5 h-3.5 mr-1" />
+                    Préc.
                   </Button>
-                  <span className="text-sm text-[oklch(0.5_0.01_250)]">
-                    Ambiguite {currentAmbiguityIndex + 1} sur {ambiguities.length}
+                  <span className="text-xs text-[oklch(0.5_0.01_250)]">
+                    {currentAmbiguityIndex + 1}/{ambiguities.length}
                   </span>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setCurrentAmbiguityIndex(Math.min(ambiguities.length - 1, currentAmbiguityIndex + 1))}
                     disabled={currentAmbiguityIndex === ambiguities.length - 1}
-                    className="border-[oklch(0.25_0.01_250)] text-[oklch(0.7_0.01_250)] hover:text-white"
+                    className="border-[oklch(0.25_0.01_250)] text-[oklch(0.7_0.01_250)] hover:text-white h-8"
                   >
-                    Suivant
-                    <ArrowRight className="w-4 h-4 ml-1" />
+                    Suiv.
+                    <ArrowRight className="w-3.5 h-3.5 ml-1" />
                   </Button>
                 </div>
 
                 <Button
-                  size="lg"
                   onClick={handleGenerateWithChoices}
                   disabled={generating || !canGenerate}
-                  className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white px-8"
+                  className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white px-6"
                 >
                   {generating ? (
-                    <>
-                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                      Generation en cours...
-                    </>
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Génération...</>
                   ) : (
-                    <>
-                      <Zap className="w-5 h-5 mr-2" />
-                      Generer le code avec mes choix
-                    </>
+                    <><Zap className="w-4 h-4 mr-2" /> Générer ({resolvedCount}/{ambiguities.length})</>
                   )}
                 </Button>
               </div>
 
-              {/* Ambiguity dots navigation */}
+              {/* Dots navigation */}
               <div className="flex items-center justify-center gap-1.5 mt-4">
                 {ambiguities.map((amb, i) => {
                   const isResolved = !!userChoices[amb.id];
@@ -1326,589 +939,166 @@ export default function CompleoPage() {
                     <button
                       key={amb.id}
                       onClick={() => setCurrentAmbiguityIndex(i)}
-                      className={`w-2.5 h-2.5 rounded-full transition-all ${
-                        isCurrent
-                          ? "w-6 bg-emerald-400"
-                          : isResolved
-                            ? "bg-emerald-500/50"
-                            : "bg-[oklch(0.3_0.01_250)]"
+                      className={`h-2 rounded-full transition-all ${
+                        isCurrent ? "w-5 bg-emerald-400" : isResolved ? "w-2 bg-emerald-500/50" : "w-2 bg-[oklch(0.3_0.01_250)]"
                       }`}
-                      title={`Ambiguite ${i + 1}: ${isResolved ? "resolue" : "en attente"}`}
                     />
                   );
                 })}
               </div>
-            </div>
-          </motion.div>
-        )}
+            </motion.div>
+          )}
 
-        {/* Step 3: Generate (no ambiguities path) */}
-        {step === "generate" && analysisResult && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <div className="max-w-4xl mx-auto">
-              {/* Multi-tech summary */}
-              {multiTechResult && (
-                <div className="p-6 rounded-xl border border-emerald-500/20 bg-emerald-500/5 mb-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                      <Layers className="w-5 h-5 text-emerald-400" />
-                      Technologies detectees
-                    </h3>
-                    {multiTechResult.maturityScore && (
-                      <div className="flex items-center gap-3">
-                        <div className="text-right">
-                          <div className="text-2xl font-bold text-emerald-400">{multiTechResult.maturityScore.global}/100</div>
-                          <div className="text-xs text-[oklch(0.5_0.01_250)]">{multiTechResult.maturityScore.label}</div>
-                        </div>
-                      </div>
+          {/* ═══ STATE: RESULTS ═══════════════════════════════════════ */}
+          {pipelineStep === "results" && generationResult && (
+            <motion.div
+              key="results"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="h-full flex flex-col"
+            >
+              {/* Results header bar */}
+              <div className="border-b border-[oklch(0.25_0.01_250)] bg-[oklch(0.14_0.01_250)] px-4 py-2 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-4 text-xs text-[oklch(0.5_0.01_250)]">
+                    <span className="text-emerald-400 font-medium">{generationResult.stats.totalFiles} fichiers</span>
+                    <span>{generationResult.stats.totalLinesGenerated.toLocaleString()} lignes</span>
+                    {generationResult.choicesApplied != null && generationResult.choicesApplied > 0 && (
+                      <span>{generationResult.choicesApplied} choix appliqués</span>
                     )}
                   </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Tabs value={resultTab} onValueChange={(v) => setResultTab(v as any)}>
+                    <TabsList className="h-7 bg-[oklch(0.18_0.01_250)] border border-[oklch(0.25_0.01_250)]">
+                      <TabsTrigger value="code" className="text-xs h-5 data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400">
+                        <Code2 className="w-3 h-3 mr-1" />
+                        Code
+                      </TabsTrigger>
+                      <TabsTrigger value="diff" className="text-xs h-5 data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400">
+                        <GitCompare className="w-3 h-3 mr-1" />
+                        Diff
+                      </TabsTrigger>
+                      <TabsTrigger value="architecture" className="text-xs h-5 data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-400">
+                        <Network className="w-3 h-3 mr-1" />
+                        Archi
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                  <Button
+                    size="sm"
+                    onClick={handleDownload}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white h-7 text-xs"
+                  >
+                    <Download className="w-3 h-3 mr-1" />
+                    ZIP
+                  </Button>
+                </div>
+              </div>
 
-                  {/* Technology badges */}
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {multiTechResult.technologiesDetected.map(tech => (
-                      <span key={tech} className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${techColors[tech] || "bg-gray-500/20 text-gray-300 border-gray-500/30"}`}>
-                        {techLabels[tech] || tech}
+              {/* Results content — split panel */}
+              <div className="flex-1 flex overflow-hidden">
+                {/* Left: File Explorer */}
+                <div className="w-64 border-r border-[oklch(0.25_0.01_250)] bg-[oklch(0.14_0.01_250)] shrink-0 flex flex-col overflow-hidden">
+                  <FileExplorer
+                    files={explorerFiles}
+                    selectedPath={selectedFile?.path || null}
+                    onSelect={handleFileSelect}
+                  />
+                </div>
+
+                {/* Right: Content area */}
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  {resultTab === "code" && (
+                    <>
+                      {selectedFile ? (
+                        <CodeViewer
+                          code={selectedFile.content}
+                          filePath={selectedFile.path}
+                        />
+                      ) : (
+                        <div className="flex-1 flex items-center justify-center text-[oklch(0.4_0.01_250)] text-sm">
+                          <div className="text-center">
+                            <FileCode2 className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                            <p>Sélectionnez un fichier dans l'arbre</p>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {resultTab === "diff" && (
+                    <div className="flex-1 overflow-auto p-4">
+                      {selectedFile && sourceFile ? (
+                        <CodeDiff
+                          sourceCode={sourceFile.content}
+                          sourceFileName={sourceFile.path}
+                          generatedCode={selectedFile.content}
+                          generatedFileName={selectedFile.path}
+                          category="service"
+                        />
+                      ) : selectedFile && !sourceFile ? (
+                        <div className="flex items-center justify-center h-full text-[oklch(0.4_0.01_250)] text-sm">
+                          <div className="text-center">
+                            <Columns2 className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                            <p>Pas de fichier source correspondant pour le diff</p>
+                            {loadingSource && <Loader2 className="w-4 h-4 animate-spin mx-auto mt-2" />}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-[oklch(0.4_0.01_250)] text-sm">
+                          Sélectionnez un fichier pour voir le diff
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {resultTab === "architecture" && (
+                    <div className="flex-1 overflow-auto p-4">
+                      {analysisResult ? (
+                        <ArchitectureDiagram
+                          useCases={analysisResult.irSummary.useCases}
+                          dtos={analysisResult.irSummary.dtos}
+                          enums={analysisResult.irSummary.enums}
+                          exceptions={analysisResult.irSummary.exceptions}
+                          remoteInterfaces={analysisResult.irSummary.remoteInterfaces}
+                          generatedFiles={generationResult.files}
+                          domains={analysisResult.irSummary.domains}
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-[oklch(0.4_0.01_250)] text-sm">
+                          Données d'architecture non disponibles
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Stats footer */}
+              <div className="border-t border-[oklch(0.25_0.01_250)] bg-[oklch(0.14_0.01_250)] px-4 py-1.5 flex items-center gap-4 text-[10px] text-[oklch(0.4_0.01_250)] shrink-0">
+                <span>Controllers: {generationResult.stats.controllers}</span>
+                <span>Services: {generationResult.stats.services}</span>
+                <span>DTOs: {generationResult.stats.dtos}</span>
+                <span>Tests: {generationResult.stats.tests}</span>
+                <span>Config: {generationResult.stats.configFiles}</span>
+                <span>Cloud: {generationResult.stats.cloudFiles}</span>
+                {multiTechResult?.technologiesDetected && (
+                  <span className="ml-auto flex items-center gap-1">
+                    {multiTechResult.technologiesDetected.map(t => (
+                      <span key={t} className={`px-1 py-0 rounded text-[9px] border ${techColors[t] || ""}`}>
+                        {techLabels[t] || t}
                       </span>
                     ))}
-                  </div>
-
-                  {/* Maturity dimensions */}
-                  {multiTechResult.maturityScore && (
-                    <div className="grid grid-cols-5 gap-2 mb-4">
-                      {[
-                        { label: "Complexite", value: multiTechResult.maturityScore.dimensions.technicalComplexity },
-                        { label: "Couverture", value: multiTechResult.maturityScore.dimensions.codeCoverage },
-                        { label: "Risque", value: multiTechResult.maturityScore.dimensions.breakingRisk },
-                        { label: "Valeur", value: multiTechResult.maturityScore.dimensions.addedValue },
-                        { label: "Confiance", value: multiTechResult.maturityScore.dimensions.engineConfidence },
-                      ].map(d => (
-                        <div key={d.label} className="p-2 rounded-lg bg-[oklch(0.15_0.01_250)] text-center">
-                          <div className="text-lg font-bold text-white">{d.value}<span className="text-xs text-[oklch(0.5_0.01_250)]">/100</span></div>
-                          <div className="text-xs text-[oklch(0.5_0.01_250)]">{d.label}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Effort estimate */}
-                  {multiTechResult.maturityScore?.estimatedEffort && (
-                    <div className="flex items-center gap-2 text-sm text-[oklch(0.6_0.01_250)]">
-                      <Info className="w-4 h-4 text-cyan-400" />
-                      Effort estime : <span className="text-white font-medium">{multiTechResult.maturityScore.estimatedEffort}</span>
-                    </div>
-                  )}
-
-                  {/* Detected components summary */}
-                  {multiTechResult.detectedComponents.length > 0 && (
-                    <div className="mt-4 pt-4 border-t border-[oklch(0.25_0.01_250)]">
-                      <h4 className="text-sm font-medium text-[oklch(0.7_0.01_250)] mb-2">
-                        {multiTechResult.detectedComponents.length} composants detectes
-                      </h4>
-                      <div className="grid grid-cols-2 gap-2 max-h-[200px] overflow-y-auto">
-                        {multiTechResult.detectedComponents.map((comp, i) => (
-                          <div key={i} className="flex items-center gap-2 p-2 rounded bg-[oklch(0.15_0.01_250)]">
-                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium border ${techColors[comp.technology] || "bg-gray-500/20 text-gray-300 border-gray-500/30"}`}>
-                              {techLabels[comp.technology] || comp.technology}
-                            </span>
-                            <span className="text-sm text-white truncate">{comp.className}</span>
-                            <span className="text-xs text-[oklch(0.4_0.01_250)] ml-auto">{comp.confidence}%</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Migration notes */}
-                  {multiTechResult.migrationNotes.length > 0 && (
-                    <div className="mt-4 pt-4 border-t border-[oklch(0.25_0.01_250)]">
-                      <h4 className="text-sm font-medium text-amber-400 mb-2 flex items-center gap-1">
-                        <AlertTriangle className="w-4 h-4" />
-                        {multiTechResult.migrationNotes.length} note(s) de migration
-                      </h4>
-                      {multiTechResult.migrationNotes.map((note, i) => (
-                        <div key={i} className={`p-2 rounded mb-1 text-sm ${
-                          note.severity === "critical" ? "bg-red-500/10 text-red-300" :
-                          note.severity === "warning" ? "bg-amber-500/10 text-amber-300" :
-                          "bg-blue-500/10 text-blue-300"
-                        }`}>
-                          <span className="font-medium">{note.title}</span>
-                          <span className="text-xs ml-2 opacity-70">{note.content}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Analysis results */}
-              <div className="p-6 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] mb-6">
-                <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                  Analyse EJB/BOA — {analysisResult.projectName}
-                </h3>
-
-                {/* Stats grid */}
-                <div className="grid grid-cols-5 gap-3 mb-6">
-                  {[
-                    { label: "UseCases", value: analysisResult.stats?.useCaseCount || 0, color: "text-emerald-400" },
-                    { label: "DTOs", value: analysisResult.stats?.dtoCount || 0, color: "text-amber-400" },
-                    { label: "Services", value: analysisResult.stats?.serviceCount || 0, color: "text-cyan-400" },
-                    { label: "Enums", value: analysisResult.stats?.enumCount || 0, color: "text-pink-400" },
-                    { label: "Exceptions", value: analysisResult.stats?.exceptionCount || 0, color: "text-red-400" },
-                  ].map(s => (
-                    <div key={s.label} className="p-3 rounded-lg bg-[oklch(0.18_0.01_250)] text-center">
-                      <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>
-                      <div className="text-xs text-[oklch(0.5_0.01_250)]">{s.label}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Warnings */}
-                {analysisResult.warnings.length > 0 && (
-                  <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 mb-4">
-                    <div className="flex items-center gap-2 text-amber-400 text-sm font-medium mb-1">
-                      <AlertTriangle className="w-4 h-4" />
-                      {analysisResult.warnings.length} avertissement(s)
-                    </div>
-                    {analysisResult.warnings.map((w, i) => (
-                      <p key={i} className="text-xs text-amber-300/70 ml-6">{w}</p>
-                    ))}
-                  </div>
+                  </span>
                 )}
-
-                {/* UseCases table */}
-                <Tabs defaultValue="usecases" className="mt-4">
-                  <TabsList className="bg-[oklch(0.18_0.01_250)] border border-[oklch(0.25_0.01_250)]">
-                    <TabsTrigger value="usecases" className="data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400">
-                      UseCases ({analysisResult.irSummary.useCases.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="dtos" className="data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400">
-                      DTOs ({analysisResult.irSummary.dtos.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="enums" className="data-[state=active]:bg-pink-500/20 data-[state=active]:text-pink-400">
-                      Enums ({analysisResult.irSummary.enums.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="exceptions" className="data-[state=active]:bg-red-500/20 data-[state=active]:text-red-400">
-                      Exceptions ({analysisResult.irSummary.exceptions.length})
-                    </TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="usecases">
-                    <ScrollArea className="h-[300px]">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-[oklch(0.25_0.01_250)]">
-                            <th className="text-left py-2 px-3 text-[oklch(0.5_0.01_250)] font-medium">UseCase</th>
-                            <th className="text-left py-2 px-3 text-[oklch(0.5_0.01_250)] font-medium">Method</th>
-                            <th className="text-left py-2 px-3 text-[oklch(0.5_0.01_250)] font-medium">REST Path</th>
-                            <th className="text-left py-2 px-3 text-[oklch(0.5_0.01_250)] font-medium">BIAN</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {analysisResult.irSummary.useCases.map((uc, i) => (
-                            <tr key={i} className="border-b border-[oklch(0.2_0.01_250)] hover:bg-[oklch(0.18_0.01_250)]">
-                              <td className="py-2 px-3 text-white font-mono text-xs">{uc.className}</td>
-                              <td className="py-2 px-3">
-                                <Badge variant="outline" className={`text-xs ${
-                                  uc.httpMethod === "GET" ? "text-green-400 border-green-500/30" :
-                                  uc.httpMethod === "POST" ? "text-blue-400 border-blue-500/30" :
-                                  uc.httpMethod === "PUT" ? "text-amber-400 border-amber-500/30" :
-                                  "text-red-400 border-red-500/30"
-                                }`}>{uc.httpMethod}</Badge>
-                              </td>
-                              <td className="py-2 px-3 text-[oklch(0.7_0.01_250)] font-mono text-xs">{uc.restPath}</td>
-                              <td className="py-2 px-3 text-[oklch(0.5_0.01_250)] text-xs">{uc.bianDomain}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </ScrollArea>
-                  </TabsContent>
-
-                  <TabsContent value="dtos">
-                    <ScrollArea className="h-[300px]">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-[oklch(0.25_0.01_250)]">
-                            <th className="text-left py-2 px-3 text-[oklch(0.5_0.01_250)] font-medium">DTO</th>
-                            <th className="text-left py-2 px-3 text-[oklch(0.5_0.01_250)] font-medium">Direction</th>
-                            <th className="text-left py-2 px-3 text-[oklch(0.5_0.01_250)] font-medium">Champs</th>
-                            <th className="text-left py-2 px-3 text-[oklch(0.5_0.01_250)] font-medium">Requis</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {analysisResult.irSummary.dtos.map((d, i) => (
-                            <tr key={i} className="border-b border-[oklch(0.2_0.01_250)] hover:bg-[oklch(0.18_0.01_250)]">
-                              <td className="py-2 px-3 text-white font-mono text-xs">{d.className}</td>
-                              <td className="py-2 px-3">
-                                <Badge variant="outline" className={`text-xs ${
-                                  d.direction === "in" ? "text-blue-400 border-blue-500/30" :
-                                  d.direction === "out" ? "text-green-400 border-green-500/30" :
-                                  "text-gray-400 border-gray-500/30"
-                                }`}>{d.direction}</Badge>
-                              </td>
-                              <td className="py-2 px-3 text-[oklch(0.7_0.01_250)]">{d.fieldCount}</td>
-                              <td className="py-2 px-3 text-[oklch(0.7_0.01_250)]">{d.requiredFields}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </ScrollArea>
-                  </TabsContent>
-
-                  <TabsContent value="enums">
-                    <ScrollArea className="h-[300px]">
-                      <div className="grid grid-cols-2 gap-2 p-2">
-                        {analysisResult.irSummary.enums.map((e, i) => (
-                          <div key={i} className="p-3 rounded-lg bg-[oklch(0.18_0.01_250)] border border-[oklch(0.25_0.01_250)]">
-                            <span className="text-white font-mono text-xs">{e.className}</span>
-                            <span className="text-[oklch(0.5_0.01_250)] text-xs ml-2">({e.valueCount} valeurs)</span>
-                          </div>
-                        ))}
-                      </div>
-                    </ScrollArea>
-                  </TabsContent>
-
-                  <TabsContent value="exceptions">
-                    <ScrollArea className="h-[300px]">
-                      <div className="grid grid-cols-2 gap-2 p-2">
-                        {analysisResult.irSummary.exceptions.map((e, i) => (
-                          <div key={i} className="p-3 rounded-lg bg-[oklch(0.18_0.01_250)] border border-[oklch(0.25_0.01_250)]">
-                            <span className="text-red-400 font-mono text-xs">{e.className}</span>
-                            <span className="text-[oklch(0.5_0.01_250)] text-xs ml-2">extends {e.extendsClass}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </ScrollArea>
-                  </TabsContent>
-                </Tabs>
               </div>
+            </motion.div>
+          )}
 
-              {/* Generate button */}
-              <div className="text-center">
-                <Button
-                  size="lg"
-                  onClick={handleGenerateWithChoices}
-                  disabled={generating}
-                  className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white px-8"
-                >
-                  {generating ? (
-                    <>
-                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                      Generation Spring Boot en cours...
-                    </>
-                  ) : (
-                    <>
-                      <Zap className="w-5 h-5 mr-2" />
-                      Generer le projet Spring Boot
-                    </>
-                  )}
-                </Button>
-                <p className="text-sm text-[oklch(0.5_0.01_250)] mt-2">
-                  Controllers REST, Services, DTOs, Tests MockMvc, Dockerfile, K8s
-                </p>
-              </div>
-            </div>
-          </motion.div>
-        )}
-
-        {/* Step 4: Preview & Download */}
-        {step === "preview" && generationResult && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            {/* Generation stats */}
-            <div className="p-6 rounded-xl border border-emerald-500/30 bg-emerald-500/5 mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                  Projet Spring Boot genere
-                  {generationResult.choicesApplied && generationResult.choicesApplied > 0 && (
-                    <Badge variant="outline" className="text-amber-400 border-amber-500/30 text-xs ml-2">
-                      {generationResult.choicesApplied} choix appliques
-                    </Badge>
-                  )}
-                </h3>
-                <Button
-                  onClick={handleDownload}
-                  className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Telecharger ZIP
-                </Button>
-              </div>
-              <div className="grid grid-cols-5 gap-3">
-                {[
-                  { label: "Fichiers", value: generationResult.stats.totalFiles, color: "text-white" },
-                  { label: "Lignes", value: generationResult.stats.totalLinesGenerated.toLocaleString(), color: "text-emerald-400" },
-                  { label: "Controllers", value: generationResult.stats.controllers, color: "text-cyan-400" },
-                  { label: "DTOs", value: generationResult.stats.dtos, color: "text-amber-400" },
-                  { label: "Tests", value: generationResult.stats.tests, color: "text-violet-400" },
-                ].map(s => (
-                  <div key={s.label} className="p-3 rounded-lg bg-[oklch(0.15_0.01_250)] text-center">
-                    <div className={`text-xl font-bold ${s.color}`}>{s.value}</div>
-                    <div className="text-xs text-[oklch(0.5_0.01_250)]">{s.label}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Result view tabs */}
-            <div className="flex items-center gap-2 mb-4">
-              {[
-                { id: "code" as const, label: "Code", icon: Code2 },
-                { id: "diff" as const, label: "Diff Legacy/New", icon: Columns2 },
-                { id: "architecture" as const, label: "Architecture", icon: Network },
-              ].map(tab => {
-                const TabIcon = tab.icon;
-                const isActive = resultTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setResultTab(tab.id)}
-                    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      isActive
-                        ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                        : "text-[oklch(0.6_0.01_250)] hover:text-white hover:bg-[oklch(0.2_0.01_250)] border border-transparent"
-                    }`}
-                  >
-                    <TabIcon className="w-4 h-4" />
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Tab: Code browser */}
-            {resultTab === "code" && (
-              <div className="grid grid-cols-12 gap-4" style={{ height: "calc(100vh - 20rem)", minHeight: "500px" }}>
-                {/* File tree */}
-                <div className="col-span-4 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] overflow-hidden">
-                  <div className="p-3 border-b border-[oklch(0.25_0.01_250)]">
-                    <h4 className="text-sm font-semibold text-white flex items-center gap-2">
-                      <FolderArchive className="w-4 h-4 text-emerald-400" />
-                      Fichiers generes ({generationResult.files.length})
-                    </h4>
-                  </div>
-                  <ScrollArea className="h-[calc(100%-3rem)]">
-                    <div className="p-2">
-                      {Object.entries(filesByCategory).map(([cat, files]) => {
-                        const Icon = categoryIcons[cat] || FileCode2;
-                        const isExpanded = expandedCategories.has(cat);
-                        return (
-                          <div key={cat} className="mb-1">
-                            <button
-                              onClick={() => toggleCategory(cat)}
-                              className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[oklch(0.2_0.01_250)] text-left"
-                            >
-                              {isExpanded ? <ChevronDown className="w-3 h-3 text-[oklch(0.5_0.01_250)]" /> : <ChevronRight className="w-3 h-3 text-[oklch(0.5_0.01_250)]" />}
-                              <Icon className={`w-4 h-4 ${categoryColors[cat] || "text-gray-400"}`} />
-                              <span className="text-sm text-white font-medium">{getCategoryLabel(cat)}</span>
-                              <span className="text-xs text-[oklch(0.4_0.01_250)] ml-auto">{files.length}</span>
-                            </button>
-                            {isExpanded && (
-                              <div className="ml-6 border-l border-[oklch(0.25_0.01_250)] pl-2">
-                                {files.map((f, i) => {
-                                  const fileName = f.path.split("/").pop() || f.path;
-                                  const isActive = previewFile?.path === f.path;
-                                  return (
-                                    <button
-                                      key={`${cat}-${i}`}
-                                      onClick={() => handlePreviewFile(f.path)}
-                                      className={`w-full flex items-center gap-2 px-2 py-1 rounded text-left text-xs ${
-                                        isActive
-                                          ? "bg-emerald-500/20 text-emerald-400"
-                                          : "text-[oklch(0.6_0.01_250)] hover:bg-[oklch(0.2_0.01_250)] hover:text-white"
-                                      }`}
-                                    >
-                                      <FileCode2 className="w-3 h-3 flex-shrink-0" />
-                                      <span className="truncate">{fileName}</span>
-                                      <span className="text-[oklch(0.4_0.01_250)] ml-auto flex-shrink-0">{f.lines}L</span>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </ScrollArea>
-                </div>
-
-                {/* Code preview */}
-                <div className="col-span-8 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.12_0.01_250)] overflow-hidden">
-                  {loadingPreview ? (
-                    <div className="h-full flex items-center justify-center">
-                      <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
-                    </div>
-                  ) : previewFile ? (
-                    <>
-                      <div className="p-3 border-b border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <FileCode2 className="w-4 h-4 text-emerald-400" />
-                          <span className="text-sm text-white font-mono">{previewFile.path}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className={`text-xs ${categoryColors[previewFile.category] || "text-gray-400"}`}>
-                            {getCategoryLabel(previewFile.category)}
-                          </Badge>
-                          <span className="text-xs text-[oklch(0.5_0.01_250)]">{previewFile.lines} lignes</span>
-                        </div>
-                      </div>
-                      <ScrollArea className="h-[calc(100%-3rem)]">
-                        <pre className="p-4 text-xs leading-relaxed">
-                          <code className="text-[oklch(0.8_0.01_250)] font-mono whitespace-pre">
-                            {previewFile.content}
-                          </code>
-                        </pre>
-                      </ScrollArea>
-                    </>
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-[oklch(0.4_0.01_250)]">
-                      <div className="text-center">
-                        <Eye className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                        <p className="text-sm">Selectionnez un fichier pour previsualiser</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Tab: Diff Legacy/New */}
-            {resultTab === "diff" && (
-              <div className="grid grid-cols-12 gap-4" style={{ height: "calc(100vh - 20rem)", minHeight: "500px" }}>
-                {/* File tree (same as code tab) */}
-                <div className="col-span-3 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] overflow-hidden">
-                  <div className="p-3 border-b border-[oklch(0.25_0.01_250)]">
-                    <h4 className="text-sm font-semibold text-white flex items-center gap-2">
-                      <GitCompare className="w-4 h-4 text-cyan-400" />
-                      Fichiers ({generationResult.files.length})
-                    </h4>
-                  </div>
-                  <ScrollArea className="h-[calc(100%-3rem)]">
-                    <div className="p-2">
-                      {Object.entries(filesByCategory).map(([cat, files]) => {
-                        const Icon = categoryIcons[cat] || FileCode2;
-                        const isExpanded = expandedCategories.has(cat);
-                        return (
-                          <div key={cat} className="mb-1">
-                            <button
-                              onClick={() => toggleCategory(cat)}
-                              className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[oklch(0.2_0.01_250)] text-left"
-                            >
-                              {isExpanded ? <ChevronDown className="w-3 h-3 text-[oklch(0.5_0.01_250)]" /> : <ChevronRight className="w-3 h-3 text-[oklch(0.5_0.01_250)]" />}
-                              <Icon className={`w-4 h-4 ${categoryColors[cat] || "text-gray-400"}`} />
-                              <span className="text-xs text-white font-medium">{getCategoryLabel(cat)}</span>
-                              <span className="text-xs text-[oklch(0.4_0.01_250)] ml-auto">{files.length}</span>
-                            </button>
-                            {isExpanded && (
-                              <div className="ml-5 border-l border-[oklch(0.25_0.01_250)] pl-2">
-                                {files.map((f, i) => {
-                                  const fileName = f.path.split("/").pop() || f.path;
-                                  const isActive = previewFile?.path === f.path;
-                                  return (
-                                    <button
-                                      key={`diff-${cat}-${i}`}
-                                      onClick={() => handlePreviewFile(f.path)}
-                                      className={`w-full flex items-center gap-2 px-2 py-1 rounded text-left text-xs ${
-                                        isActive
-                                          ? "bg-cyan-500/20 text-cyan-400"
-                                          : "text-[oklch(0.6_0.01_250)] hover:bg-[oklch(0.2_0.01_250)] hover:text-white"
-                                      }`}
-                                    >
-                                      <FileCode2 className="w-3 h-3 flex-shrink-0" />
-                                      <span className="truncate">{fileName}</span>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </ScrollArea>
-                </div>
-
-                {/* Diff view */}
-                <div className="col-span-9 rounded-xl border border-[oklch(0.25_0.01_250)] bg-[oklch(0.12_0.01_250)] overflow-hidden">
-                  {loadingPreview || loadingSource ? (
-                    <div className="h-full flex items-center justify-center">
-                      <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
-                    </div>
-                  ) : previewFile ? (
-                    <CodeDiff
-                      sourceCode={sourceFile?.content || ""}
-                      sourceFileName={sourceFile?.path?.split("/").pop() || "(pas de source correspondante)"}
-                      generatedCode={previewFile.content}
-                      generatedFileName={previewFile.path.split("/").pop() || previewFile.path}
-                      category={previewFile.category}
-                    />
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-[oklch(0.4_0.01_250)]">
-                      <div className="text-center">
-                        <Columns2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                        <p className="text-sm">Selectionnez un fichier pour voir le diff source/genere</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Tab: Architecture */}
-            {resultTab === "architecture" && analysisResult && (
-              <div style={{ height: "calc(100vh - 20rem)", minHeight: "500px" }}>
-                <ArchitectureDiagram
-                  useCases={analysisResult.irSummary.useCases.map(uc => ({
-                    className: uc.className,
-                    domain: uc.domain,
-                    httpMethod: uc.httpMethod,
-                    restPath: uc.restPath,
-                    voInType: uc.voInType,
-                    voOutType: uc.voOutType,
-                  }))}
-                  dtos={analysisResult.irSummary.dtos.map(d => ({
-                    className: d.className,
-                    direction: d.direction as "in" | "out" | "unknown",
-                    fieldCount: d.fieldCount,
-                  }))}
-                  enums={analysisResult.irSummary.enums.map(e => ({
-                    className: e.className,
-                    valueCount: e.valueCount,
-                  }))}
-                  exceptions={analysisResult.irSummary.exceptions.map(e => ({
-                    className: e.className,
-                    extendsClass: e.extendsClass,
-                  }))}
-                  remoteInterfaces={analysisResult.irSummary.remoteInterfaces.map(r => ({
-                    className: r.className,
-                    methodCount: r.methodCount,
-                  }))}
-                  generatedFiles={generationResult.files.map(f => ({
-                    path: f.path,
-                    category: f.category,
-                    lines: f.lines,
-                  }))}
-                  domains={analysisResult.irSummary.domains}
-                  onNodeClick={(nodeId, side) => {
-                    if (side === "target") {
-                      const file = generationResult.files.find(f => f.path.includes(nodeId));
-                      if (file) {
-                        handlePreviewFile(file.path);
-                        setResultTab("diff");
-                      }
-                    }
-                  }}
-                />
-              </div>
-            )}
-          </motion.div>
-        )}
+        </AnimatePresence>
       </div>
-      {/* Debug Panel — visible only in development */}
-      <DebugPanel sessionId={uploadResult?.sessionId ?? ""} />
     </div>
   );
 }

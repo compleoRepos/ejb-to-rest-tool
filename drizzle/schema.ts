@@ -195,3 +195,45 @@ export const learningRules = mysqlTable("learning_rules", {
 
 export type LearningRule = typeof learningRules.$inferSelect;
 export type InsertLearningRule = typeof learningRules.$inferInsert;
+
+// ============================================================
+// Compleo Sessions (Persistent pipeline sessions)
+// ============================================================
+
+export const compleoSessions = mysqlTable("compleo_sessions", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  projectName: varchar("project_name", { length: 255 }).notNull(),
+  status: mysqlEnum("status", [
+    "uploaded", "analyzed", "waiting_choices", "generated", "error"
+  ]).default("uploaded").notNull(),
+
+  // Pipeline data (JSON blobs)
+  filesData: json("files_data").$type<{ path: string; content: string }[]>(),
+  pomXml: text("pom_xml"),
+  bianYml: text("bian_yml"),
+  irData: json("ir_data"),
+  ambiguitiesData: json("ambiguities_data"),
+  userChoicesData: json("user_choices_data"),
+  resolvedIrData: json("resolved_ir_data"),
+  generationData: json("generation_data"),
+  zipUrl: varchar("zip_url", { length: 500 }),
+
+  // Multi-tech v3.0 fields
+  pipelineResultData: json("pipeline_result_data"),
+  detectedComponentsData: json("detected_components_data"),
+  multiTechGenerationData: json("multi_tech_generation_data"),
+  maturityScoreData: json("maturity_score_data"),
+  technologiesDetected: json("technologies_detected").$type<string[]>(),
+
+  // Debug events
+  debugEventsData: json("debug_events_data").$type<any[]>(),
+
+  // Error tracking
+  errorMessage: text("error_message"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type CompleoSessionRow = typeof compleoSessions.$inferSelect;
+export type InsertCompleoSession = typeof compleoSessions.$inferInsert;
