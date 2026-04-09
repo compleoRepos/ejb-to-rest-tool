@@ -1,4 +1,10 @@
-import type { CodeGenerator, DetectedComponent, ServletComponent, GeneratedFile, ValidationResult } from "../registry/types";
+/**
+ * Générateur Spring Boot depuis ServletComponent.
+ * v5.10.0: Multi-route support — génère un endpoint par sous-route détectée.
+ *
+ * @author Hamza NORDINE
+ */
+import type { CodeGenerator, DetectedComponent, ServletComponent, GeneratedFile, ValidationResult, DetectedMethod } from "../registry/types";
 
 export class ServletGenerator implements CodeGenerator {
   readonly technology = "SERVLET" as const;
@@ -18,7 +24,7 @@ export class ServletGenerator implements CodeGenerator {
       const dto = c.className.replace(/Servlet$/, "") + "RequestDTO";
       files.push({ path: `src/main/java/${pp}/dto/${dto}.java`, content: this.genDto(c, dto, basePackage), category: "dto", technology: "SERVLET", sourceRef: c.filePath });
     }
-    files.push({ path: `src/test/java/${pp}/controller/${ctrl}Test.java`, content: this.genTest(ctrl, svc, basePath, basePackage), category: "test", technology: "SERVLET", sourceRef: c.filePath });
+    files.push({ path: `src/test/java/${pp}/controller/${ctrl}Test.java`, content: this.genTest(ctrl, svc, basePath, c.metadata.methods, basePackage), category: "test", technology: "SERVLET", sourceRef: c.filePath });
     return files;
   }
 
@@ -35,38 +41,138 @@ export class ServletGenerator implements CodeGenerator {
 
   private mn(doMethod: string): string { return doMethod.replace(/^do/, "handle"); }
 
+  /**
+   * Détermine si une méthode a un urlPattern (multi-route).
+   */
+  private hasSubRoute(m: DetectedMethod): boolean {
+    return !!m.urlPattern && m.urlPattern.length > 0;
+  }
+
   private genCtrl(c: ServletComponent, ctrl: string, svc: string, basePath: string, pkg: string): string {
     const sf = svc.charAt(0).toLowerCase() + svc.slice(1);
+
     const methods = c.metadata.methods.map(m => {
       const map = m.httpVerb === "GET" ? "@GetMapping" : m.httpVerb === "POST" ? "@PostMapping" : m.httpVerb === "PUT" ? "@PutMapping" : "@DeleteMapping";
+      const subPath = this.hasSubRoute(m) ? `("${m.urlPattern}")` : "";
       const params = c.metadata.requestParams.map(p => "@RequestParam String " + p.name).join(", ");
       const args = c.metadata.requestParams.map(p => p.name).join(", ");
-      return `    /** Migre depuis ${c.className}.${m.name} */\n    ${map}\n    public ResponseEntity<?> ${this.mn(m.name)}(${params}) {\n        return ResponseEntity.ok(${sf}.${this.mn(m.name)}(${args}));\n    }`;
+      const handlerName = this.hasSubRoute(m) ? m.name : this.mn(m.name);
+
+      return `    /** Migré depuis ${c.className}.${m.name}${m.urlPattern ? ` — route: ${m.urlPattern}` : ""} */
+    ${map}${subPath}
+    public ResponseEntity<?> ${handlerName}(${params}) {
+        return ResponseEntity.ok(${sf}.${handlerName}(${args}));
+    }`;
     }).join("\n\n");
 
-    return `package ${pkg}.controller;\n\nimport ${pkg}.service.${svc};\nimport lombok.RequiredArgsConstructor;\nimport org.springframework.http.ResponseEntity;\nimport org.springframework.web.bind.annotation.*;\nimport io.swagger.v3.oas.annotations.tags.Tag;\n\n/** Controller REST migre depuis ${c.className}. URL legacy: ${c.metadata.urlPatterns.join(", ") || "N/A"} */\n@RestController\n@RequestMapping("${basePath}")\n@RequiredArgsConstructor\n@Tag(name = "${ctrl}")\npublic class ${ctrl} {\n\n    private final ${svc} ${sf};\n\n${methods}\n}\n`;
+    return `package ${pkg}.controller;
+
+import ${pkg}.service.${svc};
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
+/** Controller REST migré depuis ${c.className}. URL legacy: ${c.metadata.urlPatterns.join(", ") || "N/A"} */
+@RestController
+@RequestMapping("${basePath}")
+@RequiredArgsConstructor
+@Tag(name = "${ctrl}")
+public class ${ctrl} {
+
+    private final ${svc} ${sf};
+
+${methods}
+}
+`;
   }
 
   private genSvc(c: ServletComponent, svc: string, pkg: string): string {
     const methods = c.metadata.methods.map(m => {
       const isRead = m.httpVerb === "GET";
       const params = c.metadata.requestParams.map(p => "String " + p.name).join(", ");
-      return `    @Transactional${isRead ? "(readOnly = true)" : ""}\n    public Object ${this.mn(m.name)}(${params}) {\n        // TODO: Migrer la logique metier de ${c.className}.${m.name}\n        throw new UnsupportedOperationException("Migration en cours");\n    }`;
+      const handlerName = this.hasSubRoute(m) ? m.name : this.mn(m.name);
+
+      return `    @Transactional${isRead ? "(readOnly = true)" : ""}
+    public Object ${handlerName}(${params}) {
+        // TODO: Migrer la logique métier de ${c.className}.${m.name}${m.urlPattern ? ` (route: ${m.urlPattern})` : ""}
+        throw new UnsupportedOperationException("Migration en cours");
+    }`;
     }).join("\n\n");
 
     let notes = "";
-    if (c.metadata.usesSession) notes += "\n * NOTE: Le servlet original utilisait HttpSession - remplacer par un mecanisme stateless.";
-    if (c.metadata.usesForward) notes += "\n * NOTE: Le servlet original utilisait RequestDispatcher.forward - remplacer par des appels REST.";
+    if (c.metadata.usesSession) notes += "\n * NOTE: Le servlet original utilisait HttpSession — remplacer par un mécanisme stateless.";
+    if (c.metadata.usesForward) notes += "\n * NOTE: Le servlet original utilisait RequestDispatcher.forward — remplacer par des appels REST.";
 
-    return `package ${pkg}.service;\n\nimport lombok.RequiredArgsConstructor;\nimport lombok.extern.slf4j.Slf4j;\nimport org.springframework.stereotype.Service;\nimport org.springframework.transaction.annotation.Transactional;\n\n/** Service migre depuis ${c.className}.${notes} */\n@Service\n@RequiredArgsConstructor\n@Slf4j\npublic class ${svc} {\n\n${methods}\n}\n`;
+    return `package ${pkg}.service;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/** Service migré depuis ${c.className}.${notes} */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class ${svc} {
+
+${methods}
+}
+`;
   }
 
   private genDto(c: ServletComponent, dto: string, pkg: string): string {
     const fields = c.metadata.requestParams.map(p => `    private String ${p.name};`).join("\n");
-    return `package ${pkg}.dto;\n\nimport lombok.Data;\nimport jakarta.validation.constraints.NotBlank;\n\n@Data\npublic class ${dto} {\n${fields}\n}\n`;
+    return `package ${pkg}.dto;
+
+import lombok.Data;
+import jakarta.validation.constraints.NotBlank;
+
+@Data
+public class ${dto} {
+${fields}
+}
+`;
   }
 
-  private genTest(ctrl: string, svc: string, basePath: string, pkg: string): string {
-    return `package ${pkg}.controller;\n\nimport org.junit.jupiter.api.Test;\nimport org.springframework.beans.factory.annotation.Autowired;\nimport org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;\nimport org.springframework.boot.test.mock.bean.MockBean;\nimport org.springframework.test.web.servlet.MockMvc;\nimport ${pkg}.service.${svc};\n\nimport static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;\nimport static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;\n\n@WebMvcTest(${ctrl}.class)\nclass ${ctrl}Test {\n\n    @Autowired\n    private MockMvc mockMvc;\n\n    @MockBean\n    private ${svc} service;\n\n    @Test\n    void shouldReturn200() throws Exception {\n        mockMvc.perform(get("${basePath}"))\n            .andExpect(status().isOk());\n    }\n\n    @Test\n    void shouldReturn404WhenNotFound() throws Exception {\n        mockMvc.perform(get("${basePath}/nonexistent"))\n            .andExpect(status().isNotFound());\n    }\n\n    @Test\n    void shouldReturn400WhenInvalidInput() throws Exception {\n        mockMvc.perform(post("${basePath}").content("{}"))\n            .andExpect(status().isBadRequest());\n    }\n}\n`;
+  private genTest(ctrl: string, svc: string, basePath: string, methods: DetectedMethod[], pkg: string): string {
+    // Generate specific test methods for each endpoint
+    const testMethods = methods.map((m, idx) => {
+      const route = m.urlPattern ? basePath + m.urlPattern : basePath;
+      const verb = m.httpVerb?.toLowerCase() || "get";
+      const handlerName = m.urlPattern ? m.name : this.mn(m.name);
+
+      return `    @Test
+    void shouldReturn200For${handlerName.charAt(0).toUpperCase() + handlerName.slice(1)}() throws Exception {
+        mockMvc.perform(${verb}("${route}"))
+            .andExpect(status().isOk());
+    }`;
+    }).join("\n\n");
+
+    return `package ${pkg}.controller;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.bean.MockBean;
+import org.springframework.test.web.servlet.MockMvc;
+import ${pkg}.service.${svc};
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+@WebMvcTest(${ctrl}.class)
+class ${ctrl}Test {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean
+    private ${svc} service;
+
+${testMethods}
+}
+`;
   }
 }

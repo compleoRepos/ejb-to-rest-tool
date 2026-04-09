@@ -274,7 +274,74 @@ function generatePomXmlWithVendor(
   }
   // else: MySQL stays as-is
 
+  // FIX 3 (v5.10.0): Add conditional Kafka and Batch dependencies
+  const conditionalDeps = generateConditionalDependencies(ir);
+  if (conditionalDeps) {
+    // Insert before </dependencies>
+    content = content.replace(
+      /(\s*)<\/dependencies>/,
+      `\n${conditionalDeps}$1</dependencies>`
+    );
+  }
+
   return { ...basePom, content };
+}
+
+/**
+ * Génère les dépendances conditionnelles Kafka et Batch
+ * basées sur la présence de composants JMS/Batch dans l'IR.
+ */
+function generateConditionalDependencies(ir: ProjectIR): string {
+  const deps: string[] = [];
+
+  // Détecter JMS/Kafka — vérifier les batchJobs avec MessageListener ou les rawFiles avec JMS patterns
+  const hasJms = (() => {
+    // Check batchJobs for MessageListener
+    if (ir.batchJobs?.some(b => b.batchRole === "LISTENER")) return true;
+    // Check raw files for JMS annotations/imports
+    const rawFiles = (ir as any)._rawFiles ?? [];
+    return rawFiles.some((f: any) =>
+      /@Resource.*(?:Queue|Topic|ConnectionFactory)/.test(f.content) ||
+      /javax\.jms|jakarta\.jms|MessageListener|QueueSender|TopicPublisher/.test(f.content)
+    );
+  })();
+
+  // Détecter Batch — vérifier les batchJobs ou les raw files avec Batch patterns
+  const hasBatch = (() => {
+    if (ir.batchJobs?.some(b => b.batchRole !== "LISTENER")) return true;
+    const rawFiles = (ir as any)._rawFiles ?? [];
+    return rawFiles.some((f: any) =>
+      /ItemReader|ItemWriter|ItemProcessor|Batchlet|@BatchProperty|javax\.batch|jakarta\.batch/.test(f.content)
+    );
+  })();
+
+  if (hasJms) {
+    deps.push(`        <!-- Kafka (migré depuis JMS) -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka-test</artifactId>
+            <scope>test</scope>
+        </dependency>`);
+  }
+
+  if (hasBatch) {
+    deps.push(`        <!-- Spring Batch (migré depuis JSR-352) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-batch</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.batch</groupId>
+            <artifactId>spring-batch-test</artifactId>
+            <scope>test</scope>
+        </dependency>`);
+  }
+
+  return deps.join("\n\n");
 }
 
 // --- Step 4.2: Syntax Verification ---

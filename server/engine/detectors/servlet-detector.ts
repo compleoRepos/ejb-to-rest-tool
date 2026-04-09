@@ -1,6 +1,11 @@
 /**
  * Détecteur de Servlets (HttpServlet, @WebServlet, web.xml).
  * Tier 1 — Cible : Spring REST Controller.
+ *
+ * v5.10.0: Multi-route detection — analyse les if/switch sur
+ * getServletPath()/getPathInfo() pour extraire les sous-routes.
+ *
+ * @author Hamza NORDINE
  */
 import type {
   TechnologyDetector,
@@ -88,19 +93,42 @@ export class ServletDetector implements TechnologyDetector {
     let mm;
     while ((mm = methodRegex.exec(content)) !== null) {
       const httpVerb = mm[1].replace("do", "").toUpperCase() as "GET" | "POST" | "PUT" | "DELETE";
-      methods.push({
-        name: mm[1],
-        returnType: "void",
-        params: [
-          { name: "request", type: "HttpServletRequest" },
-          { name: "response", type: "HttpServletResponse" },
-        ],
-        httpVerb,
-        annotations: [],
-      });
+      const methodBody = this.extractMethodBody(content, mm.index);
+
+      // Detect sub-routes within the method body
+      const subRoutes = this.detectSubRoutes(methodBody, httpVerb);
+
+      if (subRoutes.length > 0) {
+        // Multi-route: create one DetectedMethod per sub-route
+        for (const route of subRoutes) {
+          methods.push({
+            name: route.handlerName,
+            returnType: "void",
+            params: [
+              { name: "request", type: "HttpServletRequest" },
+              { name: "response", type: "HttpServletResponse" },
+            ],
+            httpVerb,
+            urlPattern: route.urlPattern,
+            annotations: [],
+          });
+        }
+      } else {
+        // Single route (no branching detected)
+        methods.push({
+          name: mm[1],
+          returnType: "void",
+          params: [
+            { name: "request", type: "HttpServletRequest" },
+            { name: "response", type: "HttpServletResponse" },
+          ],
+          httpVerb,
+          annotations: [],
+        });
+      }
     }
 
-    // Détecter les request.getParameter
+    // Détecter les request.getParameter (per-route if possible)
     const requestParams: { name: string; type: string }[] = [];
     const paramRegex = /request\.getParameter\s*\(\s*"([^"]+)"\s*\)/g;
     let pm: RegExpExecArray | null;
@@ -144,6 +172,137 @@ export class ServletDetector implements TechnologyDetector {
     return component.confidence;
   }
 
+  // ─── Multi-route detection ────────────────────────────────────────────
+
+  /**
+   * Extraire le corps d'une méthode à partir de sa position dans le source.
+   */
+  private extractMethodBody(content: string, startIndex: number): string {
+    // Find the opening brace
+    let braceStart = content.indexOf("{", startIndex);
+    if (braceStart === -1) return "";
+
+    let depth = 0;
+    let i = braceStart;
+    for (; i < content.length; i++) {
+      if (content[i] === "{") depth++;
+      else if (content[i] === "}") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    return content.substring(braceStart, i + 1);
+  }
+
+  /**
+   * Détecter les sous-routes dans le corps d'une méthode doXxx.
+   * Patterns supportés :
+   *   - if (path.equals("/xxx")) { ... }
+   *   - if ("/xxx".equals(path)) { ... }
+   *   - if (path.contains("/xxx")) { ... }
+   *   - if (path.startsWith("/xxx")) { ... }
+   *   - switch (path) { case "/xxx": ... }
+   *   - if (action.equals("xxx")) { ... }  (request.getParameter("action"))
+   */
+  private detectSubRoutes(methodBody: string, httpVerb: string): SubRoute[] {
+    const routes: SubRoute[] = [];
+    const seen = new Set<string>();
+
+    // Pattern 1a: method call — getServletPath().equals("/xxx")
+    const ifMethodCallRegex = /(?:getServletPath|getPathInfo)\s*\(\s*\)\s*\.\s*(?:equals|contains|startsWith|endsWith)\s*\(\s*"([^"]+)"\s*\)/g;
+    let m;
+    while ((m = ifMethodCallRegex.exec(methodBody)) !== null) {
+      const urlPattern = m[1].startsWith("/") ? m[1] : "/" + m[1];
+      if (!seen.has(urlPattern)) {
+        seen.add(urlPattern);
+        routes.push({
+          urlPattern,
+          handlerName: this.routeToHandlerName(urlPattern, httpVerb),
+        });
+      }
+    }
+
+    // Pattern 1b: local variable — path.equals("/xxx"), uri.equals("/xxx")
+    const ifPathRegex = /(?:path|servletPath|pathInfo|uri)\s*\.\s*(?:equals|contains|startsWith|endsWith)\s*\(\s*"([^"]+)"\s*\)/g;
+    while ((m = ifPathRegex.exec(methodBody)) !== null) {
+      const urlPattern = m[1].startsWith("/") ? m[1] : "/" + m[1];
+      if (!seen.has(urlPattern)) {
+        seen.add(urlPattern);
+        routes.push({
+          urlPattern,
+          handlerName: this.routeToHandlerName(urlPattern, httpVerb),
+        });
+      }
+    }
+
+    // Pattern 2: "xxx".equals(path) or "/xxx".equals(getServletPath())
+    const reverseEqualsRegex = /"([^"]+)"\s*\.\s*equals\s*\(\s*(?:path|servletPath|pathInfo|request\s*\.\s*(?:getServletPath|getPathInfo)\s*\(\s*\))\s*\)/g;
+    while ((m = reverseEqualsRegex.exec(methodBody)) !== null) {
+      const urlPattern = m[1].startsWith("/") ? m[1] : "/" + m[1];
+      if (!seen.has(urlPattern)) {
+        seen.add(urlPattern);
+        routes.push({
+          urlPattern,
+          handlerName: this.routeToHandlerName(urlPattern, httpVerb),
+        });
+      }
+    }
+
+    // Pattern 3: switch/case with string literals
+    const caseRegex = /case\s+"([^"]+)"\s*:/g;
+    while ((m = caseRegex.exec(methodBody)) !== null) {
+      const urlPattern = m[1].startsWith("/") ? m[1] : "/" + m[1];
+      if (!seen.has(urlPattern)) {
+        seen.add(urlPattern);
+        routes.push({
+          urlPattern,
+          handlerName: this.routeToHandlerName(urlPattern, httpVerb),
+        });
+      }
+    }
+
+    // Pattern 4: action parameter branching
+    // if (action.equals("xxx")) or if ("xxx".equals(action))
+    const actionRegex = /(?:action|command|operation)\s*\.\s*equals\s*\(\s*"([^"]+)"\s*\)|"([^"]+)"\s*\.\s*equals\s*\(\s*(?:action|command|operation)\s*\)/g;
+    while ((m = actionRegex.exec(methodBody)) !== null) {
+      const action = m[1] || m[2];
+      const urlPattern = "/" + action;
+      if (!seen.has(urlPattern)) {
+        seen.add(urlPattern);
+        routes.push({
+          urlPattern,
+          handlerName: this.actionToHandlerName(action, httpVerb),
+        });
+      }
+    }
+
+    return routes;
+  }
+
+  /**
+   * Convertir un URL pattern en nom de handler Java.
+   * /comptes/solde → handleGetComptesSolde
+   */
+  private routeToHandlerName(urlPattern: string, httpVerb: string): string {
+    const verb = httpVerb.charAt(0).toUpperCase() + httpVerb.slice(1).toLowerCase();
+    const segments = urlPattern
+      .split("/")
+      .filter(Boolean)
+      .map(s => s.replace(/[^a-zA-Z0-9]/g, ""))
+      .map(s => s.charAt(0).toUpperCase() + s.slice(1));
+    return `handle${verb}${segments.join("") || "Root"}`;
+  }
+
+  /**
+   * Convertir un nom d'action en nom de handler Java.
+   * consulterSolde → handlePostConsulterSolde
+   */
+  private actionToHandlerName(action: string, httpVerb: string): string {
+    const verb = httpVerb.charAt(0).toUpperCase() + httpVerb.slice(1).toLowerCase();
+    const name = action.charAt(0).toUpperCase() + action.slice(1);
+    return `handle${verb}${name}`;
+  }
+
   private computeConfidence(
     methods: DetectedMethod[],
     urlPatterns: string[],
@@ -155,4 +314,9 @@ export class ServletDetector implements TechnologyDetector {
     if (requestParams.length > 0) score += 10;
     return Math.min(score, 99);
   }
+}
+
+interface SubRoute {
+  urlPattern: string;
+  handlerName: string;
 }

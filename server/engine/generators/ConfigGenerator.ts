@@ -427,6 +427,40 @@ springdoc:
 `;
     }
 
+    // ─── Multi-DataSource sections ───
+    if (dsInfo.multiDataSource && dsInfo.namedDataSources.length > 0) {
+      content += `\n# ─── Multi-DataSource Configuration ───\n`;
+      content += `# ${dsInfo.namedDataSources.length} datasources détectées — utiliser @ConfigurationProperties + @Qualifier\n\n`;
+
+      for (const nds of dsInfo.namedDataSources) {
+        const ndsCfg = VENDOR_CONFIG[nds.vendor] || VENDOR_CONFIG[dsInfo.vendor];
+        const dsKey = nds.varName
+          .replace(/DataSource$/i, "")
+          .replace(/([A-Z])/g, "-$1")
+          .toLowerCase()
+          .replace(/^-/, "");
+        const isMongods = nds.vendor === "MONGODB";
+
+        if (isMongods) {
+          content += `  # DataSource: ${nds.jndiName} (${nds.vendor})\n`;
+          content += `  # Classes: ${nds.usedInClasses.join(", ")}\n`;
+          content += `  ${dsKey || "secondary"}:\n`;
+          content += `    mongodb:\n`;
+          content += `      uri: \${${nds.varName.toUpperCase()}_URI:${ndsCfg.urlExample}}\n`;
+          content += `      database: \${${nds.varName.toUpperCase()}_DB:${dsKey || "secondary"}}\n\n`;
+        } else {
+          content += `  # DataSource: ${nds.jndiName} (${nds.vendor})\n`;
+          content += `  # Classes: ${nds.usedInClasses.join(", ")}\n`;
+          content += `  ${dsKey || "secondary"}:\n`;
+          content += `    datasource:\n`;
+          content += `      url: \${${nds.varName.toUpperCase()}_URL:${ndsCfg.urlExample}}\n`;
+          content += `      username: \${${nds.varName.toUpperCase()}_USER:}\n`;
+          content += `      password: \${${nds.varName.toUpperCase()}_PASSWORD:}\n`;
+          content += `      driver-class-name: ${ndsCfg.driverClass}\n\n`;
+        }
+      }
+    }
+
     // Clean up empty lines from conditional comments
     content = content.replace(/\n\n\n+/g, "\n\n");
 

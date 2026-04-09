@@ -264,17 +264,30 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
   const ejb2xBeans = ejb2xFiles.map(f => parseEjb2xBean(f, javaFiles));
   const batchJobs = batchFiles.map(f => parseBatchJob(f));
 
-  const useCases = useCaseFiles.map(f => {
-    const uc = parseUseCase(f, dtoMap, bianMappings, typeRegistry);
-    // Validate
-    if (uc.voInType === "ValueObject" || uc.voInType === "Object") {
-      warnings.push(`${uc.className}: Could not resolve VoIn type (found: ${uc.voInType})`);
-    }
-    if (uc.voOutType === "ValueObject" || uc.voOutType === "Object") {
-      warnings.push(`${uc.className}: Could not resolve VoOut type (found: ${uc.voOutType})`);
-    }
-    return uc;
-  });
+  // ─── Detect direct EJB multi-method classes ───
+  const directEjbFiles = javaFiles.filter(f => isDirectEjb(f.content));
+  const directEjbUseCases = directEjbFiles.flatMap(f =>
+    parseDirectEjbUseCases(f, dtoMap, bianMappings, typeRegistry)
+  );
+
+  // Filter out direct EJB files from the standard UseCase list to avoid duplication
+  const directEjbPaths = new Set(directEjbFiles.map(f => f.path));
+  const standardUseCaseFiles = useCaseFiles.filter(f => !directEjbPaths.has(f.path));
+
+  const useCases = [
+    ...standardUseCaseFiles.map(f => {
+      const uc = parseUseCase(f, dtoMap, bianMappings, typeRegistry);
+      // Validate
+      if (uc.voInType === "ValueObject" || uc.voInType === "Object") {
+        warnings.push(`${uc.className}: Could not resolve VoIn type (found: ${uc.voInType})`);
+      }
+      if (uc.voOutType === "ValueObject" || uc.voOutType === "Object") {
+        warnings.push(`${uc.className}: Could not resolve VoOut type (found: ${uc.voOutType})`);
+      }
+      return uc;
+    }),
+    ...directEjbUseCases,
+  ];
 
   // Compute domains
   const domains = [...new Set(useCases.map(uc => uc.domain))].filter(Boolean);
@@ -334,6 +347,160 @@ function isUseCase(content: string): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Détecte les EJB directs multi-méthodes — @Stateless sans BaseUseCase,
+ * avec plusieurs méthodes publiques business (non-lifecycle).
+ * Chaque méthode publique non-lifecycle = 1 UseCase distinct.
+ */
+function isDirectEjb(content: string): boolean {
+  if (!/@Stateless/.test(content)) return false;
+  if (/implements\s+BaseUseCase/.test(content)) return false; // BOA pattern → single UseCase
+  if (!(/public\s+class/.test(content))) return false;
+  const classNameMatch = content.match(/public\s+class\s+(\w+)/);
+  const className = classNameMatch ? classNameMatch[1] : "";
+  if (isDao(content, className)) return false;
+  // Count business methods (public, non-lifecycle, non-constructor)
+  const businessMethods = extractBusinessMethods(content, className);
+  return businessMethods.length > 1;
+}
+
+interface DirectEjbMethod {
+  name: string;
+  returnType: string;
+  parameters: { name: string; type: string }[];
+  throwsExceptions: string[];
+  javadoc: string;
+}
+
+const LIFECYCLE_METHODS = new Set([
+  "ejbCreate", "ejbRemove", "ejbActivate", "ejbPassivate",
+  "setSessionContext", "setEntityContext", "unsetEntityContext",
+  "toString", "hashCode", "equals", "clone", "finalize",
+  "init", "destroy", "afterPropertiesSet",
+]);
+
+function extractBusinessMethods(content: string, className: string): DirectEjbMethod[] {
+  const methods: DirectEjbMethod[] = [];
+  const methodRegex = /(?:\/\*\*([\s\S]*?)\*\/\s*)?public\s+((?:[\w<>,\s\[\]]+?)\s+(\w+))\s*\(([^)]*)\)\s*(?:throws\s+([\w,\s]+))?\s*\{/g;
+  let m;
+  while ((m = methodRegex.exec(content)) !== null) {
+    const javadocRaw = m[1] || "";
+    const returnType = m[2].replace(m[3], "").trim();
+    const name = m[3];
+    const paramsStr = m[4];
+    const throwsStr = m[5] || "";
+
+    // Skip constructor
+    if (name === className) continue;
+    // Skip lifecycle methods
+    if (LIFECYCLE_METHODS.has(name)) continue;
+    // Skip void setters (setXxx)
+    if (/^set[A-Z]/.test(name) && returnType === "void") continue;
+    // Skip getters that are just accessors (getXxx with no params)
+    if (/^get[A-Z]/.test(name) && !paramsStr.trim()) continue;
+    // Skip is-prefixed boolean getters
+    if (/^is[A-Z]/.test(name) && !paramsStr.trim() && returnType === "boolean") continue;
+
+    const javadoc = javadocRaw
+      .split("\n")
+      .map(l => l.replace(/^\s*\*\s?/, "").trim())
+      .filter(l => l && !l.startsWith("@"))
+      .join(" ")
+      .trim();
+
+    const parameters = paramsStr
+      .split(",")
+      .map(p => p.trim())
+      .filter(Boolean)
+      .map(p => {
+        // Remove annotations like @Valid, @NotNull
+        const cleaned = p.replace(/@\w+(?:\([^)]*\))?\s*/g, "").trim();
+        const parts = cleaned.split(/\s+/);
+        return { name: parts[parts.length - 1], type: parts.slice(0, -1).join(" ") };
+      });
+
+    const throwsExceptions = throwsStr.split(",").map(e => e.trim()).filter(Boolean);
+
+    methods.push({ name, returnType, parameters, throwsExceptions, javadoc });
+  }
+  return methods;
+}
+
+/**
+ * Parse un EJB direct multi-méthodes en N UseCaseIR.
+ * Chaque méthode publique non-lifecycle produit un UseCase distinct.
+ * Le className du UseCase = EjbClassName_MethodName (ex: NotificationServiceEJB_envoyerSMS)
+ */
+function parseDirectEjbUseCases(
+  file: JavaFile,
+  dtoMap: Map<string, DtoIR>,
+  bianMappings: BianMapping[],
+  typeRegistry: Map<string, string>
+): UseCaseIR[] {
+  const content = file.content;
+  const domain = extractDomain(file.packageName, file.className);
+  const businessMethods = extractBusinessMethods(content, file.className);
+
+  // Extract injected services (shared across all methods)
+  const injectedServices: InjectedService[] = [];
+  const autowiredRegex = /@(?:Autowired|Inject|EJB|Resource)\s+(?:private\s+)?(\w+)\s+(\w+)/g;
+  let am;
+  while ((am = autowiredRegex.exec(content)) !== null) {
+    injectedServices.push({ type: am[1], name: am[2] });
+  }
+
+  // Extract @Transactional info (shared)
+  let transactional: TransactionalInfo | null = null;
+  const txMatch = content.match(/@Transactional\s*\(([^)]*)\)/);
+  if (txMatch) {
+    const txBody = txMatch[1];
+    transactional = {
+      readOnly: /readOnly\s*=\s*true/.test(txBody),
+      propagation: (txBody.match(/propagation\s*=\s*Propagation\.(\w+)/) || [, "REQUIRED"])[1],
+      rollbackFor: (txBody.match(/rollbackFor\s*=\s*(\w+)\.class/) || [, ""])[1],
+    };
+  } else if (/@Transactional/.test(content)) {
+    transactional = { readOnly: false, propagation: "REQUIRED", rollbackFor: "" };
+  }
+
+  return businessMethods.map(method => {
+    // Derive VoIn from first parameter type
+    const voInType = method.parameters.length > 0 ? method.parameters[0].type : "Void";
+    // Derive VoOut from return type
+    const voOutType = method.returnType === "void" ? "Void" : method.returnType;
+
+    // Generate a unique className for this UseCase
+    const ucClassName = `${file.className}_${method.name}`;
+
+    // Determine HTTP method from method name
+    const httpMethod = determineHttpMethod(method.name, "");
+    const restPath = generateRestPath(domain, method.name);
+
+    // Description from Javadoc or method name
+    const useCaseDescription = method.javadoc || `${method.name} — extrait de ${file.className}`;
+
+    return {
+      className: ucClassName,
+      packageName: file.packageName,
+      domain,
+      bianDomain: "",
+      bianAction: "",
+      voInType,
+      voOutType,
+      useCaseDescription,
+      javadoc: method.javadoc,
+      injectedServices,
+      transactional,
+      exceptionsCaught: [],
+      exceptionsThrown: method.throwsExceptions,
+      sourceFile: file.path,
+      rawSource: content,
+      httpMethod,
+      restPath,
+    };
+  });
 }
 
 /**
