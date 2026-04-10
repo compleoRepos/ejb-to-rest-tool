@@ -818,9 +818,11 @@ export default function CompleoAgentPage() {
                                   >
                                     {amb.type}
                                   </Badge>
-                                  <span className="text-xs text-muted-foreground ml-2 font-mono">
-                                    {amb.context.className}
-                                  </span>
+                                  {amb.context?.className && (
+                                    <span className="text-xs text-muted-foreground ml-2 font-mono">
+                                      {amb.context.className}
+                                    </span>
+                                  )}
                                 </div>
                                 {choices[amb.id] && (
                                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />

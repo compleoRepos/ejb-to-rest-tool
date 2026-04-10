@@ -1013,11 +1013,14 @@ export default function CompleoPage() {
 
                   <div className="p-4">
                     {/* Context */}
+                    {currentAmbiguity.context && (
                     <div className="mb-3 space-y-1">
+                      {currentAmbiguity.context.className && (
                       <div className="flex items-center gap-2 text-sm">
                         <span className="text-[oklch(0.5_0.01_250)]">Classe :</span>
                         <span className="text-white font-mono text-xs">{currentAmbiguity.context.className}</span>
                       </div>
+                      )}
                       {currentAmbiguity.context.methodName && (
                         <div className="flex items-center gap-2 text-sm">
                           <span className="text-[oklch(0.5_0.01_250)]">Méthode :</span>
@@ -1025,6 +1028,7 @@ export default function CompleoPage() {
                         </div>
                       )}
                     </div>
+                    )}
 
                     {/* Question */}
                     <div className="p-3 rounded-lg bg-[oklch(0.18_0.01_250)] border border-[oklch(0.25_0.01_250)] mb-4">

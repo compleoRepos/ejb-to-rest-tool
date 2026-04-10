@@ -646,6 +646,7 @@ export class CompleoAgent {
           question: a.question,
           recommendation: a.recommendation,
           options: a.options,
+          context: a.context || { className: "Unknown" },
         })),
       },
     });
