@@ -22,6 +22,7 @@ import {
   BarChart3, Shield, Zap, Target, ArrowRight,
 } from "lucide-react";
 import { ArchitectureViewer } from "@/components/ArchitectureViewer";
+import { ArchitectureExplorer } from "@/components/architecture";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -357,6 +358,10 @@ export default function ArchitecturePage({ projectId }: { projectId?: number }) 
                 <TabsTrigger value="domains" className="text-xs gap-1">
                   <Layers className="w-3.5 h-3.5" />
                   Domaines
+                </TabsTrigger>
+                <TabsTrigger value="explorer" className="text-xs gap-1">
+                  <Target className="w-3.5 h-3.5" />
+                  Explorer v5.8
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -741,6 +746,10 @@ export default function ArchitecturePage({ projectId }: { projectId?: number }) 
                   ))}
                 </div>
               </div>
+            </TabsContent>
+            {/* Explorer Tab (v5.8) */}
+            <TabsContent value="explorer" className="flex-1 overflow-hidden">
+              <ArchitectureExplorer />
             </TabsContent>
           </Tabs>
         )}
