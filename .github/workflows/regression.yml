@@ -1,0 +1,167 @@
+name: "Compleo — Régression & Qualité"
+
+on:
+  push:
+    branches: [main, develop, "feature/**"]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Job 1 : Tests unitaires (bloquant) ───────────────────
+  unit-tests:
+    name: "Tests unitaires"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+      - name: Tests unitaires
+        run: pnpm run test:unit -- --reporter=verbose
+        timeout-minutes: 5
+
+  # ── Job 2 : Tests no-regression (bloquant) ───────────────
+  no-regression:
+    name: "No-regression (bugs historiques)"
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+      - name: Tests no-regression
+        run: pnpm run test:no-regression -- --reporter=verbose
+        timeout-minutes: 5
+      - name: Résumé si échec
+        if: failure()
+        run: |
+          echo "❌ Un bug historique a été réintroduit."
+          echo "Vérifier les tests BUG-V7x dans tests/regression/04-no-regression.test.ts"
+
+  # ── Job 3 : Compilation Java (bloquant) ──────────────────
+  java-compilation:
+    name: "Compilation code Java généré"
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+      - name: Test compilation
+        run: pnpm run test:compile -- --reporter=verbose
+        timeout-minutes: 15
+      - name: Résumé si échec
+        if: failure()
+        run: |
+          echo "❌ Compleo génère du code Java qui ne compile plus."
+          echo "Vérifier les erreurs ci-dessus."
+
+  # ── Job 4 : Score qualité (non-bloquant) ─────────────────
+  quality-score:
+    name: "Score qualité"
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+      - name: Test score >= baselines
+        run: pnpm run test:score -- --reporter=verbose
+        timeout-minutes: 20
+      - name: Générer dashboard
+        if: always()
+        run: npx tsx scripts/generate-dashboard.ts
+      - name: Upload dashboard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-dashboard
+          path: DASHBOARD.md
+
+  # ── Job 5 : Tests types Java (non-bloquant) ──────────────
+  java-types:
+    name: "Couverture types Java"
+    runs-on: ubuntu-latest
+    needs: [no-regression]
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+      - name: Tests types Java
+        run: pnpm run test:types -- --reporter=verbose
+        timeout-minutes: 10
+
+  # ── Job 6 : Snapshot stability (non-bloquant) ────────────
+  snapshot-stability:
+    name: "Stabilité des snapshots"
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+      - name: Tests snapshot
+        run: npx vitest run tests/regression/02-snapshot.test.ts --reporter=verbose
+        timeout-minutes: 10
+
+  # ── Job 7 : Cross-project invariants (non-bloquant) ──────
+  cross-project:
+    name: "Invariants cross-project"
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+      - name: Tests cross-project
+        run: npx vitest run tests/regression/06-cross-project.test.ts --reporter=verbose
+        timeout-minutes: 10

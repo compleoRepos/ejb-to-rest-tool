@@ -1,0 +1,28 @@
+{
+  "fixtureId": "02-ejb-direct",
+  "timestamp": "2026-04-10T17:04:13.149Z",
+  "useCaseCount": 2,
+  "dtoCount": 0,
+  "enumCount": 0,
+  "exceptionCount": 0,
+  "generatedFileCount": 15,
+  "generatedFilePaths": [
+    "src/main/java/com/bank/ejbproject/EjbProjectApplication.java",
+    "src/main/java/com/bank/ejbproject/exception/GlobalExceptionHandler.java",
+    "src/main/java/com/bank/ejbproject/exception/BusinessRuleException.java",
+    "src/main/java/com/bank/ejbproject/service/CompteService.java",
+    "src/main/java/com/bank/ejbproject/controller/CompteController.java",
+    "src/test/java/com/bank/ejbproject/controller/CompteControllerTest.java",
+    "src/main/resources/application.yml",
+    "src/main/resources/application.properties",
+    "DATASOURCE_MIGRATION.md",
+    "Dockerfile",
+    "docker-compose.yml",
+    "k8s/deployment.yaml",
+    "k8s/service.yaml",
+    "pom.xml",
+    "MIGRATION_REPORT.md"
+  ],
+  "score": 79,
+  "status": "WARN"
+}

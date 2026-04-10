@@ -1,0 +1,30 @@
+{
+  "fixtureId": "07-jdbc",
+  "timestamp": "2026-04-10T17:04:13.260Z",
+  "useCaseCount": 1,
+  "dtoCount": 2,
+  "enumCount": 0,
+  "exceptionCount": 0,
+  "generatedFileCount": 17,
+  "generatedFilePaths": [
+    "src/main/java/com/bank/ejbproject/EjbProjectApplication.java",
+    "src/main/java/com/bank/ejbproject/dto/GenererRapportRequestDTO.java",
+    "src/main/java/com/bank/ejbproject/dto/GenererRapportResponseDTO.java",
+    "src/main/java/com/bank/ejbproject/exception/GlobalExceptionHandler.java",
+    "src/main/java/com/bank/ejbproject/exception/BusinessRuleException.java",
+    "src/main/java/com/bank/ejbproject/service/DocumentService.java",
+    "src/main/java/com/bank/ejbproject/controller/DocumentController.java",
+    "src/test/java/com/bank/ejbproject/controller/DocumentControllerTest.java",
+    "src/main/resources/application.yml",
+    "src/main/resources/application.properties",
+    "DATASOURCE_MIGRATION.md",
+    "Dockerfile",
+    "docker-compose.yml",
+    "k8s/deployment.yaml",
+    "k8s/service.yaml",
+    "pom.xml",
+    "MIGRATION_REPORT.md"
+  ],
+  "score": 42,
+  "status": "FAIL"
+}

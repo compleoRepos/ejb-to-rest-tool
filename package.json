@@ -10,7 +10,17 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
-    "db:push": "drizzle-kit generate && drizzle-kit migrate"
+    "test:unit": "vitest run tests/unit/",
+    "test:regression": "vitest run tests/regression/",
+    "test:compile": "vitest run tests/regression/01-compilation.test.ts",
+    "test:no-regression": "vitest run tests/regression/04-no-regression.test.ts",
+    "test:score": "vitest run tests/regression/03-score.test.ts",
+    "test:types": "vitest run tests/regression/05-java-types.test.ts",
+    "test:watch": "vitest --watch",
+    "test:init-fixtures": "npx tsx scripts/init-fixtures.ts",
+    "test:dashboard": "npx tsx scripts/generate-dashboard.ts",
+    "db:push": "drizzle-kit generate && drizzle-kit migrate",
+    "prepare": "husky"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.693.0",
@@ -118,6 +128,7 @@
     "autoprefixer": "^10.4.20",
     "drizzle-kit": "^0.31.4",
     "esbuild": "^0.25.0",
+    "husky": "^9.1.7",
     "pnpm": "^10.15.1",
     "postcss": "^8.4.47",
     "prettier": "^3.6.2",

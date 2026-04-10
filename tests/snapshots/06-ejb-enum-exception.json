@@ -1,0 +1,33 @@
+{
+  "fixtureId": "06-ejb-enum-exception",
+  "timestamp": "2026-04-10T17:04:13.216Z",
+  "useCaseCount": 1,
+  "dtoCount": 2,
+  "enumCount": 2,
+  "exceptionCount": 1,
+  "generatedFileCount": 20,
+  "generatedFilePaths": [
+    "src/main/java/com/bank/ejbproject/EjbProjectApplication.java",
+    "src/main/java/com/bank/ejbproject/dto/TraiterPaiementRequestDTO.java",
+    "src/main/java/com/bank/ejbproject/dto/TraiterPaiementResponseDTO.java",
+    "src/main/java/com/bank/ejbproject/enums/DeviseType.java",
+    "src/main/java/com/bank/ejbproject/enums/StatutPaiement.java",
+    "src/main/java/com/bank/ejbproject/exception/PaiementRefuseException.java",
+    "src/main/java/com/bank/ejbproject/exception/GlobalExceptionHandler.java",
+    "src/main/java/com/bank/ejbproject/exception/BusinessRuleException.java",
+    "src/main/java/com/bank/ejbproject/service/TraiterpaiementService.java",
+    "src/main/java/com/bank/ejbproject/controller/TraiterpaiementController.java",
+    "src/test/java/com/bank/ejbproject/controller/TraiterpaiementControllerTest.java",
+    "src/main/resources/application.yml",
+    "src/main/resources/application.properties",
+    "DATASOURCE_MIGRATION.md",
+    "Dockerfile",
+    "docker-compose.yml",
+    "k8s/deployment.yaml",
+    "k8s/service.yaml",
+    "pom.xml",
+    "MIGRATION_REPORT.md"
+  ],
+  "score": 77,
+  "status": "WARN"
+}

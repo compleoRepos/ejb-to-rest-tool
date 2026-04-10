@@ -120,3 +120,12 @@ todo.md
 test-notes.md
 test-multi-file.md
 ideas.md
+
+# Test snapshots (generated)
+tests/fixtures/snapshots/
+
+# Dashboard (generated)
+DASHBOARD.md
+
+# Temp check scripts
+scripts/check-fixtures.mjs
