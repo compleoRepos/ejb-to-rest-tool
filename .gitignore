@@ -129,3 +129,4 @@ DASHBOARD.md
 
 # Temp check scripts
 scripts/check-fixtures.mjs
+.github/workflows/
