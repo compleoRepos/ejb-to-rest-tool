@@ -881,15 +881,53 @@ function extractDomain(packageName: string, className: string): string {
     return pkgParts[ucIdx - 1];
   }
 
-  // Infer from class name
-  const name = className.replace(/UC$/, "");
-  if (/Carte|Activer|Bloquer|Receptionner/.test(name)) return "carte";
-  if (/Client|Charger|Maj/.test(name)) return "client";
-  if (/Compte|Ouvrir|Cloturer|Consulter/.test(name)) return "compte";
-  if (/Credit|Simuler/.test(name)) return "credit";
-  if (/Virement/.test(name)) return "virement";
-  if (/Document|Generer/.test(name)) return "document";
-  if (/Notification|Envoyer/.test(name)) return "notification";
+  // FIX F v5.7.2: Infer domain from class name with enriched patterns
+  // Strip common suffixes: UC, UseCase, EJB, Bean, Service, Impl
+  const name = className
+    .replace(/UC$/, "")
+    .replace(/UseCase$/, "")
+    .replace(/EJB$/, "")
+    .replace(/Bean$/, "")
+    .replace(/ServiceImpl$/, "")
+    .replace(/Service$/, "")
+    .replace(/Impl$/, "");
+
+  // For direct EJB: strip method suffix (e.g. CompteEJB_consulterSolde → Compte)
+  const baseName = name.includes("_") ? name.split("_")[0] : name;
+
+  // Domain keyword mapping (order matters: more specific first)
+  const domainPatterns: Array<{ regex: RegExp; domain: string }> = [
+    { regex: /^Carte|Card|Activer|Bloquer|Receptionner|Opposition/, domain: "carte" },
+    { regex: /^Client|Customer|Charger|MajClient/, domain: "client" },
+    { regex: /^Compte|Account|Ouvrir|Cloturer|Solde/, domain: "compte" },
+    { regex: /^Credit|Loan|Simuler|Pret/, domain: "credit" },
+    { regex: /^Virement|Transfer|Virer/, domain: "virement" },
+    { regex: /^Document|Generer|Pdf|Releve/, domain: "document" },
+    { regex: /^Notification|Envoyer|Sms|Email|Alerte/, domain: "notification" },
+    { regex: /^Report|Reporting|Rapport|Statistique|Stat/, domain: "reporting" },
+    { regex: /^Session|Connexion|Login|Auth|Token/, domain: "sessions" },
+    { regex: /^Cheque|Check/, domain: "cheque" },
+    { regex: /^Beneficiaire|Beneficiary/, domain: "beneficiaire" },
+    { regex: /^Devise|Currency|Change|Forex/, domain: "devise" },
+    { regex: /^Paiement|Payment|Pay/, domain: "paiement" },
+    { regex: /^Assurance|Insurance/, domain: "assurance" },
+    { regex: /^Epargne|Saving/, domain: "epargne" },
+    { regex: /^Agence|Branch|Agency/, domain: "agence" },
+    { regex: /^Utilisateur|User|Profil|Profile/, domain: "utilisateur" },
+    { regex: /^Mouvement|Movement|Transaction/, domain: "mouvement" },
+    { regex: /^Batch|Job|Scheduler/, domain: "batch" },
+    { regex: /^Config|Parametre|Setting/, domain: "configuration" },
+  ];
+
+  for (const { regex, domain } of domainPatterns) {
+    if (regex.test(baseName)) return domain;
+  }
+
+  // Fallback: use the base class name as domain (lowercase)
+  // e.g. "AccountServiceBean" → "account" (after stripping suffixes)
+  if (baseName.length > 2 && baseName !== className) {
+    return baseName.charAt(0).toLowerCase() + baseName.slice(1);
+  }
 
   return "general";
 }

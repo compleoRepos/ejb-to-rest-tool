@@ -95,6 +95,14 @@ export function toPascalCase(str: string): string {
 }
 
 export function toMethodName(className: string): string {
+  // FIX D v5.7.2: Strip ClassName_ prefix from direct EJB UseCases
+  // e.g. "CompteEJB_consulterSolde" → "consulterSolde"
+  if (className.includes("_")) {
+    const methodPart = className.split("_").slice(1).join("_");
+    if (methodPart) {
+      return methodPart.charAt(0).toLowerCase() + methodPart.slice(1);
+    }
+  }
   const name = className.replace(/UC$/, "").replace(/UseCase$/, "");
   return name.charAt(0).toLowerCase() + name.slice(1);
 }

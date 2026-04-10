@@ -39,6 +39,20 @@ export function generateDomainService(
 
   const methods: string[] = [];
 
+  // FIX E v5.7.2: Collect SQL constants at class level (not duplicated per method)
+  // Extract constants from all UseCases and deduplicate by name
+  const classLevelConstants = new Map<string, { type: string; name: string; value: string; source: string }>();
+  for (const uc of useCases) {
+    if (uc.rawSource) {
+      const constants = extractConstants(uc.rawSource);
+      for (const c of constants) {
+        if (!classLevelConstants.has(c.name)) {
+          classLevelConstants.set(c.name, { ...c, source: uc.className });
+        }
+      }
+    }
+  }
+
   for (const uc of useCases) {
     const methodName = toMethodName(uc.className);
     const reqDto = dtoMap.get(uc.voInType);
@@ -69,6 +83,8 @@ export function generateDomainService(
       }
     }
 
+    // FIX A v5.7.2: For direct EJB, use actual parameter/return types even if not in dtoMap
+    // The voInType/voOutType from parser may be raw Java types (e.g. "CompteDTO", "List<Mouvement>")
     const paramType = reqType !== "Void" ? `${reqType} request` : "";
     const returnType = resType !== "Void" ? resType : "void";
 
@@ -144,6 +160,7 @@ ${[...imports].sort().join("\n")}
 public class ${serviceName} {
 
 ${injectedFields.length > 0 ? injectedFields.join("\n") + "\n" : "    // No external dependencies detected\n"}
+${classLevelConstants.size > 0 ? "\n    // \u2500\u2500\u2500 SQL / Business Constants (class-level, deduplicated) \u2500\u2500\u2500\n" + [...classLevelConstants.values()].map(c => `    private static final ${c.type} ${c.name} = ${c.value}; // from ${c.source}`).join("\n") + "\n" : ""}
 ${methods.join("\n")}
 }
 `,
@@ -295,6 +312,9 @@ function generateServiceMethodBody(
   // ─── Fallback: No execute() body found — generate builder + TODO ───
   const lines: string[] = [];
 
+  // FIX B v5.7.2: Only generate builder if resDto exists AND resType is not Void
+  // Direct EJBs may have voOutType = raw Java type (e.g. "CompteDTO") not in dtoMap
+  // In that case, resDto is undefined but resType could still be non-Void
   if (resDto && resType !== "Void") {
     lines.push(`        ${resType} response = ${resType}.builder()`);
 

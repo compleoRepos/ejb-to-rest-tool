@@ -38,6 +38,19 @@ export function generateDomainController(
 
   const endpoints: string[] = [];
 
+  // FIX C v5.7.2: Detect and resolve URL conflicts (same verb + same path)
+  // Pre-compute httpConfig for all UseCases to detect duplicates
+  const httpConfigs = useCases.map(uc => ({
+    uc,
+    config: determineHttpConfig(uc, domain),
+    methodName: toMethodName(uc.className),
+  }));
+  const pathCounts = new Map<string, number>();
+  for (const { config } of httpConfigs) {
+    const key = `${config.method}:${config.pathSuffix}`;
+    pathCounts.set(key, (pathCounts.get(key) || 0) + 1);
+  }
+
   for (const uc of useCases) {
     const methodName = toMethodName(uc.className);
     const reqDto = dtoMap.get(uc.voInType);
@@ -53,9 +66,23 @@ export function generateDomainController(
     // FIX v5.8.2: Use determineHttpConfig for proper REST URL semantics
     const httpConfig = determineHttpConfig(uc, domain);
     const httpMethod = httpConfig.method;
-    const endpointPath = httpConfig.pathSuffix;
+    let endpointPath = httpConfig.pathSuffix;
     const hasIdParam = httpConfig.hasPathVariable;
     const idParamName = hasIdParam ? getIdParamName(uc) : "";
+
+    // FIX C v5.7.2: If multiple UseCases share the same verb + path, add sub-path
+    // e.g. GET /{numCompte} conflict → GET /{numCompte}/solde, GET /{numCompte}/mouvements
+    const pathKey = `${httpMethod}:${endpointPath}`;
+    if ((pathCounts.get(pathKey) || 0) > 1) {
+      const actionSlug = methodName
+        .replace(/([a-z])([A-Z])/g, "$1-$2")
+        .toLowerCase();
+      if (hasIdParam) {
+        endpointPath = endpointPath + "/" + actionSlug;
+      } else {
+        endpointPath = endpointPath + "/" + actionSlug;
+      }
+    }
 
     let paramList = "";
     let methodBodyPrefix = "";
