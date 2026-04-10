@@ -1253,10 +1253,10 @@ router.get("/sessions", async (_req: Request, res: Response) => {
     projectName: s.projectName,
     uploadedAt: s.uploadedAt,
     status: s.status,
-    fileCount: s.files.length,
-    useCaseCount: s.ir?.stats.useCaseCount ?? 0,
-    dtoCount: s.ir?.stats.dtoCount ?? 0,
-    generatedFiles: s.generation?.stats.totalFiles ?? 0,
+    fileCount: s.files?.length ?? 0,
+    useCaseCount: s.ir?.stats?.useCaseCount ?? 0,
+    dtoCount: s.ir?.stats?.dtoCount ?? 0,
+    generatedFiles: s.generation?.stats?.totalFiles ?? 0,
     ambiguityCount: s.ambiguities?.length ?? 0,
   }));
   return res.json(list);

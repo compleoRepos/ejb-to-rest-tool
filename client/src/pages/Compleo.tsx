@@ -713,7 +713,7 @@ export default function CompleoPage() {
                     </div>
                   </div>
                 </Link>
-                <Link href="/compleo/architecture">
+                <Link href={`/compleo/architecture${sessionId ? `?sessionId=${sessionId}` : ''}`}>
                   <div className="p-4 rounded-lg border border-[oklch(0.25_0.01_250)] bg-[oklch(0.15_0.01_250)] hover:border-cyan-500/40 transition-all cursor-pointer group">
                     <div className="flex items-center gap-3">
                       <GitBranch className="w-5 h-5 text-cyan-400 group-hover:scale-110 transition-transform" />

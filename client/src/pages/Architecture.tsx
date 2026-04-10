@@ -139,8 +139,11 @@ export default function ArchitecturePage({ projectId }: { projectId?: number }) 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
 
-  // Load available sessions
+  // Load available sessions and pre-select from URL query param
   useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionIdFromUrl = urlParams.get("sessionId");
+
     fetch("/api/compleo/sessions")
       .then((r) => r.json())
       .then((data) => {
@@ -150,7 +153,10 @@ export default function ArchitecturePage({ projectId }: { projectId?: number }) 
           (s: any) => s.status === "analyzed" || s.status === "generated" || s.status === "waiting_choices" || s.status === "missing_deps"
         );
         setSessions(analyzed);
-        if (analyzed.length > 0 && !selectedSessionId) {
+        // Pre-select session from URL param, or fall back to first session
+        if (sessionIdFromUrl && analyzed.some((s: any) => s.id === sessionIdFromUrl)) {
+          setSelectedSessionId(sessionIdFromUrl);
+        } else if (analyzed.length > 0 && !selectedSessionId) {
           setSelectedSessionId(analyzed[0].id);
         }
       })
