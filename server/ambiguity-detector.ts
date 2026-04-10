@@ -128,7 +128,7 @@ export function applyChoicesToIR(ir: ProjectIR, ambiguities: Ambiguity[], choice
 
     switch (amb.type) {
       case "HTTP_VERB_AMBIGUOUS": {
-        const uc = modifiedIR.useCases.find(u => u.className === amb.context.className);
+        const uc = amb.context?.className ? modifiedIR.useCases.find(u => u.className === amb.context.className) : undefined;
         if (uc) {
           uc.httpMethod = choiceId; // A=POST, B=PUT, C=PATCH
         }
@@ -136,7 +136,7 @@ export function applyChoicesToIR(ir: ProjectIR, ambiguities: Ambiguity[], choice
       }
 
       case "TRANSACTION_AMBIGUOUS": {
-        const uc = modifiedIR.useCases.find(u => u.className === amb.context.className);
+        const uc = amb.context?.className ? modifiedIR.useCases.find(u => u.className === amb.context.className) : undefined;
         if (uc) {
           if (choiceId === "A") {
             uc.transactional = { readOnly: false, propagation: "REQUIRED", rollbackFor: "" };
@@ -151,7 +151,7 @@ export function applyChoicesToIR(ir: ProjectIR, ambiguities: Ambiguity[], choice
 
       case "RETURN_TYPE_AMBIGUOUS": {
         // Store choice as metadata for the generator to use
-        const uc = modifiedIR.useCases.find(u => u.className === amb.context.className);
+        const uc = amb.context?.className ? modifiedIR.useCases.find(u => u.className === amb.context.className) : undefined;
         if (uc) {
           // We'll use a convention: store pagination choice in restPath metadata
           (uc as any).paginationChoice = choiceId; // A=List, B=Page, C=ResponseEntity+headers
@@ -160,7 +160,7 @@ export function applyChoicesToIR(ir: ProjectIR, ambiguities: Ambiguity[], choice
       }
 
       case "URL_STRUCTURE_AMBIGUOUS": {
-        const uc = modifiedIR.useCases.find(u => u.className === amb.context.className);
+        const uc = amb.context?.className ? modifiedIR.useCases.find(u => u.className === amb.context.className) : undefined;
         if (uc) {
           // Apply the chosen URL structure
           const option = amb.options.find(o => o.id === choiceId);

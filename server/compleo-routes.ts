@@ -870,7 +870,7 @@ router.post("/resolve/:sessionId", async (req: Request, res: Response) => {
         type: a.type,
         severity: a.severity as string,
         question: a.question,
-        affectedClass: a.context.className,
+        affectedClass: a.context?.className ?? "Unknown",
         recommendation: a.recommendation,
         recommendationReason: a.recommendationReason,
         options: a.options.map(o => ({ id: o.id, label: o.label })),

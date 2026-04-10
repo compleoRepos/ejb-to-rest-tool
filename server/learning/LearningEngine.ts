@@ -139,10 +139,10 @@ export class LearningEngine {
 
     for (const amb of ambiguities) {
       const context = {
-        className: amb.context.className,
-        methodName: amb.context.methodName,
-        packageName: amb.context.packageName,
-        javadoc: amb.context.javadoc,
+        className: amb.context?.className ?? "",
+        methodName: amb.context?.methodName ?? "",
+        packageName: amb.context?.packageName ?? "",
+        javadoc: amb.context?.javadoc ?? "",
       };
 
       // Chercher toutes les règles candidates

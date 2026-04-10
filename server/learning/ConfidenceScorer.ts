@@ -109,10 +109,10 @@ export class ConfidenceScorer {
 
     // Chercher si une règle existante correspond
     const context = {
-      className: ambiguity.context.className,
-      methodName: ambiguity.context.methodName,
-      packageName: ambiguity.context.packageName,
-      javadoc: ambiguity.context.javadoc,
+      className: ambiguity.context?.className ?? "",
+      methodName: ambiguity.context?.methodName ?? "",
+      packageName: ambiguity.context?.packageName ?? "",
+      javadoc: ambiguity.context?.javadoc ?? "",
     };
 
     const match = await this.matcher.findMatch(ambiguity.type, context, tenantId);

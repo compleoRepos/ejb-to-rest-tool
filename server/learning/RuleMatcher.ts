@@ -301,10 +301,10 @@ export class RuleMatcher {
 
     for (const amb of ambiguities) {
       const context: MatchContext = {
-        className: amb.context.className,
-        methodName: amb.context.methodName,
-        packageName: amb.context.packageName,
-        javadoc: amb.context.javadoc,
+        className: amb.context?.className ?? "",
+        methodName: amb.context?.methodName ?? "",
+        packageName: amb.context?.packageName ?? "",
+        javadoc: amb.context?.javadoc ?? "",
       };
 
       const match = await this.findMatch(amb.type, context, tenantId);
