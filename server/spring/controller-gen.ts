@@ -117,7 +117,14 @@ ${builderParts.join("\n")}
         : `        ${serviceVar}.${methodName}(${reqType ? "request" : ""});\n        return ResponseEntity.ok().build();`;
     }
 
-    const javadoc = (uc as any).useCaseDescription || (uc as any).javadoc || "";
+    // v5.10.2: Sanitize javadoc — remove braces and limit length to prevent
+    // brace imbalance in generated Java files (class-level javadoc can leak code)
+    let javadocRaw = (uc as any).useCaseDescription || (uc as any).javadoc || "";
+    let javadoc = javadocRaw
+      .replace(/[{}]/g, "")          // Remove all braces
+      .replace(/\s+/g, " ")          // Collapse whitespace
+      .trim();
+    if (javadoc.length > 200) javadoc = javadoc.substring(0, 200) + "...";
     const operationSummary = extractShortSummary(javadoc, methodName, domain);
     const operationDescription = javadoc ? javadoc.replace(/"/g, '\\"') : "";
 

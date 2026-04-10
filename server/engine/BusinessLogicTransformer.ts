@@ -534,6 +534,49 @@ export function extractExecuteBody(sourceCode: string): string | null {
 }
 
 /**
+ * Extract the body of a named public method from Java source code.
+ * v5.10.2: Used for direct EJB methods (consulterSolde, initierVirement, etc.)
+ * that don't follow the execute() pattern.
+ *
+ * @param sourceCode - The full Java source code
+ * @param methodName - The method name to extract (e.g., "consulterSolde")
+ * @returns The method body as a string, or null if not found
+ */
+export function extractMethodBody(sourceCode: string, methodName: string): string | null {
+  // Pattern: public <ReturnType> <methodName>(<params>) [throws ...] {
+  const escapedName = methodName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const methodPattern = new RegExp(
+    `public\\s+\\S+\\s+${escapedName}\\s*\\([^)]*\\)\\s*(?:throws\\s+[^{]*)?\\{`,
+    "g"
+  );
+
+  const match = methodPattern.exec(sourceCode);
+  if (!match) return null;
+
+  // Extract the body using brace counting
+  let depth = 0;
+  const start = match.index + match[0].length;
+  let i = start;
+
+  for (; i < sourceCode.length; i++) {
+    if (sourceCode[i] === "{") depth++;
+    if (sourceCode[i] === "}") {
+      if (depth === 0) break;
+      depth--;
+    }
+  }
+
+  const body = sourceCode.substring(start, i).trim();
+
+  // Check if the body is essentially empty
+  if (!body || body === "return null;" || body.length < 15) {
+    return null;
+  }
+
+  return body;
+}
+
+/**
  * Extract private method bodies from a UseCase source file.
  * These are helper methods called via this.xxx() within execute().
  *

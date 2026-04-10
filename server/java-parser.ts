@@ -516,10 +516,20 @@ function isDao(content: string, className: string): boolean {
   if (isDaoName) return true;
 
   // @Stateless avec accès données mais sans méthode execute()
+  // v5.10.2: Ne pas exclure si l'EJB a des méthodes business non-lifecycle
+  // (sinon les EJB directs comme CompteEJB avec EntityManager seraient exclus à tort)
   if (/@Stateless/.test(content)) {
     const hasDataAccess = /EntityManager|getConnection|PreparedStatement|DataSource|@PersistenceContext/.test(content);
     const hasExecute = /public\s+\w+\s+execute\s*\(/.test(content);
-    if (hasDataAccess && !hasExecute) return true;
+    if (hasDataAccess && !hasExecute) {
+      // Check if it has real business methods (non-lifecycle, non-getter/setter)
+      const businessMethods = extractBusinessMethods(content, className);
+      // Only classify as DAO if it has NO business methods
+      // (pure data access layer with only lifecycle + accessors)
+      if (businessMethods.length === 0) return true;
+      // Has business methods → it's a direct EJB, not a DAO
+      return false;
+    }
   }
 
   return false;

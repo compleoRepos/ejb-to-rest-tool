@@ -8,6 +8,7 @@ import type { ProjectIR, UseCaseIR, DtoIR } from "../java-parser";
 import {
   BusinessLogicTransformer,
   extractExecuteBody,
+  extractMethodBody,
   extractConstants,
   type TransformContext,
 } from "../engine/BusinessLogicTransformer";
@@ -71,7 +72,14 @@ export function generateDomainService(
     const paramType = reqType !== "Void" ? `${reqType} request` : "";
     const returnType = resType !== "Void" ? resType : "void";
 
-    const javadoc = (uc as any).useCaseDescription || (uc as any).javadoc || "";
+    // v5.10.2: Sanitize javadoc — remove braces and limit length to prevent
+    // brace imbalance in generated Java files (class-level javadoc can leak code)
+    let javadocRaw = (uc as any).useCaseDescription || (uc as any).javadoc || "";
+    let javadoc = javadocRaw
+      .replace(/[{}]/g, "")          // Remove all braces
+      .replace(/\s+/g, " ")          // Collapse whitespace
+      .trim();
+    if (javadoc.length > 200) javadoc = javadoc.substring(0, 200) + "...";
     const javadocLine = javadoc ? `\n     * ${javadoc}` : "";
 
     const methodBody = generateServiceMethodBody(uc, reqDto, resDto, reqType, resType);
@@ -146,12 +154,19 @@ function generateServiceMethodBody(
   uc: UseCaseIR, reqDto: DtoIR | undefined, resDto: DtoIR | undefined,
   reqType: string, resType: string
 ): string {
+  // ─── v5.10.2: Detect direct EJB method name from className pattern ───
+  // Direct EJB UseCases have className = "CompteEJB_consulterSolde" → methodName = "consulterSolde"
+  const directEjbMethodName = uc.className.includes("_") ? uc.className.split("_").slice(1).join("_") : null;
+
   // ─── v5.3.1: AST pipeline — parse, build symbol table, transform ───
   let astUsed = false;
   try {
     if (uc.rawSource && uc.rawSource.length > 50) {
       const classAST = astParser.parse(uc.rawSource);
+      // v5.10.2: For direct EJB, search for the actual method name first, then fallback to execute()
       const executeMethod = classAST.methods.find(m =>
+        (directEjbMethodName ? m.name === directEjbMethodName : m.name === "execute") && !m.isPrivate
+      ) ?? classAST.methods.find(m =>
         m.name === "execute" && !m.isPrivate
       );
 
@@ -206,8 +221,15 @@ function generateServiceMethodBody(
 
         lines.push(`        // Migrated from: ${uc.className}.execute() — ${result.migratedLines} lignes migrées, ${result.manualLines} manuelles, ${result.todos.length} TODOs`);
 
-        astUsed = true;
-        return lines.join("\n");
+        // v5.10.2: Validate brace balance before returning AST-migrated code
+        const joined = lines.join("\n");
+        const openBraces = (joined.match(/\{/g) || []).length;
+        const closeBraces = (joined.match(/\}/g) || []).length;
+        if (openBraces === closeBraces) {
+          astUsed = true;
+          return joined;
+        }
+        // Brace imbalance detected — fall through to legacy/fallback
       }
     }
   } catch {
@@ -215,7 +237,10 @@ function generateServiceMethodBody(
   }
 
   // ─── v5.3 legacy fallback: regex-based extraction ───
-  const executeBody = extractExecuteBody(uc.rawSource);
+  // v5.10.2: For direct EJB, try extracting the specific method body first
+  const executeBody = directEjbMethodName
+    ? extractMethodBody(uc.rawSource, directEjbMethodName) ?? extractExecuteBody(uc.rawSource)
+    : extractExecuteBody(uc.rawSource);
 
   if (executeBody) {
     const transformer = new BusinessLogicTransformer();
@@ -257,7 +282,14 @@ function generateServiceMethodBody(
 
     lines.push(`        // Migrated from: ${uc.className}.execute() — ${result.linesTransformed} transformations applied`);
 
-    return lines.join("\n");
+    // v5.10.2: Validate brace balance before returning legacy-migrated code
+    const legacyJoined = lines.join("\n");
+    const legacyOpen = (legacyJoined.match(/\{/g) || []).length;
+    const legacyClose = (legacyJoined.match(/\}/g) || []).length;
+    if (legacyOpen === legacyClose) {
+      return legacyJoined;
+    }
+    // Brace imbalance — fall through to safe fallback
   }
 
   // ─── Fallback: No execute() body found — generate builder + TODO ───
