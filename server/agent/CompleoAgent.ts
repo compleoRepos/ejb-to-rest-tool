@@ -21,6 +21,10 @@ import * as path from "path";
 import { sessionStore } from "../session-store";
 import type { CompleoSession, SessionStatus } from "../compleo-routes";
 import { upsertProjectFromAgent } from "../db";
+import { MicroserviceSplitter, buildParsedModules } from "../engine/microservices/microservice-splitter";
+import { MicroserviceGenerator, type MicroserviceOutput } from "../engine/microservices/microservice-generator";
+import { MLEnhancer, type MLConfig } from "../engine/ml/ml-enhancer";
+import type { PipelineResult } from "../engine/pipeline/index";
 
 // ─── Types publics ────────────────────────────────────────────────────────────
 
@@ -29,6 +33,7 @@ export type AgentPhase =
   | "CLONING"
   | "ANALYZING"
   | "GENERATING"
+  | "MICROSERVICES"
   | "COMPILING"
   | "TESTING"
   | "PUSHING"
@@ -50,6 +55,8 @@ export interface AgentConfig {
     notifyOnComplete?: string;
     technologies?: string[];
     projectName?: string;
+    enableMicroservices?: boolean;
+    enableML?: boolean;
   };
 }
 
@@ -109,6 +116,13 @@ export interface AgentSession {
   downloadUrl?: string;
   /** Migration report content */
   migrationReport?: string;
+  /** Microservice split result (available after MICROSERVICES phase) */
+  microserviceResult?: {
+    services: Array<{ name: string; ejbs: string[]; ownedTables: string[]; confidence: number }>;
+    report: string;
+    filesCount: number;
+    mlEnabled: boolean;
+  };
   /** Error message if failed */
   errorMessage?: string;
   /** Promise resolver for ambiguity resolution */
@@ -283,6 +297,11 @@ export class CompleoAgent {
       // ─── Phase 4: GENERATING ──────────────────────────────────────────
       yield* this.phaseGenerating(session);
 
+      // ─── Phase 4b: MICROSERVICES (optional) ───────────────────────────
+      if (session.config.options.enableMicroservices) {
+        yield* this.phaseMicroservices(session);
+      }
+
       // ─── Phase 5: COMPILING ───────────────────────────────────────────
       yield* this.phaseCompiling(session);
 
@@ -305,6 +324,12 @@ export class CompleoAgent {
           dtoCount: session.analysisResult?.summary.dtoCount,
           fileCount: session.generatedProject?.files.length,
           report: session.migrationReport?.substring(0, 500),
+          microservices: session.microserviceResult ? {
+            serviceCount: session.microserviceResult.services.length,
+            services: session.microserviceResult.services.map(s => s.name),
+            mlEnabled: session.microserviceResult.mlEnabled,
+            filesCount: session.microserviceResult.filesCount,
+          } : undefined,
         },
       });
       yield successEvent;
@@ -730,6 +755,145 @@ export class CompleoAgent {
     } catch (syncErr) {
       console.warn("[Agent→Compleo] Sync after generation failed:", syncErr);
     }
+  }
+
+  // ─── Phase 4b: MICROSERVICES (optional) ──────────────────────────────────────
+  private async *phaseMicroservices(session: AgentSession): AsyncGenerator<AgentEvent> {
+    yield this.event("PHASE_START", {
+      phase: "MICROSERVICES",
+      message: "Découpage en microservices...",
+    });
+    this.sessionStore.update(session.id, { currentPhase: "MICROSERVICES" });
+
+    const startTime = Date.now();
+
+    if (!session.ir) throw new Error("IR non disponible pour le découpage microservices");
+
+    // Build a PipelineResult-like object from analysisResult.multiTech
+    const multiTech = session.analysisResult?.multiTech;
+    const pipelineResult: PipelineResult | undefined = multiTech
+      ? {
+          projectName: session.config.options.projectName || "migration",
+          detectedComponents: multiTech.detectedComponents || [],
+          generatedFiles: multiTech.generatedFiles || [],
+          validation: { valid: true, errors: [], warnings: [] },
+          migrationNotes: multiTech.migrationNotes || [],
+          technologiesDetected: multiTech.technologiesDetected || [],
+          stats: multiTech.stats || { totalComponents: 0, byTechnology: {} as any },
+          maturityScore: multiTech.maturityScore,
+        }
+      : undefined;
+
+    // 1. Split into microservices
+    const splitter = new MicroserviceSplitter();
+    const services = splitter.split(session.ir, pipelineResult);
+
+    yield this.event("LOG", {
+      level: "info",
+      message: `${services.length} microservice(s) identifié(s) par l'algorithme de découpage`,
+      phase: "MICROSERVICES",
+      data: {
+        services: services.map(s => ({
+          name: s.name,
+          ejbs: s.ejbs,
+          tables: s.ownedTables,
+          confidence: s.confidence,
+        })),
+      },
+    });
+
+    // 2. Generate microservice projects
+    const modules = buildParsedModules(session.ir, pipelineResult);
+    const generator = new MicroserviceGenerator();
+    const msOutput: MicroserviceOutput = generator.generateAll(services, modules);
+
+    yield this.event("LOG", {
+      level: "success",
+      message: `${msOutput.services.length} projet(s) Spring Boot généré(s) pour les microservices`,
+      phase: "MICROSERVICES",
+      data: {
+        projects: msOutput.services.map(p => ({
+          name: p.serviceName,
+          fileCount: p.files.size,
+        })),
+        infrastructureFiles: msOutput.infrastructure.size,
+      },
+    });
+
+    // 3. ML Enhancement (optional)
+    let mlEnabled = false;
+    if (session.config.options.enableML) {
+      try {
+        const mlConfig: MLConfig = {
+          enabled: true,
+          ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
+          chromaUrl: process.env.CHROMA_URL || "http://localhost:8000",
+          model: process.env.ML_MODEL || "deepseek-coder:6.7b-instruct-q4_K_M",
+          minConfidence: parseFloat(process.env.ML_MIN_CONFIDENCE || "0.6"),
+        };
+        const enhancer = new MLEnhancer(mlConfig);
+        await enhancer.initialize();
+
+        if (enhancer.enabled) {
+          mlEnabled = true;
+          yield this.event("LOG", {
+            level: "info",
+            message: "ML activé — amélioration du code généré en cours...",
+            phase: "MICROSERVICES",
+          });
+        } else {
+          yield this.event("LOG", {
+            level: "warn",
+            message: "ML non disponible (Ollama/ChromaDB non accessibles) — génération rule-based uniquement",
+            phase: "MICROSERVICES",
+          });
+        }
+      } catch (mlErr) {
+        yield this.event("LOG", {
+          level: "warn",
+          message: `ML init échouée : ${mlErr instanceof Error ? mlErr.message : String(mlErr)} — fallback rule-based`,
+          phase: "MICROSERVICES",
+        });
+      }
+    }
+
+    // 4. Use the report from generateAll output
+    const report = msOutput.report;
+
+    // 5. Count total generated files
+    let totalMsFiles = 0;
+    for (const svc of msOutput.services) {
+      totalMsFiles += svc.files.size;
+    }
+    totalMsFiles += msOutput.infrastructure.size;
+
+    // 6. Store result in session
+    session.microserviceResult = {
+      services: services.map(s => ({
+        name: s.name,
+        ejbs: s.ejbs,
+        ownedTables: s.ownedTables,
+        confidence: s.confidence,
+      })),
+      report,
+      filesCount: totalMsFiles,
+      mlEnabled,
+    };
+
+    this.sessionStore.update(session.id, {
+      microserviceResult: session.microserviceResult,
+    });
+
+    yield this.event("LOG", {
+      level: "success",
+      message: `Découpage microservices terminé : ${services.length} services, ${totalMsFiles} fichiers (${Date.now() - startTime}ms)`,
+      phase: "MICROSERVICES",
+    });
+
+    yield this.event("PHASE_END", {
+      phase: "MICROSERVICES",
+      message: `Microservices terminé (${Date.now() - startTime}ms)`,
+    });
   }
 
   private async *phaseCompiling(session: AgentSession): AsyncGenerator<AgentEvent> {

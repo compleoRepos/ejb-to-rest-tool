@@ -277,6 +277,17 @@ export function registerAgentRoutes(app: Express) {
       zipEntries.set(reportPath, session.migrationReport);
     }
 
+    // 4. Add microservice files if available
+    if (session.microserviceResult) {
+      // Add microservice report
+      if (session.microserviceResult.report) {
+        const msReportPath = "MICROSERVICES_REPORT.md";
+        if (!zipEntries.has(msReportPath)) {
+          zipEntries.set(msReportPath, session.microserviceResult.report);
+        }
+      }
+    }
+
     // Write all unique entries to the archive
     for (const [path, content] of zipEntries) {
       archive.append(content, { name: path });

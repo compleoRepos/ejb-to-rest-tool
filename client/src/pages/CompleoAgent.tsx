@@ -71,6 +71,7 @@ const PHASES = [
   { id: "ANALYZING", label: "Analyse", icon: Eye, color: "text-cyan-400" },
   { id: "AWAITING_INPUT", label: "Choix", icon: Pause, color: "text-yellow-400" },
   { id: "GENERATING", label: "Génération", icon: FileCode2, color: "text-emerald-400" },
+  { id: "MICROSERVICES", label: "Microservices", icon: Layers, color: "text-pink-400" },
   { id: "COMPILING", label: "Compilation", icon: Terminal, color: "text-purple-400" },
   { id: "PUSHING", label: "Push", icon: Upload, color: "text-orange-400" },
   { id: "COMPLETED", label: "Terminé", icon: CheckCircle2, color: "text-green-400" },
@@ -107,6 +108,8 @@ export default function CompleoAgentPage() {
   const [gitBranch, setGitBranch] = useState("main");
   const [projectName, setProjectName] = useState("");
   const [autoResolve, setAutoResolve] = useState(false);
+  const [enableMicroservices, setEnableMicroservices] = useState(false);
+  const [enableML, setEnableML] = useState(false);
 
   // Agent state
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -163,6 +166,8 @@ export default function CompleoAgentPage() {
           projectName: projectName || "migration",
           autoResolveAmbiguities: autoResolve,
           maxCompilationAttempts: 5,
+          enableMicroservices,
+          enableML: enableMicroservices && enableML,
         },
       };
 
@@ -229,7 +234,7 @@ export default function CompleoAgentPage() {
     } finally {
       setIsStarting(false);
     }
-  }, [sourceMode, uploadSessionId, gitUrl, gitToken, gitBranch, projectName, autoResolve]);
+  }, [sourceMode, uploadSessionId, gitUrl, gitToken, gitBranch, projectName, autoResolve, enableMicroservices, enableML]);
 
   // ─── Cancel Agent ───────────────────────────────────────────────────────
 
@@ -513,6 +518,30 @@ export default function CompleoAgentPage() {
                 />
                 <span className="text-sm">Auto-résoudre les ambiguïtés (utiliser les recommandations du moteur)</span>
               </label>
+              <div className="border-t border-border/30 pt-3 mt-2 space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enableMicroservices}
+                    onChange={(e) => setEnableMicroservices(e.target.checked)}
+                    className="rounded border-border"
+                  />
+                  <Layers className="w-4 h-4 text-pink-400" />
+                  <span className="text-sm">Découpage Microservices (Splitter + Générateur)</span>
+                </label>
+                {enableMicroservices && (
+                  <label className="flex items-center gap-2 cursor-pointer ml-6">
+                    <input
+                      type="checkbox"
+                      checked={enableML}
+                      onChange={(e) => setEnableML(e.target.checked)}
+                      className="rounded border-border"
+                    />
+                    <Zap className="w-4 h-4 text-amber-400" />
+                    <span className="text-sm">Amélioration ML (Ollama + ChromaDB requis)</span>
+                  </label>
+                )}
+              </div>
             </div>
 
             {/* Start button */}
