@@ -398,16 +398,33 @@ function inferDomainFromClassName(className: string): string {
 
   const lower = name.toLowerCase();
 
-  if (/compte|account/i.test(lower)) return "compte";
-  if (/virement|transfer/i.test(lower)) return "virement";
-  if (/client|customer/i.test(lower)) return "client";
+  // ── Domaines bancaires core ──
+  if (/compte|account|solde|balance/i.test(lower)) return "compte";
+  if (/virement|transfer|remittance/i.test(lower)) return "virement";
+  if (/client|customer|kyc|beneficiaire|beneficiary/i.test(lower)) return "client";
   if (/carte|card/i.test(lower)) return "carte";
-  if (/credit|pret|loan/i.test(lower)) return "credit";
-  if (/auth|session|login|security/i.test(lower)) return "auth";
-  if (/reporting|report|stat/i.test(lower)) return "reporting";
-  if (/batch|job|scheduler/i.test(lower)) return "batch";
-  if (/notification|alert|sms|email/i.test(lower)) return "notification";
-  if (/paiement|payment/i.test(lower)) return "paiement";
+  if (/credit|pret|loan|financement|leasing/i.test(lower)) return "credit";
+  if (/auth|session|login|security|habilitation|acl/i.test(lower)) return "auth";
+  if (/reporting|report|stat|bam|regulat/i.test(lower)) return "reporting";
+  if (/batch|job|scheduler|arrete|cloture/i.test(lower)) return "batch";
+  if (/notification|alert|sms|email|push/i.test(lower)) return "notification";
+  if (/paiement|payment|prelevement|debit/i.test(lower)) return "paiement";
+  // ── Domaines bancaires étendus ──
+  if (/assurance|insurance|sinistre|police/i.test(lower)) return "assurance";
+  if (/epargne|saving|placement|depot/i.test(lower)) return "epargne";
+  if (/change|forex|devise|currency/i.test(lower)) return "change";
+  if (/cheque|chequier|check/i.test(lower)) return "cheque";
+  if (/garantie|collateral|nantissement|hypotheque/i.test(lower)) return "garantie";
+  if (/risque|risk|scoring|notation/i.test(lower)) return "risque";
+  if (/tresorerie|treasury|liquidite|cash/i.test(lower)) return "tresorerie";
+  if (/trade|commerce|lettre.*credit|lc|import|export/i.test(lower)) return "trade-finance";
+  if (/conformite|compliance|aml|lcb|sanctions/i.test(lower)) return "conformite";
+  if (/comptabilite|accounting|gl|grand.*livre/i.test(lower)) return "comptabilite";
+  if (/referentiel|reference|parametre|config/i.test(lower)) return "referentiel";
+  if (/document|ged|archive|scan/i.test(lower)) return "document";
+  if (/workflow|bpm|process|approbation/i.test(lower)) return "workflow";
+  if (/monetique|tpe|pos|terminal/i.test(lower)) return "monetique";
+  if (/swift|sepa|interbank|compensation/i.test(lower)) return "interbancaire";
 
   // Split camelCase and take the first meaningful word
   const parts = name.replace(/([a-z])([A-Z])/g, "$1 $2").split(/\s+/);
@@ -655,14 +672,15 @@ export class MicroserviceSplitter {
     // e.g. "CarteEJB_getCartesActives" → strip method → "CarteEJB" → "carte"
     //      "CompteEJB_consulterSolde"  → strip method → "CompteEJB" → "compte"
     const baseName = ejbId.includes("_") ? ejbId.split("_")[0] : ejbId;
-    return baseName
+    const cleaned = baseName
       .replace(/EJB$/i, "")
       .replace(/Service$/i, "")
       .replace(/Bean$/i, "")
       .replace(/Impl$/i, "")
       .replace(/DAO$/i, "")
-      .replace(/MDB$/i, "")
-      .toLowerCase();
+      .replace(/MDB$/i, "");
+    // Delegate to shared inferDomainFromClassName for consistent domain mapping
+    return inferDomainFromClassName(cleaned);
   }
 
   private jndiToTopic(jndi: string): string {

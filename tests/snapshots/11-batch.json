@@ -1,11 +1,11 @@
 {
   "fixtureId": "11-batch",
-  "timestamp": "2026-04-11T15:15:37.441Z",
+  "timestamp": "2026-04-11T15:33:22.249Z",
   "useCaseCount": 1,
   "dtoCount": 0,
   "enumCount": 0,
   "exceptionCount": 0,
-  "generatedFileCount": 15,
+  "generatedFileCount": 16,
   "generatedFilePaths": [
     "src/main/java/com/bank/ejbproject/EjbProjectApplication.java",
     "src/main/java/com/bank/ejbproject/exception/GlobalExceptionHandler.java",
@@ -21,7 +21,8 @@
     "k8s/deployment.yaml",
     "k8s/service.yaml",
     "pom.xml",
-    "MIGRATION_REPORT.md"
+    "MIGRATION_REPORT.md",
+    "QUALITY_SCORE.md"
   ],
   "score": 77,
   "status": "WARN"

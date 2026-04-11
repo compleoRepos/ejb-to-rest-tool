@@ -125,6 +125,8 @@ export interface AgentSession {
     /** All generated microservice files (path → content) */
     generatedFiles: Array<{ path: string; content: string }>;
   };
+  /** Quality score (available after GENERATING phase) */
+  qualityScore?: { totalScore: number; maxScore: number; grade: string; summary: string };
   /** Error message if failed */
   errorMessage?: string;
   /** Promise resolver for ambiguity resolution */
@@ -332,6 +334,10 @@ export class CompleoAgent {
             mlEnabled: session.microserviceResult.mlEnabled,
             filesCount: session.microserviceResult.filesCount,
           } : undefined,
+          qualityScore: session.qualityScore ? {
+            score: `${session.qualityScore.totalScore}/${session.qualityScore.maxScore}`,
+            grade: session.qualityScore.grade,
+          } : undefined,
         },
       });
       yield successEvent;
@@ -410,6 +416,10 @@ export class CompleoAgent {
         downloadUrl: session.downloadUrl,
         ambiguityCount: session.pendingAmbiguities?.length || 0,
         choicesResolved: session.userChoices?.length || 0,
+        qualityScore: session.qualityScore ? {
+          score: `${session.qualityScore.totalScore}/${session.qualityScore.maxScore}`,
+          grade: session.qualityScore.grade,
+        } : undefined,
       },
     };
   }
@@ -718,9 +728,25 @@ export class CompleoAgent {
     session.generatedProject = generatedProject;
     session.migrationReport = generatedProject.migrationReport;
 
+    // v7.2: Quality Score
+    const qualityFile = generatedProject.files.find(f => f.path === "QUALITY_SCORE.md");
+    if (qualityFile) {
+      // Parse score from the generated quality report
+      const scoreMatch = qualityFile.content.match(/(\d+)\/(\d+)\s+\(([A-F][+]?)\)/);
+      if (scoreMatch) {
+        session.qualityScore = {
+          totalScore: parseInt(scoreMatch[1], 10),
+          maxScore: parseInt(scoreMatch[2], 10),
+          grade: scoreMatch[3],
+          summary: qualityFile.content,
+        };
+      }
+    }
+
     this.sessionStore.update(session.id, {
       generatedProject,
       migrationReport: generatedProject.migrationReport,
+      qualityScore: session.qualityScore,
     });
 
     const totalFiles = generatedProject.files.length + generatedProject.multiTechFiles.length;

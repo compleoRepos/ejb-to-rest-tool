@@ -44,6 +44,7 @@ import {
   generatePomXml,
   generateMigrationReport,
 } from "./spring/infra-gen";
+import { scoreGeneration, generateQualitySection, type QualityReport } from "./engine/quality-scorer";
 
 // --- Main Generator (Orchestrator) ---
 
@@ -223,6 +224,15 @@ public class BusinessRuleException extends RuntimeException {
       }
     }
   }
+
+  // 14. Quality Score — v7.2
+  const qualityReport = scoreGeneration(files);
+  const qualityFile: GeneratedFile = {
+    path: "QUALITY_SCORE.md",
+    content: `# Rapport de Qualité — Compleo v7.2\n\nGénéré le : ${new Date().toLocaleString("fr-FR")}\n\n${generateQualitySection(qualityReport)}\n`,
+    category: "report",
+  };
+  files.push(qualityFile);
 
   // Compute stats
   const stats: GenerationStats = {

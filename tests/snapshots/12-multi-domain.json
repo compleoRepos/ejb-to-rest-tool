@@ -1,11 +1,11 @@
 {
   "fixtureId": "12-multi-domain",
-  "timestamp": "2026-04-11T15:15:37.457Z",
+  "timestamp": "2026-04-11T15:33:22.263Z",
   "useCaseCount": 2,
   "dtoCount": 4,
   "enumCount": 0,
   "exceptionCount": 0,
-  "generatedFileCount": 22,
+  "generatedFileCount": 23,
   "generatedFilePaths": [
     "src/main/java/com/bank/ejbproject/EjbProjectApplication.java",
     "src/main/java/com/bank/ejbproject/dto/ConsulterSoldeRequestDTO.java",
@@ -28,7 +28,8 @@
     "k8s/deployment.yaml",
     "k8s/service.yaml",
     "pom.xml",
-    "MIGRATION_REPORT.md"
+    "MIGRATION_REPORT.md",
+    "QUALITY_SCORE.md"
   ],
   "score": 79,
   "status": "WARN"

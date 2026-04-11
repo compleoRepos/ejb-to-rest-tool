@@ -140,18 +140,19 @@ export class MicroserviceGenerator {
       this.application(service, pkg)
     );
 
-    // Pour chaque EJB du service
+    // Pour chaque EJB du service — FIX C bis: use clean names
     for (const mod of mods) {
+      const cleanName = this.cleanModuleName(mod.id);
       files.set(
-        `${srcPath}/service/${mod.id}Service.java`,
+        `${srcPath}/service/${cleanName}Service.java`,
         this.springService(mod, service, pkg)
       );
       files.set(
-        `${srcPath}/controller/${mod.id}Controller.java`,
+        `${srcPath}/controller/${cleanName}Controller.java`,
         this.controller(mod, service, pkg)
       );
       files.set(
-        `${testPath}/controller/${mod.id}ControllerTest.java`,
+        `${testPath}/controller/${cleanName}ControllerTest.java`,
         this.tests(mod, service, pkg)
       );
     }
@@ -340,7 +341,7 @@ public class ${pascal}Application {
     public ${uc.voOutType ?? "void"} ${uc.methodName}(${
       uc.voInType ? `${uc.voInType} request` : ""}) {
         log.info("${uc.methodName}: {}", ${uc.voInType ? "request" : '""'});
-        // TODO: Migrer la logique depuis ${mod.id}.${uc.methodName}
+        // TODO: Migrer la logique depuis ${this.cleanModuleName(mod.id)}.${uc.methodName}
         // SQL original préservé dans les commentaires ci-dessous
         ${(uc.sqlConstants ?? []).map(sql =>
           `// SQL: ${sql.name} = "${sql.value?.substring(0, 80)}..."`
@@ -357,7 +358,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * ${mod.id}Service — ${s.name}
+ * ${this.cleanModuleName(mod.id)}Service — ${s.name}
  * Migré depuis ${mod.id} (${mod.type})
  * Tables propriétaires : ${s.ownedTables.join(", ")}
  * Schéma Oracle : ${s.dbSchema}
@@ -365,7 +366,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class ${mod.id}Service {
+public class ${this.cleanModuleName(mod.id)}Service {
 
     private final JdbcTemplate jdbcTemplate;
     ${deps}
@@ -414,16 +415,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import ${pkg}.service.${mod.id}Service;
+import ${pkg}.service.${this.cleanModuleName(mod.id)}Service;
 
 @Slf4j
 @RestController
-@RequestMapping("/api/v1/${this.toPath(mod.id).replace("/", "")}")
+@RequestMapping("/api/v1/${this.toPath(this.cleanModuleName(mod.id)).replace("/", "")}")
 @RequiredArgsConstructor
-@Tag(name = "${mod.id}", description = "API ${s.name}")
-public class ${mod.id}Controller {
+@Tag(name = "${this.cleanModuleName(mod.id)}", description = "API ${s.name}")
+public class ${this.cleanModuleName(mod.id)}Controller {
 
-    private final ${mod.id}Service service;
+    private final ${this.cleanModuleName(mod.id)}Service service;
 ${endpoints}
 }`;
   }
@@ -822,14 +823,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.web.servlet.MockMvc;
-import ${pkg}.service.${mod.id}Service;
+import ${pkg}.service.${this.cleanModuleName(mod.id)}Service;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(${mod.id}Controller.class)
-class ${mod.id}ControllerTest {
+@WebMvcTest(${this.cleanModuleName(mod.id)}Controller.class)
+class ${this.cleanModuleName(mod.id)}ControllerTest {
 
     @Autowired MockMvc mockMvc;
-    @MockBean ${mod.id}Service service;
+    @MockBean ${this.cleanModuleName(mod.id)}Service service;
 
     @Test
     @DisplayName("Actuator health — service démarre")
@@ -958,12 +959,21 @@ ${"`"}${"`"}${"`"}bash
 cd infrastructure
 docker-compose up -d
 # Accéder aux Swagger UI de chaque service :
-${services.map((s, i) => `# http://localhost:${8081 + i}/swagger-ui.html  → ${s.name}`).join("\n")}
-${"`"}${"`"}${"`"}
+${services.map((s, i) => `# http://localhost:${8081 + i}/swagger-ui.html  → ${s.name}`).join("\n")}${"\`"}${"\`"}${"\`"}
 `;
   }
 
-  // ── Utilitaires ────────────────────────────────────────────────
+  // ── Utilitaires ────────────────────────────────────────────────────────────
+
+  /**
+   * FIX C bis v7.2: Clean module name for use as class/method names.
+   * "CarteEJB_getCartesActives" → "CarteEJB" (strip method after underscore)
+   * "CompteEJB_consulterSolde"  → "CompteEJB" (strip method after underscore)
+   * "CarteEJB"                  → "CarteEJB" (no change)
+   */
+  private cleanModuleName(modId: string): string {
+    return modId.includes("_") ? modId.split("_")[0] : modId;
+  }
 
   private toCamel(s: string): string {
     return s.replace(/-([a-z])/g, (_, l: string) => l.toUpperCase())
