@@ -1,13 +1,22 @@
 /**
- * Tests unitaires — Compleo v7.2
- * Score qualité automatique + domaines bancaires enrichis + FIX C bis
+ * Tests unitaires — Quality Scorer v7.3 (8 checks)
+ *
+ * Pondération (total = 100 pts) :
+ *   CHECK 1 — SQL_CONSTANTS     (25 pts)
+ *   CHECK 2 — NO_VOID_BUILDER   (15 pts)
+ *   CHECK 3 — NO_OBJECT_RETURN  (10 pts)
+ *   CHECK 4 — METHOD_PARAMS     (15 pts)
+ *   CHECK 5 — MS_NAMES          (10 pts)
+ *   CHECK 6 — ORACLE_KEYWORDS    (5 pts)
+ *   CHECK 7 — URL_CONFLICTS     (10 pts)
+ *   CHECK 8 — USECASES_DETECTED (10 pts)
  */
 
 import { describe, it, expect } from "vitest";
-import { scoreGeneration, type QualityReport } from "./quality-scorer";
+import { scoreGeneration, type QualityReport, type CheckId } from "./quality-scorer";
 import type { GeneratedFile } from "../spring/shared";
 
-// ── Helper: build a minimal service file ─────────────────────────────
+// ── Helper: build minimal files ─────────────────────────────────────
 
 function serviceFile(className: string, body: string): GeneratedFile {
   return {
@@ -25,12 +34,16 @@ function controllerFile(className: string, body: string): GeneratedFile {
   };
 }
 
+function getCheck(report: QualityReport, id: CheckId) {
+  return report.checks.find(c => c.id === id)!;
+}
+
 // ══════════════════════════════════════════════════════════════════════
-// Critère A — SQL constants au niveau classe uniquement
+// CHECK 1 — SQL_CONSTANTS (25 pts)
 // ══════════════════════════════════════════════════════════════════════
 
-describe("Critère A — SQL constants", () => {
-  it("score 25/25 quand les constantes sont au niveau classe", () => {
+describe("CHECK 1 — SQL_CONSTANTS", () => {
+  it("25/25 quand les constantes sont au niveau classe", () => {
     const files: GeneratedFile[] = [
       serviceFile("Compte", `
 public class CompteService {
@@ -46,12 +59,12 @@ public class CompteService {
       `),
     ];
     const report = scoreGeneration(files);
-    const critA = report.criteria.find(c => c.id === "A")!;
-    expect(critA.score).toBe(25);
-    expect(critA.violations).toHaveLength(0);
+    const check = getCheck(report, "SQL_CONSTANTS");
+    expect(check.points).toBe(25);
+    expect(check.passed).toBe(true);
   });
 
-  it("score < 25 quand une constante SQL est dans le body", () => {
+  it("< 25 quand une constante SQL est dans le body", () => {
     const files: GeneratedFile[] = [
       serviceFile("Carte", `
 public class CarteService {
@@ -66,86 +79,118 @@ public class CarteService {
       `),
     ];
     const report = scoreGeneration(files);
-    const critA = report.criteria.find(c => c.id === "A")!;
-    expect(critA.score).toBeLessThan(25);
-    expect(critA.violations.length).toBeGreaterThan(0);
+    const check = getCheck(report, "SQL_CONSTANTS");
+    expect(check.points).toBeLessThan(25);
+    expect(check.passed).toBe(false);
   });
 });
 
 // ══════════════════════════════════════════════════════════════════════
-// Critère B — Types retour corrects
+// CHECK 2 — NO_VOID_BUILDER (15 pts)
 // ══════════════════════════════════════════════════════════════════════
 
-describe("Critère B — Types retour", () => {
-  it("score 25/25 quand tous les types retour sont corrects", () => {
+describe("CHECK 2 — NO_VOID_BUILDER", () => {
+  it("15/15 quand pas de Void.builder()", () => {
     const files: GeneratedFile[] = [
       serviceFile("Compte", `
 public class CompteService {
-    @Transactional(readOnly = true)
     public CompteDTO consulterSolde(String numCompte) {
-        return jdbcTemplate.queryForObject("SELECT ...", mapper, numCompte);
-    }
-
-    @Transactional
-    public List<String> getCartesActives(String numCompte) {
-        return jdbcTemplate.queryForList("SELECT ...", String.class, numCompte);
+        return new CompteDTO();
     }
 }
       `),
     ];
     const report = scoreGeneration(files);
-    const critB = report.criteria.find(c => c.id === "B")!;
-    expect(critB.score).toBe(25);
-    expect(critB.violations).toHaveLength(0);
+    const check = getCheck(report, "NO_VOID_BUILDER");
+    expect(check.points).toBe(15);
+    expect(check.passed).toBe(true);
   });
 
-  it("score < 25 quand void est utilisé avec un return value", () => {
+  it("0/15 quand Void.builder() est présent", () => {
     const files: GeneratedFile[] = [
-      serviceFile("Virement", `
-public class VirementService {
-    @Transactional
-    public void initierVirement(VirementDTO request) {
-        return virementRepository.save(request);
+      serviceFile("Carte", `
+public class CarteService {
+    public Void getCartesActives() {
+        return Void.builder().build();
     }
 }
       `),
     ];
     const report = scoreGeneration(files);
-    const critB = report.criteria.find(c => c.id === "B")!;
-    expect(critB.score).toBeLessThan(25);
-    expect(critB.violations.length).toBeGreaterThan(0);
+    const check = getCheck(report, "NO_VOID_BUILDER");
+    expect(check.points).toBe(0);
+    expect(check.passed).toBe(false);
   });
 });
 
 // ══════════════════════════════════════════════════════════════════════
-// Critère C — Noms microservices = domaine EJB
+// CHECK 3 — NO_OBJECT_RETURN (10 pts)
 // ══════════════════════════════════════════════════════════════════════
 
-describe("Critère C — Noms microservices", () => {
-  it("score 25/25 avec des noms de domaine propres", () => {
+describe("CHECK 3 — NO_OBJECT_RETURN", () => {
+  it("10/10 quand pas de méthode retournant Object", () => {
+    const files: GeneratedFile[] = [
+      serviceFile("Auth", `
+public class AuthService {
+    public AuthResponseDTO handlePostConnexion(AuthRequestDTO request) {
+        return new AuthResponseDTO();
+    }
+}
+      `),
+    ];
+    const report = scoreGeneration(files);
+    const check = getCheck(report, "NO_OBJECT_RETURN");
+    expect(check.points).toBe(10);
+    expect(check.passed).toBe(true);
+  });
+
+  it("0/10 quand Object est type retour", () => {
+    const files: GeneratedFile[] = [
+      serviceFile("Auth", `
+public class AuthService {
+    public Object handlePostConnexion(String request) {
+        return new Object();
+    }
+}
+      `),
+    ];
+    const report = scoreGeneration(files);
+    const check = getCheck(report, "NO_OBJECT_RETURN");
+    expect(check.points).toBe(0);
+    expect(check.passed).toBe(false);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// CHECK 5 — MS_NAMES (10 pts)
+// ══════════════════════════════════════════════════════════════════════
+
+describe("CHECK 5 — MS_NAMES", () => {
+  it("10/10 avec des noms de domaine propres", () => {
     const report = scoreGeneration(
       [],
       ["carte-service", "compte-service", "virement-service"]
     );
-    const critC = report.criteria.find(c => c.id === "C")!;
-    expect(critC.score).toBe(25);
-    expect(critC.violations).toHaveLength(0);
+    const check = getCheck(report, "MS_NAMES");
+    expect(check.points).toBe(10);
+    expect(check.passed).toBe(true);
   });
 
-  it("score < 25 avec des noms contenant des underscores", () => {
+  it("< 10 avec des noms contenant des underscores", () => {
     const report = scoreGeneration(
       [],
       ["carteejb_getcartesactives-service", "compteejb_consultersolde-service"]
     );
-    const critC = report.criteria.find(c => c.id === "C")!;
-    expect(critC.score).toBe(0);
-    expect(critC.violations).toHaveLength(2);
+    const check = getCheck(report, "MS_NAMES");
+    expect(check.points).toBeLessThan(10);
+    expect(check.passed).toBe(false);
   });
 
-  it("score 25/25 quand pas de microservices (N/A)", () => {
+  it("10/10 quand pas de microservices (N/A)", () => {
     const report = scoreGeneration([], []);
-    const critC = report.criteria.find(c => c.id === "C")!;
-    expect(critC.score).toBe(25);
+    const check = getCheck(report, "MS_NAMES");
+    expect(check.points).toBe(10);
+    expect(check.passed).toBe(true);
   });
 
   it("pénalise les noms contenant EJB", () => {
@@ -153,37 +198,37 @@ describe("Critère C — Noms microservices", () => {
       [],
       ["carteejb-service", "compte-service"]
     );
-    const critC = report.criteria.find(c => c.id === "C")!;
-    expect(critC.score).toBeLessThan(25);
-    expect(critC.violations.length).toBe(1);
+    const check = getCheck(report, "MS_NAMES");
+    expect(check.points).toBeLessThan(10);
+    expect(check.passed).toBe(false);
   });
 });
 
 // ══════════════════════════════════════════════════════════════════════
-// Critère D — Pas de mots-clés Oracle dans les tables
+// CHECK 6 — ORACLE_KEYWORDS (5 pts)
 // ══════════════════════════════════════════════════════════════════════
 
-describe("Critère D — Filtrage Oracle", () => {
-  it("score 25/25 avec des tables propres", () => {
+describe("CHECK 6 — ORACLE_KEYWORDS", () => {
+  it("5/5 avec des tables propres", () => {
     const report = scoreGeneration(
       [],
       [],
       ["T_COMPTE", "T_CARTE", "T_VIREMENT", "T_CLIENT"]
     );
-    const critD = report.criteria.find(c => c.id === "D")!;
-    expect(critD.score).toBe(25);
-    expect(critD.violations).toHaveLength(0);
+    const check = getCheck(report, "ORACLE_KEYWORDS");
+    expect(check.points).toBe(5);
+    expect(check.passed).toBe(true);
   });
 
-  it("score < 25 avec des mots-clés Oracle", () => {
+  it("0/5 avec des mots-clés Oracle", () => {
     const report = scoreGeneration(
       [],
       [],
       ["T_COMPTE", "DUAL", "SYSDATE", "NEXTVAL", "T_CARTE"]
     );
-    const critD = report.criteria.find(c => c.id === "D")!;
-    expect(critD.score).toBeLessThan(25);
-    expect(critD.violations).toHaveLength(3);
+    const check = getCheck(report, "ORACLE_KEYWORDS");
+    expect(check.points).toBe(0);
+    expect(check.passed).toBe(false);
   });
 
   it("détecte ROWNUM et NOWAIT", () => {
@@ -192,8 +237,8 @@ describe("Critère D — Filtrage Oracle", () => {
       [],
       ["ROWNUM", "NOWAIT", "T_VALID"]
     );
-    const critD = report.criteria.find(c => c.id === "D")!;
-    expect(critD.violations).toHaveLength(2);
+    const check = getCheck(report, "ORACLE_KEYWORDS");
+    expect(check.passed).toBe(false);
   });
 });
 
@@ -218,13 +263,14 @@ public class CompteService {
     const report = scoreGeneration(
       files,
       ["compte-service", "carte-service"],
-      ["T_COMPTE", "T_CARTE"]
+      ["T_COMPTE", "T_CARTE"],
+      1 // legacyMethodCount = 1 (matches the 1 generated method)
     );
     expect(report.totalScore).toBe(100);
     expect(report.grade).toBe("A+");
   });
 
-  it("grade F pour un projet avec toutes les violations", () => {
+  it("grade < A+ pour un projet avec violations", () => {
     const files: GeneratedFile[] = [
       serviceFile("Carte", `
 public class CarteService {
@@ -242,7 +288,7 @@ public class CarteService {
       ["DUAL", "SYSDATE"]
     );
     expect(report.grade).not.toBe("A+");
-    expect(report.totalScore).toBeLessThan(50);
+    expect(report.totalScore).toBeLessThan(90);
   });
 
   it("le summary contient le tableau markdown", () => {
@@ -258,18 +304,9 @@ public class CarteService {
 // ══════════════════════════════════════════════════════════════════════
 
 describe("Domaines bancaires enrichis", () => {
-  // We test inferDomainFromClassName indirectly via the splitter
-  // For direct testing, import the function
   it("les noms de domaine bancaires étendus sont reconnus", async () => {
-    // Import dynamically to test the exported function
     const { MicroserviceSplitter } = await import("./microservices/microservice-splitter");
-
-    // Test via toDomain (private) — we test indirectly via inferServiceName
-    // The key test is that inferDomainFromClassName recognizes extended domains
     const splitter = new MicroserviceSplitter();
-
-    // We can't easily test private methods, so we test the public interface
-    // by checking that the module exists and exports correctly
     expect(splitter).toBeDefined();
     expect(typeof splitter.split).toBe("function");
   });
@@ -291,20 +328,12 @@ describe("FIX C bis — cleanModuleName", () => {
 // ══════════════════════════════════════════════════════════════════════
 
 describe("inferDomainFromClassName — domaines étendus", () => {
-  // We need to test the function directly
-  // Since it's not exported, we test via the splitter's behavior
-  // But we can import it if it's exported
-
   it("reconnaît les domaines bancaires core", async () => {
-    // Dynamic import to get the function
     const mod = await import("./microservices/microservice-splitter");
-    // inferDomainFromClassName is a module-level function, may not be exported
-    // Test indirectly: the splitter should produce correct domain names
     expect(mod.MicroserviceSplitter).toBeDefined();
   });
 
-  // Test the domain mapping via the quality scorer
-  it("le score C valide les noms de domaines bancaires étendus", () => {
+  it("le score MS_NAMES valide les noms de domaines bancaires étendus", () => {
     const extendedDomains = [
       "assurance-service",
       "epargne-service",
@@ -324,8 +353,8 @@ describe("inferDomainFromClassName — domaines étendus", () => {
     ];
 
     const report = scoreGeneration([], extendedDomains, []);
-    const critC = report.criteria.find(c => c.id === "C")!;
-    expect(critC.score).toBe(25);
-    expect(critC.violations).toHaveLength(0);
+    const check = getCheck(report, "MS_NAMES");
+    expect(check.points).toBe(10);
+    expect(check.passed).toBe(true);
   });
 });

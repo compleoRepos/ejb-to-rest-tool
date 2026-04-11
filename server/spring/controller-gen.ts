@@ -18,6 +18,7 @@ import {
   type HttpConfig,
   toPascalCase, toMethodName, mapDtoClassName, pluralize,
   determineHttpConfig, getIdParamName, getHttpAnnotation,
+  mapToSpringType,
 } from "./shared";
 
 export function generateDomainController(
@@ -57,11 +58,16 @@ export function generateDomainController(
     const resDto = dtoMap.get(uc.voOutType);
 
     const reqType = reqDto ? mapDtoClassName(reqDto.className) : null;
+    // FIX F v7.3: Object is never acceptable as return type — infer from rawSource
+    let effectiveVoOutType = uc.voOutType;
+    if (effectiveVoOutType === "Object" || effectiveVoOutType === "ValueObject") {
+      effectiveVoOutType = inferReturnTypeFromSourceCtrl(uc.rawSource, uc.className, methodName);
+    }
     // FIX B v7.1: Infer return type from voOutType even when not in dtoMap
     const resType = resDto
       ? mapDtoClassName(resDto.className)
-      : (uc.voOutType && uc.voOutType !== "Void" && uc.voOutType !== "void" && uc.voOutType !== "Object" && uc.voOutType !== "ValueObject")
-        ? resolveRawReturnTypeCtrl(uc.voOutType, imports, basePackage)
+      : (effectiveVoOutType && effectiveVoOutType !== "Void" && effectiveVoOutType !== "void" && effectiveVoOutType !== "Object" && effectiveVoOutType !== "ValueObject")
+        ? resolveRawReturnTypeCtrl(effectiveVoOutType, imports, basePackage)
         : "Void";
 
     if (reqType) imports.add(`import ${basePackage}.dto.${reqType};`);
@@ -138,6 +144,35 @@ ${builderParts.join("\n")}
       paramList = `@PathVariable String ${idParamName}`;
     } else if (reqType) {
       paramList = `@Valid @RequestBody ${reqType} request`;
+    } else {
+      // FIX E v7.3: Use legacy method parameters when no DTO wrapper exists
+      const legacyParams = (uc as any).methodParameters as { name: string; type: string }[] | undefined;
+      if (legacyParams && legacyParams.length > 0) {
+        const enumNames = new Set<string>();
+        const paramParts: string[] = [];
+        if (hasIdParam) {
+          paramParts.push(`@PathVariable String ${idParamName}`);
+        }
+        for (const p of legacyParams) {
+          const springType = mapToSpringType(p.type, false, enumNames, imports);
+          addImportsForRawTypeCtrl(springType, imports, basePackage);
+          if (httpMethod === "GET") {
+            imports.add("import org.springframework.web.bind.annotation.RequestParam;");
+            paramParts.push(`@RequestParam ${springType} ${p.name}`);
+          } else {
+            paramParts.push(`${springType} ${p.name}`);
+          }
+        }
+        paramList = paramParts.join(", ");
+      }
+    }
+
+       // FIX E v7.3: Determine service call arguments
+    // If using individual legacy params, pass them directly; otherwise pass "request" DTO
+    const legacyParamsCtrl = (uc as any).methodParameters as { name: string; type: string }[] | undefined;
+    let serviceCallArgs = reqType ? "request" : "";
+    if (!reqType && legacyParamsCtrl && legacyParamsCtrl.length > 0) {
+      serviceCallArgs = legacyParamsCtrl.map(p => p.name).join(", ");
     }
 
     // FIX v5.8.2: Use httpConfig.responseStatus for proper HTTP status codes
@@ -145,14 +180,19 @@ ${builderParts.join("\n")}
     if (httpConfig.responseStatus === 201) {
       imports.add("import org.springframework.http.HttpStatus;");
       responseStatement = resType !== "Void"
-        ? `        ${resType} result = ${serviceVar}.${methodName}(${reqType ? "request" : ""});\n        return ResponseEntity.status(HttpStatus.CREATED).body(result);`
-        : `        ${serviceVar}.${methodName}(${reqType ? "request" : ""});\n        return ResponseEntity.status(HttpStatus.CREATED).build();`;
+        ? `        ${resType} result = ${serviceVar}.${methodName}(${serviceCallArgs});
+        return ResponseEntity.status(HttpStatus.CREATED).body(result);`
+        : `        ${serviceVar}.${methodName}(${serviceCallArgs});
+        return ResponseEntity.status(HttpStatus.CREATED).build();`;
     } else if (httpConfig.responseStatus === 204) {
-      responseStatement = `        ${serviceVar}.${methodName}(${reqType ? "request" : ""});\n        return ResponseEntity.noContent().build();`;
+      responseStatement = `        ${serviceVar}.${methodName}(${serviceCallArgs});
+        return ResponseEntity.noContent().build();`;
     } else {
       responseStatement = resType !== "Void"
-        ? `        ${resType} result = ${serviceVar}.${methodName}(${reqType ? "request" : ""});\n        return ResponseEntity.ok(result);`
-        : `        ${serviceVar}.${methodName}(${reqType ? "request" : ""});\n        return ResponseEntity.ok().build();`;
+        ? `        ${resType} result = ${serviceVar}.${methodName}(${serviceCallArgs});
+        return ResponseEntity.ok(result);`
+        : `        ${serviceVar}.${methodName}(${serviceCallArgs});
+        return ResponseEntity.ok().build();`;
     }
 
     // v5.10.2: Sanitize javadoc — remove braces and limit length to prevent
@@ -298,4 +338,50 @@ function addImportsForRawTypeCtrl(resType: string, imports: Set<string>, basePac
   if (resType.includes("<")) return;
   if (JAVA_BUILTIN_TYPES_CTRL.has(resType)) return;
   imports.add(`import ${basePackage}.dto.${resType};`);
+}
+
+
+/**
+ * FIX F v7.3: Infer the real return type from raw source code when voOutType is "Object".
+ * Same logic as service-gen.ts version but for controller context.
+ */
+function inferReturnTypeFromSourceCtrl(rawSource: string, className: string, methodName: string): string {
+  if (!rawSource) return "Void";
+
+  // Heuristic 1: Methods that are clearly void
+  const voidPatterns = /deconnex|logout|disconnect|destroy|cleanup|invalidat|fermer|close/i;
+  if (voidPatterns.test(methodName)) return "Void";
+
+  // Heuristic 2: Extract declared return type from method signature
+  const methodRegex = new RegExp(
+    `public\\s+(\\S+)\\s+${methodName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\(`,
+    "m"
+  );
+  const sigMatch = rawSource.match(methodRegex);
+  if (sigMatch) {
+    const declaredReturn = sigMatch[1];
+    if (declaredReturn && declaredReturn !== "void" && declaredReturn !== "Object") {
+      return declaredReturn;
+    }
+  }
+
+  // Heuristic 3: "return new XxxDTO(...)"
+  const returnNewMatch = rawSource.match(/return\s+new\s+(\w+(?:DTO|Response|Result|Info|Data))\s*\(/);
+  if (returnNewMatch) return returnNewMatch[1];
+
+  // Heuristic 4: Typed variable assignment
+  const typedVarMatch = rawSource.match(/(\w+(?:DTO|Response|Result|Info|Data))\s+\w+\s*=/);
+  if (typedVarMatch) return typedVarMatch[1];
+
+  // Heuristic 5: Cast pattern
+  const castMatch = rawSource.match(/return\s+\((\w+(?:DTO|Response|Result|Info|Data))\)\s+/);
+  if (castMatch) return castMatch[1];
+
+  // Heuristic 6: handlePostXxx → XxxResponseDTO
+  const handleMatch = methodName.match(/^handlePost(\w+)$/i);
+  if (handleMatch) {
+    return `${handleMatch[1]}ResponseDTO`;
+  }
+
+  return "Void";
 }

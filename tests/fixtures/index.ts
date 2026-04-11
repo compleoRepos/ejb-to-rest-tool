@@ -1019,6 +1019,214 @@ public class CompteInexistantException extends Exception {
   },
 };
 
+// ─── 17: BMCE Banking (BUG-1 à BUG-6) ──────────────────────────────────────
+export const FIXTURE_17_BMCE: TestFixture = {
+  id: "17-bmce-banking",
+  name: "BMCE Digital Banking Legacy",
+  description: "Projet BMCE complet : CarteEJB, CompteEJB, ReportingEJB, SessionManagerBean, AuthServlet",
+  category: "ejb",
+  pomXml: POM_ORACLE,
+  files: [
+    // CarteEJB — BUG-1 : getCartesActives(String numCompte)
+    {
+      path: "src/main/java/com/bmce/carte/CarteEJB.java",
+      content: `package com.bmce.carte;
+import javax.ejb.Stateless;
+import java.util.List;
+import java.util.ArrayList;
+@Stateless
+public class CarteEJB {
+    private static final String SQL_GET_CARTES = "SELECT NUM_CARTE FROM T_CARTE WHERE NUM_COMPTE = ? AND STATUT = 'ACTIVE'";
+    
+    public List<String> getCartesActives(String numCompte) {
+        // SELECT NUM_CARTE FROM T_CARTE WHERE NUM_COMPTE = :numCompte
+        return new ArrayList<>();
+    }
+    
+    public void bloquerCarte(String numCarte, String motif) {
+        // UPDATE T_CARTE SET STATUT = 'BLOQUEE' WHERE NUM_CARTE = :numCarte
+    }
+}`,
+    },
+    // CompteEJB — consulterSolde avec VoIn
+    {
+      path: "src/main/java/com/bmce/compte/CompteEJB.java",
+      content: `package com.bmce.compte;
+import javax.ejb.Stateless;
+@Stateless
+public class CompteEJB {
+    private static final String SQL_SOLDE = "SELECT SOLDE FROM T_COMPTE WHERE NUM_COMPTE = ?";
+    
+    public ConsulterSoldeVoOut consulterSolde(ConsulterSoldeVoIn voIn) {
+        ConsulterSoldeVoOut out = new ConsulterSoldeVoOut();
+        out.setSolde(1000.0);
+        return out;
+    }
+}`,
+    },
+    {
+      path: "src/main/java/com/bmce/compte/ConsulterSoldeVoIn.java",
+      content: `package com.bmce.compte;
+public class ConsulterSoldeVoIn {
+    private String numCompte;
+    public String getNumCompte() { return numCompte; }
+    public void setNumCompte(String n) { this.numCompte = n; }
+}`,
+    },
+    {
+      path: "src/main/java/com/bmce/compte/ConsulterSoldeVoOut.java",
+      content: `package com.bmce.compte;
+public class ConsulterSoldeVoOut {
+    private double solde;
+    public double getSolde() { return solde; }
+    public void setSolde(double s) { this.solde = s; }
+}`,
+    },
+    // ReportingEJB — BUG-2 : getHistoriqueClientComplet(String, String, String)
+    {
+      path: "src/main/java/com/bmce/reporting/ReportingEJB.java",
+      content: `package com.bmce.reporting;
+import javax.ejb.Stateless;
+import java.util.List;
+import java.util.ArrayList;
+@Stateless
+public class ReportingEJB {
+    private static final String SQL_HISTORIQUE = "SELECT * FROM T_MOUVEMENT WHERE CODE_CLIENT = ? AND DATE_MVT BETWEEN ? AND ?";
+    
+    public List<String> getHistoriqueClientComplet(String codeClient, String dateDebut, String dateFin) {
+        return new ArrayList<>();
+    }
+    
+    public String genererRapportBAM(String codeAgence) {
+        return "RAPPORT-BAM";
+    }
+}`,
+    },
+    // SessionManagerBean — BUG-4 : validerSession(String token) → boolean
+    {
+      path: "src/main/java/com/bmce/session/SessionManagerBean.java",
+      content: `package com.bmce.session;
+import javax.ejb.SessionBean;
+import javax.ejb.SessionContext;
+public class SessionManagerBean implements SessionBean {
+    private SessionContext ctx;
+    public void ejbCreate() {}
+    public void ejbRemove() {}
+    public void ejbActivate() {}
+    public void ejbPassivate() {}
+    public void setSessionContext(SessionContext ctx) { this.ctx = ctx; }
+    
+    public String creerSession(String userId, String codeAgence, String ip) {
+        return "TOKEN-123";
+    }
+    
+    public boolean validerSession(String token) {
+        return token != null && !token.isEmpty();
+    }
+    
+    public void invaliderSession(String token) {
+        // invalidation logic
+    }
+    
+    public String getUserIdFromToken(String token) {
+        return "USER-001";
+    }
+    
+    public String getCodeAgenceFromToken(String token) {
+        return "AGC-001";
+    }
+}`,
+    },
+    {
+      path: "META-INF/ejb-jar.xml",
+      content: `<?xml version="1.0" encoding="UTF-8"?>
+<ejb-jar>
+  <enterprise-beans>
+    <session>
+      <ejb-name>SessionManagerBean</ejb-name>
+      <ejb-class>com.bmce.session.SessionManagerBean</ejb-class>
+      <session-type>Stateless</session-type>
+    </session>
+  </enterprise-beans>
+</ejb-jar>`,
+    },
+    // AuthServlet — BUG-3 : handlePostConnexion retourne Object
+    {
+      path: "src/main/java/com/bmce/web/AuthServlet.java",
+      content: `package com.bmce.web;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import javax.servlet.annotation.WebServlet;
+import java.io.IOException;
+@WebServlet("/auth")
+public class AuthServlet extends HttpServlet {
+    protected void doPost(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        String action = request.getParameter("action");
+        if ("connexion".equals(action)) {
+            String login = request.getParameter("login");
+            String motDePasse = request.getParameter("motDePasse");
+            // authenticate and return JSON token
+            response.getWriter().write("{\"token\": \"abc123\"}");
+        } else if ("deconnexion".equals(action)) {
+            request.getSession().invalidate();
+            response.getWriter().write("{\"status\": \"ok\"}");
+        }
+    }
+}`,
+    },
+    // VirementEJB
+    {
+      path: "src/main/java/com/bmce/virement/VirementEJB.java",
+      content: `package com.bmce.virement;
+import javax.ejb.Stateless;
+@Stateless
+public class VirementEJB {
+    private static final String SQL_VIREMENT = "INSERT INTO T_VIREMENT (SOURCE, DEST, MONTANT) VALUES (?, ?, ?)";
+    
+    public InitierVirementVoOut initierVirement(InitierVirementVoIn voIn) {
+        InitierVirementVoOut out = new InitierVirementVoOut();
+        out.setReference("VIR-001");
+        return out;
+    }
+}`,
+    },
+    {
+      path: "src/main/java/com/bmce/virement/InitierVirementVoIn.java",
+      content: `package com.bmce.virement;
+public class InitierVirementVoIn {
+    private String source;
+    private String dest;
+    private double montant;
+    public String getSource() { return source; }
+    public void setSource(String s) { this.source = s; }
+    public String getDest() { return dest; }
+    public void setDest(String d) { this.dest = d; }
+    public double getMontant() { return montant; }
+    public void setMontant(double m) { this.montant = m; }
+}`,
+    },
+    {
+      path: "src/main/java/com/bmce/virement/InitierVirementVoOut.java",
+      content: `package com.bmce.virement;
+public class InitierVirementVoOut {
+    private String reference;
+    public String getReference() { return reference; }
+    public void setReference(String r) { this.reference = r; }
+}`,
+    },
+  ],
+  expected: {
+    useCases: 8,
+    dtos: 4,
+    enums: 0,
+    exceptions: 0,
+    domains: ["carte", "compte", "reporting", "virement"],
+    technologies: ["ejb3x", "ejb2x", "servlet"],
+    minScore: 80,
+  },
+};
+
 // ─── Registry ───────────────────────────────────────────────────────────────
 
 export const ALL_FIXTURES: TestFixture[] = [
@@ -1038,6 +1246,7 @@ export const ALL_FIXTURES: TestFixture[] = [
   FIXTURE_14_EJB2X,
   FIXTURE_15_HIBERNATE,
   FIXTURE_16_MIXTE,
+  FIXTURE_17_BMCE,
 ];
 
 export const EJB_FIXTURES = ALL_FIXTURES.filter((f) => f.category === "ejb");

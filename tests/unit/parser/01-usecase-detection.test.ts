@@ -195,4 +195,79 @@ describe("UseCase detection — tous types Java", () => {
       }
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FIX-E : Propagation des paramètres String directs (v7.3)
+  // ═══════════════════════════════════════════════════════════════════════════
+  describe("FIX-E : paramètres directs propagés", () => {
+    it("propage un param String direct sans VoIn", () => {
+      const src = `
+        package com.bank.carte;
+        import javax.ejb.Stateless;
+        import java.util.List;
+        @Stateless
+        public class CarteEJB {
+          public List<String> getCartesActives(String numCompte) {
+            return new java.util.ArrayList<>();
+          }
+        }
+      `;
+      const uc = parseUseCases(src, "src/main/java/com/bank/carte/CarteEJB.java");
+      expect(uc.length).toBeGreaterThanOrEqual(1);
+      const target = uc.find(u => u.className.includes("getCartesActives"));
+      expect(target).toBeDefined();
+      if (target) {
+        expect(target.methodParameters).toBeDefined();
+        expect(target.methodParameters!.length).toBe(1);
+        expect(target.methodParameters![0].name).toBe("numCompte");
+        expect(target.methodParameters![0].type).toBe("String");
+      }
+    });
+
+    it("propage 3 params directs pour getHistoriqueClientComplet", () => {
+      const src = `
+        package com.bank.reporting;
+        import javax.ejb.Stateless;
+        import java.util.List;
+        @Stateless
+        public class ReportingEJB {
+          public List<String> getHistoriqueClientComplet(
+              String codeClient, String dateDebut, String dateFin) {
+            return new java.util.ArrayList<>();
+          }
+        }
+      `;
+      const uc = parseUseCases(src, "src/main/java/com/bank/reporting/ReportingEJB.java");
+      const target = uc.find(u => u.className.includes("getHistoriqueClientComplet"));
+      expect(target).toBeDefined();
+      if (target) {
+        expect(target.methodParameters).toBeDefined();
+        expect(target.methodParameters!.length).toBe(3);
+        expect(target.methodParameters!.map(p => p.name)).toEqual(["codeClient", "dateDebut", "dateFin"]);
+      }
+    });
+
+    it("VoIn reste un DTO Spring (pas des params directs)", () => {
+      const src = `
+        package com.bank.compte;
+        import javax.ejb.Stateless;
+        @Stateless
+        public class CompteEJB {
+          public ConsulterSoldeVoOut consulterSolde(ConsulterSoldeVoIn voIn) {
+            return null;
+          }
+        }
+      `;
+      const uc = parseUseCases(src, "src/main/java/com/bank/compte/CompteEJB.java");
+      const target = uc.find(u => u.className.includes("consulterSolde"));
+      expect(target).toBeDefined();
+      if (target) {
+        expect(target.voInType).toBe("ConsulterSoldeVoIn");
+        // Les params VoIn ne sont pas des params directs
+        if (target.methodParameters && target.methodParameters.length > 0) {
+          expect(target.methodParameters[0].type).toBe("ConsulterSoldeVoIn");
+        }
+      }
+    });
+  });
 });

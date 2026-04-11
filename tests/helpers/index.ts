@@ -263,10 +263,12 @@ export function calculateScore(
   }
 
   // 3. Types de retour corrects (0-10)
-  const hasVoidBuilder = Array.from(fileMap.values()).some(
-    (c) => c.includes("Void.builder()") || c.includes("Void.VoidBuilder")
+  // Only check Java files, not reports (.md) which may mention these patterns in descriptions
+  const javaEntries = Array.from(fileMap.entries()).filter(([p]) => p.endsWith(".java"));
+  const hasVoidBuilder = javaEntries.some(
+    ([, c]) => c.includes("Void.builder()") || c.includes("Void.VoidBuilder")
   );
-  const hasObjectReturn = Array.from(fileMap.values()).some((c) => /public Object \w+\(/.test(c));
+  const hasObjectReturn = javaEntries.some(([, c]) => /public Object \w+\(/.test(c));
   if (!hasVoidBuilder && !hasObjectReturn) {
     bd.correctReturnTypes = 10;
     passed.push("Types de retour corrects");

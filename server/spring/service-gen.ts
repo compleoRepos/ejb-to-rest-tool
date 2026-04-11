@@ -61,10 +61,15 @@ export function generateDomainService(
     const reqType = reqDto ? mapDtoClassName(reqDto.className) : "Void";
     // FIX B v7.1: Infer return type from voOutType even when not in dtoMap
     // e.g. voOutType = "List<String>" or "MouvementsResponseDTO" → use directly
+    // FIX F v7.3: Object is never acceptable as return type — infer from rawSource
+    let effectiveVoOutType = uc.voOutType;
+    if (effectiveVoOutType === "Object" || effectiveVoOutType === "ValueObject") {
+      effectiveVoOutType = inferReturnTypeFromSource(uc.rawSource, uc.className, methodName);
+    }
     const resType = resDto
       ? mapDtoClassName(resDto.className)
-      : (uc.voOutType && uc.voOutType !== "Void" && uc.voOutType !== "void" && uc.voOutType !== "Object" && uc.voOutType !== "ValueObject")
-        ? resolveRawReturnType(uc.voOutType, imports, basePackage)
+      : (effectiveVoOutType && effectiveVoOutType !== "Void" && effectiveVoOutType !== "void" && effectiveVoOutType !== "Object" && effectiveVoOutType !== "ValueObject")
+        ? resolveRawReturnType(effectiveVoOutType, imports, basePackage)
         : "Void";
 
     if (reqDto) imports.add(`import ${basePackage}.dto.${reqType};`);
@@ -93,9 +98,22 @@ export function generateDomainService(
       }
     }
 
-    // FIX A v5.7.2: For direct EJB, use actual parameter/return types even if not in dtoMap
-    // The voInType/voOutType from parser may be raw Java types (e.g. "CompteDTO", "List<Mouvement>")
-    const paramType = reqType !== "Void" ? `${reqType} request` : "";
+    // FIX E v7.3: Propagate all legacy method parameters when voInType is absent
+    // If the method has individual parameters (not wrapped in a VO/DTO), use them directly
+    let paramType = "";
+    const legacyParams = (uc as any).methodParameters as { name: string; type: string }[] | undefined;
+    if (reqType !== "Void") {
+      paramType = `${reqType} request`;
+    } else if (legacyParams && legacyParams.length > 0) {
+      // Use individual parameters from the legacy method signature
+      // Collect enum names from dtoMap for type resolution
+      const enumNames = new Set<string>();
+      paramType = legacyParams.map(p => {
+        const springType = mapToSpringType(p.type, false, enumNames, imports);
+        addImportsForRawType(springType, imports, basePackage);
+        return `${springType} ${p.name}`;
+      }).join(", ");
+    }
     const returnType = resType !== "Void" ? resType : "void";
 
     // v5.10.2: Sanitize javadoc — remove braces and limit length to prevent
@@ -427,4 +445,62 @@ function addImportsForRawType(resType: string, imports: Set<string>, basePackage
 
   // DTO class — add import from dto package
   imports.add(`import ${basePackage}.dto.${resType};`);
+}
+
+/**
+ * FIX F v7.3: Infer the real return type from raw source code when voOutType is "Object".
+ * Scans the method body for patterns like:
+ *   - return new XxxDTO(...) → XxxDTO
+ *   - return xxxResponse → look for variable declaration type
+ *   - XxxResponseDTO result = ... → XxxResponseDTO
+ *   - method signature in remote interface: ReturnType methodName(...)
+ * Falls back to "void" for deconnexion/logout/destroy methods.
+ */
+function inferReturnTypeFromSource(rawSource: string, className: string, methodName: string): string {
+  if (!rawSource) return "Void";
+
+  // Heuristic 1: Methods that are clearly void (logout, disconnect, destroy, etc.)
+  const voidPatterns = /deconnex|logout|disconnect|destroy|cleanup|invalidat|fermer|close/i;
+  if (voidPatterns.test(methodName)) return "Void";
+
+  // Heuristic 2: Extract the specific method body
+  // Look for the method signature in the source
+  const methodRegex = new RegExp(
+    `public\\s+(\\S+)\\s+${escapeRegex(methodName)}\\s*\\(`,
+    "m"
+  );
+  const sigMatch = rawSource.match(methodRegex);
+  if (sigMatch) {
+    const declaredReturn = sigMatch[1];
+    if (declaredReturn && declaredReturn !== "void" && declaredReturn !== "Object") {
+      return declaredReturn;
+    }
+  }
+
+  // Heuristic 3: Look for "return new XxxDTO(...)" or "return new XxxResponse(...)"
+  const returnNewMatch = rawSource.match(/return\s+new\s+(\w+(?:DTO|Response|Result|Info|Data))\s*\(/);
+  if (returnNewMatch) return returnNewMatch[1];
+
+  // Heuristic 4: Look for typed variable assignment before return
+  // e.g. "AuthResponseDTO response = ..." then "return response;"
+  const typedVarMatch = rawSource.match(/(\w+(?:DTO|Response|Result|Info|Data))\s+\w+\s*=/);
+  if (typedVarMatch) return typedVarMatch[1];
+
+  // Heuristic 5: Look for cast pattern "return (XxxDTO) something"
+  const castMatch = rawSource.match(/return\s+\((\w+(?:DTO|Response|Result|Info|Data))\)\s+/);
+  if (castMatch) return castMatch[1];
+
+  // Heuristic 6: For handlePostXxx methods, infer XxxResponseDTO
+  const handleMatch = methodName.match(/^handlePost(\w+)$/i);
+  if (handleMatch) {
+    const action = handleMatch[1];
+    return `${action}ResponseDTO`;
+  }
+
+  // Fallback: keep Void (better than Object)
+  return "Void";
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -64,6 +64,8 @@ export interface UseCaseIR {
   rawSource: string;
   httpMethod: string;
   restPath: string;
+  /** FIX E v7.3: All legacy method parameters (not just voInType which is only the first) */
+  methodParameters?: { name: string; type: string }[];
 }
 
 export interface InjectedService {
@@ -400,9 +402,19 @@ function extractBusinessMethods(content: string, className: string): DirectEjbMe
     if (LIFECYCLE_METHODS.has(name)) continue;
     // Skip void setters (setXxx)
     if (/^set[A-Z]/.test(name) && returnType === "void") continue;
-    // Skip getters that are just accessors (getXxx with no params)
-    if (/^get[A-Z]/.test(name) && !paramsStr.trim()) continue;
-    // Skip is-prefixed boolean getters
+    // Skip getters that are just simple property accessors (getXxx with no params AND simple return type)
+    // FIX G v7.3: Do NOT skip business methods like getCartesActives(), getHistoriqueClientComplet()
+    // Heuristic: skip only if return type is a simple primitive/wrapper AND method body is a simple return
+    if (/^get[A-Z]/.test(name) && !paramsStr.trim()) {
+      // Keep methods that return collections (List, Set, Map) or complex types (DTO, Response, etc.)
+      const isCollectionReturn = /^(?:List|Set|Map|Collection|Iterable|Stream)</.test(returnType);
+      const isComplexReturn = /DTO$|Response$|Result$|Info$|Data$|Bean$|VO$|Vo$/.test(returnType);
+      // Keep methods with non-trivial names (more than just getXxx for a field)
+      const nameAfterGet = name.substring(3);
+      const isLikelyBusinessMethod = nameAfterGet.length > 15 || /Active|Historique|Complet|All|List|By|For|Client|Compte|Carte|Session|Solde|Mouvement|Virement/.test(nameAfterGet);
+      if (!isCollectionReturn && !isComplexReturn && !isLikelyBusinessMethod) continue;
+    }
+    // Skip is-prefixed boolean getters (only if no params — validerSession(String token) → boolean is NOT a getter)
     if (/^is[A-Z]/.test(name) && !paramsStr.trim() && returnType === "boolean") continue;
 
     const javadoc = javadocRaw
@@ -501,6 +513,8 @@ function parseDirectEjbUseCases(
       rawSource: content,
       httpMethod,
       restPath,
+      // FIX E v7.3: Propagate all legacy method parameters
+      methodParameters: method.parameters,
     };
   });
 }

@@ -90,6 +90,126 @@ describe("No-Regression — bugs historiques jamais recréés", () => {
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BUG-1 à BUG-6 — Régressions BMCE Banking (v7.3)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const bmceResult = allResults.find(({ fixture }) => fixture.id === "17-bmce-banking");
+
+  describe("BUG-1 : getCartesActives(String numCompte) — paramètre propagé", () => {
+    it("CarteService contient getCartesActives(String numCompte)", () => {
+      expect(bmceResult).toBeDefined();
+      const carteService = bmceResult!.result.generation.files
+        .find((f) => f.path.includes("CarteService.java") || f.path.includes("Carte") && f.path.includes("Service.java"));
+      expect(carteService).toBeDefined();
+      // La méthode doit avoir le paramètre numCompte
+      expect(carteService!.content).toMatch(/getCartesActives\(.*String\s+numCompte.*\)/);
+      // Pas de version sans paramètre
+      expect(carteService!.content).not.toMatch(/getCartesActives\(\s*\)/);
+    });
+
+    it("CarteController passe numCompte au service", () => {
+      expect(bmceResult).toBeDefined();
+      const carteCtrl = bmceResult!.result.generation.files
+        .find((f) => f.path.includes("CarteController.java") || f.path.includes("Carte") && f.path.includes("Controller.java"));
+      expect(carteCtrl).toBeDefined();
+      expect(carteCtrl!.content).toContain("numCompte");
+      // Le controller ne doit pas appeler getCartesActives() sans argument
+      expect(carteCtrl!.content).not.toMatch(/service\.getCartesActives\(\s*\)/);
+    });
+  });
+
+  describe("BUG-2 : getHistoriqueClientComplet — 3 paramètres présents", () => {
+    it("ReportingService contient les 3 paramètres String", () => {
+      expect(bmceResult).toBeDefined();
+      const reportingSvc = bmceResult!.result.generation.files
+        .find((f) => f.path.includes("ReportingService.java") || f.path.includes("Reporting") && f.path.includes("Service.java"));
+      expect(reportingSvc).toBeDefined();
+      expect(reportingSvc!.content).toContain("String codeClient");
+      expect(reportingSvc!.content).toContain("String dateDebut");
+      expect(reportingSvc!.content).toContain("String dateFin");
+      // Pas de version sans paramètre
+      expect(reportingSvc!.content).not.toMatch(/getHistoriqueClientComplet\(\s*\)/);
+    });
+  });
+
+  describe("BUG-3 : AuthenticationService — aucun retour Object", () => {
+    it("aucun fichier Service.java ne retourne Object brut", () => {
+      expect(bmceResult).toBeDefined();
+      for (const file of bmceResult!.result.generation.files) {
+        if (!file.path.includes("Service.java")) continue;
+        const objectMethods = file.content.match(/public Object \w+\(/g) ?? [];
+        if (objectMethods.length > 0) {
+          console.error(`Object retour dans ${file.path}:`, objectMethods);
+        }
+        expect(objectMethods).toHaveLength(0);
+      }
+    });
+  });
+
+  describe("BUG-4 : SessionManagerService — validerSession présente", () => {
+    it("validerSession(String token) → boolean dans le service généré", () => {
+      expect(bmceResult).toBeDefined();
+      // Chercher dans tous les fichiers Service.java qui contiennent Session
+      const sessionSvc = bmceResult!.result.generation.files
+        .find((f) => (f.path.includes("SessionManager") || f.path.includes("Session")) && f.path.includes("Service.java"));
+      // Si le SessionManagerBean est détecté, le service doit contenir validerSession
+      if (sessionSvc) {
+        expect(sessionSvc.content).toContain("validerSession");
+        expect(sessionSvc.content).toMatch(/boolean|Boolean/);
+        expect(sessionSvc.content).toContain("String token");
+      }
+    });
+  });
+
+  describe("BUG-5 : QUALITY_SCORE.md honnête — pas 100/100 si bugs", () => {
+    it("score < 100 quand Void.builder() est présent", async () => {
+      const { scoreGeneration } = await import("../../server/engine/quality-scorer");
+      const fakeFiles = [
+        {
+          path: "src/main/java/com/bank/service/FakeService.java",
+          content: "public class FakeService {\n  public Void.builder() consulterSolde() { return Void.builder().build(); }\n}",
+          category: "service" as const,
+        },
+      ];
+      const report = scoreGeneration(fakeFiles);
+      expect(report.totalScore).toBeLessThan(report.maxScore);
+    });
+  });
+
+  describe("BUG-6 : ML Enhancer reçoit EJBSignature", () => {
+    it("MLEnhancer.enhance() accepte ejbSignature avec params[]", async () => {
+      const { MLEnhancer } = await import("../../server/engine/ml/ml-enhancer");
+      // MLEnhancer nécessite un MLConfig — créer une config désactivée pour tester la signature
+      const enhancer = new MLEnhancer({
+        enabled: false,
+        chromaUrl: "",
+        ollamaUrl: "",
+        model: "deepseek-coder:6.7b",
+        minConfidence: 0.6,
+      });
+      // Vérifier que enhance() accepte la signature EJBSignature
+      const result = await enhancer.enhance(
+        "// ejb code",
+        "// rule code",
+        {
+          methodName: "getCartesActives",
+          params: [{ name: "numCompte", type: "String" }],
+          returnType: "List<String>",
+          className: "CarteEJB",
+          javaType: "EJB3X",
+        }
+      );
+      // Quand ML est désactivé, le résultat doit fallback sur rule-based
+      expect(result).toHaveProperty("code");
+      expect(result).toHaveProperty("source");
+      // source = "rules" quand ML désactivé
+      expect(result.source).toBe("rules");
+      // code = le rule-based passé en argument
+      expect(result.code).toBe("// rule code");
+    });
+  });
+
   describe("Résumé global des issues", () => {
     it("aucun bug historique détecté sur l'ensemble des fixtures", () => {
       const totalIssues = allResults.reduce(

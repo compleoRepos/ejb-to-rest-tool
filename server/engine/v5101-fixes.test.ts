@@ -434,7 +434,7 @@ public class DetailServlet extends HttpServlet {
     // Le nom de méthode doit être handleGetComptesSolde (sans {id} ni api)
     expect(ctrlFile!.content).toContain("handleGetComptesSolde");
     // Vérifier que le nom de méthode ne contient pas de / ou { directement
-    const methodNameMatch = ctrlFile!.content.match(/public ResponseEntity<\?> (\w+)\(/);
+    const methodNameMatch = ctrlFile!.content.match(/public ResponseEntity<[^>]+> (\w+)\(/);
     expect(methodNameMatch).toBeTruthy();
     expect(methodNameMatch![1]).not.toMatch(/[\/\{\}]/);
     expect(methodNameMatch![1]).toBe("handleGetComptesSolde");

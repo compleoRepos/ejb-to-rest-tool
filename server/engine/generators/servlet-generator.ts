@@ -75,6 +75,7 @@ export class ServletGenerator implements CodeGenerator {
 
   private genCtrl(c: ServletComponent, ctrl: string, svc: string, basePath: string, pkg: string): string {
     const sf = svc.charAt(0).toLowerCase() + svc.slice(1);
+    const dtoImports = new Set<string>();
 
     const methods = c.metadata.methods.map(m => {
       const map = m.httpVerb === "GET" ? "@GetMapping" : m.httpVerb === "POST" ? "@PostMapping" : m.httpVerb === "PUT" ? "@PutMapping" : "@DeleteMapping";
@@ -83,18 +84,30 @@ export class ServletGenerator implements CodeGenerator {
       const args = c.metadata.requestParams.map(p => p.name).join(", ");
       const rawHandlerName = this.hasSubRoute(m) ? m.name : this.mn(m.name);
       const handlerName = this.sanitizeJavaMethodName(rawHandlerName);
+      const returnType = this.inferReturnType(handlerName);
+      const isVoid = returnType === "void";
+      const responseType = isVoid ? "ResponseEntity<Void>" : `ResponseEntity<${returnType}>`;
+      const body = isVoid
+        ? `${sf}.${handlerName}(${args});
+        return ResponseEntity.ok().build();`
+        : `return ResponseEntity.ok(${sf}.${handlerName}(${args}));`;
+      if (!isVoid && returnType !== "Object" && returnType.endsWith("DTO")) {
+        dtoImports.add(returnType);
+      }
 
       return `    /** Migré depuis ${c.className}.${m.name}${m.urlPattern ? ` — route: ${m.urlPattern}` : ""} */
     ${map}${subPath}
-    public ResponseEntity<?> ${handlerName}(${params}) {
-        return ResponseEntity.ok(${sf}.${handlerName}(${args}));
+    public ${responseType} ${handlerName}(${params}) {
+        ${body}
     }`;
     }).join("\n\n");
+
+    const dtoImportLines = [...dtoImports].map(d => `import ${pkg}.dto.${d};`).join("\n");
 
     return `package ${pkg}.controller;
 
 import ${pkg}.service.${svc};
-import lombok.RequiredArgsConstructor;
+${dtoImportLines ? dtoImportLines + "\n" : ""}import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -117,11 +130,12 @@ ${methods}
     const methods = c.metadata.methods.map(m => {
       const isRead = m.httpVerb === "GET";
       const params = c.metadata.requestParams.map(p => "String " + p.name).join(", ");
-        const rawHandlerName = m.urlPattern ? m.name : this.mn(m.name);
+      const rawHandlerName = m.urlPattern ? m.name : this.mn(m.name);
       const handlerName = this.sanitizeJavaMethodName(rawHandlerName);
+      const returnType = this.inferReturnType(handlerName);
 
       return `    @Transactional${isRead ? "(readOnly = true)" : ""}
-    public Object ${handlerName}(${params}) {
+    public ${returnType} ${handlerName}(${params}) {
         // TODO: Migrer la logique métier de ${c.className}.${m.name}${m.urlPattern ? ` (route: ${m.urlPattern})` : ""}
         throw new UnsupportedOperationException("Migration en cours");
     }`;
@@ -161,6 +175,36 @@ public class ${dto} {
 ${fields}
 }
 `;
+  }
+
+  /**
+   * FIX F v7.3 — Inférer le type retour depuis le nom de méthode Servlet.
+   * Règle : Object n'est jamais acceptable comme type de retour.
+   * - handlePostConnexion → ConnexionResponseDTO
+   * - handlePostDeconnexion → void (pattern deconnex/logout/destroy)
+   * - handleGetXxx → XxxResponseDTO
+   * - fallback → void (mieux que Object)
+   */
+  private inferReturnType(handlerName: string): string {
+    // Heuristic 1: Methods that are clearly void
+    const voidPatterns = /deconnex|logout|disconnect|destroy|cleanup|invalidat|fermer|close|supprimer|delete|remove/i;
+    if (voidPatterns.test(handlerName)) return "void";
+
+    // Heuristic 2: handlePostXxx → XxxResponseDTO
+    const handleMatch = handlerName.match(/^handle(?:Post|Put|Get|Delete)(\w+)$/i);
+    if (handleMatch) {
+      const action = handleMatch[1];
+      return `${action.charAt(0).toUpperCase() + action.slice(1)}ResponseDTO`;
+    }
+
+    // Heuristic 3: xxxYyy → YyyResponseDTO (camelCase extraction)
+    const parts = handlerName.replace(/^(get|post|put|delete|handle)/i, "");
+    if (parts.length > 0) {
+      return `${parts.charAt(0).toUpperCase() + parts.slice(1)}ResponseDTO`;
+    }
+
+    // Fallback: void (better than Object)
+    return "void";
   }
 
   private genTest(ctrl: string, svc: string, basePath: string, methods: DetectedMethod[], pkg: string): string {
