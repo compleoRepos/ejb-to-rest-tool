@@ -296,12 +296,50 @@ export function registerAgentRoutes(app: Express) {
       }
     }
 
+    // 5. Add enhanced reports if available (v7.4)
+    if (session.enhancedReports?.enhanced) {
+      const reportMap: Record<string, string> = {
+        MIGRATION_REPORT:     "MIGRATION_REPORT.md",
+        MICROSERVICES_REPORT: "MICROSERVICES_REPORT.md",
+        DATASOURCE_MIGRATION: "DATASOURCE_MIGRATION.md",
+        QUALITY_SCORE:        "QUALITY_SCORE.md",
+        EXECUTIVE_SUMMARY:    "EXECUTIVE_SUMMARY.md",
+      };
+      for (const [key, fileName] of Object.entries(reportMap)) {
+        const content = session.enhancedReports.reports[key];
+        if (content) {
+          zipEntries.set(fileName, content);
+        }
+      }
+    }
+
     // Write all unique entries to the archive
     for (const [path, content] of zipEntries) {
       archive.append(content, { name: path });
     }
 
     archive.finalize();
+  });
+
+  // ─── GET /api/agent/:id/reports — v7.4 Enhanced Reports ───────────────────
+  router.get("/:id/reports", (req: Request, res: Response) => {
+    const { id } = req.params;
+    const store = getAgentStore();
+    const session = store.get(id);
+
+    if (!session) {
+      return res.status(404).json({ error: "Session introuvable" });
+    }
+
+    if (!session.enhancedReports) {
+      return res.json({
+        enhanced: false,
+        reports: {},
+        metadata: null,
+      });
+    }
+
+    return res.json(session.enhancedReports);
   });
 
   // ─── GET /api/agent/sessions ────────────────────────────────────────────────

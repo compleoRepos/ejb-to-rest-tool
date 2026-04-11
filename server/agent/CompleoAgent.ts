@@ -24,6 +24,8 @@ import { upsertProjectFromAgent } from "../db";
 import { MicroserviceSplitter, buildParsedModules } from "../engine/microservices/microservice-splitter";
 import { MicroserviceGenerator, type MicroserviceOutput } from "../engine/microservices/microservice-generator";
 import { MLEnhancer, type MLConfig } from "../engine/ml/ml-enhancer";
+import { ReportEnhancer, type ReportEnhancerConfig, type ReportContext, type EnhancedReports } from "../engine/ml/report-enhancer";
+import type { QualityReport } from "../engine/quality-scorer";
 import type { PipelineResult } from "../engine/pipeline/index";
 
 // ─── Types publics ────────────────────────────────────────────────────────────
@@ -34,6 +36,7 @@ export type AgentPhase =
   | "ANALYZING"
   | "GENERATING"
   | "MICROSERVICES"
+  | "ENHANCING_REPORTS"
   | "COMPILING"
   | "TESTING"
   | "PUSHING"
@@ -57,6 +60,7 @@ export interface AgentConfig {
     projectName?: string;
     enableMicroservices?: boolean;
     enableML?: boolean;
+    enableReportEnhancer?: boolean;
   };
 }
 
@@ -127,6 +131,8 @@ export interface AgentSession {
   };
   /** Quality score (available after GENERATING phase) */
   qualityScore?: { totalScore: number; maxScore: number; grade: string; summary: string };
+  /** Enhanced reports (available after ENHANCING_REPORTS phase) — v7.4 */
+  enhancedReports?: EnhancedReports;
   /** Error message if failed */
   errorMessage?: string;
   /** Promise resolver for ambiguity resolution */
@@ -306,6 +312,11 @@ export class CompleoAgent {
         yield* this.phaseMicroservices(session);
       }
 
+      // ─── Phase 4c: ENHANCING_REPORTS (optional, v7.4) ─────────────────
+      if (session.config.options.enableReportEnhancer) {
+        yield* this.phaseEnhancingReports(session);
+      }
+
       // ─── Phase 5: COMPILING ───────────────────────────────────────────
       yield* this.phaseCompiling(session);
 
@@ -337,6 +348,10 @@ export class CompleoAgent {
           qualityScore: session.qualityScore ? {
             score: `${session.qualityScore.totalScore}/${session.qualityScore.maxScore}`,
             grade: session.qualityScore.grade,
+          } : undefined,
+          enhancedReports: session.enhancedReports?.enhanced ? {
+            reportCount: Object.keys(session.enhancedReports.reports).filter(k => session.enhancedReports!.reports[k] !== null).length,
+            reports: Object.keys(session.enhancedReports.reports).filter(k => session.enhancedReports!.reports[k] !== null),
           } : undefined,
         },
       });
@@ -420,6 +435,7 @@ export class CompleoAgent {
           score: `${session.qualityScore.totalScore}/${session.qualityScore.maxScore}`,
           grade: session.qualityScore.grade,
         } : undefined,
+        enhancedReports: session.enhancedReports?.enhanced || false,
       },
     };
   }
@@ -933,6 +949,148 @@ export class CompleoAgent {
     yield this.event("PHASE_END", {
       phase: "MICROSERVICES",
       message: `Microservices terminé (${Date.now() - startTime}ms)`,
+    });
+  }
+
+  // ─── Phase 4c: ENHANCING_REPORTS (v7.4) ─────────────────────────────────────
+  private async *phaseEnhancingReports(session: AgentSession): AsyncGenerator<AgentEvent> {
+    yield this.event("PHASE_START", {
+      phase: "ENHANCING_REPORTS",
+      message: "Enrichissement des rapports par IA...",
+    });
+    this.sessionStore.update(session.id, { currentPhase: "ENHANCING_REPORTS" });
+
+    const startTime = Date.now();
+
+    try {
+      const enhancerConfig: ReportEnhancerConfig = {
+        enabled:   true,
+        ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
+        model:     process.env.REPORT_ML_MODEL || "llama3:8b-instruct-q4_K_M",
+        language:  "fr",
+        timeoutMs: 180_000,
+      };
+
+      const enhancer = new ReportEnhancer(enhancerConfig);
+
+      // Build ReportContext from session data
+      const modules = (session.analysisResult?.multiTech.detectedComponents || []).map(c => ({
+        id:           c.className || c.technology,
+        type:         c.technology,
+        writeTables:  (c.metadata as any)?.tables || [],
+        readTables:   (c.metadata as any)?.readTables || [],
+        dataSources:  (c.metadata as any)?.dataSources || [],
+        jmsQueues:    (c.metadata as any)?.jmsQueues || [],
+        externalApis: (c.metadata as any)?.externalApis || [],
+        sqlFeatures:  (c.metadata as any)?.sqlFeatures || [],
+        ejbCalls:     (c.metadata as any)?.ejbCalls || [],
+      }));
+
+      const services = (session.microserviceResult?.services || []).map(s => ({
+        name:             s.name,
+        ejbs:             s.ejbs,
+        ownedTables:      s.ownedTables,
+        readOnlyTables:   [],
+        kafkaTopics:      [],
+        restApis:         [],
+        restDependencies: [],
+        dbSchema:         "",
+        confidence:       s.confidence,
+      }));
+
+      const qualityReport: QualityReport = session.qualityScore
+        ? {
+            score:      session.qualityScore.totalScore,
+            grade:      session.qualityScore.grade,
+            checks:     [],
+            issues:     [],
+            summary:    session.qualityScore.summary,
+            timestamp:  new Date().toLocaleString("fr-FR"),
+            totalScore: session.qualityScore.totalScore,
+            maxScore:   session.qualityScore.maxScore,
+            criteria:   [],
+          }
+        : {
+            score: 0, grade: "N/A", checks: [], issues: [],
+            summary: "", timestamp: "", totalScore: 0, maxScore: 100, criteria: [],
+          };
+
+      const reportContext: ReportContext = {
+        projectName:            session.config.options.projectName || "Unknown",
+        modules,
+        services,
+        dataSources:            [],
+        useCasesCount:          session.analysisResult?.summary.useCaseCount || 0,
+        confidenceScore:        89,
+        qualityReport,
+        estimatedDuration:      enhancer.estimateDuration({ services } as any),
+        criticalDependencies:   [],
+        requiredInfrastructure: ["Kafka 3.x", "Oracle 19c RAC", "K8s cluster"],
+      };
+
+      yield this.event("LOG", {
+        level: "info",
+        message: `Enrichissement de ${Object.keys(reportContext.modules).length} modules, ${services.length} services...`,
+        phase: "ENHANCING_REPORTS",
+      });
+
+      const enhanced = await enhancer.enhanceAll(reportContext);
+      session.enhancedReports = enhanced;
+
+      // Inject enhanced reports into generated files
+      if (enhanced.enhanced && session.generatedProject) {
+        const reportMap: Record<string, string> = {
+          MIGRATION_REPORT:     "MIGRATION_REPORT.md",
+          MICROSERVICES_REPORT: "MICROSERVICES_REPORT.md",
+          DATASOURCE_MIGRATION: "DATASOURCE_MIGRATION.md",
+          QUALITY_SCORE:        "QUALITY_SCORE.md",
+          EXECUTIVE_SUMMARY:    "EXECUTIVE_SUMMARY.md",
+        };
+
+        for (const [key, fileName] of Object.entries(reportMap)) {
+          const content = enhanced.reports[key];
+          if (!content) continue;
+
+          // Replace existing file or add new one
+          const existingIdx = session.generatedProject.files.findIndex(
+            f => f.path === fileName
+          );
+          if (existingIdx >= 0) {
+            session.generatedProject.files[existingIdx].content = content;
+          } else {
+            session.generatedProject.files.push({
+              path:     fileName,
+              content,
+              category: "report",
+            });
+          }
+        }
+      }
+
+      this.sessionStore.update(session.id, {
+        enhancedReports: enhanced,
+        generatedProject: session.generatedProject,
+      });
+
+      const enrichedCount = Object.values(enhanced.reports).filter(v => v !== null).length;
+
+      yield this.event("LOG", {
+        level: "success",
+        message: `${enrichedCount}/5 rapports enrichis par IA (${Date.now() - startTime}ms)`,
+        phase: "ENHANCING_REPORTS",
+      });
+
+    } catch (err) {
+      yield this.event("LOG", {
+        level: "warn",
+        message: `Enrichissement des rapports échoué : ${err instanceof Error ? err.message : String(err)} — rapports originaux conservés`,
+        phase: "ENHANCING_REPORTS",
+      });
+    }
+
+    yield this.event("PHASE_END", {
+      phase: "ENHANCING_REPORTS",
+      message: `Enrichissement terminé (${Date.now() - startTime}ms)`,
     });
   }
 

@@ -21,6 +21,7 @@ import {
   Activity, Radio, Pause, SkipForward, Network,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
+import ReportViewer from "@/components/compleo/ReportViewer";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -72,6 +73,7 @@ const PHASES = [
   { id: "AWAITING_INPUT", label: "Choix", icon: Pause, color: "text-yellow-400" },
   { id: "GENERATING", label: "Génération", icon: FileCode2, color: "text-emerald-400" },
   { id: "MICROSERVICES", label: "Microservices", icon: Layers, color: "text-pink-400" },
+  { id: "ENHANCING_REPORTS", label: "Rapports IA", icon: Star, color: "text-amber-400" },
   { id: "COMPILING", label: "Compilation", icon: Terminal, color: "text-purple-400" },
   { id: "PUSHING", label: "Push", icon: Upload, color: "text-orange-400" },
   { id: "COMPLETED", label: "Terminé", icon: CheckCircle2, color: "text-green-400" },
@@ -110,6 +112,7 @@ export default function CompleoAgentPage() {
   const [autoResolve, setAutoResolve] = useState(false);
   const [enableMicroservices, setEnableMicroservices] = useState(false);
   const [enableML, setEnableML] = useState(false);
+  const [enableReportEnhancer, setEnableReportEnhancer] = useState(false);
 
   // Agent state
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -168,6 +171,7 @@ export default function CompleoAgentPage() {
           maxCompilationAttempts: 5,
           enableMicroservices,
           enableML: enableMicroservices && enableML,
+          enableReportEnhancer,
         },
       };
 
@@ -541,6 +545,16 @@ export default function CompleoAgentPage() {
                     <span className="text-sm">Amélioration ML (Ollama + ChromaDB requis)</span>
                   </label>
                 )}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enableReportEnhancer}
+                    onChange={(e) => setEnableReportEnhancer(e.target.checked)}
+                    className="rounded border-border"
+                  />
+                  <Star className="w-4 h-4 text-amber-400" />
+                  <span className="text-sm">Rapports IA enrichis (Ollama requis)</span>
+                </label>
               </div>
             </div>
 
@@ -700,6 +714,12 @@ export default function CompleoAgentPage() {
                       <Badge variant="secondary" className="text-xs ml-1 bg-yellow-500/20 text-yellow-400">
                         {ambiguities.length}
                       </Badge>
+                    </TabsTrigger>
+                  )}
+                  {sessionId && isCompleted && (
+                    <TabsTrigger value="reports" className="gap-1.5">
+                      <Star className="w-3.5 h-3.5 text-amber-400" />
+                      Rapports IA
                     </TabsTrigger>
                   )}
                 </TabsList>
@@ -888,6 +908,13 @@ export default function CompleoAgentPage() {
                         </div>
                       </ScrollArea>
                     </div>
+                  </TabsContent>
+                )}
+
+                {/* Enhanced Reports tab (v7.4) */}
+                {sessionId && isCompleted && (
+                  <TabsContent value="reports" className="mt-3">
+                    <ReportViewer sessionId={sessionId} compact />
                   </TabsContent>
                 )}
               </Tabs>
