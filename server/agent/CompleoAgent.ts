@@ -122,6 +122,8 @@ export interface AgentSession {
     report: string;
     filesCount: number;
     mlEnabled: boolean;
+    /** All generated microservice files (path → content) */
+    generatedFiles: Array<{ path: string; content: string }>;
   };
   /** Error message if failed */
   errorMessage?: string;
@@ -867,7 +869,18 @@ export class CompleoAgent {
     }
     totalMsFiles += msOutput.infrastructure.size;
 
-    // 6. Store result in session
+    // 6. Collect all generated files from microservice output
+    const generatedFiles: Array<{ path: string; content: string }> = [];
+    for (const svc of msOutput.services) {
+      for (const [filePath, content] of svc.files) {
+        generatedFiles.push({ path: `microservices/${svc.serviceName}/${filePath}`, content });
+      }
+    }
+    for (const [filePath, content] of msOutput.infrastructure) {
+      generatedFiles.push({ path: `microservices/infrastructure/${filePath}`, content });
+    }
+
+    // 7. Store result in session
     session.microserviceResult = {
       services: services.map(s => ({
         name: s.name,
@@ -878,6 +891,7 @@ export class CompleoAgent {
       report,
       filesCount: totalMsFiles,
       mlEnabled,
+      generatedFiles,
     };
 
     this.sessionStore.update(session.id, {

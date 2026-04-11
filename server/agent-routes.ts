@@ -286,6 +286,14 @@ export function registerAgentRoutes(app: Express) {
           zipEntries.set(msReportPath, session.microserviceResult.report);
         }
       }
+      // Add all generated microservice files (Spring Boot projects, Docker, K8s, etc.)
+      if (session.microserviceResult.generatedFiles) {
+        for (const file of session.microserviceResult.generatedFiles) {
+          if (!zipEntries.has(file.path)) {
+            zipEntries.set(file.path, file.content);
+          }
+        }
+      }
     }
 
     // Write all unique entries to the archive

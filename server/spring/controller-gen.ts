@@ -57,10 +57,21 @@ export function generateDomainController(
     const resDto = dtoMap.get(uc.voOutType);
 
     const reqType = reqDto ? mapDtoClassName(reqDto.className) : null;
-    const resType = resDto ? mapDtoClassName(resDto.className) : "Void";
+    // FIX B v7.1: Infer return type from voOutType even when not in dtoMap
+    const resType = resDto
+      ? mapDtoClassName(resDto.className)
+      : (uc.voOutType && uc.voOutType !== "Void" && uc.voOutType !== "void" && uc.voOutType !== "Object" && uc.voOutType !== "ValueObject")
+        ? resolveRawReturnTypeCtrl(uc.voOutType, imports, basePackage)
+        : "Void";
 
     if (reqType) imports.add(`import ${basePackage}.dto.${reqType};`);
-    if (resType !== "Void") imports.add(`import ${basePackage}.dto.${resType};`);
+    if (resType !== "Void") {
+      if (resDto) {
+        imports.add(`import ${basePackage}.dto.${resType};`);
+      } else {
+        addImportsForRawTypeCtrl(resType, imports, basePackage);
+      }
+    }
     if (reqType) imports.add("import jakarta.validation.Valid;");
 
     // FIX v5.8.2: Use determineHttpConfig for proper REST URL semantics
@@ -235,4 +246,56 @@ function extractShortSummary(description: string, methodName: string, domain: st
     .trim()
     .replace(/^./, (c) => c.toUpperCase())
     + " \u2014 " + domain;
+}
+
+// ─── FIX B v7.1: Helpers for raw return type inference (controller) ─────────
+
+const JAVA_BUILTIN_TYPES_CTRL = new Set([
+  "String", "int", "Integer", "long", "Long", "double", "Double",
+  "float", "Float", "boolean", "Boolean", "byte", "Byte", "short", "Short",
+  "char", "Character", "BigDecimal", "BigInteger", "LocalDate", "LocalDateTime",
+  "Date", "Instant", "void", "Void", "Object",
+]);
+
+function resolveRawReturnTypeCtrl(rawType: string, imports: Set<string>, basePackage: string): string {
+  if (!rawType || rawType === "Void" || rawType === "void") return "Void";
+
+  const genericMatch = rawType.match(/^(\w+)<(.+)>$/);
+  if (genericMatch) {
+    const container = genericMatch[1];
+    const inner = genericMatch[2].trim();
+    if (container === "List" || container === "ArrayList" || container === "LinkedList") {
+      imports.add("import java.util.List;");
+      return `List<${resolveRawReturnTypeCtrl(inner, imports, basePackage)}>`;
+    }
+    if (container === "Set" || container === "HashSet" || container === "TreeSet") {
+      imports.add("import java.util.Set;");
+      return `Set<${resolveRawReturnTypeCtrl(inner, imports, basePackage)}>`;
+    }
+    if (container === "Map" || container === "HashMap") {
+      imports.add("import java.util.Map;");
+      const parts = inner.split(",").map(p => p.trim());
+      if (parts.length === 2) {
+        return `Map<${resolveRawReturnTypeCtrl(parts[0], imports, basePackage)}, ${resolveRawReturnTypeCtrl(parts[1], imports, basePackage)}>`;
+      }
+    }
+    return rawType;
+  }
+
+  if (JAVA_BUILTIN_TYPES_CTRL.has(rawType)) {
+    if (rawType === "BigDecimal") imports.add("import java.math.BigDecimal;");
+    if (rawType === "BigInteger") imports.add("import java.math.BigInteger;");
+    if (rawType === "LocalDate") imports.add("import java.time.LocalDate;");
+    if (rawType === "LocalDateTime") imports.add("import java.time.LocalDateTime;");
+    if (rawType === "Instant") imports.add("import java.time.Instant;");
+    return rawType;
+  }
+
+  return mapDtoClassName(rawType);
+}
+
+function addImportsForRawTypeCtrl(resType: string, imports: Set<string>, basePackage: string): void {
+  if (resType.includes("<")) return;
+  if (JAVA_BUILTIN_TYPES_CTRL.has(resType)) return;
+  imports.add(`import ${basePackage}.dto.${resType};`);
 }

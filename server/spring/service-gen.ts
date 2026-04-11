@@ -59,10 +59,20 @@ export function generateDomainService(
     const resDto = dtoMap.get(uc.voOutType);
 
     const reqType = reqDto ? mapDtoClassName(reqDto.className) : "Void";
-    const resType = resDto ? mapDtoClassName(resDto.className) : "Void";
+    // FIX B v7.1: Infer return type from voOutType even when not in dtoMap
+    // e.g. voOutType = "List<String>" or "MouvementsResponseDTO" → use directly
+    const resType = resDto
+      ? mapDtoClassName(resDto.className)
+      : (uc.voOutType && uc.voOutType !== "Void" && uc.voOutType !== "void" && uc.voOutType !== "Object" && uc.voOutType !== "ValueObject")
+        ? resolveRawReturnType(uc.voOutType, imports, basePackage)
+        : "Void";
 
     if (reqDto) imports.add(`import ${basePackage}.dto.${reqType};`);
     if (resDto) imports.add(`import ${basePackage}.dto.${resType};`);
+    // FIX B v7.1: Import for non-dtoMap return types (raw Java types)
+    if (!resDto && resType !== "Void") {
+      addImportsForRawType(resType, imports, basePackage);
+    }
 
     // R7: @Transactional at the right level
     let txAnnotation = "";
@@ -201,17 +211,10 @@ function generateServiceMethodBody(
         };
         const result = transformer.transform(executeMethod.body, astSymbolTable, ctx);
 
-        const constants = extractConstants(uc.rawSource);
-        const constantLines = constants.map(c =>
-          `        // Migrated constant from ${uc.className}\n        final ${c.type} ${c.name} = ${c.value};`
-        );
+        // FIX A v7.1: SQL constants are now ONLY at class level (private static final)
+        // No longer duplicated inside method body — removed constant extraction here
 
         const lines: string[] = [];
-
-        if (constantLines.length > 0) {
-          lines.push(...constantLines);
-          lines.push("");
-        }
 
         if (resDto && resType !== "Void" && !result.code.includes("builder")) {
           lines.push(`        var builder = ${resType}.builder();`);
@@ -270,17 +273,10 @@ function generateServiceMethodBody(
     };
     const result = transformer.transform(executeBody, ctx);
 
-    const constants = extractConstants(uc.rawSource);
-    const constantLines = constants.map(c =>
-      `        // Migrated constant from ${uc.className}\n        final ${c.type} ${c.name} = ${c.value};`
-    );
+    // FIX A v7.1: SQL constants are now ONLY at class level (private static final)
+    // No longer duplicated inside method body — removed constant extraction here
 
     const lines: string[] = [];
-
-    if (constantLines.length > 0) {
-      lines.push(...constantLines);
-      lines.push("");
-    }
 
     if (resDto && resType !== "Void") {
       lines.push(`        var builder = ${resType}.builder();`);
@@ -350,4 +346,85 @@ function generateServiceMethodBody(
   }
 
   return lines.join("\n");
+}
+
+// ─── FIX B v7.1: Helpers for raw return type inference ──────────────────────
+
+/** Known Java primitive/wrapper types that don't need DTO import */
+const JAVA_BUILTIN_TYPES = new Set([
+  "String", "int", "Integer", "long", "Long", "double", "Double",
+  "float", "Float", "boolean", "Boolean", "byte", "Byte", "short", "Short",
+  "char", "Character", "BigDecimal", "BigInteger", "LocalDate", "LocalDateTime",
+  "Date", "Instant", "void", "Void", "Object",
+]);
+
+/**
+ * Resolve a raw voOutType (not in dtoMap) to a valid Java return type.
+ * Handles: List<X>, Set<X>, Map<K,V>, simple types, DTO class names.
+ */
+function resolveRawReturnType(rawType: string, imports: Set<string>, basePackage: string): string {
+  if (!rawType || rawType === "Void" || rawType === "void") return "Void";
+
+  // Generic types: List<String>, List<CompteDTO>, Set<X>, Map<K,V>
+  const genericMatch = rawType.match(/^(\w+)<(.+)>$/);
+  if (genericMatch) {
+    const container = genericMatch[1];
+    const inner = genericMatch[2].trim();
+
+    if (container === "List" || container === "ArrayList" || container === "LinkedList") {
+      imports.add("import java.util.List;");
+      const innerType = resolveRawReturnType(inner, imports, basePackage);
+      return `List<${innerType}>`;
+    }
+    if (container === "Set" || container === "HashSet" || container === "TreeSet") {
+      imports.add("import java.util.Set;");
+      const innerType = resolveRawReturnType(inner, imports, basePackage);
+      return `Set<${innerType}>`;
+    }
+    if (container === "Map" || container === "HashMap") {
+      imports.add("import java.util.Map;");
+      const parts = inner.split(",").map(p => p.trim());
+      if (parts.length === 2) {
+        const k = resolveRawReturnType(parts[0], imports, basePackage);
+        const v = resolveRawReturnType(parts[1], imports, basePackage);
+        return `Map<${k}, ${v}>`;
+      }
+    }
+    return rawType; // unknown generic — pass through
+  }
+
+  // Array types
+  if (rawType.endsWith("[]")) {
+    const base = rawType.slice(0, -2);
+    resolveRawReturnType(base, imports, basePackage); // resolve imports for base
+    return rawType;
+  }
+
+  // Known Java types
+  if (JAVA_BUILTIN_TYPES.has(rawType)) {
+    if (rawType === "BigDecimal") imports.add("import java.math.BigDecimal;");
+    if (rawType === "BigInteger") imports.add("import java.math.BigInteger;");
+    if (rawType === "LocalDate") imports.add("import java.time.LocalDate;");
+    if (rawType === "LocalDateTime") imports.add("import java.time.LocalDateTime;");
+    if (rawType === "Instant") imports.add("import java.time.Instant;");
+    return rawType;
+  }
+
+  // DTO-like class name (e.g. MouvementsResponseDTO, CompteDTO)
+  // Apply mapDtoClassName transformation (VoOut→ResponseDTO, etc.)
+  return mapDtoClassName(rawType);
+}
+
+/**
+ * Add required imports for a raw return type that is not in dtoMap.
+ */
+function addImportsForRawType(resType: string, imports: Set<string>, basePackage: string): void {
+  // Generic types already handled in resolveRawReturnType
+  if (resType.includes("<")) return;
+
+  // Java builtins — imports already added by resolveRawReturnType
+  if (JAVA_BUILTIN_TYPES.has(resType)) return;
+
+  // DTO class — add import from dto package
+  imports.add(`import ${basePackage}.dto.${resType};`);
 }

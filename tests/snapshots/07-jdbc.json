@@ -1,6 +1,6 @@
 {
   "fixtureId": "07-jdbc",
-  "timestamp": "2026-04-10T21:33:36.745Z",
+  "timestamp": "2026-04-11T15:15:37.383Z",
   "useCaseCount": 1,
   "dtoCount": 2,
   "enumCount": 0,
@@ -25,6 +25,6 @@
     "pom.xml",
     "MIGRATION_REPORT.md"
   ],
-  "score": 42,
+  "score": 47,
   "status": "FAIL"
 }

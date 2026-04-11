@@ -84,13 +84,29 @@ const SQL_WRITE_REGEX = /(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)\s+(
 const SQL_READ_REGEX  = /(?:SELECT\s+.*?\s+FROM|FROM|JOIN)\s+([A-Z_][A-Z0-9_.]+)/gi;
 const SQL_FEATURE_REGEX = /(FOR\s+UPDATE(?:\s+NOWAIT)?|MERGE\s+INTO|BULK\s+COLLECT|RETURNING|CONNECT\s+BY)/gi;
 
+// FIX D v7.1: Oracle/SQL keywords that must NEVER be treated as table names
+const SQL_KEYWORDS_NOT_TABLES = new Set([
+  "DUAL", "SYSDATE", "SYSTIMESTAMP", "NOWAIT", "NEXTVAL", "CURRVAL",
+  "ROWNUM", "ROWID", "LEVEL", "NULL", "TRUE", "FALSE",
+  "SELECT", "FROM", "WHERE", "AND", "OR", "NOT", "IN", "EXISTS",
+  "BETWEEN", "LIKE", "IS", "AS", "ON", "SET", "VALUES",
+  "ORDER", "GROUP", "HAVING", "LIMIT", "OFFSET", "UNION",
+  "ALL", "DISTINCT", "CASE", "WHEN", "THEN", "ELSE", "END",
+  "ASC", "DESC", "COUNT", "SUM", "AVG", "MIN", "MAX",
+  "NVL", "NVL2", "DECODE", "COALESCE", "TRIM", "UPPER", "LOWER",
+  "TO_CHAR", "TO_DATE", "TO_NUMBER", "SUBSTR", "LENGTH", "REPLACE",
+  "TRUNC", "ROUND", "CEIL", "FLOOR", "MOD", "ABS", "SIGN",
+  "USER", "CURRENT_DATE", "CURRENT_TIMESTAMP",
+]);
+
 function extractTables(source: string, regex: RegExp): string[] {
   const tables = new Set<string>();
   let match: RegExpExecArray | null;
   const r = new RegExp(regex.source, regex.flags);
   while ((match = r.exec(source)) !== null) {
     const table = match[1].toUpperCase().replace(/^[A-Z_]+\./, ""); // strip schema prefix
-    if (!table.startsWith("DUAL") && table.length > 1) {
+    // FIX D v7.1: Skip Oracle keywords, SQL functions, and pseudo-columns
+    if (table.length > 1 && !SQL_KEYWORDS_NOT_TABLES.has(table)) {
       tables.add(table);
     }
   }
@@ -635,10 +651,17 @@ export class MicroserviceSplitter {
   }
 
   private toDomain(ejbId: string): string {
-    return ejbId
+    // FIX C v7.1: Extract domain from EJB class name, not className_methodName
+    // e.g. "CarteEJB_getCartesActives" → strip method → "CarteEJB" → "carte"
+    //      "CompteEJB_consulterSolde"  → strip method → "CompteEJB" → "compte"
+    const baseName = ejbId.includes("_") ? ejbId.split("_")[0] : ejbId;
+    return baseName
       .replace(/EJB$/i, "")
       .replace(/Service$/i, "")
       .replace(/Bean$/i, "")
+      .replace(/Impl$/i, "")
+      .replace(/DAO$/i, "")
+      .replace(/MDB$/i, "")
       .toLowerCase();
   }
 
