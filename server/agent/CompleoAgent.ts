@@ -872,7 +872,7 @@ export class CompleoAgent {
           enabled: true,
           ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
           chromaUrl: process.env.CHROMA_URL || "http://localhost:8000",
-          model: process.env.ML_MODEL || "deepseek-coder:6.7b-instruct-q4_K_M",
+          model: process.env.ML_MODEL || "qwen2.5:1.5b",
           minConfidence: parseFloat(process.env.ML_MIN_CONFIDENCE || "0.6"),
         };
         const enhancer = new MLEnhancer(mlConfig);
@@ -966,7 +966,7 @@ export class CompleoAgent {
       const enhancerConfig: ReportEnhancerConfig = {
         enabled:   true,
         ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
-        model:     process.env.REPORT_ML_MODEL || "llama3:8b-instruct-q4_K_M",
+        model:     process.env.REPORT_ML_MODEL || "qwen2.5:1.5b",
         language:  "fr",
         timeoutMs: 180_000,
       };

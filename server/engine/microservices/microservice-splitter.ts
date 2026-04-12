@@ -99,6 +99,17 @@ const SQL_KEYWORDS_NOT_TABLES = new Set([
   "USER", "CURRENT_DATE", "CURRENT_TIMESTAMP",
 ]);
 
+/**
+ * BUG-F v7.5: Extract ALL tables from a class source, including private helper methods.
+ * Scans the entire source code, not just public methods.
+ */
+export function extractAllTablesFromClass(source: string): { read: string[]; write: string[] } {
+  return {
+    read:  extractTables(source, SQL_READ_REGEX),
+    write: extractTables(source, SQL_WRITE_REGEX),
+  };
+}
+
 function extractTables(source: string, regex: RegExp): string[] {
   const tables = new Set<string>();
   let match: RegExpExecArray | null;
@@ -644,19 +655,55 @@ export class MicroserviceSplitter {
           });
         }
       }
+      // BUG-D v7.5: Deduplicate Kafka topics by direction+name
+      service.kafkaTopics = this.deduplicateKafkaTopics(service.kafkaTopics);
     }
+  }
+
+  /**
+   * BUG-D v7.5: Deduplicate Kafka topics within a service.
+   * Multiple EJB methods may reference the same JMS queue → same Kafka topic.
+   * Dedup key = direction + name.
+   */
+  private deduplicateKafkaTopics(topics: KafkaTopic[]): KafkaTopic[] {
+    const seen = new Set<string>();
+    return topics.filter(t => {
+      const key = `${t.direction}:${t.name}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   // ── Naming Helpers ─────────────────────────────────────────────
 
   private inferServiceName(group: ParsedModule[]): string {
     const ids = group.map(m => m.id.toLowerCase());
+
+    // BUG-E/J v7.5: Dashboard/Operateur/Admin servlets → ops-service (NOT auth-service)
+    if (ids.some(id =>
+      id.includes("dashboard") || id.includes("operateur") ||
+      id.includes("admin") || id.includes("backoffice")
+    )) return "ops-service";
+
     if (ids.some(id => id.includes("reporting"))) return "reporting-service";
     if (ids.some(id => id.includes("batch")))     return "batch-service";
+
+    // BUG-E/J v7.5: Only auth/session keywords → auth-service (NOT all servlets)
     if (ids.some(id =>
-      id.includes("auth") || id.includes("session") ||
-      group.find(m => m.id.toLowerCase() === id)?.type === "SERVLET"
-    ))                                             return "auth-service";
+      id.includes("auth") || id.includes("login") || id.includes("session")
+    )) return "auth-service";
+
+    // BUG-E/J v7.5: Servlets without specific domain → ops-service
+    const hasServlet = group.some(m => m.type === "SERVLET");
+    if (hasServlet) {
+      // Check if there's a clear domain from non-servlet modules in the group
+      const nonServletDomains = group
+        .filter(m => m.type !== "SERVLET")
+        .map(m => this.toDomain(m.id))
+        .filter(d => d !== "unknown");
+      if (nonServletDomains.length === 0) return "ops-service";
+    }
 
     // Domaine dominant
     const domains = group.map(m => this.toDomain(m.id));

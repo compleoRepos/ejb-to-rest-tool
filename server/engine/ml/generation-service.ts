@@ -14,7 +14,7 @@
  *       et le type retour.
  *
  * Dépendance externe (optionnelle, via fetch) :
- *   - Ollama : http://localhost:11434 (modèle deepseek-coder)
+ *   - Ollama : http://localhost:11434 (modèle qwen2.5:1.5b)
  */
 
 import type { MigrationPair } from "./embedding-service";
@@ -37,7 +37,7 @@ export class GenerationService {
 
   constructor(
     ollamaUrl: string,
-    model = "deepseek-coder:6.7b-instruct-q4_K_M"
+    model = "qwen2.5:1.5b"
   ) {
     this.ollamaUrl = ollamaUrl.replace(/\/$/, "");
     this.model     = model;

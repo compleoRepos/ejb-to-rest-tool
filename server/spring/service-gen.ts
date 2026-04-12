@@ -324,11 +324,14 @@ function generateServiceMethodBody(
   }
 
   // ─── Fallback: No execute() body found — generate builder + TODO ───
+  // BUG-I v7.5: For complex methods (>50 lines), generate a structured stub
+  // that documents the legacy steps instead of a generic TODO.
   const lines: string[] = [];
 
+  // BUG-I v7.5: Extract step comments from complex legacy methods
+  const legacySteps = extractLegacySteps(uc.rawSource, uc.className);
+
   // FIX B v5.7.2: Only generate builder if resDto exists AND resType is not Void
-  // Direct EJBs may have voOutType = raw Java type (e.g. "CompteDTO") not in dtoMap
-  // In that case, resDto is undefined but resType could still be non-Void
   if (resDto && resType !== "Void") {
     lines.push(`        ${resType} response = ${resType}.builder()`);
 
@@ -352,21 +355,179 @@ function generateServiceMethodBody(
     lines.push(`            .build();`);
   }
 
-  const magixService = uc.injectedServices.find(s =>
-    s.type.toLowerCase().includes("magix") || s.type.toLowerCase().includes("service")
-  );
-  if (magixService) {
-    const fieldName = (magixService as any).fieldName || magixService.type.charAt(0).toLowerCase() + magixService.type.slice(1);
-    lines.push(`        // TODO: Implement call to ${magixService.type} — migrated from @EJB ${fieldName}`);
-    lines.push(`        // Original transaction code: see legacy ${uc.className}`);
+  // BUG-I v7.5: If complex method with steps, generate structured stub
+  if (legacySteps.length > 0) {
+    lines.push(`        // ─── Structured migration stub from ${uc.className} (${legacySteps.length} steps detected) ───`);
+    lines.push(`        // This method is complex (>50 lines). Each step below corresponds`);
+    lines.push(`        // to a logical block in the legacy code. Implement them in order.`);
+    lines.push(``);
+    for (let i = 0; i < legacySteps.length; i++) {
+      const step = legacySteps[i];
+      lines.push(`        // STEP ${i + 1}: ${step.label}`);
+      if (step.tables.length > 0) {
+        lines.push(`        //   Tables concernées : ${step.tables.join(", ")}`);
+      }
+      if (step.ejbCalls.length > 0) {
+        lines.push(`        //   Appels @EJB : ${step.ejbCalls.join(", ")}`);
+      }
+      if (step.hasTransaction) {
+        lines.push(`        //   ⚠️ Transaction manuelle détectée — vérifier la gestion transactionnelle`);
+      }
+      lines.push(`        // TODO: Implement step ${i + 1} — ${step.label}`);
+      lines.push(``);
+    }
+    lines.push(`        // Migrated from: ${uc.className} — ${legacySteps.length} steps, structured stub`);
   } else {
-    lines.push(`        // TODO: Implement business logic from legacy ${uc.className}`);
+    // Simple fallback for non-complex methods
+    const magixService = uc.injectedServices.find(s =>
+      s.type.toLowerCase().includes("magix") || s.type.toLowerCase().includes("service")
+    );
+    if (magixService) {
+      const fieldName = (magixService as any).fieldName || magixService.type.charAt(0).toLowerCase() + magixService.type.slice(1);
+      lines.push(`        // TODO: Implement call to ${magixService.type} — migrated from @EJB ${fieldName}`);
+      lines.push(`        // Original transaction code: see legacy ${uc.className}`);
+    } else {
+      lines.push(`        // TODO: Implement business logic from legacy ${uc.className}`);
+    }
   }
 
   return lines.join("\n");
 }
 
-// ─── FIX B v7.1: Helpers for raw return type inference ──────────────────────
+// ─── BUG-I v7.5: Extract logical steps from complex legacy methods ───────────────────
+
+interface LegacyStep {
+  label:          string;
+  tables:         string[];
+  ejbCalls:       string[];
+  hasTransaction: boolean;
+}
+
+/**
+ * BUG-I v7.5: Parse a complex legacy method to extract logical steps.
+ * Detects:
+ *   - // ÉTAPE N: ... comments
+ *   - // Step N: ... comments
+ *   - Large try/catch blocks with distinct SQL operations
+ *   - Transaction boundaries (UserTransaction, begin/commit/rollback)
+ */
+export function extractLegacySteps(rawSource: string, className: string): LegacyStep[] {
+  if (!rawSource || rawSource.length < 500) return []; // Not complex enough
+
+  // Count non-blank lines to determine complexity
+  const nonBlankLines = rawSource.split("\n").filter(l => l.trim().length > 0).length;
+  if (nonBlankLines < 50) return []; // Not complex enough
+
+  const steps: LegacyStep[] = [];
+
+  // Strategy 1: Look for explicit step comments (ÉTAPE, Step, STEP, Phase)
+  const stepCommentRegex = /\/\/\s*(?:ÉTAPE|ETAPE|Step|STEP|Phase)\s*(\d+)\s*[:.]?\s*(.+)/gi;
+  let match: RegExpExecArray | null;
+  const stepPositions: { index: number; label: string }[] = [];
+
+  while ((match = stepCommentRegex.exec(rawSource)) !== null) {
+    stepPositions.push({
+      index: match.index,
+      label:  match[2].trim(),
+    });
+  }
+
+  if (stepPositions.length >= 2) {
+    // Extract context for each step section
+    for (let i = 0; i < stepPositions.length; i++) {
+      const start = stepPositions[i].index;
+      const end   = i + 1 < stepPositions.length
+        ? stepPositions[i + 1].index
+        : rawSource.length;
+      const section = rawSource.substring(start, end);
+
+      steps.push({
+        label:          stepPositions[i].label,
+        tables:         extractTablesFromSection(section),
+        ejbCalls:       extractEjbCallsFromSection(section),
+        hasTransaction: /UserTransaction|utx\.|begin\(|commit\(|rollback\(/i.test(section),
+      });
+    }
+    return steps;
+  }
+
+  // Strategy 2: Infer steps from large try/catch blocks and SQL patterns
+  const tryCatchRegex = /try\s*\{/g;
+  const tryPositions: number[] = [];
+  while ((match = tryCatchRegex.exec(rawSource)) !== null) {
+    tryPositions.push(match.index);
+  }
+
+  if (tryPositions.length >= 2) {
+    for (let i = 0; i < tryPositions.length; i++) {
+      const start = tryPositions[i];
+      const end   = i + 1 < tryPositions.length
+        ? tryPositions[i + 1]
+        : rawSource.length;
+      const section = rawSource.substring(start, end);
+      const tables  = extractTablesFromSection(section);
+      const ejbCalls = extractEjbCallsFromSection(section);
+
+      if (tables.length > 0 || ejbCalls.length > 0) {
+        steps.push({
+          label:          tables.length > 0
+            ? `Opération sur ${tables.join(", ")}`
+            : `Bloc try/catch #${i + 1}`,
+          tables,
+          ejbCalls,
+          hasTransaction: /UserTransaction|utx\.|begin\(|commit\(|rollback\(/i.test(section),
+        });
+      }
+    }
+  }
+
+  // Strategy 3: If still no steps, create one big step
+  if (steps.length === 0 && nonBlankLines >= 50) {
+    const allTables = extractTablesFromSection(rawSource);
+    const allEjbCalls = extractEjbCallsFromSection(rawSource);
+    steps.push({
+      label:          `Logique métier complexe (${nonBlankLines} lignes)`,
+      tables:         allTables,
+      ejbCalls:       allEjbCalls,
+      hasTransaction: /UserTransaction|utx\.|begin\(|commit\(|rollback\(/i.test(rawSource),
+    });
+  }
+
+  return steps;
+}
+
+function extractTablesFromSection(section: string): string[] {
+  const tables = new Set<string>();
+  const regex = /(?:FROM|INTO|UPDATE|JOIN|DELETE\s+FROM)\s+([A-Z_][A-Z0-9_]+)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(section)) !== null) {
+    const t = m[1].toUpperCase();
+    if (t.length > 2 && ![
+      "SELECT", "WHERE", "SET", "AND", "OR", "ON", "AS", "IS", "IN",
+      "NOT", "NULL", "VALUES", "ORDER", "GROUP", "HAVING", "DUAL",
+    ].includes(t)) {
+      tables.add(t);
+    }
+  }
+  return [...tables];
+}
+
+function extractEjbCallsFromSection(section: string): string[] {
+  const calls = new Set<string>();
+  const regex = /@EJB[^;]*?(\w+Service|\w+EJB|\w+Bean)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(section)) !== null) {
+    calls.add(m[1]);
+  }
+  // Also detect method calls on injected EJBs
+  const callRegex = /(\w+(?:Service|EJB|Bean))\.\w+\(/g;
+  while ((m = callRegex.exec(section)) !== null) {
+    calls.add(m[1]);
+  }
+   return [...calls];
+}
+
+// ─── FIX B v7.1:: Helpers for raw return type inference ──────────────────────
 
 /** Known Java primitive/wrapper types that don't need DTO import */
 const JAVA_BUILTIN_TYPES = new Set([

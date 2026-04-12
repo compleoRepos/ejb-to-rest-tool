@@ -22,7 +22,7 @@ import type { QualityReport, QualityCheck } from "../quality-scorer";
 
 export interface ReportEnhancerConfig {
   ollamaUrl:   string;
-  model:       string;   // llama3:8b-instruct-q4_K_M (meilleur pour le texte)
+  model:       string;   // qwen2.5:1.5b (léger, offline, gratuit)
   enabled:     boolean;
   language:    "fr" | "en";
   timeoutMs?:  number;   // défaut: 180_000 (3 min)
@@ -100,25 +100,36 @@ export class ReportEnhancer {
       return { enhanced: false, reports: {} };
     }
 
-    const [migration, microservices, datasource, quality, executive] =
-      await Promise.allSettled([
-        this.enhanceMigrationReport(context),
-        this.enhanceMicroservicesReport(context),
-        this.enhanceDatasourceReport(context),
-        this.enhanceQualityScore(context),
-        this.generateExecutiveSummary(context),
-      ]);
-
-    return {
-      enhanced: true,
-      reports: {
-        MIGRATION_REPORT:     this.unwrap(migration),
-        MICROSERVICES_REPORT: this.unwrap(microservices),
-        DATASOURCE_MIGRATION: this.unwrap(datasource),
-        QUALITY_SCORE:        this.unwrap(quality),
-        EXECUTIVE_SUMMARY:    this.unwrap(executive),
-      },
+    // Exécution séquentielle — Ollama ne peut traiter qu'un prompt à la fois
+    // sur des machines à mémoire limitée (< 8 Go RAM).
+    // Chaque rapport bénéficie ainsi de toute la mémoire GPU/CPU disponible.
+    const reports: Record<string, string | null> = {
+      MIGRATION_REPORT:     null,
+      MICROSERVICES_REPORT: null,
+      DATASOURCE_MIGRATION: null,
+      QUALITY_SCORE:        null,
+      EXECUTIVE_SUMMARY:    null,
     };
+
+    const tasks: { key: string; fn: () => Promise<string> }[] = [
+      { key: "MIGRATION_REPORT",     fn: () => this.enhanceMigrationReport(context) },
+      { key: "MICROSERVICES_REPORT", fn: () => this.enhanceMicroservicesReport(context) },
+      { key: "DATASOURCE_MIGRATION", fn: () => this.enhanceDatasourceReport(context) },
+      { key: "QUALITY_SCORE",        fn: () => this.enhanceQualityScore(context) },
+      { key: "EXECUTIVE_SUMMARY",    fn: () => this.generateExecutiveSummary(context) },
+    ];
+
+    for (const task of tasks) {
+      try {
+        reports[task.key] = await task.fn();
+      } catch (err) {
+        // Fallback gracieux : si un rapport échoue, on continue avec les suivants
+        console.warn(`[ReportEnhancer] ${task.key} échoué: ${err instanceof Error ? err.message : String(err)}`);
+        reports[task.key] = null;
+      }
+    }
+
+    return { enhanced: true, reports };
   }
 
   // ── MIGRATION_REPORT.md enrichi ──────────────────────────────
@@ -129,7 +140,7 @@ export class ReportEnhancer {
       temperature: 0.3,
       num_predict: 2000,
     });
-    return this.cleanMarkdown(raw);
+    return this.sanitizeOutput(raw, ctx); // BUG-G/H v7.5
   }
 
   private buildMigrationPrompt(ctx: ReportContext): string {
@@ -215,10 +226,9 @@ Génère le rapport :`;
       temperature: 0.3,
       num_predict: 2500,
     });
-    return this.cleanMarkdown(raw);
+    return this.sanitizeOutput(raw, ctx); // BUG-G/H v7.5
   }
-
-  // ── DATASOURCE_MIGRATION.md enrichi ──────────────────────────
+  // ── DATASOURCE_MIGRATION.md enrichii ──────────────────────────
 
   async enhanceDatasourceReport(ctx: ReportContext): Promise<string> {
     const dsDetails = ctx.dataSources.map(ds => ({
@@ -261,13 +271,12 @@ Format : Markdown technique mais lisible par un chef de projet.
 
 Génère le rapport :`;
 
-    const raw = await this.ollamaGenerate(prompt, {
+     const raw = await this.ollamaGenerate(prompt, {
       temperature: 0.2,
       num_predict: 2000,
     });
-    return this.cleanMarkdown(raw);
+    return this.sanitizeOutput(raw, ctx); // BUG-G/H v7.5
   }
-
   // ── QUALITY_SCORE.md enrichi ─────────────────────────────────
 
   async enhanceQualityScore(ctx: ReportContext): Promise<string> {
@@ -313,10 +322,9 @@ Génère le rapport :`;
       temperature: 0.2,
       num_predict: 1200,
     });
-    return this.cleanMarkdown(raw);
+    return this.sanitizeOutput(raw, ctx); // BUG-G/H v7.5
   }
-
-  // ── EXECUTIVE_SUMMARY.md — nouveau fichier pour le DSI/COMEX ─
+  // ── EXECUTIVE_SUMMARY.mdd — nouveau fichier pour le DSI/COMEX ─
 
   async generateExecutiveSummary(ctx: ReportContext): Promise<string> {
     const prompt = `Tu es consultant en transformation digitale bancaire.
@@ -369,10 +377,9 @@ Génère le résumé exécutif :`;
       temperature: 0.4,
       num_predict: 1500,
     });
-    return this.cleanMarkdown(raw);
+    return this.sanitizeOutput(raw, ctx); // BUG-G/H v7.5
   }
-
-  // ── Ollama API call ──────────────────────────────────────────
+  // ── Ollama API calll ──────────────────────────────────────────
 
   private async ollamaGenerate(
     prompt: string,
@@ -443,6 +450,101 @@ Génère le résumé exécutif :`;
       .replace(/```markdown\s*/g, "")
       .replace(/```\s*$/g, "")
       .trim();
+  }
+
+  /**
+   * BUG-G v7.5: Detect and strip prompt leak from ML output.
+   * The LLM sometimes echoes back parts of the system prompt.
+   */
+  stripPromptLeak(output: string): string {
+    // Remove lines that look like prompt instructions
+    const promptPatterns = [
+      /^Tu es un architecte.*$/gm,
+      /^Tu dois .*$/gm,
+      /^## Ta mission$/gm,
+      /^Génère (?:un|le) (?:rapport|résumé).*:$/gm,
+      /^Ton\s*:.*$/gm,
+      /^Format\s*:.*$/gm,
+      /^Sois honnête\s*:.*$/gm,
+      /^Aucun acronyme.*$/gm,
+      /^Max \d+ mots\.?$/gm,
+    ];
+
+    let cleaned = output;
+    for (const pattern of promptPatterns) {
+      cleaned = cleaned.replace(pattern, "");
+    }
+
+    // Remove consecutive blank lines (artifact of stripping)
+    cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+    return cleaned.trim();
+  }
+
+  /**
+   * BUG-H v7.5: Detect hallucinated content in ML output.
+   * Returns true if the output contains suspicious patterns.
+   */
+  detectHallucinations(output: string, context: ReportContext): string[] {
+    const warnings: string[] = [];
+
+    // Check for invented module names not in the context
+    const knownModuleIds = new Set(context.modules.map(m => m.id.toLowerCase()));
+    const knownServiceNames = new Set(context.services.map(s => s.name.toLowerCase()));
+
+    // Extract module-like references from the output (PascalCase words ending with EJB/Service/Bean)
+    const moduleRefs = output.match(/\b[A-Z][a-zA-Z]+(?:EJB|Service|Bean|Servlet|MDB|DAO)\b/g) ?? [];
+    for (const ref of moduleRefs) {
+      if (!knownModuleIds.has(ref.toLowerCase()) &&
+          !knownServiceNames.has(ref.toLowerCase())) {
+        warnings.push(`Module potentiellement halluciné : ${ref}`);
+      }
+    }
+
+    // Check for invented table names (ALL_CAPS_SNAKE_CASE that look like tables)
+    const knownTables = new Set([
+      ...context.modules.flatMap(m => [...(m.writeTables ?? []), ...(m.readTables ?? [])]),
+    ].map(t => t.toUpperCase()));
+    const tableRefs = output.match(/\bT_[A-Z][A-Z0-9_]+\b/g) ?? [];
+    for (const ref of tableRefs) {
+      if (!knownTables.has(ref.toUpperCase())) {
+        warnings.push(`Table potentiellement hallucinée : ${ref}`);
+      }
+    }
+
+    // Check for invented percentages or numbers that seem too precise
+    const percentages = output.match(/\d{2,3}(?:\.\d+)?\s*%/g) ?? [];
+    for (const pct of percentages) {
+      const num = parseFloat(pct);
+      if (num > 100) {
+        warnings.push(`Pourcentage suspect : ${pct}`);
+      }
+    }
+
+    return warnings;
+  }
+
+  /**
+   * BUG-G/H v7.5: Full sanitization pipeline for ML output.
+   * 1. Clean markdown fences
+   * 2. Strip prompt leak
+   * 3. Detect hallucinations (log warnings but don't reject)
+   * 4. Validate minimum structure
+   */
+  sanitizeOutput(raw: string, context: ReportContext): string {
+    let output = this.cleanMarkdown(raw);
+    output = this.stripPromptLeak(output);
+
+    const warnings = this.detectHallucinations(output, context);
+    if (warnings.length > 0) {
+      console.warn(`[ReportEnhancer] Hallucination warnings: ${warnings.join("; ")}`);
+    }
+
+    // Validate minimum structure: must have at least one heading and 100 chars
+    if (output.length < 100 || !output.includes("#")) {
+      throw new Error("Output ML trop court ou sans structure Markdown");
+    }
+
+    return output;
   }
 
   private unwrap<T>(result: PromiseSettledResult<T>): T | null {

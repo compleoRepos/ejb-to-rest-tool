@@ -267,7 +267,9 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
   const batchJobs = batchFiles.map(f => parseBatchJob(f));
 
   // ─── Detect direct EJB multi-method classes ───
-  const directEjbFiles = javaFiles.filter(f => isDirectEjb(f.content));
+  // BUG-A v7.5: Filter inner classes before classification
+  const topLevelJavaFiles = javaFiles.filter(f => !shouldSkipClass(f.className, f.content, f.content));
+  const directEjbFiles = topLevelJavaFiles.filter(f => isDirectEjb(f.content));
   const directEjbUseCases = directEjbFiles.flatMap(f =>
     parseDirectEjbUseCases(f, dtoMap, bianMappings, typeRegistry)
   );
@@ -337,6 +339,181 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
 
 // ─── File Classification ────────────────────────────────────────────────────
 
+// ─── BUG-A v7.5: Filter inner/private classes ─────────────────────────────
+
+/** Component type classification for Java EE → Spring mapping (BUG-B v7.5) */
+export type JavaComponentType =
+  | "EJB3X_STATELESS"      // @Stateless → @Service Spring
+  | "EJB3X_SINGLETON"      // @Singleton → @Component + @Scope("singleton")
+  | "EJB3X_STATEFUL"       // @Stateful → @Service + @Scope("prototype")
+  | "EJB2X_SESSION"        // implements SessionBean → @Service
+  | "CDI_APPLICATION"      // @ApplicationScoped → @Component Spring
+  | "CDI_REQUEST"          // @RequestScoped → @Component + @Scope("request")
+  | "SERVLET"              // extends HttpServlet → @RestController
+  | "FILTER"               // implements Filter → @Component OncePerRequestFilter
+  | "MDB"                  // @MessageDriven → @KafkaListener
+  | "BATCH_READER"         // ItemReader → @Component Spring Batch
+  | "BATCH_PROCESSOR"      // ItemProcessor → @Component Spring Batch
+  | "BATCH_WRITER"         // ItemWriter → @Component Spring Batch
+  | "VALIDATOR"            // CDI bean pur sans annotation → @Component
+  | "TRANSFORMER"          // CDI bean pur sans annotation → @Component
+  | "UNKNOWN";
+
+/**
+ * Detect the Java EE component type from source code (BUG-B v7.5).
+ * Order matters: EJB annotations take priority over CDI.
+ */
+export function detectComponentType(source: string): JavaComponentType {
+  // EJB Annotations (highest priority)
+  if (/@Stateless/.test(source))    return "EJB3X_STATELESS";
+  if (/@Singleton/.test(source))    return "EJB3X_SINGLETON";
+  if (/@Stateful/.test(source))     return "EJB3X_STATEFUL";
+  if (/implements\s+(?:.*\b)?SessionBean\b/.test(source)) return "EJB2X_SESSION";
+
+  // CDI Annotations
+  if (/@ApplicationScoped/.test(source)) return "CDI_APPLICATION";
+  if (/@RequestScoped/.test(source))     return "CDI_REQUEST";
+
+  // Servlet / Filter
+  if (/extends\s+HttpServlet/.test(source))    return "SERVLET";
+  if (/implements\s+(?:.*\b)?Filter\b/.test(source)) return "FILTER";
+
+  // MDB
+  if (/@MessageDriven/.test(source)) return "MDB";
+
+  // Batch JSR-352
+  if (/extends\s+AbstractItemReader/.test(source) ||
+      /implements\s+(?:.*\b)?ItemReader\b/.test(source))   return "BATCH_READER";
+  if (/implements\s+(?:.*\b)?ItemProcessor\b/.test(source)) return "BATCH_PROCESSOR";
+  if (/extends\s+AbstractItemWriter/.test(source) ||
+      /implements\s+(?:.*\b)?ItemWriter\b/.test(source))   return "BATCH_WRITER";
+
+  return "UNKNOWN";
+}
+
+/** Whether this component type should generate a REST Controller (BUG-B v7.5) */
+export function shouldGenerateController(type: JavaComponentType): boolean {
+  return type === "EJB3X_STATELESS"
+      || type === "EJB3X_STATEFUL"
+      || type === "EJB2X_SESSION"
+      || type === "EJB3X_SINGLETON"
+      || type === "SERVLET";
+}
+
+/** Map component type to Spring annotation (BUG-B v7.5) */
+export function generateSpringAnnotation(type: JavaComponentType): string {
+  switch (type) {
+    case "EJB3X_STATELESS":
+    case "EJB3X_STATEFUL":
+    case "EJB2X_SESSION":
+      return "@Service";
+    case "EJB3X_SINGLETON":
+    case "CDI_APPLICATION":
+    case "CDI_REQUEST":
+    case "VALIDATOR":
+    case "TRANSFORMER":
+      return "@Component";
+    case "SERVLET":
+      return "@RestController";
+    case "FILTER":
+      return "@Component";
+    case "MDB":
+      return "@Component";
+    case "BATCH_READER":
+    case "BATCH_PROCESSOR":
+    case "BATCH_WRITER":
+      return "@Component";
+    default:
+      return "@Component";
+  }
+}
+
+/**
+ * BUG-A v7.5: Check if a class is an inner/private/static nested class.
+ * Inner classes should not be treated as EJBs.
+ */
+function isInnerClass(content: string, className: string): boolean {
+  const classDecl = `class ${className}`;
+  const idx = content.indexOf(classDecl);
+  if (idx < 0) return false;
+
+  // Check for 'private', 'protected', 'static' modifier before class declaration
+  const before = content.substring(Math.max(0, idx - 80), idx);
+  if (/\b(private|protected)\s+(static\s+)?class\b/.test(before + "class")) return true;
+  if (/\bstatic\s+class\b/.test(content.substring(Math.max(0, idx - 15), idx + classDecl.length))) return true;
+
+  // Check indentation: inner classes are declared inside another class
+  // Count opening/closing braces before this class declaration
+  const beforeClass = content.substring(0, idx);
+  const publicClassMatches = beforeClass.match(/public\s+(?:abstract\s+)?class\s+/g);
+  if (publicClassMatches && publicClassMatches.length >= 1) {
+    // There's already a public class before this one → this is an inner class
+    // But only if this class itself is NOT the first public class
+    const firstPublicClassIdx = content.search(/public\s+(?:abstract\s+)?class\s+/);
+    if (firstPublicClassIdx >= 0 && firstPublicClassIdx < idx) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * BUG-A v7.5: Check if a class should be skipped from EJB/CDI processing.
+ * Filters inner classes, DTOs, listeners, callbacks, enums.
+ */
+function shouldSkipClass(className: string, content: string, fullSource: string): boolean {
+  // 1. Inner class / private static class
+  if (isInnerClass(fullSource, className)) return true;
+
+  // 2. DTO / ValueObject suffixes
+  const dtoSuffixes = [
+    "VoIn", "VoOut", "DTO", "Dto", "Request", "Response",
+    "Item", "Context", "Data", "Builder", "Event", "Config",
+    "Info", "Detail", "Summary", "Result", "Match"
+  ];
+  if (dtoSuffixes.some(s => className.endsWith(s))) return true;
+
+  // 3. Listener / Callback / Handler (non-servlet)
+  if (className.endsWith("Listener") || className.endsWith("Callback")) return true;
+  if (className.endsWith("Handler") && !/extends\s+HttpServlet/.test(content)) return true;
+
+  // 4. Enum declaration
+  if (/public\s+enum\s+/.test(content)) return true;
+
+  return false;
+}
+
+/**
+ * BUG-C v7.5: Check if a class is a DTO that should NOT be treated as an EJB/CDI component.
+ */
+function isDtoClass(className: string, source: string): boolean {
+  // 1. Known DTO suffixes
+  const dtoSuffixes = [
+    "VoIn", "VoOut", "DTO", "Dto", "RequestDTO", "ResponseDTO",
+    "Request", "Response", "Item", "Context", "Data",
+    "Config", "Info", "Detail", "Summary", "Result", "Match"
+  ];
+  if (dtoSuffixes.some(s => className.endsWith(s))) return true;
+
+  // 2. Lombok @Data/@Builder without EJB/CDI annotations
+  const hasLombokData    = /@Data/.test(source);
+  const hasLombokBuilder = /@Builder/.test(source);
+  const hasEJBAnnotation = /@Stateless|@Singleton|@Stateful|@ApplicationScoped|@MessageDriven/.test(source);
+  if (hasLombokData && hasLombokBuilder && !hasEJBAnnotation) return true;
+
+  // 3. @Data without business logic
+  const hasBusinessLogic = source.includes("DataSource")
+    || source.includes("Connection")
+    || source.includes("PreparedStatement")
+    || source.includes("@Resource")
+    || source.includes("@EJB")
+    || source.includes("@Inject");
+  if (hasLombokData && !hasBusinessLogic) return true;
+
+  return false;
+}
+
 function isUseCase(content: string): boolean {
   // BOA pattern: @UseCase + BaseUseCase
   if (/@UseCase/.test(content) && /implements\s+BaseUseCase/.test(content)) return true;
@@ -359,12 +536,18 @@ function isUseCase(content: string): boolean {
  * v5.10.1: seuil abaissé de >1 à >=1 pour couvrir les EJB à méthode unique.
  */
 function isDirectEjb(content: string): boolean {
+  // BUG-B v7.5: CDI @ApplicationScoped/@RequestScoped are NOT EJBs
+  if (/@ApplicationScoped/.test(content) || /@RequestScoped/.test(content)) return false;
   if (!/@Stateless/.test(content) && !/@Stateful/.test(content)) return false;
   if (/implements\s+BaseUseCase/.test(content)) return false; // BOA pattern → single UseCase via parseUseCase
   if (!(/public\s+class/.test(content))) return false;
   const classNameMatch = content.match(/public\s+class\s+(\w+)/);
   const className = classNameMatch ? classNameMatch[1] : "";
   if (isDao(content, className)) return false;
+  // BUG-A v7.5: Skip inner classes
+  if (shouldSkipClass(className, content, content)) return false;
+  // BUG-C v7.5: Skip DTOs
+  if (isDtoClass(className, content)) return false;
   // Count business methods (public, non-lifecycle, non-constructor)
   const businessMethods = extractBusinessMethods(content, className);
   return businessMethods.length >= 1;
