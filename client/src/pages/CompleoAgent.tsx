@@ -8,6 +8,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
@@ -113,6 +114,7 @@ export default function CompleoAgentPage() {
   const [enableMicroservices, setEnableMicroservices] = useState(false);
   const [enableML, setEnableML] = useState(false);
   const [enableReportEnhancer, setEnableReportEnhancer] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   // Agent state
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -435,11 +437,17 @@ export default function CompleoAgentPage() {
                     }}
                   />
                   <div
-                    className="border-2 border-dashed border-border/50 rounded-lg p-8 text-center cursor-pointer hover:border-emerald-500/50 transition-colors"
+                    className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all duration-200 ${
+                      isDragOver
+                        ? "border-emerald-400 bg-emerald-500/10 scale-[1.01]"
+                        : "border-border/50 hover:border-emerald-500/50"
+                    }`}
                     onClick={() => fileInputRef.current?.click()}
-                    onDragOver={(e) => e.preventDefault()}
+                    onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                    onDragLeave={() => setIsDragOver(false)}
                     onDrop={(e) => {
                       e.preventDefault();
+                      setIsDragOver(false);
                       const f = e.dataTransfer.files[0];
                       if (f) handleFileSelect(f);
                     }}
@@ -513,47 +521,43 @@ export default function CompleoAgentPage() {
                   className="font-mono text-sm"
                 />
               </div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <Checkbox
                   checked={autoResolve}
-                  onChange={(e) => setAutoResolve(e.target.checked)}
-                  className="rounded border-border"
+                  onCheckedChange={(v) => setAutoResolve(v === true)}
+                  className="data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-500"
                 />
-                <span className="text-sm">Auto-résoudre les ambiguïtés (utiliser les recommandations du moteur)</span>
+                <span className="text-sm group-hover:text-foreground transition-colors">Auto-résoudre les ambiguïtés (utiliser les recommandations du moteur)</span>
               </label>
               <div className="border-t border-border/30 pt-3 mt-2 space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <Checkbox
                     checked={enableMicroservices}
-                    onChange={(e) => setEnableMicroservices(e.target.checked)}
-                    className="rounded border-border"
+                    onCheckedChange={(v) => setEnableMicroservices(v === true)}
+                    className="data-[state=checked]:bg-pink-500 data-[state=checked]:border-pink-500"
                   />
                   <Layers className="w-4 h-4 text-pink-400" />
-                  <span className="text-sm">Découpage Microservices (Splitter + Générateur)</span>
+                  <span className="text-sm group-hover:text-foreground transition-colors">Découpage Microservices (Splitter + Générateur)</span>
                 </label>
                 {enableMicroservices && (
-                  <label className="flex items-center gap-2 cursor-pointer ml-6">
-                    <input
-                      type="checkbox"
+                  <label className="flex items-center gap-3 cursor-pointer ml-6 group">
+                    <Checkbox
                       checked={enableML}
-                      onChange={(e) => setEnableML(e.target.checked)}
-                      className="rounded border-border"
+                      onCheckedChange={(v) => setEnableML(v === true)}
+                      className="data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
                     />
                     <Zap className="w-4 h-4 text-amber-400" />
-                    <span className="text-sm">Amélioration ML (Ollama + ChromaDB requis)</span>
+                    <span className="text-sm group-hover:text-foreground transition-colors">Amélioration ML (Ollama + ChromaDB requis)</span>
                   </label>
                 )}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <Checkbox
                     checked={enableReportEnhancer}
-                    onChange={(e) => setEnableReportEnhancer(e.target.checked)}
-                    className="rounded border-border"
+                    onCheckedChange={(v) => setEnableReportEnhancer(v === true)}
+                    className="data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
                   />
                   <Star className="w-4 h-4 text-amber-400" />
-                  <span className="text-sm">Rapports IA enrichis (Ollama requis)</span>
+                  <span className="text-sm group-hover:text-foreground transition-colors">Rapports IA enrichis (Ollama requis)</span>
                 </label>
               </div>
             </div>
