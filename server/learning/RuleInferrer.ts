@@ -415,6 +415,8 @@ export class RuleInferrer {
       allInferred.push(...inferred);
 
       for (const rule of inferred) {
+        // Guard: skip rules without a valid chosenOption to avoid DB insert errors
+        if (!rule.chosenOption) continue;
         toInsert.push({
           tenantId,
           ruleType: rule.ruleType,
