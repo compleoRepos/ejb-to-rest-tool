@@ -1,5 +1,5 @@
 /**
- * ReportEnhancer — Compleo v7.4
+ * ReportEnhancer — Compleo v7.6
  *
  * Transforme les rapports mécaniques en conseil d'architecte senior.
  * Utilise un LLM local (Ollama) pour enrichir 5 rapports :
@@ -7,7 +7,13 @@
  *   - MICROSERVICES_REPORT.md
  *   - DATASOURCE_MIGRATION.md
  *   - QUALITY_SCORE.md
- *   - EXECUTIVE_SUMMARY.md (nouveau)
+ *   - EXECUTIVE_SUMMARY.md
+ *
+ * v7.6 — Anti-hallucination renforcée :
+ *   - Prompts ancrés avec noms réels des classes/méthodes/tables
+ *   - validateMLOutput() bloque les classes inventées (UserService, OrderService)
+ *   - BAM = Banque Al-Maghrib (pas "Bureau Automatisé des Mandats")
+ *   - Aucune techno hors contexte (ASP.NET, PostgreSQL, etc.)
  *
  * Le ML est optionnel. Si Ollama est indisponible, les rapports
  * originaux sont retournés sans modification (fallback gracieux).
@@ -41,6 +47,11 @@ export interface ReportContext {
   estimatedDuration:       number;
   criticalDependencies:    string[];
   requiredInfrastructure:  string[];
+  // v7.6: Contexte réel pour ancrer les prompts ML
+  realClassNames?:         string[];
+  realMethodNames?:        string[];
+  realTableNames?:         string[];
+  realQueueNames?:         string[];
 }
 
 export interface ReportModule {
@@ -82,6 +93,44 @@ export interface EnhancedReports {
   reports:  Record<string, string | null>;
 }
 
+// ── Hallucinated patterns blacklist (v7.6 P3) ───────────────────
+
+const HALLUCINATED_CLASS_NAMES = new Set([
+  "UserService", "OrderService", "ProductService", "PaymentService",
+  "CartService", "AuthService", "LoginService", "RegisterService",
+  "CustomerService", "InvoiceService", "ShoppingCartService",
+  "UserController", "OrderController", "ProductController",
+  "UserRepository", "OrderRepository",
+]);
+
+const HALLUCINATED_METHOD_NAMES = new Set([
+  "findUserById", "getUserById", "createUser", "deleteUser",
+  "findOrderById", "createOrder", "deleteOrder",
+  "findProductById", "createProduct", "addToCart",
+]);
+
+const OUT_OF_CONTEXT_TECH = [
+  /ASP\.NET/i,
+  /PostgreSQL/i,
+  /MongoDB/i,
+  /\.NET\s+Core/i,
+  /C#/i,
+  /Node\.?js/i,
+  /Python/i,
+  /Django/i,
+  /Ruby\s+on\s+Rails/i,
+  /Express\.?js/i,
+  /Angular/i,
+  /React/i,
+  /Vue\.?js/i,
+];
+
+const BAM_WRONG_DEFINITIONS = [
+  /Bureau\s+Automatisé\s+des\s+Mandats/i,
+  /Bureau\s+d['']Audit\s+et\s+de\s+Management/i,
+  /Business\s+Activity\s+Monitoring/i,
+];
+
 // ── ReportEnhancer ───────────────────────────────────────────────
 
 export class ReportEnhancer {
@@ -100,9 +149,10 @@ export class ReportEnhancer {
       return { enhanced: false, reports: {} };
     }
 
+    // v7.6: Enrichir le contexte avec les noms réels si pas déjà fournis
+    this.enrichContextWithRealNames(context);
+
     // Exécution séquentielle — Ollama ne peut traiter qu'un prompt à la fois
-    // sur des machines à mémoire limitée (< 8 Go RAM).
-    // Chaque rapport bénéficie ainsi de toute la mémoire GPU/CPU disponible.
     const reports: Record<string, string | null> = {
       MIGRATION_REPORT:     null,
       MICROSERVICES_REPORT: null,
@@ -123,13 +173,57 @@ export class ReportEnhancer {
       try {
         reports[task.key] = await task.fn();
       } catch (err) {
-        // Fallback gracieux : si un rapport échoue, on continue avec les suivants
         console.warn(`[ReportEnhancer] ${task.key} échoué: ${err instanceof Error ? err.message : String(err)}`);
         reports[task.key] = null;
       }
     }
 
     return { enhanced: true, reports };
+  }
+
+  // ── v7.6: Enrichir le contexte avec les noms réels ──────────
+
+  private enrichContextWithRealNames(ctx: ReportContext): void {
+    if (!ctx.realClassNames || ctx.realClassNames.length === 0) {
+      ctx.realClassNames = [
+        ...ctx.modules.map(m => m.id),
+        ...ctx.services.flatMap(s => s.ejbs ?? []),
+      ].filter(Boolean);
+    }
+    if (!ctx.realMethodNames || ctx.realMethodNames.length === 0) {
+      // Extract method-like names from module IDs (ClassName_methodName pattern)
+      ctx.realMethodNames = ctx.modules
+        .map(m => m.id)
+        .filter(id => id.includes("_"))
+        .map(id => id.split("_").slice(1).join("_"))
+        .filter(Boolean);
+    }
+    if (!ctx.realTableNames || ctx.realTableNames.length === 0) {
+      ctx.realTableNames = [
+        ...ctx.modules.flatMap(m => [...(m.writeTables ?? []), ...(m.readTables ?? [])]),
+        ...ctx.dataSources.flatMap(ds => ds.tables),
+      ].filter(Boolean);
+    }
+    if (!ctx.realQueueNames || ctx.realQueueNames.length === 0) {
+      ctx.realQueueNames = ctx.modules
+        .flatMap(m => m.jmsQueues ?? [])
+        .filter(Boolean);
+    }
+  }
+
+  // ── v7.6: Construire le bloc d'ancrage "classes réelles" ────
+
+  private buildRealNamesAnchor(ctx: ReportContext): string {
+    const classes = (ctx.realClassNames ?? []).slice(0, 15);
+    const tables = [...new Set(ctx.realTableNames ?? [])].slice(0, 20);
+    if (classes.length === 0 && tables.length === 0) return "";
+
+    return `
+IMPORTANT — Classes et tables RÉELLES du projet (NE PAS inventer d'autres noms) :
+Classes: ${classes.join(", ")}
+Tables: ${tables.join(", ")}
+N'utilise QUE ces noms. Si tu ne connais pas un nom, ne l'invente pas.
+`;
   }
 
   // ── MIGRATION_REPORT.md enrichi ──────────────────────────────
@@ -140,17 +234,16 @@ export class ReportEnhancer {
       temperature: 0.3,
       num_predict: 1200,
     });
-    return this.sanitizeOutput(raw, ctx); // BUG-G/H v7.5
+    return this.sanitizeOutput(raw, ctx);
   }
 
   private buildMigrationPrompt(ctx: ReportContext): string {
     const risks = this.extractRisks(ctx);
-    // v7.5.1: Limiter à 8 modules max pour rester dans le context window du modèle 1.5B
     const topModules = ctx.modules.slice(0, 8);
     const remaining = ctx.modules.length - topModules.length;
 
-    return `Architecte Java EE senior, banques marocaines. Oracle RAC, BAM, WebLogic 12.2.
-
+    return `Architecte Java EE senior, banques marocaines. Oracle RAC, BAM (Banque Al-Maghrib), WebLogic 12.2.
+${this.buildRealNamesAnchor(ctx)}
 ## Projet
 Banque: ${ctx.projectName} | ${ctx.modules.length} classes | ${ctx.useCasesCount} UseCases | Confiance: ${ctx.confidenceScore}%
 
@@ -174,9 +267,9 @@ Markdown ## ###. Max 500 mots.`;
   // ── MICROSERVICES_REPORT.md enrichi ──────────────────────────
 
   async enhanceMicroservicesReport(ctx: ReportContext): Promise<string> {
-    // v7.5.1: Prompt compact pour rester dans le context window 4096 tokens
     const prompt = `Architecte microservices senior. Découpage en ${ctx.services.length} services pour DSI.
-
+BAM = Banque Al-Maghrib (régulateur bancaire marocain).
+${this.buildRealNamesAnchor(ctx)}
 ## Services
 ${ctx.services.map(s => `- **${s.name}** (${s.confidence}%): ${s.ejbs?.length||0} modules, ${s.ownedTables?.length||0} tables, deps=${s.restDependencies?.length||0}`).join("\n")}
 
@@ -194,9 +287,10 @@ Markdown ## ###. Max 600 mots.`;
       temperature: 0.3,
       num_predict: 1500,
     });
-    return this.sanitizeOutput(raw, ctx); // BUG-G/H v7.5
+    return this.sanitizeOutput(raw, ctx);
   }
-  // ── DATASOURCE_MIGRATION.md enrichii ──────────────────────────
+
+  // ── DATASOURCE_MIGRATION.md enrichi ──────────────────────────
 
   async enhanceDatasourceReport(ctx: ReportContext): Promise<string> {
     const dsDetails = ctx.dataSources.map(ds => ({
@@ -207,147 +301,122 @@ Markdown ## ###. Max 600 mots.`;
       features: ds.sqlFeatures,
     }));
 
-    const prompt = `Tu es un DBA Oracle senior et expert en migration de bases de données pour les institutions financières.
-
+    const prompt = `DBA Oracle senior, migration bases de données, institutions financières.
+BAM = Banque Al-Maghrib (régulateur bancaire marocain).
+${this.buildRealNamesAnchor(ctx)}
 ## DataSources détectées
 ${JSON.stringify(dsDetails, null, 2)}
 
-## Ta mission
-Pour chaque DataSource, génère une section dans DATASOURCE_MIGRATION.md avec :
+Pour chaque DataSource, génère DATASOURCE_MIGRATION.md avec :
+1. Spécificités SQL et équivalent Spring Boot
+2. Configuration Spring Boot exacte (application.yml)
+3. Plan de migration des données
+4. Stratégie de cohabitation (Strangler Fig Pattern)
 
-1. Les spécificités SQL détectées et leur équivalent Spring Boot
-   Exemples :
-   - Oracle FOR UPDATE NOWAIT → @Lock(PESSIMISTIC_WRITE) avec QueryHint
-   - DB2 YEAR(date) → @Query(nativeQuery=true) ou EXTRACT(YEAR FROM date)
-   - Oracle ROWNUM → FETCH FIRST n ROWS ONLY (déjà standard)
-   - Oracle SYSDATE → LocalDateTime.now() ou CURRENT_TIMESTAMP
-
-2. La configuration Spring Boot exacte (application.yml)
-   Avec les valeurs correctes pour Oracle 19c RAC et DB2 LUW 11.5
-
-3. Le plan de migration des données
-   - Ce qui peut être automatisé
-   - Ce qui nécessite un DBA
-   - Les risques de perte de données
-   - La durée estimée réaliste
-
-4. La stratégie de cohabitation pendant la transition
-   (Strangler Fig Pattern — l'ancien et le nouveau coexistent)
-
-Sois précis sur les versions : Oracle 19c, DB2 LUW 11.5, ojdbc11 v23.2.
-Format : Markdown technique mais lisible par un chef de projet.
-
-Génère le rapport :`;
+Oracle 19c, DB2 LUW 11.5, ojdbc11 v23.2.
+Markdown technique. Max 500 mots.`;
 
      const raw = await this.ollamaGenerate(prompt, {
       temperature: 0.2,
       num_predict: 2000,
     });
-    return this.sanitizeOutput(raw, ctx); // BUG-G/H v7.5
+    return this.sanitizeOutput(raw, ctx);
   }
-  // ── QUALITY_SCORE.md enrichi ─────────────────────────────────
+
+  // ── QUALITY_SCORE.md enrichi (v7.6 P3: prompts ancrés) ──────
 
   async enhanceQualityScore(ctx: ReportContext): Promise<string> {
     const report = ctx.qualityReport;
-
-    const prompt = `Tu es un lead développeur Java Spring Boot.
-Tu dois expliquer à un responsable technique ce que signifie ce score de qualité en termes concrets et ce qu'il faut faire.
-
-## Score calculé : ${report.score}/100 (${report.grade})
-
-## Détail des checks
-${report.checks.map((c: QualityCheck) => `
-- ${c.passed ? "✅" : "❌"} ${c.id} (${c.points}/${c.maxPoints} pts)
-  ${c.description}
-  Détail : ${c.detail}
-`).join("")}
-
-## Problèmes détectés
-${report.issues.join("\n")}
-
-## Ta mission
-Génère un QUALITY_SCORE.md enrichi en français avec :
-
-1. Ce que ce score signifie en pratique
-   (peut-on déployer ? qu'est-ce qui risque de casser ?)
-
-2. Pour chaque problème détecté :
-   - Impact concret sur le comportement de l'application
-   - Temps estimé pour le corriger (en heures)
-   - Priorité : BLOQUANT / IMPORTANT / MINEUR
-
-3. Ce qui peut être déployé en l'état sans risque
-
-4. La checklist "prêt pour la production"
-   avec les items restants à compléter
-
-Sois honnête : si le code n'est pas prêt à déployer, dis-le clairement.
-Format : Markdown. Max 500 mots.
-
-Génère le rapport :`;
-
+    const prompt = this.buildQualityPrompt(ctx, report);
     const raw = await this.ollamaGenerate(prompt, {
       temperature: 0.2,
       num_predict: 1200,
     });
-    return this.sanitizeOutput(raw, ctx); // BUG-G/H v7.5
+    return this.sanitizeOutput(raw, ctx);
   }
-  // ── EXECUTIVE_SUMMARY.mdd — nouveau fichier pour le DSI/COMEX ─
+
+  /**
+   * v7.6 P3: Prompt ancré avec les vrais noms de classes et méthodes.
+   * Empêche le modèle d'inventer UserService, OrderService, etc.
+   */
+  private buildQualityPrompt(ctx: ReportContext, report: QualityReport): string {
+    const realClasses = (ctx.realClassNames ?? []).slice(0, 12).join(", ");
+    const realMethods = (ctx.realMethodNames ?? []).slice(0, 10).join(", ");
+
+    return `Lead développeur Java Spring Boot. Score qualité migration.
+${this.buildRealNamesAnchor(ctx)}
+## Score : ${report.score}/100 (${report.grade})
+
+## Checks
+${report.checks.map((c: QualityCheck) => `- ${c.passed ? "✅" : "❌"} ${c.id} (${c.points}/${c.maxPoints} pts) ${c.description}`).join("\n")}
+
+## Problèmes
+${report.issues.join("\n")}
+
+Génère QUALITY_SCORE.md en français:
+1. Ce que ce score signifie en pratique
+2. Pour chaque problème: impact, temps de correction, priorité
+3. Ce qui peut être déployé en l'état
+4. Checklist "prêt pour la production"
+
+RÈGLES STRICTES:
+- N'utilise QUE les noms de classes listés ci-dessus: ${realClasses}
+- N'utilise QUE les noms de méthodes listés ci-dessus: ${realMethods}
+- NE MENTIONNE PAS: UserService, OrderService, ProductService, findUserById
+- NE MENTIONNE PAS: ASP.NET, PostgreSQL, MongoDB, Node.js, Python
+- BAM = Banque Al-Maghrib (régulateur bancaire marocain)
+
+Markdown. Max 500 mots.`;
+  }
+
+  // ── EXECUTIVE_SUMMARY.md (v7.6 P3: BAM défini, chiffres encadrés) ─
 
   async generateExecutiveSummary(ctx: ReportContext): Promise<string> {
-    const prompt = `Tu es consultant en transformation digitale bancaire.
-Tu dois écrire un résumé exécutif d'une page destiné au DSI ou au COMEX d'une banque marocaine. Pas de jargon technique. Focus sur la valeur, les risques, et les décisions à prendre.
-
-## Contexte
-Projet : Migration SI Legacy → Architecture Microservices Spring Boot
-Banque : ${ctx.projectName}
-Modules analysés : ${ctx.modules.length}
-Services microservices proposés : ${ctx.services.length}
-Score qualité global : ${ctx.qualityReport.score}/100
-Durée estimée totale : ${ctx.estimatedDuration} semaines
-
-## Points clés techniques (à traduire en langage DSI)
-- Modules à faible risque (déployables rapidement) : ${
-  ctx.services.filter(s => s.confidence >= 85).map(s => s.name).join(", ") || "aucun"
-}
-- Modules nécessitant une décision architecturale : ${
-  ctx.services.filter(s => s.confidence < 70).map(s => s.name).join(", ") || "aucun"
-}
-- Dépendances critiques identifiées : ${ctx.criticalDependencies.join(", ") || "aucune"}
-- Infrastructure requise : ${ctx.requiredInfrastructure.join(", ") || "non spécifiée"}
-
-## Ta mission
-Génère un EXECUTIVE_SUMMARY.md avec :
-
-1. Résumé en 3 phrases (ce qu'on fait, pourquoi, en combien de temps)
-
-2. Les 3 bénéfices principaux pour la banque
-   (conformité BAM, réduction des coûts, agilité — avec des chiffres réalistes)
-
-3. Les 3 risques principaux et leurs mitigations
-   (pas plus — les DSI n'ont pas le temps pour des listes de 20 points)
-
-4. Les 3 décisions que le DSI doit prendre maintenant
-   (pas les décisions techniques — les décisions stratégiques)
-
-5. Le calendrier en 3 phases (rapide/moyen/long terme)
-   Avec des jalons clairs et mesurables
-
-6. L'investissement humain requis
-   (combien de développeurs, pendant combien de temps)
-
-Ton : confiant, professionnel, honnête sur les risques.
-Aucun acronyme sans explication. Max 600 mots.
-
-Génère le résumé exécutif :`;
-
+    const prompt = this.buildExecutiveSummaryPrompt(ctx);
     const raw = await this.ollamaGenerate(prompt, {
       temperature: 0.4,
       num_predict: 1500,
     });
-    return this.sanitizeOutput(raw, ctx); // BUG-G/H v7.5
+    return this.sanitizeOutput(raw, ctx);
   }
-  // ── Ollama API calll ──────────────────────────────────────────
+
+  /**
+   * v7.6 P3: Prompt ancré pour Executive Summary.
+   * BAM = Banque Al-Maghrib, chiffres encadrés, pas de % inventés.
+   */
+  private buildExecutiveSummaryPrompt(ctx: ReportContext): string {
+    return `Consultant transformation digitale bancaire. Résumé exécutif pour DSI/COMEX.
+${this.buildRealNamesAnchor(ctx)}
+## Contexte
+Projet: Migration SI Legacy → Microservices Spring Boot
+Banque: ${ctx.projectName}
+Modules: ${ctx.modules.length} | Services: ${ctx.services.length}
+Score qualité: ${ctx.qualityReport.score}/100
+Durée estimée: ${ctx.estimatedDuration} semaines
+
+## Points clés
+- Déployables rapidement: ${ctx.services.filter(s => s.confidence >= 85).map(s => s.name).join(", ") || "aucun"}
+- Décision architecturale nécessaire: ${ctx.services.filter(s => s.confidence < 70).map(s => s.name).join(", ") || "aucun"}
+- Dépendances critiques: ${ctx.criticalDependencies.join(", ") || "aucune"}
+- Infrastructure: ${ctx.requiredInfrastructure.join(", ") || "non spécifiée"}
+
+Génère EXECUTIVE_SUMMARY.md en français:
+1. Résumé en 3 phrases
+2. 3 bénéfices principaux (conformité BAM, coûts, agilité)
+3. 3 risques principaux et mitigations
+4. 3 décisions stratégiques pour le DSI
+5. Calendrier en 3 phases
+6. Investissement humain requis
+
+RÈGLES STRICTES:
+- BAM = Banque Al-Maghrib (régulateur bancaire marocain). JAMAIS "Bureau Automatisé des Mandats".
+- N'invente PAS de pourcentages précis (ex: "taux de dépannage de 0%")
+- N'utilise QUE les noms de services listés ci-dessus
+- NE MENTIONNE PAS: ASP.NET, PostgreSQL, MongoDB, Node.js, Python, C#
+- Ton: confiant, professionnel, honnête. Max 600 mots.`;
+  }
+
+  // ── Ollama API call ──────────────────────────────────────────
 
   private async ollamaGenerate(
     prompt: string,
@@ -422,10 +491,8 @@ Génère le résumé exécutif :`;
 
   /**
    * BUG-G v7.5: Detect and strip prompt leak from ML output.
-   * The LLM sometimes echoes back parts of the system prompt.
    */
   stripPromptLeak(output: string): string {
-    // Remove lines that look like prompt instructions
     const promptPatterns = [
       /^Tu es un architecte.*$/gm,
       /^Tu dois .*$/gm,
@@ -436,6 +503,14 @@ Génère le résumé exécutif :`;
       /^Sois honnête\s*:.*$/gm,
       /^Aucun acronyme.*$/gm,
       /^Max \d+ mots\.?$/gm,
+      // v7.6: Additional prompt leak patterns
+      /^RÈGLES STRICTES\s*:?$/gm,
+      /^IMPORTANT —.*$/gm,
+      /^N'utilise QUE.*$/gm,
+      /^NE MENTIONNE PAS.*$/gm,
+      /^N'invente PAS.*$/gm,
+      /^Classes\s*:.*$/gm,
+      /^Tables\s*:.*$/gm,
     ];
 
     let cleaned = output;
@@ -443,34 +518,115 @@ Génère le résumé exécutif :`;
       cleaned = cleaned.replace(pattern, "");
     }
 
-    // Remove consecutive blank lines (artifact of stripping)
     cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
     return cleaned.trim();
   }
 
   /**
+   * v7.6 P3: Validate ML output — block hallucinated content.
+   * Returns list of issues found. If critical issues, the output is rejected.
+   */
+  validateMLOutput(output: string, context: ReportContext): { warnings: string[]; critical: boolean } {
+    const warnings: string[] = [];
+    let critical = false;
+
+    // 1. Check for hallucinated class names
+    for (const name of HALLUCINATED_CLASS_NAMES) {
+      if (output.includes(name)) {
+        warnings.push(`Classe hallucinée détectée: ${name}`);
+        critical = true;
+      }
+    }
+
+    // 2. Check for hallucinated method names
+    for (const name of HALLUCINATED_METHOD_NAMES) {
+      if (output.includes(name)) {
+        warnings.push(`Méthode hallucinée détectée: ${name}`);
+      }
+    }
+
+    // 3. Check for out-of-context technologies
+    for (const pattern of OUT_OF_CONTEXT_TECH) {
+      if (pattern.test(output)) {
+        warnings.push(`Technologie hors contexte détectée: ${pattern.source}`);
+      }
+    }
+
+    // 4. Check for wrong BAM definitions
+    for (const pattern of BAM_WRONG_DEFINITIONS) {
+      if (pattern.test(output)) {
+        warnings.push(`Définition BAM incorrecte détectée`);
+      }
+    }
+
+    // 5. Check for invented percentages (taux de dépannage de 0%, etc.)
+    if (/taux de dépannage de 0%/i.test(output)) {
+      warnings.push(`Statistique inventée: taux de dépannage de 0%`);
+    }
+
+    return { warnings, critical };
+  }
+
+  /**
+   * v7.6 P3: Remove hallucinated content from ML output.
+   * Strips known hallucinated class/method names and replaces with real ones.
+   */
+  private removeHallucinatedContent(output: string, context: ReportContext): string {
+    let cleaned = output;
+
+    // Remove hallucinated class names
+    for (const name of HALLUCINATED_CLASS_NAMES) {
+      cleaned = cleaned.replace(new RegExp(`\\b${name}\\b`, "g"), "");
+    }
+
+    // Remove hallucinated method names
+    for (const name of HALLUCINATED_METHOD_NAMES) {
+      cleaned = cleaned.replace(new RegExp(`\\b${name}\\b`, "g"), "");
+    }
+
+    // Fix BAM definition
+    for (const pattern of BAM_WRONG_DEFINITIONS) {
+      cleaned = cleaned.replace(pattern, "Banque Al-Maghrib");
+    }
+
+    // Remove out-of-context tech mentions
+    for (const pattern of OUT_OF_CONTEXT_TECH) {
+      cleaned = cleaned.replace(pattern, "");
+    }
+
+    // Clean up artifacts (empty parentheses, double spaces, etc.)
+    cleaned = cleaned
+      .replace(/\(\s*\)/g, "")
+      .replace(/,\s*,/g, ",")
+      .replace(/\s{2,}/g, " ")
+      .replace(/\n{3,}/g, "\n\n");
+
+    return cleaned.trim();
+  }
+
+  /**
    * BUG-H v7.5: Detect hallucinated content in ML output.
-   * Returns true if the output contains suspicious patterns.
+   * Returns warnings for logging purposes.
    */
   detectHallucinations(output: string, context: ReportContext): string[] {
     const warnings: string[] = [];
 
-    // Check for invented module names not in the context
     const knownModuleIds = new Set(context.modules.map(m => m.id.toLowerCase()));
     const knownServiceNames = new Set(context.services.map(s => s.name.toLowerCase()));
 
-    // Extract module-like references from the output (PascalCase words ending with EJB/Service/Bean)
     const moduleRefs = output.match(/\b[A-Z][a-zA-Z]+(?:EJB|Service|Bean|Servlet|MDB|DAO)\b/g) ?? [];
     for (const ref of moduleRefs) {
       if (!knownModuleIds.has(ref.toLowerCase()) &&
-          !knownServiceNames.has(ref.toLowerCase())) {
+          !knownServiceNames.has(ref.toLowerCase()) &&
+          // v7.6: Also check against known class names
+          !(context.realClassNames ?? []).some(c => c.toLowerCase() === ref.toLowerCase())) {
         warnings.push(`Module potentiellement halluciné : ${ref}`);
       }
     }
 
-    // Check for invented table names (ALL_CAPS_SNAKE_CASE that look like tables)
     const knownTables = new Set([
       ...context.modules.flatMap(m => [...(m.writeTables ?? []), ...(m.readTables ?? [])]),
+      ...(context.realTableNames ?? []),
     ].map(t => t.toUpperCase()));
     const tableRefs = output.match(/\bT_[A-Z][A-Z0-9_]+\b/g) ?? [];
     for (const ref of tableRefs) {
@@ -479,7 +635,6 @@ Génère le résumé exécutif :`;
       }
     }
 
-    // Check for invented percentages or numbers that seem too precise
     const percentages = output.match(/\d{2,3}(?:\.\d+)?\s*%/g) ?? [];
     for (const pct of percentages) {
       const num = parseFloat(pct);
@@ -492,22 +647,34 @@ Génère le résumé exécutif :`;
   }
 
   /**
-   * BUG-G/H v7.5: Full sanitization pipeline for ML output.
+   * v7.6: Full sanitization pipeline for ML output.
    * 1. Clean markdown fences
    * 2. Strip prompt leak
-   * 3. Detect hallucinations (log warnings but don't reject)
-   * 4. Validate minimum structure
+   * 3. Validate ML output (block hallucinated classes)
+   * 4. Remove hallucinated content
+   * 5. Detect remaining hallucinations (log warnings)
+   * 6. Validate minimum structure
    */
   sanitizeOutput(raw: string, context: ReportContext): string {
     let output = this.cleanMarkdown(raw);
     output = this.stripPromptLeak(output);
 
+    // v7.6: Validate and clean hallucinated content
+    const validation = this.validateMLOutput(output, context);
+    if (validation.warnings.length > 0) {
+      console.warn(`[ReportEnhancer] Validation warnings: ${validation.warnings.join("; ")}`);
+    }
+
+    // Always remove hallucinated content (even if not critical)
+    output = this.removeHallucinatedContent(output, context);
+
+    // Legacy hallucination detection (for logging)
     const warnings = this.detectHallucinations(output, context);
     if (warnings.length > 0) {
       console.warn(`[ReportEnhancer] Hallucination warnings: ${warnings.join("; ")}`);
     }
 
-    // Validate minimum structure: must have at least one heading and 100 chars
+    // Validate minimum structure
     if (output.length < 100 || !output.includes("#")) {
       throw new Error("Output ML trop court ou sans structure Markdown");
     }
