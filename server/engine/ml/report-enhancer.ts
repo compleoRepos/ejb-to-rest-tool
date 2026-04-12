@@ -25,7 +25,7 @@ export interface ReportEnhancerConfig {
   model:       string;   // qwen2.5:1.5b (léger, offline, gratuit)
   enabled:     boolean;
   language:    "fr" | "en";
-  timeoutMs?:  number;   // défaut: 180_000 (3 min)
+  timeoutMs?:  number;   // défaut: 300_000 (5 min)
 }
 
 // ── Types de contexte ────────────────────────────────────────────
@@ -90,7 +90,7 @@ export class ReportEnhancer {
 
   constructor(config: ReportEnhancerConfig) {
     this.config    = config;
-    this.timeoutMs = config.timeoutMs ?? 180_000;
+    this.timeoutMs = config.timeoutMs ?? 300_000;
   }
 
   // ── Point d'entrée principal ─────────────────────────────────
@@ -138,93 +138,61 @@ export class ReportEnhancer {
     const prompt = this.buildMigrationPrompt(ctx);
     const raw    = await this.ollamaGenerate(prompt, {
       temperature: 0.3,
-      num_predict: 2000,
+      num_predict: 1200,
     });
     return this.sanitizeOutput(raw, ctx); // BUG-G/H v7.5
   }
 
   private buildMigrationPrompt(ctx: ReportContext): string {
     const risks = this.extractRisks(ctx);
+    // v7.5.1: Limiter à 8 modules max pour rester dans le context window du modèle 1.5B
+    const topModules = ctx.modules.slice(0, 8);
+    const remaining = ctx.modules.length - topModules.length;
 
-    return `Tu es un architecte Java EE senior spécialisé dans les banques marocaines. Tu connais Oracle RAC, la directive BAM, WebLogic 12.2, et les contraintes des SI bancaires africains.
+    return `Architecte Java EE senior, banques marocaines. Oracle RAC, BAM, WebLogic 12.2.
 
-## Projet analysé
-Banque : ${ctx.projectName}
-Modules détectés : ${ctx.modules.length} classes Java EE
-UseCases migrés  : ${ctx.useCasesCount}
-Score confiance  : ${ctx.confidenceScore}%
+## Projet
+Banque: ${ctx.projectName} | ${ctx.modules.length} classes | ${ctx.useCasesCount} UseCases | Confiance: ${ctx.confidenceScore}%
 
-## Modules et leurs caractéristiques
-${ctx.modules.map(m => `
-### ${m.id} (${m.type})
-- Tables propriétaires : ${m.writeTables?.join(", ") || "aucune"}
-- Tables lues : ${m.readTables?.join(", ") || "aucune"}
-- DataSources : ${m.dataSources?.join(", ") || "aucune"}
-- JMS : ${m.jmsQueues?.join(", ") || "aucune"}
-- APIs externes : ${m.externalApis?.join(", ") || "aucune"}
-- Features SQL : ${m.sqlFeatures?.join(", ") || "aucune"}
-- Appels @EJB : ${m.ejbCalls?.join(", ") || "aucun"}
-`).join("")}
+## Modules principaux (${topModules.length}/${ctx.modules.length})
+${topModules.map(m => `- **${m.id}** (${m.type}): Tables=${(m.writeTables?.length||0)+(m.readTables?.length||0)}, DS=${m.dataSources?.length||0}, EJB=${m.ejbCalls?.length||0}`).join("\n")}
+${remaining > 0 ? `\n+ ${remaining} autres modules similaires\n` : ""}
 
-## Risques détectés automatiquement
-${risks.map(r => `- ${r}`).join("\n")}
+## Risques
+${risks.slice(0, 6).map(r => `- ${r}`).join("\n")}
 
-## Ta mission
-Génère un MIGRATION_REPORT.md enrichi en français avec :
+Génère MIGRATION_REPORT.md en français:
+1. Résumé exécutif (3 phrases pour DSI)
+2. Risques par module, impact business, actions
+3. Ordre de migration recommandé
+4. Dépendances bloquantes
+5. Décisions humaines nécessaires
 
-1. Un résumé exécutif de 3-4 phrases (pour le DSI, pas le développeur)
-2. Pour chaque module : les risques réels, leur impact business, les actions concrètes
-3. L'ordre de migration recommandé avec justification
-4. Les dépendances bloquantes entre modules
-5. Les points nécessitant une décision humaine (pas automatisables)
-
-Ton : direct, professionnel, orienté action. Évite le jargon.
-Format : Markdown avec ## et ###. Max 800 mots.
-
-Génère le rapport :`;
+Markdown ## ###. Max 500 mots.`;
   }
 
   // ── MICROSERVICES_REPORT.md enrichi ──────────────────────────
 
   async enhanceMicroservicesReport(ctx: ReportContext): Promise<string> {
-    const prompt = `Tu es un architecte microservices senior.
-Tu dois expliquer à un DSI pourquoi ce découpage en ${ctx.services.length} services est la bonne décision, et ce qu'il doit savoir avant de l'approuver.
+    // v7.5.1: Prompt compact pour rester dans le context window 4096 tokens
+    const prompt = `Architecte microservices senior. Découpage en ${ctx.services.length} services pour DSI.
 
-## Découpage proposé
-${ctx.services.map(s => `
-### ${s.name} (confiance ${s.confidence}%)
-- Modules inclus : ${s.ejbs?.join(", ") || "aucun"}
-- Tables propriétaires : ${s.ownedTables?.join(", ") || "aucune"}
-- Tables dépendantes : ${s.readOnlyTables?.join(", ") || "aucune"}
-- APIs exposées : ${s.restApis?.map(a => a.path).join(", ") || "aucune"}
-- Dépendances : ${s.restDependencies?.map(d =>
-    d.targetService + (d.isCritical ? " ⚡CRITIQUE" : "")).join(", ") || "aucune"}
-- Kafka : ${s.kafkaTopics?.map(t =>
-    (t.direction === "PRODUCE" ? "→" : "←") + " " + t.name).join(", ") || "aucun"}
-`).join("")}
+## Services
+${ctx.services.map(s => `- **${s.name}** (${s.confidence}%): ${s.ejbs?.length||0} modules, ${s.ownedTables?.length||0} tables, deps=${s.restDependencies?.length||0}`).join("\n")}
 
-## Ta mission
-Génère un MICROSERVICES_REPORT.md enrichi en français avec :
+Génère MICROSERVICES_REPORT.md en français:
+1. Explication du découpage (langage DSI)
+2. Par service: périmètre, risques, ordre de démarrage
+3. Décisions architecturales à valider
+4. Infrastructure minimale requise
+5. Timeline réaliste
 
-1. Explication du découpage en langage DSI (pas développeur)
-2. Pour chaque service :
-   - Pourquoi ce périmètre (justification data-driven)
-   - Ce qui peut mal se passer (risques spécifiques)
-   - Par quel service commencer et pourquoi
-3. Les décisions architecturales que le DSI doit valider
-4. L'infrastructure minimale nécessaire (ce qui doit exister avant de déployer)
-5. Timeline réaliste avec les dépendances entre services
-
-Pour les services à confiance < 70% : expliquer le problème clairement et donner les 2-3 options avec leurs trade-offs.
-
-Format : Markdown. Ton : conseil senior, direct, honnête sur les risques.
-Max 1000 mots.
-
-Génère le rapport :`;
+Services confiance < 70%: expliquer options et trade-offs.
+Markdown ## ###. Max 600 mots.`;
 
     const raw = await this.ollamaGenerate(prompt, {
       temperature: 0.3,
-      num_predict: 2500,
+      num_predict: 1500,
     });
     return this.sanitizeOutput(raw, ctx); // BUG-G/H v7.5
   }

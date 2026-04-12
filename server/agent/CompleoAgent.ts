@@ -968,7 +968,7 @@ export class CompleoAgent {
         ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
         model:     process.env.REPORT_ML_MODEL || "qwen2.5:1.5b",
         language:  "fr",
-        timeoutMs: 180_000,
+        timeoutMs: 300_000,
       };
 
       const enhancer = new ReportEnhancer(enhancerConfig);
