@@ -242,7 +242,7 @@ export default function CompleoAgentPage() {
     } finally {
       setIsStarting(false);
     }
-  }, [sourceMode, uploadSessionId, gitUrl, gitToken, gitBranch, projectName, autoResolve, enableMicroservices, enableML]);
+  }, [sourceMode, uploadSessionId, gitUrl, gitToken, gitBranch, projectName, autoResolve, enableMicroservices, enableML, enableReportEnhancer, enableSaga]);
 
   // ─── Cancel Agent ───────────────────────────────────────────────────────
 

@@ -1099,9 +1099,22 @@ export class CompleoAgent {
     const startTime = Date.now();
 
     try {
+      const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
+
+      // Quick health check — fail fast if Ollama is unreachable (3s timeout)
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 3_000);
+        const hc = await fetch(`${ollamaUrl}/api/version`, { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (!hc.ok) throw new Error(`Ollama returned ${hc.status}`);
+      } catch (_hcErr) {
+        throw new Error("Ollama non accessible — enrichissement IA ignoré (rapports originaux conservés)");
+      }
+
       const enhancerConfig: ReportEnhancerConfig = {
         enabled:   true,
-        ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
+        ollamaUrl,
         model:     process.env.REPORT_ML_MODEL || "qwen2.5:1.5b",
         language:  "fr",
         timeoutMs: 300_000,
