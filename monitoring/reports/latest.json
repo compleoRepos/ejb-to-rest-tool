@@ -1,0 +1,102 @@
+{
+  "date": "2026-04-13",
+  "time": "07:09:04",
+  "durationSec": 48.3,
+  "score": "CRITIQUE",
+  "globalRate": 84,
+  "frontend": {
+    "total": 62,
+    "ok": 62,
+    "fail": 0,
+    "slow": 2,
+    "rate": 100,
+    "avgLatency": 51,
+    "p95": 345
+  },
+  "api": {
+    "total": 19,
+    "ok": 6,
+    "fail": 13,
+    "slow": 0,
+    "rate": 31.6,
+    "avgLatency": 5,
+    "p95": 19
+  },
+  "alerts": [
+    {
+      "severity": "AVERTISSEMENT",
+      "type": "Frontend",
+      "detail": "/compleo/agent — 685 ms (seuil 500 ms)"
+    },
+    {
+      "severity": "AVERTISSEMENT",
+      "type": "Frontend",
+      "detail": "/compleo/workspace — 974 ms (seuil 500 ms)"
+    },
+    {
+      "severity": "ERREUR",
+      "type": "API",
+      "detail": "[GET] tRPC Projects List — HTTP 500 "
+    },
+    {
+      "severity": "ERREUR",
+      "type": "API",
+      "detail": "[GET] tRPC System Health — HTTP 400 "
+    },
+    {
+      "severity": "ERREUR",
+      "type": "API",
+      "detail": "[GET] Learning Rules List — HTTP 500 "
+    },
+    {
+      "severity": "ERREUR",
+      "type": "API",
+      "detail": "[GET] Learning Stats — HTTP 500 "
+    },
+    {
+      "severity": "ERREUR",
+      "type": "API",
+      "detail": "[GET] Learning Rules Export — HTTP 500 "
+    },
+    {
+      "severity": "ERREUR",
+      "type": "API",
+      "detail": "[GET] Auth Me — HTTP 401 "
+    },
+    {
+      "severity": "ERREUR",
+      "type": "API",
+      "detail": "[GET] tRPC Files List — HTTP 500 "
+    },
+    {
+      "severity": "ERREUR",
+      "type": "API",
+      "detail": "[GET] tRPC Scans List — HTTP 500 "
+    },
+    {
+      "severity": "ERREUR",
+      "type": "API",
+      "detail": "[GET] tRPC Comments List — HTTP 500 "
+    },
+    {
+      "severity": "ERREUR",
+      "type": "API",
+      "detail": "[GET] tRPC Git List — HTTP 500 "
+    },
+    {
+      "severity": "ERREUR",
+      "type": "API",
+      "detail": "[GET] tRPC Sharing List — HTTP 500 "
+    },
+    {
+      "severity": "ERREUR",
+      "type": "API",
+      "detail": "[GET] tRPC Project GetById — HTTP 500 "
+    },
+    {
+      "severity": "ERREUR",
+      "type": "API",
+      "detail": "[GET] tRPC Scan GetById — HTTP 500 "
+    }
+  ]
+}
