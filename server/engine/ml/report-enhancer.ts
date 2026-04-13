@@ -23,6 +23,7 @@
 
 import type { ServiceCandidate, ParsedModule } from "../microservices/microservice-splitter";
 import type { QualityReport, QualityCheck } from "../quality-scorer";
+import { validateMLOutput as externalValidateML } from "./validateMLOutput";
 
 // ── Configuration ────────────────────────────────────────────────
 
@@ -663,6 +664,16 @@ RÈGLES STRICTES:
     const validation = this.validateMLOutput(output, context);
     if (validation.warnings.length > 0) {
       console.warn(`[ReportEnhancer] Validation warnings: ${validation.warnings.join("; ")}`);
+    }
+
+    // v7.7: External validateMLOutput (3-level anti-hallucination)
+    const extValidation = externalValidateML(output, context.realClassNames ?? []);
+    if (!extValidation.isValid) {
+      console.warn(`[ReportEnhancer] v7.7 external validation: ${extValidation.hallucinations.length} hallucination(s)`);
+      for (const h of extValidation.hallucinations) {
+        console.warn(`  L${h.line}: [${h.type}] ${h.original}`);
+      }
+      output = extValidation.cleanedText;
     }
 
     // Always remove hallucinated content (even if not critical)

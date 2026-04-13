@@ -30,7 +30,11 @@ export type CheckId =
   | "MS_NAMES"
   | "ORACLE_KEYWORDS"
   | "URL_CONFLICTS"
-  | "USECASES_DETECTED";
+  | "USECASES_DETECTED"
+  | "SERVICE_NAMING"
+  | "NO_ORACLE_KEYWORDS"
+  | "NO_URL_CONFLICTS"
+  | "USECASE_COVERAGE";
 
 export interface QualityCheck {
   id:          CheckId;
@@ -464,7 +468,7 @@ function extractClassName(filePath: string): string {
 // ── Legacy criteria builder (backward compat with v7.2 tests) ───────
 
 function buildLegacyCriteria(checks: QualityCheck[]): QualityCriterion[] {
-  const idMap: Record<CheckId, CriterionId> = {
+  const idMap: Partial<Record<CheckId, CriterionId>> = {
     "SQL_CONSTANTS": "A",
     "NO_VOID_BUILDER": "B",
     "NO_OBJECT_RETURN": "C",
@@ -473,10 +477,15 @@ function buildLegacyCriteria(checks: QualityCheck[]): QualityCriterion[] {
     "ORACLE_KEYWORDS": "F",
     "URL_CONFLICTS": "G",
     "USECASES_DETECTED": "H",
+    // v7.7 aliases (map to same letters for backward compat)
+    "SERVICE_NAMING": "E",
+    "NO_ORACLE_KEYWORDS": "F",
+    "NO_URL_CONFLICTS": "G",
+    "USECASE_COVERAGE": "H",
   };
 
   return checks.map(c => ({
-    id: idMap[c.id],
+    id: idMap[c.id] ?? "A" as CriterionId,
     name: c.description,
     maxPoints: c.maxPoints,
     score: c.points,
@@ -549,4 +558,239 @@ function buildSummary(
 
 export function generateQualitySection(report: QualityReport): string {
   return report.summary;
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// v7.7 — calculateQualityScore(Map<string, string>)
+//
+// Nouvelle API acceptant un Map<path, content> au lieu de GeneratedFile[].
+// Permet de scorer directement depuis les fichiers générés sans dépendre
+// de la structure GeneratedFile. Les 8 checks sont les mêmes, adaptés
+// pour travailler sur Map.
+// ══════════════════════════════════════════════════════════════════════
+
+export function calculateQualityScore(files: Map<string, string>): QualityReport {
+  const checks: QualityCheck[] = [];
+
+  // ── CHECK A (15 pts) : SQL constants private static final ──────────
+  const sqlCheck = mapCheckSqlConstants(files);
+  checks.push({
+    id: "SQL_CONSTANTS",
+    description: "SQL constants private static final (pas dans méthodes)",
+    passed: sqlCheck.duplicates === 0,
+    detail: `${sqlCheck.ok} OK, ${sqlCheck.duplicates} dupliquée(s)`,
+    points: sqlCheck.duplicates === 0 ? 15 : Math.max(0, 15 - sqlCheck.duplicates * 3),
+    maxPoints: 15,
+  });
+
+  // ── CHECK B (15 pts) : Pas de Void.builder() ──────────────────────
+  const voidCheck = mapCheckNoVoidBuilder(files);
+  checks.push({
+    id: "NO_VOID_BUILDER",
+    description: "Aucun Void.builder() invalide",
+    passed: voidCheck.count === 0,
+    detail: `${voidCheck.count} occurrence(s)`,
+    points: voidCheck.count === 0 ? 15 : 0,
+    maxPoints: 15,
+  });
+
+  // ── CHECK C (10 pts) : Pas de retour Object ───────────────────────
+  const objectCheck = mapCheckNoObjectReturn(files);
+  checks.push({
+    id: "NO_OBJECT_RETURN",
+    description: "Aucune méthode public Object",
+    passed: objectCheck.count === 0,
+    detail: `${objectCheck.count} méthode(s) retournant Object`,
+    points: objectCheck.count === 0 ? 10 : 0,
+    maxPoints: 10,
+  });
+
+  // ── CHECK D (15 pts) : Paramètres méthodes complets ───────────────
+  const paramsCheck = mapCheckMethodParams(files);
+  checks.push({
+    id: "METHOD_PARAMS",
+    description: "Toutes les méthodes ont leurs paramètres",
+    passed: paramsCheck.empty === 0,
+    detail: `${paramsCheck.empty} méthode(s) sans paramètres suspects`,
+    points: paramsCheck.empty === 0 ? 15 : Math.max(0, 15 - paramsCheck.empty * 5),
+    maxPoints: 15,
+  });
+
+  // ── CHECK E (10 pts) : Noms microservices valides ─────────────────
+  const namingCheck = mapCheckServiceNaming(files);
+  checks.push({
+    id: "SERVICE_NAMING",
+    description: "Noms microservices en kebab-case sans préfixe EJB",
+    passed: namingCheck.invalid === 0,
+    detail: `${namingCheck.valid} valides, ${namingCheck.invalid} invalides`,
+    points: namingCheck.invalid === 0 ? 10 : 0,
+    maxPoints: 10,
+  });
+
+  // ── CHECK F (10 pts) : Pas de mots-clés Oracle comme tables ───────
+  const oracleCheck = mapCheckNoOracleKeywords(files);
+  checks.push({
+    id: "NO_ORACLE_KEYWORDS",
+    description: "Pas de NOWAIT/SYSDATE/DUAL comme noms de tables",
+    passed: oracleCheck.count === 0,
+    detail: `${oracleCheck.count} faux positif(s)`,
+    points: oracleCheck.count === 0 ? 10 : 0,
+    maxPoints: 10,
+  });
+
+  // ── CHECK G (10 pts) : Pas de conflits URL ────────────────────────
+  const urlCheck = mapCheckNoUrlConflicts(files);
+  checks.push({
+    id: "NO_URL_CONFLICTS",
+    description: "Pas de doublons dans les endpoints REST",
+    passed: urlCheck.conflicts === 0,
+    detail: `${urlCheck.conflicts} conflit(s)`,
+    points: urlCheck.conflicts === 0 ? 10 : Math.max(0, 10 - urlCheck.conflicts * 2),
+    maxPoints: 10,
+  });
+
+  // ── CHECK H (15 pts) : Couverture UseCases ────────────────────────
+  const coverageCheck = mapCheckUseCaseCoverage(files);
+  checks.push({
+    id: "USECASE_COVERAGE",
+    description: "Tous les UseCases EJB couverts par un Service",
+    passed: coverageCheck.missing === 0,
+    detail: `${coverageCheck.covered}/${coverageCheck.total} couverts`,
+    points: coverageCheck.missing === 0 ? 15 :
+      Math.round(15 * coverageCheck.covered / Math.max(1, coverageCheck.total)),
+    maxPoints: 15,
+  });
+
+  // ── SCORE FINAL ───────────────────────────────────────────────────
+  const total = checks.reduce((sum, c) => sum + c.points, 0);
+  const maxTotal = checks.reduce((sum, c) => sum + c.maxPoints, 0);
+  const pct = Math.round((total / maxTotal) * 100);
+  const grade = pct >= 95 ? "A+" : pct >= 90 ? "A"
+    : pct >= 85 ? "B+" : pct >= 80 ? "B"
+    : pct >= 70 ? "C" : pct >= 60 ? "D" : "F";
+
+  const issues = checks.filter(c => !c.passed).map(c => `${c.description}: ${c.detail}`);
+  const criteria = buildLegacyCriteria(checks);
+  const summary = buildSummary(checks, pct, grade);
+
+  return {
+    score: pct,
+    grade,
+    checks,
+    issues,
+    summary,
+    timestamp: new Date().toLocaleString("fr-FR"),
+    totalScore: total,
+    maxScore: maxTotal,
+    criteria,
+  };
+}
+
+// ── Map-based check functions (v7.7) ────────────────────────────────
+
+function mapCheckSqlConstants(files: Map<string, string>) {
+  let ok = 0, duplicates = 0;
+  for (const [path, content] of files) {
+    if (!path.endsWith("Service.java")) continue;
+    const staticFinal = (content.match(/private\s+static\s+final\s+String\s+SQL_/g) ?? []).length;
+    const allSql = (content.match(/final\s+String\s+SQL_/g) ?? []).length;
+    ok += staticFinal;
+    duplicates += (allSql - staticFinal);
+  }
+  return { ok, duplicates };
+}
+
+function mapCheckNoVoidBuilder(files: Map<string, string>) {
+  let count = 0;
+  for (const [path, content] of files) {
+    if (!path.endsWith(".java")) continue; // Skip reports (.md)
+    count += (content.match(/Void\.builder\(\)/g) ?? []).length;
+  }
+  return { count };
+}
+
+function mapCheckNoObjectReturn(files: Map<string, string>) {
+  let count = 0;
+  for (const [path, content] of files) {
+    if (!path.endsWith("Service.java")) continue;
+    count += (content.match(/public\s+Object\s+\w+\s*\(/g) ?? []).length;
+  }
+  return { count };
+}
+
+function mapCheckMethodParams(files: Map<string, string>) {
+  let empty = 0;
+  for (const [path, content] of files) {
+    if (!path.endsWith("Service.java")) continue;
+    // Méthodes publiques sans paramètres dont le nom suggère des paramètres
+    const suspectMethods = content.match(
+      /public\s+\w+\s+(get\w+|consulter\w+|rechercher\w+|generer\w+)\s*\(\s*\)/g
+    ) ?? [];
+    empty += suspectMethods.length;
+  }
+  return { empty };
+}
+
+function mapCheckServiceNaming(files: Map<string, string>) {
+  let valid = 0, invalid = 0;
+  const seen = new Set<string>();
+  for (const [path] of files) {
+    if (!path.includes("microservices/")) continue;
+    const dirMatch = path.match(/microservices\/([^/]+)\//);
+    if (!dirMatch) continue;
+    const name = dirMatch[1];
+    if (seen.has(name)) continue;
+    seen.add(name);
+    if (/^[a-z]+-[a-z]+(-[a-z]+)*$/.test(name)) valid++;
+    else invalid++;
+  }
+  return { valid, invalid };
+}
+
+function mapCheckNoOracleKeywords(files: Map<string, string>) {
+  // Only check table NAMES, not SQL content — Oracle keywords in SQL constants are expected
+  const ORACLE_KW = new Set(["NOWAIT", "SYSDATE", "DUAL", "NEXTVAL", "ROWNUM", "ROWID"]);
+  let count = 0;
+  for (const [path, content] of files) {
+    if (!path.endsWith(".java")) continue; // Skip reports (.md)
+    // Check if Oracle keywords appear as table names in @Table or CREATE TABLE
+    for (const kw of ORACLE_KW) {
+      // Only flag if used as a table name: @Table(name="SYSDATE") or FROM SYSDATE or JOIN SYSDATE
+      const tableNameRegex = new RegExp(
+        `@Table\\s*\\(.*name\\s*=\\s*"${kw}"|` +
+        `(?:FROM|JOIN|INTO|UPDATE)\\s+${kw}\\b`,
+        "i"
+      );
+      if (tableNameRegex.test(content)) count++;
+    }
+  }
+  return { count };
+}
+
+function mapCheckNoUrlConflicts(files: Map<string, string>) {
+  const endpoints = new Map<string, string[]>();
+  for (const [path, content] of files) {
+    if (!path.endsWith("Controller.java")) continue;
+    const mappings = content.match(/@(?:Get|Post|Put|Delete|Patch)Mapping\("([^"]+)"\)/g) ?? [];
+    for (const m of mappings) {
+      const url = m.match(/"([^"]+)"/)?.[1] ?? "";
+      if (!endpoints.has(url)) endpoints.set(url, []);
+      endpoints.get(url)!.push(path);
+    }
+  }
+  let conflicts = 0;
+  for (const [, paths] of endpoints) {
+    if (paths.length > 1) conflicts++;
+  }
+  return { conflicts };
+}
+
+function mapCheckUseCaseCoverage(files: Map<string, string>) {
+  const services = [...files.keys()].filter(p => p.endsWith("Service.java"));
+  const controllers = [...files.keys()].filter(p => p.endsWith("Controller.java"));
+  const total = Math.max(services.length, controllers.length);
+  const covered = Math.min(services.length, controllers.length);
+  const missing = Math.abs(services.length - controllers.length);
+  return { total, covered, missing };
 }
