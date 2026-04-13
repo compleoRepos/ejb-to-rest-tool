@@ -37,7 +37,8 @@ export type CheckId =
   | "USECASE_COVERAGE"
   | "NO_VOID_VARIABLES"
   | "NO_DUPLICATE_SERVICES"
-  | "NO_DTO_SERVICES";
+  | "NO_DTO_SERVICES"
+  | "SAGA_COVERAGE";
 
 export interface QualityCheck {
   id:          CheckId;
@@ -248,6 +249,32 @@ export function scoreGeneration(
       passed: dtoSvcCount === 0,
       detail: `${dtoSvcCount} faux service(s)`,
       points: dtoSvcCount === 0 ? 5 : 0,
+      maxPoints: 5,
+    });
+  }
+
+  // CHECK 12 v7.9 — Saga Coverage (5 pts)
+  {
+    const sagaOrchFiles = files.filter(f => /SagaOrchestrator\.java$/.test(f.path));
+    let candidateCount = 0;
+    for (const file of files) {
+      if (!file.path.endsWith("Service.java") && !file.path.endsWith("Controller.java")) continue;
+      const injections = (file.content.match(/@Autowired[\s\S]*?private\s+\w+Service\s/g) || []).length
+        + (file.content.match(/private\s+final\s+\w+Service\s/g) || []).length;
+      if (injections >= 2) candidateCount++;
+    }
+    const hasSagas = sagaOrchFiles.length > 0;
+    const noCandidates = candidateCount === 0;
+    checks.push({
+      id: "SAGA_COVERAGE",
+      description: "Saga Orchestration générée pour les EJBs multi-services",
+      passed: hasSagas || noCandidates,
+      detail: noCandidates
+        ? "Aucun EJB multi-services détecté (non applicable)"
+        : hasSagas
+          ? `${sagaOrchFiles.length} saga(s) générée(s)`
+          : `${candidateCount} EJB(s) multi-services sans saga`,
+      points: (hasSagas || noCandidates) ? 5 : 0,
       maxPoints: 5,
     });
   }
@@ -544,6 +571,7 @@ function buildLegacyCriteria(checks: QualityCheck[]): QualityCriterion[] {
     "NO_VOID_VARIABLES": "B",
     "NO_DUPLICATE_SERVICES": "A",
     "NO_DTO_SERVICES": "C",
+    "SAGA_COVERAGE": "D",
   };
 
   return checks.map(c => ({
@@ -757,6 +785,21 @@ export function calculateQualityScore(files: Map<string, string>): QualityReport
     maxPoints: 5,
   });
 
+  // ── CHECK L (5 pts) v7.9 : Saga Coverage ────────────────────
+  const sagaCheck = checkSagaCoverage(files);
+  checks.push({
+    id: "SAGA_COVERAGE",
+    description: "Saga Orchestration générée pour les EJBs multi-services",
+    passed: sagaCheck.hasSagas || sagaCheck.noCandidates,
+    detail: sagaCheck.noCandidates
+      ? "Aucun EJB multi-services détecté (non applicable)"
+      : sagaCheck.hasSagas
+        ? `${sagaCheck.sagaCount} saga(s) générée(s)`
+        : `${sagaCheck.candidateCount} EJB(s) multi-services sans saga`,
+    points: (sagaCheck.hasSagas || sagaCheck.noCandidates) ? 5 : 0,
+    maxPoints: 5,
+  });
+
   // ── SCORE FINAL ───────────────────────────────────────────────────────────
   const total = checks.reduce((sum, c) => sum + c.points, 0);
   const maxTotal = checks.reduce((sum, c) => sum + c.maxPoints, 0);
@@ -939,4 +982,40 @@ function mapCheckNoDtoServices(files: Map<string, string>): { count: number } {
     }
   }
   return { count };
+}
+
+/**
+ * CHECK L — Saga Coverage (v7.9)
+ * Vérifie si les EJBs multi-services ont des Sagas générées.
+ * Un EJB est "multi-services" s'il injecte ≥2 autres EJBs.
+ * Passe si : (a) des fichiers *SagaOrchestrator.java existent, ou (b) aucun candidat détecté.
+ */
+function checkSagaCoverage(files: Map<string, string>): {
+  hasSagas: boolean;
+  noCandidates: boolean;
+  sagaCount: number;
+  candidateCount: number;
+} {
+  // Count saga orchestrator files
+  const sagaFiles = [...files.keys()].filter(p => /SagaOrchestrator\.java$/.test(p));
+  const sagaCount = sagaFiles.length;
+
+  // Heuristic: count EJBs that inject ≥2 other EJBs (multi-service candidates)
+  let candidateCount = 0;
+  for (const [filePath, content] of files) {
+    if (!filePath.endsWith("Service.java") && !filePath.endsWith("Controller.java")) continue;
+    // Count @Autowired or constructor-injected services
+    const injections = (content.match(/@Autowired[\s\S]*?private\s+\w+Service\s/g) || []).length
+      + (content.match(/private\s+final\s+\w+Service\s/g) || []).length;
+    if (injections >= 2) {
+      candidateCount++;
+    }
+  }
+
+  return {
+    hasSagas: sagaCount > 0,
+    noCandidates: candidateCount === 0,
+    sagaCount,
+    candidateCount,
+  };
 }

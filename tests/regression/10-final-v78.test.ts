@@ -234,8 +234,8 @@ describe("v7.8 BUG-8 : Quality Scorer — checks honnêtes", () => {
     expect(checkIds).toContain("NO_VOID_VARIABLES");
     expect(checkIds).toContain("NO_DUPLICATE_SERVICES");
     expect(checkIds).toContain("NO_DTO_SERVICES");
-    // Total max should be 115 (100 original + 15 new)
-    expect(report.maxScore).toBe(115);
+    // Total max should be 120 (100 original + 15 v7.8 + 5 v7.9 SAGA)
+    expect(report.maxScore).toBe(120);
   });
 
   it("calculateQualityScore inclut les 3 nouveaux checks v7.8", () => {
@@ -249,7 +249,7 @@ describe("v7.8 BUG-8 : Quality Scorer — checks honnêtes", () => {
     expect(checkIds).toContain("NO_VOID_VARIABLES");
     expect(checkIds).toContain("NO_DUPLICATE_SERVICES");
     expect(checkIds).toContain("NO_DTO_SERVICES");
-    // Total max should be 115
-    expect(report.maxScore).toBe(115);
+    // Total max should be 120 (v7.9)
+    expect(report.maxScore).toBe(120);
   });
 });

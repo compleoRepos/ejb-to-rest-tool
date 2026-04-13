@@ -114,6 +114,7 @@ export default function CompleoAgentPage() {
   const [enableMicroservices, setEnableMicroservices] = useState(false);
   const [enableML, setEnableML] = useState(false);
   const [enableReportEnhancer, setEnableReportEnhancer] = useState(false);
+  const [enableSaga, setEnableSaga] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
 
   // Agent state
@@ -174,6 +175,7 @@ export default function CompleoAgentPage() {
           enableMicroservices,
           enableML: enableMicroservices && enableML,
           enableReportEnhancer,
+          enableSaga: enableMicroservices && enableSaga,
         },
       };
 
@@ -559,6 +561,17 @@ export default function CompleoAgentPage() {
                   <Star className="w-4 h-4 text-amber-400" />
                   <span className="text-sm group-hover:text-foreground transition-colors">Rapports IA enrichis (Ollama requis)</span>
                 </label>
+                {enableMicroservices && (
+                  <label className="flex items-center gap-3 cursor-pointer ml-6 group">
+                    <Checkbox
+                      checked={enableSaga}
+                      onCheckedChange={(v) => setEnableSaga(v === true)}
+                      className="data-[state=checked]:bg-violet-500 data-[state=checked]:border-violet-500"
+                    />
+                    <GitBranch className="w-4 h-4 text-violet-400" />
+                    <span className="text-sm group-hover:text-foreground transition-colors">Saga Orchestration (compensation automatique)</span>
+                  </label>
+                )}
               </div>
             </div>
 

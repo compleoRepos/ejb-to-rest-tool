@@ -313,9 +313,9 @@ Utiliser PostgreSQL au lieu d'Oracle.
       expect(grade).toMatch(/^A/);
     });
 
-    it("P6-D : calculateQualityScore retourne 11 checks (8 v7.7 + 3 v7.8)", () => {
+    it("P6-D : calculateQualityScore retourne 12 checks (8 v7.7 + 3 v7.8 + 1 v7.9 SAGA)", () => {
       const { checks } = calculateQualityScore(fileMap);
-      expect(checks.length).toBe(11); // v7.8: 8 original + 3 new checks
+      expect(checks.length).toBe(12); // v7.9: 8 original + 3 v7.8 + 1 v7.9 SAGA
       const ids = checks.map(c => c.id);
       // v7.7 original checks
       expect(ids).toContain("SQL_CONSTANTS");
@@ -330,6 +330,8 @@ Utiliser PostgreSQL au lieu d'Oracle.
       expect(ids).toContain("NO_VOID_VARIABLES");
       expect(ids).toContain("NO_DUPLICATE_SERVICES");
       expect(ids).toContain("NO_DTO_SERVICES");
+      // v7.9 new check
+      expect(ids).toContain("SAGA_COVERAGE");
     });
 
     it("P6-E : Score projet complexe >= 90 (grade A ou A+)", () => {

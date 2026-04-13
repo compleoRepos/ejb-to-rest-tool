@@ -266,7 +266,7 @@ public class CompteService {
       ["T_COMPTE", "T_CARTE"],
       1 // legacyMethodCount = 1 (matches the 1 generated method)
     );
-    expect(report.totalScore).toBe(115); // v7.8: 100 + 3 new checks (5+5+5)
+    expect(report.totalScore).toBe(120); // v7.9: 100 + 3 v7.8 checks (5+5+5) + 1 v7.9 SAGA (5)
     expect(report.grade).toBe("A+");
   });
 
@@ -288,7 +288,7 @@ public class CarteService {
       ["DUAL", "SYSDATE"]
     );
     expect(report.grade).not.toBe("A+");
-    expect(report.totalScore).toBeLessThan(105); // v7.8: adjusted for 115 max
+    expect(report.totalScore).toBeLessThan(110); // v7.9: adjusted for 120 max
   });
 
   it("le summary contient le tableau markdown", () => {

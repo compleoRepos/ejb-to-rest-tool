@@ -27,6 +27,7 @@ import { MLEnhancer, type MLConfig } from "../engine/ml/ml-enhancer";
 import { ReportEnhancer, type ReportEnhancerConfig, type ReportContext, type EnhancedReports } from "../engine/ml/report-enhancer";
 import type { QualityReport } from "../engine/quality-scorer";
 import type { PipelineResult } from "../engine/pipeline/index";
+import { detectSagaCandidates, generateAllSagas, type SagaGenerationResult } from "../engine/saga";
 
 // ─── Types publics ────────────────────────────────────────────────────────────
 
@@ -61,6 +62,7 @@ export interface AgentConfig {
     enableMicroservices?: boolean;
     enableML?: boolean;
     enableReportEnhancer?: boolean;
+    enableSaga?: boolean;
   };
 }
 
@@ -133,6 +135,12 @@ export interface AgentSession {
   qualityScore?: { totalScore: number; maxScore: number; grade: string; summary: string };
   /** Enhanced reports (available after ENHANCING_REPORTS phase) — v7.4 */
   enhancedReports?: EnhancedReports;
+  /** Saga orchestration result (available after MICROSERVICES phase) — v7.9 */
+  sagaResult?: {
+    candidates: Array<{ className: string; domain: string; stepsCount: number; compensableCount: number }>;
+    filesGenerated: number;
+    report: string;
+  };
   /** Error message if failed */
   errorMessage?: string;
   /** Promise resolver for ambiguity resolution */
@@ -312,7 +320,12 @@ export class CompleoAgent {
         yield* this.phaseMicroservices(session);
       }
 
-      // ─── Phase 4c: ENHANCING_REPORTS (optional, v7.4) ─────────────────
+      // ─── Phase 4c: SAGA ORCHESTRATION (optional, v7.9) ──────────
+      if (session.config.options.enableSaga) {
+        yield* this.phaseSagaOrchestration(session);
+      }
+
+      // ─── Phase 4d: ENHANCING_REPORTS (optional, v7.4) ─────────────
       if (session.config.options.enableReportEnhancer) {
         yield* this.phaseEnhancingReports(session);
       }
@@ -952,7 +965,130 @@ export class CompleoAgent {
     });
   }
 
-  // ─── Phase 4c: ENHANCING_REPORTS (v7.4) ─────────────────────────────────────
+  // ──  // ─── Phase 4c: SAGA ORCHESTRATION (v7.9) ───────────────────────────
+  private async *phaseSagaOrchestration(session: AgentSession): AsyncGenerator<AgentEvent> {
+    yield this.event("PHASE_START", {
+      phase: "MICROSERVICES",
+      message: "Détection et génération des Sagas...",
+    });
+
+    const startTime = Date.now();
+
+    if (!session.ir) {
+      yield this.event("LOG", {
+        level: "warn",
+        message: "IR non disponible pour la détection Saga",
+        phase: "MICROSERVICES",
+      });
+      return;
+    }
+
+    // 1. Détecter les candidats Saga
+    const candidates = detectSagaCandidates(session.ir);
+
+    if (candidates.length === 0) {
+      yield this.event("LOG", {
+        level: "info",
+        message: "Aucun EJB éligible au pattern Saga détecté",
+        phase: "MICROSERVICES",
+      });
+      return;
+    }
+
+    yield this.event("LOG", {
+      level: "info",
+      message: `${candidates.length} EJB(s) éligible(s) au pattern Saga détecté(s)`,
+      phase: "MICROSERVICES",
+      data: { candidates: candidates.map(c => ({ className: c.className, domain: c.domain, deps: c.interServiceCount })) },
+    });
+
+    // 2. Générer les fichiers Saga
+    const basePackage = session.ir.groupId ? `${session.ir.groupId}.saga` : "com.compleo.saga";
+    const sagaResults = generateAllSagas(candidates, basePackage);
+
+    // 3. Ajouter les fichiers générés au projet
+    let totalFiles = 0;
+    const sagaFiles: Array<{ path: string; content: string }> = [];
+    for (const result of sagaResults) {
+      for (const file of result.files) {
+        sagaFiles.push({ path: `saga/${file.path}`, content: file.content });
+        totalFiles++;
+      }
+
+      yield this.event("LOG", {
+        level: "success",
+        message: `Saga ${result.domain}: ${result.stats.totalSteps} steps, ${result.stats.compensableSteps} compensables, ${result.files.length} fichiers`,
+        phase: "MICROSERVICES",
+        data: {
+          domain: result.domain,
+          sourceClass: result.sourceClass,
+          steps: result.steps.map(s => ({ order: s.order, name: s.name, type: s.type, compensable: s.isCompensable })),
+        },
+      });
+    }
+
+    // 4. Ajouter les fichiers Saga aux fichiers microservices existants
+    if (session.microserviceResult) {
+      session.microserviceResult.generatedFiles.push(...sagaFiles);
+      session.microserviceResult.filesCount += totalFiles;
+    }
+
+    // 5. Générer le rapport Saga
+    const reportLines = [
+      `# Saga Orchestration Report`,
+      ``,
+      `## Résumé`,
+      `- **${candidates.length}** EJB(s) éligible(s) au pattern Saga`,
+      `- **${totalFiles}** fichiers générés`,
+      ``,
+    ];
+    for (const result of sagaResults) {
+      reportLines.push(`## ${result.domain} (source: ${result.sourceClass})`);
+      reportLines.push(`- Steps: ${result.stats.totalSteps}`);
+      reportLines.push(`- Compensables: ${result.stats.compensableSteps}`);
+      reportLines.push(`- Asynchrones: ${result.stats.asyncSteps}`);
+      reportLines.push(`- Critiques: ${result.stats.criticalSteps}`);
+      reportLines.push(``);
+      reportLines.push(`### Steps`);
+      for (const step of result.steps) {
+        const tags = [
+          step.isCompensable ? "[COMPENSABLE]" : "",
+          step.isAsync ? "[ASYNC]" : "",
+          step.isCritical ? "[CRITICAL]" : "",
+        ].filter(Boolean).join(" ");
+        reportLines.push(`${step.order}. **${step.label}** (${step.type}) ${tags}`);
+        if (step.compensation) {
+          reportLines.push(`   → Compensation: ${step.compensation.description}`);
+        }
+      }
+      reportLines.push(``);
+    }
+    const report = reportLines.join("\n");
+
+    // 6. Stocker le résultat
+    session.sagaResult = {
+      candidates: sagaResults.map(r => ({
+        className: r.sourceClass,
+        domain: r.domain,
+        stepsCount: r.stats.totalSteps,
+        compensableCount: r.stats.compensableSteps,
+      })),
+      filesGenerated: totalFiles,
+      report,
+    };
+
+    this.sessionStore.update(session.id, {
+      sagaResult: session.sagaResult,
+    });
+
+    yield this.event("LOG", {
+      level: "success",
+      message: `Saga Orchestration terminée : ${candidates.length} saga(s), ${totalFiles} fichiers (${Date.now() - startTime}ms)`,
+      phase: "MICROSERVICES",
+    });
+  }
+
+  // ─── Phase 4d: ENHANCING_REPORTS (v7.4) ─────────────────────────
   private async *phaseEnhancingReports(session: AgentSession): AsyncGenerator<AgentEvent> {
     yield this.event("PHASE_START", {
       phase: "ENHANCING_REPORTS",

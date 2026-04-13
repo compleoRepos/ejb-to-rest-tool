@@ -287,7 +287,7 @@ describe("FIX H — Quality scorer v7.3 avec 8 checks", () => {
     ];
 
     const report = scoreGeneration(files);
-    expect(report.checks).toHaveLength(11); // v7.8: 8 original + 3 new checks
+    expect(report.checks).toHaveLength(12); // v7.9: 8 original + 3 v7.8 + 1 v7.9 SAGA
     const checkIds = report.checks.map(c => c.id);
     expect(checkIds).toContain("SQL_CONSTANTS");
     expect(checkIds).toContain("NO_VOID_BUILDER");
@@ -396,14 +396,14 @@ describe("FIX H — Quality scorer v7.3 avec 8 checks", () => {
 
     const report = scoreGeneration(files, ["compte-service", "carte-service"], ["COMPTES", "MOUVEMENTS"], 2);
     expect(report.grade).toBe("A+");
-    expect(report.totalScore).toBe(115); // v7.8: 100 + 3 new checks (5+5+5)
+    expect(report.totalScore).toBe(120); // v7.9: 100 + 3 v7.8 checks (5+5+5) + 1 v7.9 SAGA (5)
   });
 
   // Legacy backward compat: criteria should still be available
   it("devrait exposer les criteria legacy pour compatibilité", () => {
     const report = scoreGeneration([], [], []);
     expect(report.criteria).toBeDefined();
-    expect(report.criteria.length).toBe(11); // v7.8: 8 original + 3 new checks
+    expect(report.criteria.length).toBe(12); // v7.9: 8 original + 3 v7.8 + 1 v7.9 SAGA
     expect(report.criteria[0].id).toBe("A");
   });
 });
