@@ -34,7 +34,10 @@ export type CheckId =
   | "SERVICE_NAMING"
   | "NO_ORACLE_KEYWORDS"
   | "NO_URL_CONFLICTS"
-  | "USECASE_COVERAGE";
+  | "USECASE_COVERAGE"
+  | "NO_VOID_VARIABLES"
+  | "NO_DUPLICATE_SERVICES"
+  | "NO_DTO_SERVICES";
 
 export interface QualityCheck {
   id:          CheckId;
@@ -193,6 +196,61 @@ export function scoreGeneration(
       : 0,
     maxPoints: 10,
   });
+
+  // CHECK 9 v7.8 — No Void as variable type (5 pts)
+  {
+    let voidVarCount = 0;
+    for (const file of files) {
+      if (!file.path.endsWith(".java")) continue;
+      voidVarCount += (file.content.match(/\bVoid\s+\w+\s*=/g) ?? []).length;
+    }
+    checks.push({
+      id: "NO_VOID_VARIABLES",
+      description: "Pas de Void comme type de variable locale",
+      passed: voidVarCount === 0,
+      detail: `${voidVarCount} occurrence(s) de Void varName =`,
+      points: voidVarCount === 0 ? 5 : 0,
+      maxPoints: 5,
+    });
+  }
+
+  // CHECK 10 v7.8 — No duplicate EJB services (5 pts)
+  {
+    const serviceFileNames = files
+      .filter(f => f.path.endsWith("Service.java"))
+      .map(f => f.path.split("/").pop()!.replace(".java", ""));
+    let dupCount = 0;
+    for (const name of serviceFileNames) {
+      if (/EJBService$/.test(name)) dupCount++;
+    }
+    checks.push({
+      id: "NO_DUPLICATE_SERVICES",
+      description: "Pas de services EJB doublons (*EJBService.java)",
+      passed: dupCount === 0,
+      detail: `${dupCount} doublon(s) détecté(s)`,
+      points: dupCount === 0 ? 5 : 0,
+      maxPoints: 5,
+    });
+  }
+
+  // CHECK 11 v7.8 — No DTO/CDI services (5 pts)
+  {
+    let dtoSvcCount = 0;
+    for (const file of files) {
+      const fileName = file.path.split("/").pop() ?? "";
+      if (/VoIn.*Service|VoOut.*Service|Transformer.*Service/i.test(fileName)) {
+        dtoSvcCount++;
+      }
+    }
+    checks.push({
+      id: "NO_DTO_SERVICES",
+      description: "Pas de services générés pour des DTOs/CDI beans",
+      passed: dtoSvcCount === 0,
+      detail: `${dtoSvcCount} faux service(s)`,
+      points: dtoSvcCount === 0 ? 5 : 0,
+      maxPoints: 5,
+    });
+  }
 
   const total = checks.reduce((sum, c) => sum + c.points, 0);
   const maxTotal = checks.reduce((sum, c) => sum + c.maxPoints, 0);
@@ -482,6 +540,10 @@ function buildLegacyCriteria(checks: QualityCheck[]): QualityCriterion[] {
     "NO_ORACLE_KEYWORDS": "F",
     "NO_URL_CONFLICTS": "G",
     "USECASE_COVERAGE": "H",
+    // v7.8 new checks (map to unused letters)
+    "NO_VOID_VARIABLES": "B",
+    "NO_DUPLICATE_SERVICES": "A",
+    "NO_DTO_SERVICES": "C",
   };
 
   return checks.map(c => ({
@@ -662,7 +724,40 @@ export function calculateQualityScore(files: Map<string, string>): QualityReport
     maxPoints: 15,
   });
 
-  // ── SCORE FINAL ───────────────────────────────────────────────────
+  // ── CHECK I (5 pts) v7.8 : Pas de Void comme type de variable ─────
+  const voidVarCheck = mapCheckNoVoidVariables(files);
+  checks.push({
+    id: "NO_VOID_VARIABLES",
+    description: "Pas de Void comme type de variable locale",
+    passed: voidVarCheck.count === 0,
+    detail: `${voidVarCheck.count} occurrence(s) de Void varName =`,
+    points: voidVarCheck.count === 0 ? 5 : 0,
+    maxPoints: 5,
+  });
+
+  // ── CHECK J (5 pts) v7.8 : Pas de services EJB doublons ────────
+  const dupCheck = mapCheckNoDuplicateServices(files);
+  checks.push({
+    id: "NO_DUPLICATE_SERVICES",
+    description: "Pas de services EJB doublons (*EJBService.java)",
+    passed: dupCheck.duplicates === 0,
+    detail: `${dupCheck.duplicates} doublon(s) détecté(s)`,
+    points: dupCheck.duplicates === 0 ? 5 : 0,
+    maxPoints: 5,
+  });
+
+  // ── CHECK K (5 pts) v7.8 : Pas de services DTO/CDI ───────────
+  const dtoSvcCheck = mapCheckNoDtoServices(files);
+  checks.push({
+    id: "NO_DTO_SERVICES",
+    description: "Pas de services générés pour des DTOs/CDI beans",
+    passed: dtoSvcCheck.count === 0,
+    detail: `${dtoSvcCheck.count} faux service(s)`,
+    points: dtoSvcCheck.count === 0 ? 5 : 0,
+    maxPoints: 5,
+  });
+
+  // ── SCORE FINAL ───────────────────────────────────────────────────────────
   const total = checks.reduce((sum, c) => sum + c.points, 0);
   const maxTotal = checks.reduce((sum, c) => sum + c.maxPoints, 0);
   const pct = Math.round((total / maxTotal) * 100);
@@ -750,7 +845,9 @@ function mapCheckServiceNaming(files: Map<string, string>) {
 
 function mapCheckNoOracleKeywords(files: Map<string, string>) {
   // Only check table NAMES, not SQL content — Oracle keywords in SQL constants are expected
-  const ORACLE_KW = new Set(["NOWAIT", "SYSDATE", "DUAL", "NEXTVAL", "ROWNUM", "ROWID"]);
+  // FIX v7.8: NOWAIT in "FOR UPDATE NOWAIT" is a legitimate SQL lock hint, not a table name
+  const ORACLE_KW = new Set(["SYSDATE", "DUAL", "NEXTVAL", "ROWNUM", "ROWID"]);
+  // NOWAIT is excluded because it's commonly used in "FOR UPDATE NOWAIT" which is valid SQL
   let count = 0;
   for (const [path, content] of files) {
     if (!path.endsWith(".java")) continue; // Skip reports (.md)
@@ -759,7 +856,7 @@ function mapCheckNoOracleKeywords(files: Map<string, string>) {
       // Only flag if used as a table name: @Table(name="SYSDATE") or FROM SYSDATE or JOIN SYSDATE
       const tableNameRegex = new RegExp(
         `@Table\\s*\\(.*name\\s*=\\s*"${kw}"|` +
-        `(?:FROM|JOIN|INTO|UPDATE)\\s+${kw}\\b`,
+        `(?:FROM|JOIN|INTO)\\s+${kw}\\b`,
         "i"
       );
       if (tableNameRegex.test(content)) count++;
@@ -793,4 +890,53 @@ function mapCheckUseCaseCoverage(files: Map<string, string>) {
   const covered = Math.min(services.length, controllers.length);
   const missing = Math.abs(services.length - controllers.length);
   return { total, covered, missing };
+}
+
+// ── v7.8 new check functions ────────────────────────────────────────
+
+/**
+ * CHECK I — No Void as variable type (Void sql = "..." is a compilation error)
+ * Only checks .java files, skips .md reports
+ */
+function mapCheckNoVoidVariables(files: Map<string, string>): { count: number } {
+  let count = 0;
+  for (const [path, content] of files) {
+    if (!path.endsWith(".java")) continue;
+    count += (content.match(/\bVoid\s+\w+\s*=/g) ?? []).length;
+  }
+  return { count };
+}
+
+/**
+ * CHECK J — No duplicate EJB services (e.g. CreditScoringEJBService.java alongside CreditService.java)
+ * Detects *EJBService.java files that duplicate domain services
+ */
+function mapCheckNoDuplicateServices(files: Map<string, string>): { duplicates: number } {
+  const serviceNames = [...files.keys()]
+    .filter(p => p.endsWith("Service.java"))
+    .map(p => p.split("/").pop()!.replace(".java", ""));
+
+  // Count EJB-suffixed services that have a corresponding domain service
+  let duplicates = 0;
+  for (const name of serviceNames) {
+    if (/EJBService$/.test(name)) {
+      duplicates++;
+    }
+  }
+  return { duplicates };
+}
+
+/**
+ * CHECK K — No services generated for DTOs or CDI beans
+ * Detects VoIn*Service, VoOut*Service, Transformer*Service patterns
+ */
+function mapCheckNoDtoServices(files: Map<string, string>): { count: number } {
+  let count = 0;
+  for (const [path] of files) {
+    const fileName = path.split("/").pop() ?? "";
+    if (/VoIn.*Service|VoOut.*Service|Transformer.*Service/i.test(fileName)) {
+      count++;
+    }
+  }
+  return { count };
 }

@@ -229,6 +229,19 @@ function generateServiceMethodBody(
         };
         const result = transformer.transform(executeMethod.body, astSymbolTable, ctx);
 
+        // FIX v7.8: Post-process Void variable declarations → infer real type
+        // When resType is "Void", the T10 replacement produces "Void sql = ..." which is invalid Java.
+        // Replace "Void varName = " with inferred type based on the RHS value.
+        result.code = result.code.replace(/\bVoid\s+(\w+)\s*=/g, (match, varName) => {
+          // Infer type from variable name and common patterns
+          if (/sql|query|hql|jpql/i.test(varName)) return `String ${varName} =`;
+          if (/msg|message|text|body|subject|content/i.test(varName)) return `String ${varName} =`;
+          if (/count|total|nb|size|index/i.test(varName)) return `int ${varName} =`;
+          if (/flag|is[A-Z]|has[A-Z]|found|exists/i.test(varName)) return `boolean ${varName} =`;
+          if (/result|response|data|obj|entity/i.test(varName)) return `Object ${varName} =`;
+          return `var ${varName} =`;  // Safe fallback: let Java infer the type
+        });
+
         // FIX A v7.1: SQL constants are now ONLY at class level (private static final)
         // No longer duplicated inside method body — removed constant extraction here
 
@@ -290,6 +303,16 @@ function generateServiceMethodBody(
       sourceClassName: uc.className,
     };
     const result = transformer.transform(executeBody, ctx);
+
+    // FIX v7.8: Post-process Void variable declarations → infer real type (legacy path)
+    result.body = result.body.replace(/\bVoid\s+(\w+)\s*=/g, (match, varName) => {
+      if (/sql|query|hql|jpql/i.test(varName)) return `String ${varName} =`;
+      if (/msg|message|text|body|subject|content/i.test(varName)) return `String ${varName} =`;
+      if (/count|total|nb|size|index/i.test(varName)) return `int ${varName} =`;
+      if (/flag|is[A-Z]|has[A-Z]|found|exists/i.test(varName)) return `boolean ${varName} =`;
+      if (/result|response|data|obj|entity/i.test(varName)) return `Object ${varName} =`;
+      return `var ${varName} =`;
+    });
 
     // FIX A v7.1: SQL constants are now ONLY at class level (private static final)
     // No longer duplicated inside method body — removed constant extraction here

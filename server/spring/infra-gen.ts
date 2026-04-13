@@ -107,8 +107,9 @@ export function generateInjectedServiceStub(
   const seenMethods = new Set<string>();
 
   if (sourceContent) {
-    // Robust regex: only match lines that look like interface method declarations
-    const methodRegex = /^\s*(?:public\s+)?([A-Z]\w*(?:<[^>]+>)?(?:\[\])?|void|boolean|int|long|double|float|char|byte|short|String)\s+(\w+)\s*\(([^)]*)\)\s*(?:throws\s+[\w,\s]+)?\s*;/gm;
+    // FIX v7.8 BUG-7: Match both interface declarations (ending with ;) AND class method implementations (ending with {)
+    // This handles EJB implementation classes (NotificationMulticanalEJB) not just interfaces
+    const methodRegex = /^\s*(?:public\s+)?([A-Z]\w*(?:<[^>]+>)?(?:\[\])?|void|boolean|int|long|double|float|char|byte|short|String)\s+(\w+)\s*\(([^)]*)\)\s*(?:throws\s+[\w,\s]+)?\s*[;{]/gm;
     let mm;
     while ((mm = methodRegex.exec(sourceContent)) !== null) {
       const returnType = mm[1].trim();

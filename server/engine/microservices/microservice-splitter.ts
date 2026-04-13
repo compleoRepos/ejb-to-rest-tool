@@ -678,7 +678,8 @@ export class MicroserviceSplitter {
   // ── Naming Helpers ─────────────────────────────────────────────
 
   private inferServiceName(group: ParsedModule[]): string {
-    const ids = group.map(m => m.id.toLowerCase());
+    // FIX v7.8: Guard against modules with undefined/null id
+    const ids = group.map(m => (m.id ?? '').toLowerCase()).filter(id => id.length > 0);
 
     // BUG-E/J v7.5: Dashboard/Operateur/Admin servlets → ops-service (NOT auth-service)
     if (ids.some(id =>
@@ -706,7 +707,7 @@ export class MicroserviceSplitter {
     }
 
     // Domaine dominant
-    const domains = group.map(m => this.toDomain(m.id));
+    const domains = group.filter(m => m.id).map(m => this.toDomain(m.id));
     const dominant = domains.sort((a, b) =>
       domains.filter(d => d === b).length -
       domains.filter(d => d === a).length
@@ -715,6 +716,8 @@ export class MicroserviceSplitter {
   }
 
   private toDomain(ejbId: string): string {
+    // FIX v7.8: Guard against undefined ejbId
+    if (!ejbId) return "unknown";
     // FIX C v7.1: Extract domain from EJB class name, not className_methodName
     // e.g. "CarteEJB_getCartesActives" → strip method → "CarteEJB" → "carte"
     //      "CompteEJB_consulterSolde"  → strip method → "CompteEJB" → "compte"

@@ -189,7 +189,49 @@ public class BusinessRuleException extends RuntimeException {
     }
   }
   for (const [svcType, usedMethods] of serviceMethodUsages) {
-    const sourceFile = (ir as any)._rawFiles?.find((f: any) => f.className === svcType);
+    // FIX v7.8 BUG-7: Search source file with fallback — _rawFiles has { path, content } only (no className)
+    // IMPORTANT: For EJBLocal interfaces (e.g. NotificationMulticanalEJBLocal), the Local interface
+    // file is often empty (just `public interface Xxx {}`). We MUST search the EJB implementation first.
+    const rawFiles = (ir as any)._rawFiles ?? [];
+    const pathEndsWith = (f: any, name: string) =>
+      f.path?.endsWith(`/${name}.java`) || f.path?.endsWith(`\\${name}.java`) || f.path === `${name}.java`;
+
+    let sourceFile: any = null;
+
+    // Step 1: Strip EJB interface suffixes to find the implementation class first
+    const baseName = svcType
+      .replace(/Local$/i, "")
+      .replace(/Remote$/i, "")
+      .replace(/Home$/i, "");
+    if (baseName !== svcType) {
+      // svcType had a suffix — search for the implementation first
+      const candidates = [baseName, baseName + "Bean", baseName + "Impl"];
+      for (const cand of candidates) {
+        sourceFile = rawFiles.find((f: any) => pathEndsWith(f, cand));
+        if (sourceFile) break;
+      }
+    }
+
+    // Step 2: If no implementation found, try exact match (the svcType itself)
+    if (!sourceFile) {
+      sourceFile = rawFiles.find((f: any) => pathEndsWith(f, svcType));
+    }
+
+    // Step 3: If exact match is an empty interface, try implementation again
+    if (sourceFile && sourceFile.content) {
+      const trimmed = sourceFile.content.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
+      // Check if it's just an empty interface declaration
+      if (/^package[^;]*;\s*(import[^;]*;\s*)*public\s+interface\s+\w+\s*\{\s*\}\s*$/.test(trimmed)) {
+        // Empty interface — try to find implementation
+        const implCandidates = [baseName, baseName + "Bean", baseName + "Impl"];
+        for (const cand of implCandidates) {
+          if (cand === svcType) continue; // skip the one we already found
+          const impl = rawFiles.find((f: any) => pathEndsWith(f, cand));
+          if (impl) { sourceFile = impl; break; }
+        }
+      }
+    }
+
     if (sourceFile) {
       // Filter the source content to only include methods that are actually used
       files.push(generateInjectedServiceStub(basePackage, basePath, svcType, sourceFile.content, usedMethods));
