@@ -18,7 +18,9 @@ import {
   FileText, BarChart3, Database, Layers, BookOpen,
   Download, Loader2, AlertTriangle, CheckCircle2,
   Clock, Sparkles, Eye, EyeOff, Maximize2, Minimize2,
+  FileDown,
 } from "lucide-react";
+import { exportSingleReportPDF, exportAllReportsPDF } from "@/lib/pdf-report-generator";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -157,6 +159,27 @@ export default function ReportViewer({ sessionId, originalReports, compact = fal
     }
   }, [data]);
 
+  // Export single report as PDF
+  const handleExportPDF = useCallback((reportId: string) => {
+    if (!data?.reports[reportId]) return;
+    exportSingleReportPDF(
+      reportId,
+      data.reports[reportId]!,
+      "Projet",
+      data.metadata?.generatedAt,
+    );
+  }, [data]);
+
+  // Export all reports as combined PDF
+  const handleExportAllPDF = useCallback(() => {
+    if (!data?.reports) return;
+    exportAllReportsPDF(
+      data.reports,
+      "Projet",
+      data.metadata?.generatedAt,
+    );
+  }, [data]);
+
   // ─── Loading state ──────────────────────────────────────────────────────
 
   if (loading) {
@@ -239,6 +262,15 @@ export default function ReportViewer({ sessionId, originalReports, compact = fal
           <Button
             variant="ghost"
             size="sm"
+            onClick={handleExportAllPDF}
+            className="gap-1.5 text-xs text-amber-400 hover:text-amber-300"
+          >
+            <FileDown className="w-3.5 h-3.5" />
+            PDF
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleDownloadAll}
             className="gap-1.5 text-xs"
           >
@@ -286,6 +318,15 @@ export default function ReportViewer({ sessionId, originalReports, compact = fal
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                 <span className="text-xs text-muted-foreground">{tab.description}</span>
               </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleExportPDF(tab.id)}
+                className="gap-1.5 text-xs h-7 text-amber-400 hover:text-amber-300"
+              >
+                <FileDown className="w-3 h-3" />
+                PDF
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"
