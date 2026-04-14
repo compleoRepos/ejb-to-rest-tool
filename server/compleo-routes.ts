@@ -1449,4 +1449,15 @@ router.get("/debug-ir/:id", async (req: Request, res: Response) => {
 
 export function registerCompleoRoutes(app: import("express").Express) {
   app.use("/api/compleo", router);
+
+  // Feature flag: Microservices + ML (STEP 2 — Compleo v7.0)
+  // Activé uniquement si FEATURE_MS_ML=true dans l'environnement
+  if (process.env.FEATURE_MS_ML === "true") {
+    import("./engine/microservices/routes").then(({ microservicesRouter }) => {
+      app.use("/api/compleo/microservices", microservicesRouter);
+      console.log("Feature microservices + ML activée");
+    }).catch((err) => {
+      console.warn("Microservices feature failed to load:", err.message);
+    });
+  }
 }

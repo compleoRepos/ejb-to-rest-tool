@@ -37,19 +37,19 @@ LABEL org.opencontainers.image.title="Compleo EJB Client Modernizer" \
       org.opencontainers.image.version="1.0.0" \
       org.opencontainers.image.authors="Hamza NORDINE"
 
-# Créer un utilisateur non-root
-RUN addgroup -g 1000 compleo && \
-    adduser -u 1000 -G compleo -s /bin/sh -D compleo
+# Créer un utilisateur non-root (UID/GID 1001 pour éviter conflit avec node:1000)
+RUN addgroup -g 1001 compleo && \
+    adduser -u 1001 -G compleo -s /bin/sh -D compleo
 
 WORKDIR /app
 
 # Copier les artefacts de build
-COPY --from=builder --chown=compleo:compleo /app/dist ./dist
-COPY --from=builder --chown=compleo:compleo /app/node_modules ./node_modules
-COPY --from=builder --chown=compleo:compleo /app/package.json ./package.json
+COPY --from=builder --chown=1001:1001 /app/dist ./dist
+COPY --from=builder --chown=1001:1001 /app/node_modules ./node_modules
+COPY --from=builder --chown=1001:1001 /app/package.json ./package.json
 
 # Copier les projets de test et les règles (nécessaires au runtime)
-COPY --from=builder --chown=compleo:compleo /app/test-projects ./test-projects
+COPY --from=builder --chown=1001:1001 /app/test-projects ./test-projects
 
 # Créer le répertoire temporaire pour les sessions
 RUN mkdir -p /tmp/compleo-sessions && chown compleo:compleo /tmp/compleo-sessions

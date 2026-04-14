@@ -1,0 +1,54 @@
+# ═══════════════════════════════════════════════════════════════════
+# Compleo v7.0 — Services ML additionnels
+# Branche feature/microservice-ml-generator uniquement
+#
+# Lancer avec :
+#   docker-compose -f docker/docker-compose.feature.yml up -d
+#
+# Arrêter avec :
+#   docker-compose -f docker/docker-compose.feature.yml down
+# ═══════════════════════════════════════════════════════════════════
+
+version: "3.9"
+
+services:
+
+  # ── Ollama — LLM local pour génération de code ──────────────────
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    # GPU optionnel — décommenter si GPU NVIDIA disponible
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── ChromaDB — Vector store pour RAG ────────────────────────────
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma-data:/chroma/chroma
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  ollama-models:
+  chroma-data:

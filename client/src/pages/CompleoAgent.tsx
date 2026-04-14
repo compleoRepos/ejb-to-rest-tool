@@ -8,6 +8,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
@@ -21,6 +22,7 @@ import {
   Activity, Radio, Pause, SkipForward, Network,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
+import ReportViewer from "@/components/compleo/ReportViewer";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -71,6 +73,8 @@ const PHASES = [
   { id: "ANALYZING", label: "Analyse", icon: Eye, color: "text-cyan-400" },
   { id: "AWAITING_INPUT", label: "Choix", icon: Pause, color: "text-yellow-400" },
   { id: "GENERATING", label: "Génération", icon: FileCode2, color: "text-emerald-400" },
+  { id: "MICROSERVICES", label: "Microservices", icon: Layers, color: "text-pink-400" },
+  { id: "ENHANCING_REPORTS", label: "Rapports IA", icon: Star, color: "text-amber-400" },
   { id: "COMPILING", label: "Compilation", icon: Terminal, color: "text-purple-400" },
   { id: "PUSHING", label: "Push", icon: Upload, color: "text-orange-400" },
   { id: "COMPLETED", label: "Terminé", icon: CheckCircle2, color: "text-green-400" },
@@ -107,6 +111,11 @@ export default function CompleoAgentPage() {
   const [gitBranch, setGitBranch] = useState("main");
   const [projectName, setProjectName] = useState("");
   const [autoResolve, setAutoResolve] = useState(false);
+  const [enableMicroservices, setEnableMicroservices] = useState(false);
+  const [enableML, setEnableML] = useState(false);
+  const [enableReportEnhancer, setEnableReportEnhancer] = useState(false);
+  const [enableSaga, setEnableSaga] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   // Agent state
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -163,6 +172,10 @@ export default function CompleoAgentPage() {
           projectName: projectName || "migration",
           autoResolveAmbiguities: autoResolve,
           maxCompilationAttempts: 5,
+          enableMicroservices,
+          enableML: enableMicroservices && enableML,
+          enableReportEnhancer,
+          enableSaga: enableMicroservices && enableSaga,
         },
       };
 
@@ -229,7 +242,7 @@ export default function CompleoAgentPage() {
     } finally {
       setIsStarting(false);
     }
-  }, [sourceMode, uploadSessionId, gitUrl, gitToken, gitBranch, projectName, autoResolve]);
+  }, [sourceMode, uploadSessionId, gitUrl, gitToken, gitBranch, projectName, autoResolve, enableMicroservices, enableML, enableReportEnhancer, enableSaga]);
 
   // ─── Cancel Agent ───────────────────────────────────────────────────────
 
@@ -426,11 +439,17 @@ export default function CompleoAgentPage() {
                     }}
                   />
                   <div
-                    className="border-2 border-dashed border-border/50 rounded-lg p-8 text-center cursor-pointer hover:border-emerald-500/50 transition-colors"
+                    className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all duration-200 ${
+                      isDragOver
+                        ? "border-emerald-400 bg-emerald-500/10 scale-[1.01]"
+                        : "border-border/50 hover:border-emerald-500/50"
+                    }`}
                     onClick={() => fileInputRef.current?.click()}
-                    onDragOver={(e) => e.preventDefault()}
+                    onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                    onDragLeave={() => setIsDragOver(false)}
                     onDrop={(e) => {
                       e.preventDefault();
+                      setIsDragOver(false);
                       const f = e.dataTransfer.files[0];
                       if (f) handleFileSelect(f);
                     }}
@@ -504,15 +523,56 @@ export default function CompleoAgentPage() {
                   className="font-mono text-sm"
                 />
               </div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <Checkbox
                   checked={autoResolve}
-                  onChange={(e) => setAutoResolve(e.target.checked)}
-                  className="rounded border-border"
+                  onCheckedChange={(v) => setAutoResolve(v === true)}
+                  className="data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-500"
                 />
-                <span className="text-sm">Auto-résoudre les ambiguïtés (utiliser les recommandations du moteur)</span>
+                <span className="text-sm group-hover:text-foreground transition-colors">Auto-résoudre les ambiguïtés (utiliser les recommandations du moteur)</span>
               </label>
+              <div className="border-t border-border/30 pt-3 mt-2 space-y-2">
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <Checkbox
+                    checked={enableMicroservices}
+                    onCheckedChange={(v) => setEnableMicroservices(v === true)}
+                    className="data-[state=checked]:bg-pink-500 data-[state=checked]:border-pink-500"
+                  />
+                  <Layers className="w-4 h-4 text-pink-400" />
+                  <span className="text-sm group-hover:text-foreground transition-colors">Découpage Microservices (Splitter + Générateur)</span>
+                </label>
+                {enableMicroservices && (
+                  <label className="flex items-center gap-3 cursor-pointer ml-6 group">
+                    <Checkbox
+                      checked={enableML}
+                      onCheckedChange={(v) => setEnableML(v === true)}
+                      className="data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
+                    />
+                    <Zap className="w-4 h-4 text-amber-400" />
+                    <span className="text-sm group-hover:text-foreground transition-colors">Amélioration ML (Ollama + ChromaDB requis)</span>
+                  </label>
+                )}
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <Checkbox
+                    checked={enableReportEnhancer}
+                    onCheckedChange={(v) => setEnableReportEnhancer(v === true)}
+                    className="data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
+                  />
+                  <Star className="w-4 h-4 text-amber-400" />
+                  <span className="text-sm group-hover:text-foreground transition-colors">Rapports IA enrichis (Ollama requis)</span>
+                </label>
+                {enableMicroservices && (
+                  <label className="flex items-center gap-3 cursor-pointer ml-6 group">
+                    <Checkbox
+                      checked={enableSaga}
+                      onCheckedChange={(v) => setEnableSaga(v === true)}
+                      className="data-[state=checked]:bg-violet-500 data-[state=checked]:border-violet-500"
+                    />
+                    <GitBranch className="w-4 h-4 text-violet-400" />
+                    <span className="text-sm group-hover:text-foreground transition-colors">Saga Orchestration (compensation automatique)</span>
+                  </label>
+                )}
+              </div>
             </div>
 
             {/* Start button */}
@@ -671,6 +731,12 @@ export default function CompleoAgentPage() {
                       <Badge variant="secondary" className="text-xs ml-1 bg-yellow-500/20 text-yellow-400">
                         {ambiguities.length}
                       </Badge>
+                    </TabsTrigger>
+                  )}
+                  {sessionId && isCompleted && (
+                    <TabsTrigger value="reports" className="gap-1.5">
+                      <Star className="w-3.5 h-3.5 text-amber-400" />
+                      Rapports IA
                     </TabsTrigger>
                   )}
                 </TabsList>
@@ -859,6 +925,13 @@ export default function CompleoAgentPage() {
                         </div>
                       </ScrollArea>
                     </div>
+                  </TabsContent>
+                )}
+
+                {/* Enhanced Reports tab (v7.4) */}
+                {sessionId && isCompleted && (
+                  <TabsContent value="reports" className="mt-3">
+                    <ReportViewer sessionId={sessionId} compact />
                   </TabsContent>
                 )}
               </Tabs>

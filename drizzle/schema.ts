@@ -176,7 +176,7 @@ export const learningRules = mysqlTable("learning_rules", {
   patternParamTypes: varchar("pattern_param_types", { length: 500 }),
 
   // Choix de l'utilisateur
-  chosenOption: varchar("chosen_option", { length: 100 }).notNull(),
+  chosenOption: varchar("chosen_option", { length: 100 }).default("").notNull(),
   chosenReason: text("chosen_reason"),
 
   // Statistiques d'apprentissage
