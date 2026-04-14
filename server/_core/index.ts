@@ -15,6 +15,7 @@ import { authMiddleware } from "../middleware/auth-middleware";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { bootstrap } from "../bootstrap";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -88,6 +89,9 @@ async function startServer() {
   } else {
     serveStatic(app);
   }
+
+  // ── Bootstrap Code First : migration + seed ───────────────
+  await bootstrap();
 
   const preferredPort = parseInt(process.env.PORT || "3000");
   const port = await findAvailablePort(preferredPort);
