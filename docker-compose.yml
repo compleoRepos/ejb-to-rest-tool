@@ -137,10 +137,11 @@ services:
     #           count: all
     #           capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD", "ollama", "list"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      start_period: 30s
+      retries: 5
 
   # ── ChromaDB — Vector store pour RAG ───────────────────────
   chromadb:
@@ -154,10 +155,11 @@ services:
     networks:
       - compleo-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8000'"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      start_period: 30s
+      retries: 5
 
 # ── Volumes persistants ────────────────────────────────────────
 volumes:
