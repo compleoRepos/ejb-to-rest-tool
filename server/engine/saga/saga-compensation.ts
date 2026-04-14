@@ -104,6 +104,93 @@ const COMPENSATION_RULES: CompensationRule[] = [
         "UPDATE T_TRANSACTIONS_SEPA SET STATUT = :statutPrecedent WHERE END_TO_END_ID = :e2eId",
     }),
   },
+
+  // Post-Audit STEP 8: Compensations concrètes + SQL Oracle
+
+  // Décaissement crédit → Annuler le décaissement
+  {
+    pattern: /décaissement|deblocage|versement.*crédit/i,
+    build: () => ({
+      method: "annulerDecaissement",
+      description:
+        "Annuler le décaissement : re-créditer le compte de prêt et débiter le compte client",
+      sqlHint:
+        "UPDATE T_PRETS SET STATUT = 'ANNULE', DATE_ANNULATION = SYSDATE WHERE REFERENCE_PRET = :refPret; " +
+        "UPDATE T_COMPTES SET SOLDE = SOLDE - :montant WHERE NUMERO_COMPTE = :compteClient",
+    }),
+  },
+
+  // Garantie → Libérer la garantie
+  {
+    pattern: /garantie|collateral|hypotheque|nantissement/i,
+    build: () => ({
+      method: "libererGarantie",
+      description:
+        "Libérer la garantie enregistrée (hypothèque, nantissement, caution)",
+      sqlHint:
+        "UPDATE T_GARANTIES SET STATUT = 'LIBEREE', DATE_LIBERATION = SYSDATE WHERE REFERENCE_GARANTIE = :refGarantie",
+    }),
+  },
+
+  // Échéancier → Supprimer l'échéancier
+  {
+    pattern: /echeancier|amortissement|plan.*remboursement/i,
+    build: () => ({
+      method: "supprimerEcheancier",
+      description:
+        "Supprimer l'échéancier généré pour le prêt",
+      sqlHint:
+        "DELETE FROM T_ECHEANCIER WHERE REFERENCE_PRET = :refPret AND STATUT = 'GENERE'",
+    }),
+  },
+
+  // Ouverture compte → Fermer le compte
+  {
+    pattern: /ouverture.*compte|création.*compte/i,
+    build: () => ({
+      method: "fermerCompte",
+      description:
+        "Fermer le compte ouvert (statut CLOTURE, date clôture)",
+      sqlHint:
+        "UPDATE T_COMPTES SET STATUT = 'CLOTURE', DATE_CLOTURE = SYSDATE, MOTIF_CLOTURE = 'ANNULATION_SAGA' WHERE NUMERO_COMPTE = :numeroCompte",
+    }),
+  },
+
+  // KYC → Invalider le KYC
+  {
+    pattern: /kyc|know.*your.*customer|vérification.*identit/i,
+    build: () => ({
+      method: "invaliderKyc",
+      description:
+        "Invalider la vérification KYC effectuée",
+      sqlHint:
+        "UPDATE T_KYC_VERIFICATIONS SET STATUT = 'INVALIDE', DATE_INVALIDATION = SYSDATE WHERE REFERENCE_KYC = :refKyc",
+    }),
+  },
+
+  // Notification → Envoyer notification d'annulation
+  {
+    pattern: /notification|envoi.*mail|sms|alerte/i,
+    build: () => ({
+      method: "envoyerNotificationAnnulation",
+      description:
+        "Envoyer une notification d'annulation au client",
+      sqlHint: null,
+    }),
+  },
+
+  // Scoring → Invalider le score
+  {
+    pattern: /scoring|calcul.*score|décision.*crédit/i,
+    build: () => ({
+      method: "invaliderScoring",
+      description:
+        "Invalider le scoring et la décision de crédit",
+      sqlHint:
+        "UPDATE T_SCORING SET STATUT = 'INVALIDE' WHERE ID_DEMANDE = :idDemande; " +
+        "UPDATE T_DECISIONS_CREDIT SET STATUT = 'ANNULEE' WHERE ID_DEMANDE = :idDemande",
+    }),
+  },
 ];
 
 // ── API publique ─────────────────────────────────────────────────────────────

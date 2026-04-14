@@ -55,10 +55,15 @@ describe("ReportEnhancer", () => {
     });
     const ctx    = buildMockContext();
     const result = await enhancerTimeout.enhanceAll(ctx);
-    // Pas d'exception — les rapports individuels sont null
+    // Pas d'exception — les rapports ML sont null, mais QUALITY_SCORE est statique
     expect(result.enhanced).toBe(true);
-    // Tous les rapports sont null car Ollama est inaccessible
+    // Les rapports ML (qui nécessitent Ollama) sont null
     for (const key of Object.keys(result.reports)) {
+      if (key === "QUALITY_SCORE") {
+        // QUALITY_SCORE est calculé statiquement, pas via Ollama
+        // Il peut être non-null même sans Ollama
+        continue;
+      }
       expect(result.reports[key]).toBeNull();
     }
   });

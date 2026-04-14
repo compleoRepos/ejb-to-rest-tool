@@ -324,16 +324,87 @@ Markdown technique. Max 500 mots.`;
     return this.sanitizeOutput(raw, ctx);
   }
 
-  // ── QUALITY_SCORE.md enrichi (v7.6 P3: prompts ancrés) ──────
+  // ── QUALITY_SCORE.md — calculé statiquement (Post-Audit STEP 8c) ──────
+  // Le QUALITY_SCORE est désormais généré par analyse statique du code,
+  // PAS par le LLM Ollama. Cela évite les hallucinations, les répétitions
+  // et les "[SUPPRIMÉ]" de l'anti-hallucination.
 
   async enhanceQualityScore(ctx: ReportContext): Promise<string> {
+    // Génération statique — pas d'appel Ollama
+    return this.generateStaticQualityScore(ctx);
+  }
+
+  private generateStaticQualityScore(ctx: ReportContext): string {
     const report = ctx.qualityReport;
-    const prompt = this.buildQualityPrompt(ctx, report);
-    const raw = await this.ollamaGenerate(prompt, {
-      temperature: 0.2,
-      num_predict: 1200,
-    });
-    return this.sanitizeOutput(raw, ctx);
+    const lines: string[] = [
+      `# Rapport Qualité — ${ctx.projectName}`,
+      "",
+      `> Généré automatiquement par Compleo (analyse statique du code Java généré)`,
+      "",
+      `## Score Global : ${report.score}/100 (${report.grade})`,
+      "",
+      `| Critère | Description | Score | Détail |`,
+      `|---------|-------------|-------|--------|`,
+    ];
+
+    for (const c of report.checks) {
+      const icon = c.passed ? "✅" : "❌";
+      lines.push(`| ${icon} ${c.id} | ${c.description} | ${c.points}/${c.maxPoints} | ${c.detail} |`);
+    }
+
+    const failedChecks = report.checks.filter(c => !c.passed);
+    if (failedChecks.length > 0) {
+      lines.push("");
+      lines.push("## Problèmes détectés");
+      lines.push("");
+      for (const c of failedChecks) {
+        lines.push(`### ${c.id} — ${c.description}`);
+        lines.push("");
+        lines.push(`**Détail** : ${c.detail}`);
+        lines.push(`**Impact** : -${c.maxPoints - c.points} pts`);
+        lines.push(`**Action** : Corriger avant mise en production`);
+        lines.push("");
+      }
+    }
+
+    const passedChecks = report.checks.filter(c => c.passed);
+    if (passedChecks.length > 0) {
+      lines.push("");
+      lines.push("## Critères validés");
+      lines.push("");
+      for (const c of passedChecks) {
+        lines.push(`- ✅ **${c.id}** : ${c.description} (${c.points}/${c.maxPoints} pts)`);
+      }
+    }
+
+    // Contexte du projet
+    lines.push("");
+    lines.push("## Contexte du projet");
+    lines.push("");
+    lines.push(`| Métrique | Valeur |`);
+    lines.push(`|----------|--------|`);
+    lines.push(`| Modules analysés | ${ctx.modules.length} |`);
+    lines.push(`| Services générés | ${ctx.services.length} |`);
+    lines.push(`| UseCases détectés | ${ctx.useCasesCount} |`);
+    lines.push(`| Confiance globale | ${ctx.confidenceScore}% |`);
+    lines.push(`| Durée estimée | ${ctx.estimatedDuration} semaines |`);
+
+    // Checklist production
+    lines.push("");
+    lines.push("## Checklist prêt pour la production");
+    lines.push("");
+    const productionReady = report.score >= 85;
+    lines.push(productionReady
+      ? "> \u2705 Le code généré est déployable avec des corrections mineures."
+      : "> \u26a0\ufe0f Des corrections sont nécessaires avant la mise en production.");
+    lines.push("");
+    lines.push(`- [${report.score >= 80 ? "x" : " "}] Score qualité \u2265 80/100`);
+    lines.push(`- [${failedChecks.length <= 2 ? "x" : " "}] Moins de 3 critères échoués`);
+    lines.push(`- [ ] Tests de régression validés manuellement`);
+    lines.push(`- [ ] Revue de code par un architecte senior`);
+    lines.push(`- [ ] Tests d'intégration exécutés`);
+
+    return lines.join("\n");
   }
 
   /**

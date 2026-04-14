@@ -75,6 +75,63 @@ export interface ParsedModuleUseCase {
   tx:           string;
   httpVerb:     string | null;
   sqlConstants: { name: string; value: string }[];
+  /** Post-Audit STEP 3: Real method parameters (not just voInType) */
+  methodParameters?: { name: string; type: string }[];
+}
+
+// ── Method Extraction from Source (Post-Audit STEP 3) ─────────────
+
+interface ExtractedMethod {
+  name: string;
+  returnType: string;
+  parameters: { name: string; type: string }[];
+}
+
+/**
+ * Post-Audit STEP 3: Extract all public/protected methods from Java source.
+ * Returns real method names and parameters instead of just the class name.
+ */
+function extractMethodsFromSource(rawSource: string, className: string): ExtractedMethod[] {
+  if (!rawSource || rawSource.length < 20) return [];
+
+  const methods: ExtractedMethod[] = [];
+  // Match: public ReturnType methodName(Type1 param1, Type2 param2)
+  const methodRegex = /(?:public|protected)\s+(?:static\s+)?([\w<>\[\],\s]+?)\s+(\w+)\s*\(([^)]*)\)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = methodRegex.exec(rawSource)) !== null) {
+    const returnType = match[1].trim();
+    const methodName = match[2];
+    const paramsStr = match[3].trim();
+
+    // Skip constructors, main, lifecycle methods
+    if (methodName === className || methodName === "main" ||
+        methodName === "ejbCreate" || methodName === "ejbRemove" ||
+        methodName === "ejbActivate" || methodName === "ejbPassivate" ||
+        methodName === "setSessionContext" || methodName === "setEntityContext" ||
+        methodName === "unsetEntityContext" || methodName === "ejbLoad" ||
+        methodName === "ejbStore" || methodName === "ejbPostCreate" ||
+        methodName === "onMessage") {
+      continue;
+    }
+
+    const parameters: { name: string; type: string }[] = [];
+    if (paramsStr.length > 0) {
+      for (const p of paramsStr.split(",")) {
+        const parts = p.trim().split(/\s+/);
+        if (parts.length >= 2) {
+          parameters.push({
+            type: parts.slice(0, -1).join(" "),
+            name: parts[parts.length - 1],
+          });
+        }
+      }
+    }
+
+    methods.push({ name: methodName, returnType, parameters });
+  }
+
+  return methods;
 }
 
 // ── SQL Extraction Helpers ─────────────────────────────────────────
@@ -183,13 +240,13 @@ export function buildParsedModules(
   const allClassNames: string[] = [];
 
   // Collect all class names for EJB call detection
-  for (const uc of ir.useCases) allClassNames.push(uc.className);
-  for (const svc of ir.services) allClassNames.push(svc.className);
-  for (const ejb of ir.ejb2xBeans) allClassNames.push(ejb.className);
+  for (const uc of (ir.useCases ?? [])) allClassNames.push(uc.className);
+  for (const svc of (ir.services ?? [])) allClassNames.push(svc.className);
+  for (const ejb of (ir.ejb2xBeans ?? [])) allClassNames.push(ejb.className);
 
   // 1. UseCases → ParsedModule (one per UseCase class)
   const useCasesByClass = new Map<string, UseCaseIR[]>();
-  for (const uc of ir.useCases) {
+  for (const uc of (ir.useCases ?? [])) {
     const existing = useCasesByClass.get(uc.className) ?? [];
     existing.push(uc);
     useCasesByClass.set(uc.className, existing);
@@ -217,20 +274,37 @@ export function buildParsedModules(
       jmsProduces: extractJmsQueues(source).filter(q => classifyJmsDirection(source, q) === "PRODUCE"),
       jmsConsumes: extractJmsQueues(source).filter(q => classifyJmsDirection(source, q) === "CONSUME"),
       sqlFeatures: extractSqlFeatures(source),
-      useCases: ucs.map(uc => ({
-        methodName: uc.className.replace(/^UC/, "").replace(/^UseCase/, ""),
-        voInType: uc.voInType !== "Void" ? uc.voInType : null,
-        voOutType: uc.voOutType !== "Void" ? uc.voOutType : null,
-        tx: uc.transactional?.propagation ?? "REQUIRED",
-        httpVerb: uc.httpMethod || null,
-        sqlConstants: [],
-      })),
+      useCases: ucs.flatMap(uc => {
+        // Post-Audit STEP 3: Extract ALL methods from rawSource, not just the class name
+        const methods = extractMethodsFromSource(uc.rawSource, uc.className);
+        if (methods.length > 0) {
+          return methods.map(m => ({
+            methodName: m.name,
+            voInType: m.parameters.length > 0 ? m.parameters[0].type : null,
+            voOutType: m.returnType !== "void" ? m.returnType : null,
+            tx: uc.transactional?.propagation ?? "REQUIRED",
+            httpVerb: uc.httpMethod || null,
+            sqlConstants: [],
+            methodParameters: m.parameters,
+          }));
+        }
+        // Fallback: use the UseCase metadata
+        return [{
+          methodName: uc.className.replace(/^UC/, "").replace(/^UseCase/, ""),
+          voInType: uc.voInType !== "Void" ? uc.voInType : null,
+          voOutType: uc.voOutType !== "Void" ? uc.voOutType : null,
+          tx: uc.transactional?.propagation ?? "REQUIRED",
+          httpVerb: uc.httpMethod || null,
+          sqlConstants: [],
+          methodParameters: uc.methodParameters ?? [],
+        }];
+      }),
       rawSource: source,
     });
   }
 
   // 2. Services → ParsedModule (one per Service class)
-  for (const svc of ir.services) {
+  for (const svc of (ir.services ?? [])) {
     const source = svc.methods.map(m => m.name).join(" ");
     const rawSource = (ir._rawFiles ?? []).find(f => f.path.includes(svc.className))?.content ?? "";
     const readTables = extractTables(rawSource, SQL_READ_REGEX);
@@ -260,13 +334,14 @@ export function buildParsedModules(
         tx: "REQUIRED",
         httpVerb: null,
         sqlConstants: [],
+        methodParameters: m.parameters,
       })),
       rawSource,
     });
   }
 
   // 3. EJB 2.x beans → ParsedModule
-  for (const ejb of ir.ejb2xBeans) {
+  for (const ejb of (ir.ejb2xBeans ?? [])) {
     const rawSource = ejb.rawSource;
     const readTables = extractTables(rawSource, SQL_READ_REGEX);
     const writeTables = extractTables(rawSource, SQL_WRITE_REGEX);
@@ -295,13 +370,14 @@ export function buildParsedModules(
         tx: "REQUIRED",
         httpVerb: null,
         sqlConstants: [],
+        methodParameters: m.parameters,
       })),
       rawSource,
     });
   }
 
   // 4. Batch jobs → ParsedModule
-  for (const batch of ir.batchJobs) {
+  for (const batch of (ir.batchJobs ?? [])) {
     const rawSource = batch.rawSource;
     modules.push({
       id: batch.className,
