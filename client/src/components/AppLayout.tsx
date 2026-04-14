@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Terminal, FolderGit2, LayoutDashboard, Code2, Network,
   GitBranch, MessageSquare, BookOpen, Menu, X, Package,
-  Bot, Brain, FolderOpen, ChevronRight,
+  Bot, Brain, FolderOpen, ChevronRight, Layers,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -22,6 +22,7 @@ const NAV_ITEMS = [
 const COMPLEO_TABS = [
   { path: "/compleo", label: "Analyse", icon: Code2, exact: true },
   { path: "/compleo/agent", label: "Agent IA", icon: Bot },
+  { path: "/compleo/sagas", label: "Sagas", icon: GitBranch },
   { path: "/compleo/architecture", label: "Architecture", icon: Network },
   { path: "/compleo/rules", label: "Règles", icon: Brain },
   { path: "/compleo/workspace", label: "Workspaces", icon: FolderOpen },

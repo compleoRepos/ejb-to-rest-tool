@@ -7,6 +7,8 @@
  * POST   /api/agent/:id/choices    → Résoudre les ambiguïtés
  * POST   /api/agent/:id/cancel     → Annuler la session
  * GET    /api/agent/:id/download   → Télécharger le ZIP résultat
+ * GET    /api/agent/:id/reports    → Rapports enrichis
+ * GET    /api/agent/:id/sagas      → Données Saga Orchestration
  * GET    /api/agent/sessions       → Lister les sessions
  */
 
@@ -340,6 +342,52 @@ export function registerAgentRoutes(app: Express) {
     }
 
     return res.json(session.enhancedReports);
+  });
+
+  // ─── GET /api/agent/:id/sagas — v7.9 Saga Orchestration ──────────────────
+  router.get("/:id/sagas", (req: Request, res: Response) => {
+    const { id } = req.params;
+    const store = getAgentStore();
+    const session = store.get(id);
+
+    if (!session) {
+      return res.status(404).json({ error: "Session introuvable" });
+    }
+
+    if (!session.sagaResult) {
+      return res.json({
+        detected: false,
+        candidates: [],
+        filesGenerated: 0,
+        report: null,
+        details: [],
+      });
+    }
+
+    // Build enriched response with step-level details from SSE events
+    const sagaEvents = session.events.filter(
+      (e) =>
+        e.type === "LOG" &&
+        e.phase === "MICROSERVICES" &&
+        (e.data as any)?.domain,
+    );
+
+    const details = sagaEvents.map((e) => {
+      const data = e.data as any;
+      return {
+        domain: data.domain,
+        sourceClass: data.sourceClass,
+        steps: data.steps || [],
+      };
+    });
+
+    return res.json({
+      detected: true,
+      candidates: session.sagaResult.candidates,
+      filesGenerated: session.sagaResult.filesGenerated,
+      report: session.sagaResult.report,
+      details,
+    });
   });
 
   // ─── GET /api/agent/sessions ────────────────────────────────────────────────

@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import ReportViewer from "@/components/compleo/ReportViewer";
+import SagaViewer from "@/components/compleo/SagaViewer";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -734,6 +735,12 @@ export default function CompleoAgentPage() {
                     </TabsTrigger>
                   )}
                   {sessionId && isCompleted && (
+                    <TabsTrigger value="sagas" className="gap-1.5">
+                      <GitBranch className="w-3.5 h-3.5 text-pink-400" />
+                      Sagas
+                    </TabsTrigger>
+                  )}
+                  {sessionId && isCompleted && (
                     <TabsTrigger value="reports" className="gap-1.5">
                       <Star className="w-3.5 h-3.5 text-amber-400" />
                       Rapports IA
@@ -925,6 +932,13 @@ export default function CompleoAgentPage() {
                         </div>
                       </ScrollArea>
                     </div>
+                  </TabsContent>
+                )}
+
+                {/* Saga Orchestration tab (v7.9) */}
+                {sessionId && isCompleted && (
+                  <TabsContent value="sagas" className="mt-3">
+                    <SagaViewer sessionId={sessionId} compact />
                   </TabsContent>
                 )}
 

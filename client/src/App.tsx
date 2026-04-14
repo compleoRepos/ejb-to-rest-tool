@@ -15,6 +15,7 @@ import CompleoPage from "./pages/Compleo";
 import CompleoAgentPage from "./pages/CompleoAgent";
 import LearningRulesPage from "./pages/LearningRules";
 import WorkspacePage from "./pages/Workspace";
+import SagasPage from "./pages/Sagas";
 import AppLayout from "./components/AppLayout";
 
 function Router() {
@@ -36,6 +37,7 @@ function Router() {
       </Route>
       <Route path={"/compleo"} component={CompleoPage} />
       <Route path={"/compleo/agent"} component={CompleoAgentPage} />
+      <Route path={"/compleo/sagas"} component={SagasPage} />
       <Route path={"/compleo/rules"} component={LearningRulesPage} />
       <Route path={"/compleo/workspace"} component={WorkspacePage} />
       <Route path={"/compleo/architecture"}>
