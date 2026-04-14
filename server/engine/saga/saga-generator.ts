@@ -22,6 +22,8 @@ import type { SagaCandidate } from "./saga-detector";
 import type { SagaStep, IntermediateResult } from "./saga-step-extractor";
 import { extractSagaSteps, extractIntermediateResults } from "./saga-step-extractor";
 import { generateSharedSagaFiles } from "./saga-shared-generators";
+import type { SagaMLEnricher, SagaMLResult } from "./ml/SagaMLEnricher";
+import type { MLStepEnrichment } from "./ml/prompts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,6 +59,13 @@ export interface SagaGenerationResult {
     compensableSteps: number;
     asyncSteps: number;
     criticalSteps: number;
+  };
+  /** Statistiques ML (si enrichissement ML activé) */
+  mlStats?: {
+    mlEnriched: number;
+    fallbackUsed: number;
+    validationIssues: number;
+    totalDurationMs: number;
   };
 }
 
@@ -164,6 +173,122 @@ export function generateAllSagas(
   }
 
   return perSagaResults;
+}
+
+/**
+ * Génère une Saga enrichie par le LLM.
+ * Le ML remplace les TODO dans les step bodies et compensations
+ * par du code métier réel migré depuis l'EJB source.
+ *
+ * Fallback automatique vers le rule-based si Ollama est absent.
+ */
+export async function generateSagaWithML(
+  candidate: SagaCandidate,
+  basePackage: string,
+  mlEnricher: SagaMLEnricher,
+): Promise<SagaGenerationResult> {
+  // 1. Extraction mécanique (identique au rule engine)
+  const steps = extractSagaSteps(
+    candidate.rawSource,
+    "execute",
+    candidate.ejbDependencies,
+  );
+  const intermediateResults = extractIntermediateResults(
+    candidate.rawSource,
+    steps,
+  );
+
+  // 2. Enrichissement ML
+  const mlResult = await mlEnricher.enrichSaga(candidate, steps, intermediateResults);
+
+  // 3. Génération des fichiers avec enrichissements ML
+  const domain = candidate.domain;
+  const domainPascal = toPascalCase(domain);
+  const packagePath = basePackage.replace(/\./g, "/");
+
+  const files: SagaGeneratedFile[] = [];
+
+  // State enum (identique)
+  files.push({
+    path: `src/main/java/${packagePath}/saga/${domainPascal}SagaState.java`,
+    content: generateStateEnum(domainPascal, steps, basePackage),
+    category: "saga-state",
+  });
+
+  // Context POJO enrichi avec les champs ML
+  files.push({
+    path: `src/main/java/${packagePath}/saga/${domainPascal}SagaContext.java`,
+    content: generateContextWithML(domainPascal, intermediateResults, basePackage, mlResult),
+    category: "saga-context",
+  });
+
+  // Log entity (identique)
+  files.push({
+    path: `src/main/java/${packagePath}/saga/${domainPascal}SagaLog.java`,
+    content: generateLogEntity(domainPascal, basePackage),
+    category: "saga-log",
+  });
+
+  // Orchestrator enrichi ML
+  files.push({
+    path: `src/main/java/${packagePath}/saga/${domainPascal}SagaOrchestrator.java`,
+    content: generateOrchestratorWithML(domainPascal, steps, intermediateResults, candidate, basePackage, mlResult),
+    category: "saga-orchestrator",
+  });
+
+  // SQL migration (identique)
+  files.push({
+    path: `src/main/resources/db/migration/V3__create_saga_log.sql`,
+    content: generateSqlMigration(domainPascal),
+    category: "saga-migration",
+  });
+
+  const compensableSteps = steps.filter((s) => s.isCompensable);
+  const asyncSteps = steps.filter((s) => s.isAsync);
+  const criticalSteps = steps.filter((s) => s.isCritical);
+
+  return {
+    domain,
+    sourceClass: candidate.className,
+    steps,
+    intermediateResults,
+    files,
+    stats: {
+      totalSteps: steps.length,
+      compensableSteps: compensableSteps.length,
+      asyncSteps: asyncSteps.length,
+      criticalSteps: criticalSteps.length,
+    },
+    mlStats: {
+      mlEnriched: mlResult.stats.mlEnriched,
+      fallbackUsed: mlResult.stats.fallbackUsed,
+      validationIssues: mlResult.stats.validationIssues,
+      totalDurationMs: mlResult.stats.totalDurationMs,
+    },
+  };
+}
+
+/**
+ * Génère toutes les Sagas avec enrichissement ML.
+ * Version async de generateAllSagas.
+ */
+export async function generateAllSagasWithML(
+  candidates: SagaCandidate[],
+  basePackage: string,
+  mlEnricher: SagaMLEnricher,
+): Promise<SagaGenerationResult[]> {
+  const results: SagaGenerationResult[] = [];
+  for (const c of candidates) {
+    results.push(await generateSagaWithML(c, basePackage, mlEnricher));
+  }
+
+  // Fichiers partagés — générés 1 seule fois
+  if (results.length > 0) {
+    const sharedFiles = generateSharedSagaFiles(basePackage, candidates);
+    results[0].files = [...results[0].files, ...sharedFiles];
+  }
+
+  return results;
 }
 
 // ── Helpers production-ready ─────────────────────────────────────────────────
@@ -977,7 +1102,381 @@ function buildCompensationMethod(step: SagaStep, domainPascal: string): string {
     }`;
 }
 
-// ── Utilitaires ──────────────────────────────────────────────────────────────
+// ── ML-Enhanced Generators ────────────────────────────────────────────────────────────────
+
+/**
+ * Génère le Context POJO enrichi avec les champs découverts par le ML.
+ */
+function generateContextWithML(
+  domainPascal: string,
+  results: IntermediateResult[],
+  basePackage: string,
+  mlResult: SagaMLResult,
+): string {
+  // Collecter les champs ML découverts (en plus des champs rule-based)
+  const mlFields: Array<{ name: string; type: string }> = [];
+  const seenFields = new Set(results.map(r => r.fieldName));
+
+  for (const [, enrichment] of mlResult.enrichments) {
+    for (const field of enrichment.contextFields) {
+      if (!seenFields.has(field.name)) {
+        seenFields.add(field.name);
+        mlFields.push(field);
+      }
+    }
+  }
+
+  // Combiner les champs rule-based + ML
+  const allFieldDecls = [
+    ...results.map((r) => `    private ${r.type} ${r.fieldName};`),
+    ...mlFields.map((f) => `    /** Découvert par ML */\n    private ${f.type} ${f.name};`),
+  ];
+
+  const allGettersSetters = [
+    ...results.map((r) => {
+      const cap = r.fieldName.charAt(0).toUpperCase() + r.fieldName.slice(1);
+      return `\n    public ${r.type} get${cap}() {\n        return ${r.fieldName};\n    }\n\n    public void set${cap}(${r.type} ${r.fieldName}) {\n        this.${r.fieldName} = ${r.fieldName};\n    }`;
+    }),
+    ...mlFields.map((f) => {
+      const cap = f.name.charAt(0).toUpperCase() + f.name.slice(1);
+      return `\n    public ${f.type} get${cap}() {\n        return ${f.name};\n    }\n\n    public void set${cap}(${f.type} ${f.name}) {\n        this.${f.name} = ${f.name};\n    }`;
+    }),
+  ];
+
+  return `package ${basePackage}.saga;
+
+import java.io.Serializable;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Contexte partagé entre les steps de la Saga ${domainPascal}.
+ * Enrichi par ML : ${mlFields.length} champs supplémentaires découverts.
+ * Généré automatiquement par Compleo — NE PAS MODIFIER.
+ */
+public class ${domainPascal}SagaContext implements Serializable {
+
+    private static final long serialVersionUID = 1L;
+
+    /** Identifiant unique de l'exécution Saga */
+    private String sagaId;
+
+    /** Timestamp de début */
+    private LocalDateTime startedAt;
+
+    /** Timestamp de fin */
+    private LocalDateTime completedAt;
+
+    /** État courant */
+    private ${domainPascal}SagaState currentState;
+
+    /** Motif d'erreur (si échec) */
+    private String errorReason;
+
+    /** Steps complétés (pour compensation LIFO) */
+    private List<String> completedSteps;
+
+${allFieldDecls.join("\n")}
+
+    // ── Constructeur ─────────────────────────────────────────────────────────────
+
+    public ${domainPascal}SagaContext() {
+        this.sagaId = java.util.UUID.randomUUID().toString();
+        this.startedAt = LocalDateTime.now();
+        this.currentState = ${domainPascal}SagaState.INITIATED;
+        this.completedSteps = new ArrayList<>();
+    }
+
+    // ── Getters / Setters ────────────────────────────────────────────────────────
+
+    public String getSagaId() { return sagaId; }
+    public void setSagaId(String sagaId) { this.sagaId = sagaId; }
+
+    public LocalDateTime getStartedAt() { return startedAt; }
+    public void setStartedAt(LocalDateTime startedAt) { this.startedAt = startedAt; }
+
+    public LocalDateTime getCompletedAt() { return completedAt; }
+    public void setCompletedAt(LocalDateTime completedAt) { this.completedAt = completedAt; }
+
+    public ${domainPascal}SagaState getCurrentState() { return currentState; }
+    public void setCurrentState(${domainPascal}SagaState currentState) { this.currentState = currentState; }
+
+    public String getErrorReason() { return errorReason; }
+    public void setErrorReason(String errorReason) { this.errorReason = errorReason; }
+
+    public List<String> getCompletedSteps() { return completedSteps; }
+    public void setCompletedSteps(List<String> completedSteps) { this.completedSteps = completedSteps; }
+${allGettersSetters.join("\n")}
+}
+`;
+}
+
+/**
+ * Génère l'Orchestrator enrichi ML.
+ * Les step bodies et compensations contiennent du code métier réel
+ * au lieu de TODO.
+ */
+function generateOrchestratorWithML(
+  domainPascal: string,
+  steps: SagaStep[],
+  _results: IntermediateResult[],
+  candidate: SagaCandidate,
+  basePackage: string,
+  mlResult: SagaMLResult,
+): string {
+  const phases = splitIntoPhases(steps);
+  const compensableSteps = steps.filter((s) => s.isCompensable).reverse();
+  const injections = buildInjections(steps, candidate, basePackage);
+  const stepMethods = steps.map((s) => buildStepMethodWithML(s, domainPascal, mlResult));
+  const compensationMethods = compensableSteps.map((s) =>
+    buildCompensationMethodWithML(s, domainPascal, mlResult),
+  );
+
+  const retryPolicyInit = steps.map((s) => {
+    // Utiliser la recommandation ML si disponible
+    const enrichment = mlResult.enrichments.get(s.order);
+    const retryPolicy = enrichment?.retryRecommendation
+      && enrichment.retryRecommendation.startsWith("RetryPolicy.")
+      ? enrichment.retryRecommendation
+      : getRetryPolicyForStep(s);
+    return `        retryPolicies.put("step${s.order}", ${retryPolicy});`;
+  }).join("\n");
+
+  const phaseBlocks = phases.map((phase) => buildPhaseBlock(phase, domainPascal, candidate)).join("\n\n");
+  const compensateBlock = buildCompensateWithRetry(compensableSteps, domainPascal);
+
+  const mlStatsComment = `\n * ML Enrichment: ${mlResult.stats.mlEnriched} steps enrichis par ML, ${mlResult.stats.fallbackUsed} fallback rule-based`;
+
+  return `package ${basePackage}.saga;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import ${basePackage}.saga.retry.RetryPolicy;
+import ${basePackage}.saga.retry.SagaStepException;
+import ${basePackage}.saga.circuitbreaker.CircuitBreakerRegistry;
+import ${basePackage}.saga.circuitbreaker.CircuitOpenException;
+import ${basePackage}.saga.transaction.SagaSavepointManager;
+import ${basePackage}.saga.recovery.SagaStateStore;
+import ${basePackage}.saga.recovery.SagaStateRecord;
+import javax.sql.DataSource;
+import java.util.*;
+${injections.imports.join("\n")}
+
+/**
+ * Orchestrateur Saga pour le domaine ${domainPascal}.
+ * Coordonne ${steps.length} steps séquentiels avec :
+ *   - Retry + backoff exponentiel par step
+ *   - Circuit breaker par service distant
+ *   - Savepoints pour rollback granulaire
+ *   - Compensation avec retry dédié + dead letter
+ *   - Recovery pour les Sagas orphelines${mlStatsComment}
+ *
+ * Source EJB : ${candidate.className}
+ * Généré automatiquement par Compleo (ML-Enhanced) — NE PAS MODIFIER.
+ */
+@Service
+public class ${domainPascal}SagaOrchestrator {
+
+    private static final Logger log = LoggerFactory.getLogger(${domainPascal}SagaOrchestrator.class);
+
+${injections.fields.join("\n")}
+    private final CircuitBreakerRegistry circuitBreakerRegistry;
+    private final SagaStateStore sagaStateStore;
+    private final DataSource dataSource;
+    private final Map<String, RetryPolicy> retryPolicies = new HashMap<>();
+
+    // ── Constructeur (injection par constructeur) ────────────────────────
+
+    public ${domainPascal}SagaOrchestrator(
+${injections.constructorParams.join(",\n")},
+            CircuitBreakerRegistry circuitBreakerRegistry,
+            SagaStateStore sagaStateStore,
+            DataSource dataSource
+    ) {
+${injections.constructorAssignments.join("\n")}
+        this.circuitBreakerRegistry = circuitBreakerRegistry;
+        this.sagaStateStore = sagaStateStore;
+        this.dataSource = dataSource;
+
+        // ── Retry policies par step ───────────────────────────────────────
+${retryPolicyInit}
+    }
+
+    // ── Point d'entrée ─────────────────────────────────────────────────────────
+
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public ${domainPascal}SagaContext execute(${candidate.inputType} input) {
+        ${domainPascal}SagaContext ctx = new ${domainPascal}SagaContext();
+        log.info("[SAGA:{}] Démarrage saga {} — sagaId={}", "${domainPascal}", "${domainPascal}", ctx.getSagaId());
+        persistSagaState(ctx);
+
+        try {
+${phaseBlocks}
+
+            ctx.setCurrentState(${domainPascal}SagaState.COMPLETED);
+            ctx.setCompletedAt(java.time.LocalDateTime.now());
+            logTransition(ctx, "COMPLETED", "SUCCESS", null);
+            persistSagaState(ctx);
+            log.info("[SAGA:{}] Saga terminée avec succès — sagaId={}", "${domainPascal}", ctx.getSagaId());
+
+        } catch (Exception ex) {
+            log.error("[SAGA:{}] Échec — sagaId={} — {}", "${domainPascal}", ctx.getSagaId(), ex.getMessage());
+            ctx.setErrorReason(ex.getMessage());
+            ctx.setCurrentState(${domainPascal}SagaState.COMPENSATING);
+            persistSagaState(ctx);
+
+            compensate(ctx);
+        }
+
+        sagaStateStore.markCompleted(ctx.getSagaId(), ctx.getCurrentState().name());
+        return ctx;
+    }
+
+    // ── Compensation LIFO avec retry dédié ──────────────────────────────
+
+${compensateBlock}
+
+    // ── Steps (ML-Enhanced) ───────────────────────────────────────────────────
+
+${stepMethods.join("\n\n")}
+
+    // ── Compensations (ML-Enhanced) ──────────────────────────────────────────
+
+${compensationMethods.join("\n\n")}
+
+    // ── Persistance état + heartbeat ────────────────────────────────────────
+
+    private void persistSagaState(${domainPascal}SagaContext ctx) {
+        try {
+            sagaStateStore.persistState(SagaStateRecord.builder()
+                .sagaId(ctx.getSagaId())
+                .sagaName("${domainPascal}")
+                .currentState(ctx.getCurrentState().name())
+                .lastStepCompleted(ctx.getCompletedSteps().size())
+                .completedStepsJson(String.join(",", ctx.getCompletedSteps()))
+                .errorMessage(ctx.getErrorReason())
+                .build());
+        } catch (Exception e) {
+            log.warn("[SAGA:{}] Échec persistance état: {}", "${domainPascal}", e.getMessage());
+        }
+    }
+
+    private void sendToDeadLetter(${domainPascal}SagaContext ctx, List<String> failedCompensations) {
+        log.error("[SAGA:{}] DEAD LETTER — {} compensations échouées: {}",
+            "${domainPascal}", failedCompensations.size(), failedCompensations);
+        persistSagaState(ctx);
+    }
+
+    private void logTransition(${domainPascal}SagaContext ctx, String stateTo, String status, String error) {
+        log.debug("[SAGA:{}] {} → {} [{}] {}", "${domainPascal}", ctx.getCurrentState(), stateTo, status, error != null ? error : "");
+    }
+}
+`;
+}
+
+/**
+ * Step method enrichi ML : le corps contient du code métier réel.
+ */
+function buildStepMethodWithML(step: SagaStep, domainPascal: string, mlResult: SagaMLResult): string {
+  const methodName = `step${step.order}${toPascalCase(step.name)}`;
+  const asyncTag = step.isAsync ? " [ASYNC]" : "";
+  const criticalTag = step.isCritical ? " [CRITICAL]" : "";
+  const enrichment = mlResult.enrichments.get(step.order);
+  const source = mlResult.sources.get(step.order) || "fallback";
+
+  // Préconditions en commentaire Javadoc
+  const preconditions = enrichment?.preconditions?.length
+    ? enrichment.preconditions.map(p => `     *   - ${p}`).join("\n")
+    : "     *   - context != null";
+
+  // Postconditions en commentaire Javadoc
+  const postconditions = enrichment?.postconditions?.length
+    ? enrichment.postconditions.map(p => `     *   - ${p}`).join("\n")
+    : "     *   - Step complété";
+
+  // Corps du step (ML ou fallback)
+  const stepBody = enrichment?.stepBody
+    ? indentCode(enrichment.stepBody, 12)
+    : `            // TODO: Implémenter l'appel au service ${step.targetService || "local"}`;
+
+  return `    /**
+     * Step ${step.order}: ${step.label}${asyncTag}${criticalTag}
+     * Type: ${step.type} | Compensable: ${step.isCompensable}
+     * Source: ${source} | Retry: ${getRetryPolicyForStep(step)}
+     * ${step.sourceComment}
+     *
+     * Préconditions:
+${preconditions}
+     * Postconditions:
+${postconditions}
+     */
+    private void ${methodName}(${domainPascal}SagaContext ctx) {
+        log.info("[SAGA:${domainPascal}] Step ${step.order} — ${step.label}");
+        long start = System.currentTimeMillis();
+        try {
+${stepBody}
+            logTransition(ctx, "${domainPascal}SagaState.STEP_${step.order}_${toConstCase(step.name)}", "SUCCESS", null);
+        } catch (Exception ex) {
+            logTransition(ctx, "${domainPascal}SagaState.STEP_${step.order}_${toConstCase(step.name)}", "FAILED", ex.getMessage());
+            throw ex;
+        } finally {
+            log.debug("[SAGA:${domainPascal}] Step ${step.order} durée={}ms", System.currentTimeMillis() - start);
+        }
+    }`;
+}
+
+/**
+ * Compensation method enrichie ML : le corps contient l'action inverse concrète.
+ */
+function buildCompensationMethodWithML(step: SagaStep, domainPascal: string, mlResult: SagaMLResult): string {
+  const methodName = `compensateStep${step.order}${toPascalCase(step.name)}`;
+  const comp = step.compensation;
+  const enrichment = mlResult.enrichments.get(step.order);
+  const source = mlResult.sources.get(step.order) || "fallback";
+
+  // Corps de la compensation (ML ou fallback)
+  const compensationBody = enrichment?.compensationBody
+    && enrichment.compensationBody.trim().length > 0
+    && !/^\s*\/\/\s*(TODO|non compensable)/i.test(enrichment.compensationBody)
+    ? indentCode(enrichment.compensationBody, 12)
+    : `            // TODO: Implémenter la compensation\n            // ${comp?.method || "compensate"}(ctx);`;
+
+  return `    /**
+     * Compensation Step ${step.order}: ${step.label}
+     * ${comp?.description || "Compensation générique"}
+     * Source: ${source}
+     * Retry: RetryPolicy.forCompensation() (5 tentatives, backoff 3x)
+     */
+    private void ${methodName}(${domainPascal}SagaContext ctx) {
+        try {
+            log.warn("[SAGA:${domainPascal}] Compensation step ${step.order} — ${comp?.method || step.name}");
+${compensationBody}
+            logTransition(ctx, "COMPENSATING", "COMPENSATED", null);
+        } catch (Exception ex) {
+            log.error("[SAGA:${domainPascal}] Échec compensation step ${step.order} — {}", ex.getMessage());
+            logTransition(ctx, "COMPENSATING", "COMPENSATION_FAILED", ex.getMessage());
+            throw ex;
+        }
+    }`;
+}
+
+/**
+ * Indente un bloc de code Java avec le nombre d'espaces spécifié.
+ */
+function indentCode(code: string, spaces: number): string {
+  const indent = " ".repeat(spaces);
+  return code
+    .split("\n")
+    .map(line => line.trim() ? `${indent}${line.trim()}` : "")
+    .join("\n");
+}
+
+// ── Utilitaires ──────────────────────────────────────────────────────────────────────────────
 
 function inferServiceName(step: SagaStep): string {
   if (!step.targetService) return "unknown-service";

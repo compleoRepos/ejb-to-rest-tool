@@ -27,7 +27,7 @@ import { MLEnhancer, type MLConfig } from "../engine/ml/ml-enhancer";
 import { ReportEnhancer, type ReportEnhancerConfig, type ReportContext, type EnhancedReports } from "../engine/ml/report-enhancer";
 import type { QualityReport } from "../engine/quality-scorer";
 import type { PipelineResult } from "../engine/pipeline/index";
-import { detectSagaCandidates, generateAllSagas, type SagaGenerationResult } from "../engine/saga";
+import { detectSagaCandidates, generateAllSagas, generateAllSagasWithML, SagaMLEnricher, type SagaGenerationResult } from "../engine/saga";
 
 // ─── Types publics ────────────────────────────────────────────────────────────
 
@@ -1002,9 +1002,54 @@ export class CompleoAgent {
       data: { candidates: candidates.map(c => ({ className: c.className, domain: c.domain, deps: c.interServiceCount })) },
     });
 
-    // 2. Générer les fichiers Saga
+    // 2. Générer les fichiers Saga (ML-Enhanced si activé)
     const basePackage = session.ir.groupId ? `${session.ir.groupId}.saga` : "com.compleo.saga";
-    const sagaResults = generateAllSagas(candidates, basePackage);
+    let sagaResults: SagaGenerationResult[];
+
+    if (session.config.options.enableML) {
+      // ML-Enhanced Saga Generation
+      yield this.event("LOG", {
+        level: "info",
+        message: "Enrichissement ML des Sagas en cours (Ollama qwen2.5)...",
+        phase: "MICROSERVICES",
+      });
+
+      try {
+        const mlEnricher = new SagaMLEnricher({
+          ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
+          model: process.env.ML_MODEL || "qwen2.5:1.5b",
+        });
+
+        if (await mlEnricher.isAvailable()) {
+          sagaResults = await generateAllSagasWithML(candidates, basePackage, mlEnricher);
+
+          const totalMLEnriched = sagaResults.reduce((sum, r) => sum + (r.mlStats?.mlEnriched || 0), 0);
+          const totalFallback = sagaResults.reduce((sum, r) => sum + (r.mlStats?.fallbackUsed || 0), 0);
+          yield this.event("LOG", {
+            level: "success",
+            message: `ML Saga: ${totalMLEnriched} steps enrichis par ML, ${totalFallback} fallback rule-based`,
+            phase: "MICROSERVICES",
+          });
+        } else {
+          yield this.event("LOG", {
+            level: "warn",
+            message: "Ollama non disponible — fallback rule-based pour les Sagas",
+            phase: "MICROSERVICES",
+          });
+          sagaResults = generateAllSagas(candidates, basePackage);
+        }
+      } catch (mlErr) {
+        yield this.event("LOG", {
+          level: "warn",
+          message: `ML Saga échoué : ${mlErr instanceof Error ? mlErr.message : String(mlErr)} — fallback rule-based`,
+          phase: "MICROSERVICES",
+        });
+        sagaResults = generateAllSagas(candidates, basePackage);
+      }
+    } else {
+      // Rule-based only
+      sagaResults = generateAllSagas(candidates, basePackage);
+    }
 
     // 3. Ajouter les fichiers générés au projet
     let totalFiles = 0;
