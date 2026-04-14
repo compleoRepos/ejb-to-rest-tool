@@ -140,9 +140,18 @@ export class MicroserviceGenerator {
       this.application(service, pkg)
     );
 
-    // Pour chaque EJB du service — FIX C bis: use clean names
+    // Post-Audit STEP 2+3+4: Deduplicate, clean names, filter invalid adapters
+    const generatedNames = new Set<string>();
     for (const mod of mods) {
-      const cleanName = this.cleanModuleName(mod.id);
+      const cleanName = this.cleanModuleNameFull(mod.id);
+
+      // STEP 4: Skip modules with invalid Java identifiers (e.g., "private", "abstract")
+      if (this.isInvalidJavaName(cleanName)) continue;
+
+      // STEP 2: Skip duplicate — if domain service already generated, skip EJB variant
+      if (generatedNames.has(cleanName)) continue;
+      generatedNames.add(cleanName);
+
       files.set(
         `${srcPath}/service/${cleanName}Service.java`,
         this.springService(mod, service, pkg)
@@ -336,18 +345,27 @@ public class ${pascal}Application {
                 `${this.toCamel(d.targetService)}Client;`)
       .join("\n    ");
 
-    const methods = (mod.useCases ?? []).map(uc => `
+    // Post-Audit STEP 3: Use real method parameters
+    const methods = (mod.useCases ?? []).map(uc => {
+      // Build parameter list from real params or fallback to voInType
+      const params = (uc.methodParameters && uc.methodParameters.length > 0)
+        ? uc.methodParameters.map(p => `${p.type} ${p.name}`).join(", ")
+        : (uc.voInType ? `${uc.voInType} request` : "");
+      const paramLog = (uc.methodParameters && uc.methodParameters.length > 0)
+        ? uc.methodParameters.map(p => p.name).join(", ")
+        : (uc.voInType ? "request" : '""');
+      return `
     @Transactional${uc.tx === "SUPPORTS" ? "(readOnly = true)" : ""}
-    public ${uc.voOutType ?? "void"} ${uc.methodName}(${
-      uc.voInType ? `${uc.voInType} request` : ""}) {
-        log.info("${uc.methodName}: {}", ${uc.voInType ? "request" : '""'});
-        // TODO: Migrer la logique depuis ${this.cleanModuleName(mod.id)}.${uc.methodName}
+    public ${uc.voOutType ?? "void"} ${uc.methodName}(${params}) {
+        log.info("${uc.methodName}: {}", ${paramLog});
+        // TODO: Migrer la logique depuis ${this.cleanModuleNameFull(mod.id)}.${uc.methodName}
         // SQL original préservé dans les commentaires ci-dessous
         ${(uc.sqlConstants ?? []).map(sql =>
           `// SQL: ${sql.name} = "${sql.value?.substring(0, 80)}..."`
         ).join("\n        ")}
         throw new UnsupportedOperationException("Migration en cours");
-    }`).join("\n");
+    }`;
+    }).join("\n");
 
     return `package ${pkg}.service;
 
@@ -358,7 +376,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * ${this.cleanModuleName(mod.id)}Service — ${s.name}
+ * ${this.cleanModuleNameFull(mod.id)}Service — ${s.name}
  * Migré depuis ${mod.id} (${mod.type})
  * Tables propriétaires : ${s.ownedTables.join(", ")}
  * Schéma Oracle : ${s.dbSchema}
@@ -366,7 +384,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class ${this.cleanModuleName(mod.id)}Service {
+public class ${this.cleanModuleNameFull(mod.id)}Service {
 
     private final JdbcTemplate jdbcTemplate;
     ${deps}
@@ -380,27 +398,57 @@ ${methods}
   private controller(
     mod: ParsedModule, s: ServiceCandidate, pkg: string
   ): string {
+    // Post-Audit STEP 3: Use real method parameters in controller
     const endpoints = (mod.useCases ?? []).map(uc => {
       const verb   = uc.httpVerb ?? (uc.methodName.startsWith("get") ||
                      uc.methodName.startsWith("list") ||
-                     uc.methodName.startsWith("find")
+                     uc.methodName.startsWith("find") ||
+                     uc.methodName.startsWith("consulter") ||
+                     uc.methodName.startsWith("rechercher")
                      ? "Get" : "Post");
       const pathStr = this.toPath(uc.methodName);
       const status = verb === "Post" ? "HttpStatus.CREATED" : "";
+
+      // Build real parameter annotations
+      const hasRealParams = uc.methodParameters && uc.methodParameters.length > 0;
+      let controllerParams: string;
+      let serviceCallArgs: string;
+
+      if (hasRealParams) {
+        if (verb === "Get") {
+          controllerParams = uc.methodParameters!.map(p =>
+            `@RequestParam ${p.type} ${p.name}`
+          ).join(", ");
+        } else {
+          // For POST: if single complex param, use @RequestBody; if multiple, use @RequestParam
+          if (uc.methodParameters!.length === 1 && /^[A-Z]/.test(uc.methodParameters![0].type)) {
+            controllerParams = `@Valid @RequestBody ${uc.methodParameters![0].type} ${uc.methodParameters![0].name}`;
+          } else {
+            controllerParams = uc.methodParameters!.map(p =>
+              `@RequestParam ${p.type} ${p.name}`
+            ).join(", ");
+          }
+        }
+        serviceCallArgs = uc.methodParameters!.map(p => p.name).join(", ");
+      } else if (uc.voInType) {
+        controllerParams = verb === "Get"
+          ? `@PathVariable String id`
+          : `@Valid @RequestBody ${uc.voInType} request`;
+        serviceCallArgs = verb === "Get" ? "id" : "request";
+      } else {
+        controllerParams = "";
+        serviceCallArgs = "";
+      }
+
       return `
     @Operation(summary = "${uc.methodName}")
     @${verb}Mapping("${pathStr}")
-    public ResponseEntity<${uc.voOutType ?? "Void"}> ${uc.methodName}(${
-      uc.voInType
-        ? (verb === "Get"
-          ? `@PathVariable String id`
-          : `@Valid @RequestBody ${uc.voInType} request`)
-        : ""}) {
-        ${uc.voInType && verb === "Get"
-          ? `return ResponseEntity.ok(service.${uc.methodName}(id));`
-          : status
-          ? `return ResponseEntity.status(${status}).body(service.${uc.methodName}(${uc.voInType ? "request" : ""}));`
-          : `return ResponseEntity.ok(service.${uc.methodName}(${uc.voInType ? "request" : ""}));`
+    public ResponseEntity<${uc.voOutType ?? "Void"}> ${uc.methodName}(${controllerParams}) {
+        ${uc.voOutType
+          ? (status
+            ? `return ResponseEntity.status(${status}).body(service.${uc.methodName}(${serviceCallArgs}));`
+            : `return ResponseEntity.ok(service.${uc.methodName}(${serviceCallArgs}));`)
+          : `service.${uc.methodName}(${serviceCallArgs}); return ResponseEntity.ok().build();`
         }
     }`;
     }).join("\n");
@@ -415,16 +463,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import ${pkg}.service.${this.cleanModuleName(mod.id)}Service;
+import ${pkg}.service.${this.cleanModuleNameFull(mod.id)}Service;
 
 @Slf4j
 @RestController
-@RequestMapping("/api/v1/${this.toPath(this.cleanModuleName(mod.id)).replace("/", "")}")
+@RequestMapping("/api/v1/${this.toPath(this.cleanModuleNameFull(mod.id)).replace("/", "")}")
 @RequiredArgsConstructor
-@Tag(name = "${this.cleanModuleName(mod.id)}", description = "API ${s.name}")
-public class ${this.cleanModuleName(mod.id)}Controller {
+@Tag(name = "${this.cleanModuleNameFull(mod.id)}", description = "API ${s.name}")
+public class ${this.cleanModuleNameFull(mod.id)}Controller {
 
-    private final ${this.cleanModuleName(mod.id)}Service service;
+    private final ${this.cleanModuleNameFull(mod.id)}Service service;
 ${endpoints}
 }`;
   }
@@ -823,14 +871,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.web.servlet.MockMvc;
-import ${pkg}.service.${this.cleanModuleName(mod.id)}Service;
+import ${pkg}.service.${this.cleanModuleNameFull(mod.id)}Service;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(${this.cleanModuleName(mod.id)}Controller.class)
-class ${this.cleanModuleName(mod.id)}ControllerTest {
+@WebMvcTest(${this.cleanModuleNameFull(mod.id)}Controller.class)
+class ${this.cleanModuleNameFull(mod.id)}ControllerTest {
 
     @Autowired MockMvc mockMvc;
-    @MockBean ${this.cleanModuleName(mod.id)}Service service;
+    @MockBean ${this.cleanModuleNameFull(mod.id)}Service service;
 
     @Test
     @DisplayName("Actuator health — service démarre")
@@ -973,6 +1021,46 @@ ${services.map((s, i) => `# http://localhost:${8081 + i}/swagger-ui.html  → ${
    */
   private cleanModuleName(modId: string): string {
     return modId.includes("_") ? modId.split("_")[0] : modId;
+  }
+
+  /**
+   * Post-Audit STEP 2: Full clean — strip EJB/Bean/Impl/DAO suffixes
+   * and method names after underscore.
+   * "CreditOctroiEJB" → "CreditOctroi"
+   * "CompteEJB_consulterSolde" → "Compte"
+   * "CarteEJB" → "Carte"
+   */
+  private cleanModuleNameFull(modId: string): string {
+    const base = modId.includes("_") ? modId.split("_")[0] : modId;
+    return base
+      .replace(/EJB$/i, "")
+      .replace(/Bean$/i, "")
+      .replace(/Impl$/i, "")
+      .replace(/DAO$/i, "")
+      .replace(/Service$/i, "")
+      .replace(/MDB$/i, "")
+      || base;
+  }
+
+  /**
+   * Post-Audit STEP 4: Filter out invalid Java identifiers.
+   * Java reserved words, empty names, names starting with numbers.
+   */
+  private isInvalidJavaName(name: string): boolean {
+    if (!name || name.length === 0) return true;
+    const reserved = new Set([
+      "abstract", "assert", "boolean", "break", "byte", "case", "catch",
+      "char", "class", "const", "continue", "default", "do", "double",
+      "else", "enum", "extends", "final", "finally", "float", "for",
+      "goto", "if", "implements", "import", "instanceof", "int",
+      "interface", "long", "native", "new", "package", "private",
+      "protected", "public", "return", "short", "static", "strictfp",
+      "super", "switch", "synchronized", "this", "throw", "throws",
+      "transient", "try", "void", "volatile", "while",
+    ]);
+    if (reserved.has(name.toLowerCase())) return true;
+    if (/^\d/.test(name)) return true;
+    return false;
   }
 
   private toCamel(s: string): string {

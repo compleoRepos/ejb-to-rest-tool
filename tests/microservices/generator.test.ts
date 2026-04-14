@@ -189,12 +189,12 @@ describe("MicroserviceGenerator", () => {
       const pkg = "ma.bmce.digital.compteService";
       const srcPath = `src/main/java/${pkg.replace(/\./g, "/")}`;
 
-      const serviceFile = output.services[0].files.get(`${srcPath}/service/CompteEJBService.java`)!;
+      const serviceFile = output.services[0].files.get(`${srcPath}/service/CompteService.java`)!;
       expect(serviceFile).toContain("@Service");
       expect(serviceFile).toContain("consulterCompte");
       expect(serviceFile).toContain("@Transactional(readOnly = true)");
 
-      const controllerFile = output.services[0].files.get(`${srcPath}/controller/CompteEJBController.java`)!;
+      const controllerFile = output.services[0].files.get(`${srcPath}/controller/CompteController.java`)!;
       expect(controllerFile).toContain("@RestController");
       expect(controllerFile).toContain("consulterCompte");
       expect(controllerFile).toContain("@GetMapping");
@@ -207,9 +207,9 @@ describe("MicroserviceGenerator", () => {
       const pkg = "ma.bmce.digital.compteService";
       const testPath = `src/test/java/${pkg.replace(/\./g, "/")}`;
 
-      const testFile = output.services[0].files.get(`${testPath}/controller/CompteEJBControllerTest.java`)!;
+      const testFile = output.services[0].files.get(`${testPath}/controller/CompteControllerTest.java`)!;
       expect(testFile).toContain("@WebMvcTest");
-      expect(testFile).toContain("CompteEJBControllerTest");
+      expect(testFile).toContain("CompteControllerTest");
     });
   });
 

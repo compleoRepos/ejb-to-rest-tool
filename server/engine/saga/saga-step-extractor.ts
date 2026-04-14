@@ -390,6 +390,58 @@ function enrichBankingResults(
         { stepName: "controle-sanctions", type: "SanctionsCheckResult", fieldName: "sanctionsResult" },
       ],
     },
+    // Post-Audit STEP 7: Additional banking patterns for Credit, Virement, Client
+    {
+      stepPattern: /scoring|score.*global|décision/i,
+      fields: [
+        { stepName: "scoring", type: "Integer", fieldName: "scoreGlobal" },
+        { stepName: "scoring", type: "String", fieldName: "decisionCredit" },
+      ],
+    },
+    {
+      stepPattern: /décaissement|deblocage|versement/i,
+      fields: [
+        { stepName: "decaissement", type: "String", fieldName: "referenceDecaissement" },
+        { stepName: "decaissement", type: "BigDecimal", fieldName: "montantDecaisse" },
+      ],
+    },
+    {
+      stepPattern: /garantie|collateral|hypotheque/i,
+      fields: [
+        { stepName: "garantie", type: "String", fieldName: "referenceGarantie" },
+      ],
+    },
+    {
+      stepPattern: /echeancier|amortissement|plan.*remboursement/i,
+      fields: [
+        { stepName: "echeancier", type: "String", fieldName: "echeancierJson" },
+      ],
+    },
+    {
+      stepPattern: /kyc|know.*your.*customer|vérification.*identit/i,
+      fields: [
+        { stepName: "verification-kyc", type: "Boolean", fieldName: "kycValide" },
+        { stepName: "verification-kyc", type: "String", fieldName: "kycReference" },
+      ],
+    },
+    {
+      stepPattern: /ouverture.*compte|création.*compte/i,
+      fields: [
+        { stepName: "ouverture-compte", type: "String", fieldName: "numeroCompte" },
+      ],
+    },
+    {
+      stepPattern: /débit|prélèvement|mouvement.*comptable/i,
+      fields: [
+        { stepName: "debit", type: "String", fieldName: "referenceEcriture" },
+      ],
+    },
+    {
+      stepPattern: /notification|envoi.*mail|sms/i,
+      fields: [
+        { stepName: "notification", type: "Boolean", fieldName: "notificationEnvoyee" },
+      ],
+    },
   ];
 
   for (const pattern of bankingPatterns) {
