@@ -1,5 +1,5 @@
 /**
- * EmbeddingService — Compleo v7.0 ML Layer
+ * EmbeddingService — Compleo v7.9.2 ML Layer
  *
  * Gère l'indexation et la recherche de paires de migration EJB→Spring
  * via ChromaDB (vector store) et Ollama (embeddings).
@@ -10,6 +10,8 @@
  *
  * Si les services ne sont pas disponibles, les opérations échouent
  * silencieusement et le MLEnhancer bascule sur le mode rule-based.
+ *
+ * Supporte ChromaDB v1 ET v2 (détection automatique).
  */
 
 // ── Types ────────────────────────────────────────────────────────
@@ -41,6 +43,8 @@ export class EmbeddingService {
   private ollamaUrl:      string;
   private collectionName: string;
   private initialized:    boolean = false;
+  private apiVersion:     "v1" | "v2" = "v1";
+  private collectionId:   string | null = null;
 
   constructor(chromaUrl: string, ollamaUrl: string) {
     this.chromaUrl      = chromaUrl.replace(/\/$/, "");
@@ -49,46 +53,181 @@ export class EmbeddingService {
   }
 
   /**
+   * Detect ChromaDB API version (v1 or v2).
+   * Tries v2 heartbeat first, falls back to v1.
+   */
+  private async detectApiVersion(): Promise<"v1" | "v2"> {
+    try {
+      const v2 = await fetch(`${this.chromaUrl}/api/v2/heartbeat`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (v2.ok) return "v2";
+    } catch { /* v2 not available */ }
+
+    try {
+      const v1 = await fetch(`${this.chromaUrl}/api/v1/heartbeat`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (v1.ok) return "v1";
+    } catch { /* v1 not available either */ }
+
+    // Default to v2 (latest ChromaDB images)
+    return "v2";
+  }
+
+  /**
+   * Build the ChromaDB API base path for the detected version.
+   */
+  private get apiBase(): string {
+    return `${this.chromaUrl}/api/${this.apiVersion}`;
+  }
+
+  /**
    * Initialize the ChromaDB collection.
    * Creates it if it doesn't exist.
+   * Auto-detects ChromaDB API version (v1 or v2).
    */
   async initialize(): Promise<void> {
-    // Create or get the collection via ChromaDB REST API
-    const res = await fetch(`${this.chromaUrl}/api/v1/collections`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({
-        name:             this.collectionName,
-        get_or_create:    true,
-      }),
-    });
+    // Step 1: Detect API version
+    this.apiVersion = await this.detectApiVersion();
+    console.log(`ChromaDB: detected API ${this.apiVersion}`);
 
-    if (!res.ok) {
-      throw new Error(`ChromaDB init failed: ${res.status} ${await res.text()}`);
+    // Step 2: Create or get the collection
+    if (this.apiVersion === "v2") {
+      await this.initializeV2();
+    } else {
+      await this.initializeV1();
     }
 
     this.initialized = true;
 
-    // Log the count
-    const countRes = await fetch(
-      `${this.chromaUrl}/api/v1/collections/${this.collectionName}/count`
-    );
-    if (countRes.ok) {
-      const count = await countRes.json();
-      console.log(`ChromaDB: ${count} exemples indexés`);
+    // Step 3: Log the count
+    await this.logCount();
+  }
+
+  /**
+   * ChromaDB v1 initialization (legacy).
+   */
+  private async initializeV1(): Promise<void> {
+    const res = await fetch(`${this.apiBase}/collections`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        name:          this.collectionName,
+        get_or_create: true,
+      }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`ChromaDB v1 init failed: ${res.status} ${await res.text()}`);
     }
+
+    const data = await res.json() as { id?: string };
+    this.collectionId = data.id ?? null;
+  }
+
+  /**
+   * ChromaDB v2 initialization.
+   * v2 uses /api/v2/tenants/default_tenant/databases/default_database/collections
+   */
+  private async initializeV2(): Promise<void> {
+    const baseCollections = `${this.apiBase}/tenants/default_tenant/databases/default_database/collections`;
+
+    // Try to get existing collection first
+    const getRes = await fetch(`${baseCollections}/${this.collectionName}`);
+    if (getRes.ok) {
+      const data = await getRes.json() as { id?: string };
+      this.collectionId = data.id ?? null;
+      return;
+    }
+
+    // Create collection
+    const createRes = await fetch(baseCollections, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        name: this.collectionName,
+      }),
+    });
+
+    if (!createRes.ok) {
+      const text = await createRes.text();
+      // If already exists (409), try to get it again
+      if (createRes.status === 409) {
+        const retryGet = await fetch(`${baseCollections}/${this.collectionName}`);
+        if (retryGet.ok) {
+          const data = await retryGet.json() as { id?: string };
+          this.collectionId = data.id ?? null;
+          return;
+        }
+      }
+      throw new Error(`ChromaDB v2 init failed: ${createRes.status} ${text}`);
+    }
+
+    const data = await createRes.json() as { id?: string };
+    this.collectionId = data.id ?? null;
+  }
+
+  /**
+   * Log the number of indexed items.
+   */
+  private async logCount(): Promise<void> {
+    try {
+      const countUrl = this.apiVersion === "v2"
+        ? `${this.apiBase}/tenants/default_tenant/databases/default_database/collections/${this.collectionId}/count`
+        : `${this.apiBase}/collections/${this.collectionName}/count`;
+
+      const countRes = await fetch(countUrl);
+      if (countRes.ok) {
+        const count = await countRes.json();
+        console.log(`ChromaDB: ${count} exemples indexés`);
+      }
+    } catch { /* non-critical */ }
+  }
+
+  /**
+   * Build the collection endpoint URL for the current API version.
+   */
+  private collectionEndpoint(action: string): string {
+    if (this.apiVersion === "v2") {
+      return `${this.apiBase}/tenants/default_tenant/databases/default_database/collections/${this.collectionId}/${action}`;
+    }
+    return `${this.apiBase}/collections/${this.collectionName}/${action}`;
   }
 
   /**
    * Generate an embedding vector for the given text using Ollama.
+   * Supports both Ollama v1 (/api/embeddings) and v2 (/api/embed) endpoints.
    */
   async embed(text: string): Promise<number[]> {
+    const truncated = text.substring(0, 2000);
+
+    // Try v2 endpoint first (/api/embed)
+    try {
+      const res = await fetch(`${this.ollamaUrl}/api/embed`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          model: "nomic-embed-text",
+          input: truncated,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json() as { embeddings?: number[][] };
+        if (data.embeddings && data.embeddings.length > 0) {
+          return data.embeddings[0];
+        }
+      }
+    } catch { /* fallback to v1 */ }
+
+    // Fallback to v1 endpoint (/api/embeddings)
     const res = await fetch(`${this.ollamaUrl}/api/embeddings`, {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
       body:    JSON.stringify({
         model:  "nomic-embed-text",
-        prompt: text.substring(0, 2000), // limiter la taille
+        prompt: truncated,
       }),
     });
 
@@ -110,26 +249,23 @@ export class EmbeddingService {
 
     const embedding = await this.embed(pair.ejbCode);
 
-    const res = await fetch(
-      `${this.chromaUrl}/api/v1/collections/${this.collectionName}/upsert`,
-      {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          ids:        [pair.id],
-          embeddings: [embedding],
-          documents:  [pair.ejbCode],
-          metadatas:  [{
-            springCode: pair.springCode,
-            className:  pair.meta.className,
-            methodName: pair.meta.methodName,
-            javaType:   pair.meta.javaType,
-            hasOracle:  pair.meta.hasOracle,
-            hasJms:     pair.meta.hasJms,
-          }],
-        }),
-      }
-    );
+    const res = await fetch(this.collectionEndpoint("upsert"), {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        ids:        [pair.id],
+        embeddings: [embedding],
+        documents:  [pair.ejbCode],
+        metadatas:  [{
+          springCode: pair.springCode,
+          className:  pair.meta.className,
+          methodName: pair.meta.methodName,
+          javaType:   pair.meta.javaType,
+          hasOracle:  pair.meta.hasOracle,
+          hasJms:     pair.meta.hasJms,
+        }],
+      }),
+    });
 
     if (!res.ok) {
       throw new Error(`ChromaDB upsert failed: ${res.status}`);
@@ -149,17 +285,14 @@ export class EmbeddingService {
 
     const embedding = await this.embed(ejbCode);
 
-    const res = await fetch(
-      `${this.chromaUrl}/api/v1/collections/${this.collectionName}/query`,
-      {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          query_embeddings: [embedding],
-          n_results:        topK,
-        }),
-      }
-    );
+    const res = await fetch(this.collectionEndpoint("query"), {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        query_embeddings: [embedding],
+        n_results:        topK,
+      }),
+    });
 
     if (!res.ok) {
       throw new Error(`ChromaDB query failed: ${res.status}`);
@@ -186,5 +319,12 @@ export class EmbeddingService {
    */
   isReady(): boolean {
     return this.initialized;
+  }
+
+  /**
+   * Get the detected API version (useful for diagnostics).
+   */
+  getApiVersion(): string {
+    return this.apiVersion;
   }
 }
