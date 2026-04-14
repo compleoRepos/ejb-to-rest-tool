@@ -323,7 +323,7 @@ describe("Saga Generator v7.9", () => {
     expect(stateFile.content).toContain("FAILED");
   });
 
-  it("TEST 14: generateAllSagas traite plusieurs candidats", () => {
+  it("TEST 14: generateAllSagas traite plusieurs candidats (avec fichiers partagés)", () => {
     const candidate2: SagaCandidate = {
       ...candidate,
       className: "TransfertInterneEJB",
@@ -334,9 +334,16 @@ describe("Saga Generator v7.9", () => {
     expect(results.length).toBe(2);
     expect(results[0].domain).toBe("virement-sepa");
     expect(results[1].domain).toBe("transfert-interne");
-    // Each should have 5 files
-    expect(results[0].files.length).toBe(5);
+    // First result includes shared files (11) + per-saga files (5) = 16
+    expect(results[0].files.length).toBeGreaterThanOrEqual(16);
+    // Second result has only per-saga files (5)
     expect(results[1].files.length).toBe(5);
+    // Shared files should include retry, CB, transaction, recovery categories
+    const sharedCategories = results[0].files.map(f => f.category);
+    expect(sharedCategories).toContain("saga-retry");
+    expect(sharedCategories).toContain("saga-circuitbreaker");
+    expect(sharedCategories).toContain("saga-transaction");
+    expect(sharedCategories).toContain("saga-recovery");
   });
 });
 

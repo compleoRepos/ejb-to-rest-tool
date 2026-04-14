@@ -1,5 +1,5 @@
 /**
- * Saga Orchestration Module — Compleo v7.9
+ * Saga Orchestration Module — Compleo v7.10 (Production-Ready)
  * @author Hamza NORDINE
  */
 
@@ -14,3 +14,5 @@ export type { CompensationAction } from "./saga-compensation";
 
 export { generateSaga, generateAllSagas } from "./saga-generator";
 export type { SagaGeneratedFile, SagaGenerationResult } from "./saga-generator";
+
+export { generateSharedSagaFiles } from "./saga-shared-generators";
