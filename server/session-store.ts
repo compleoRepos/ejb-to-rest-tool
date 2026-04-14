@@ -36,7 +36,18 @@ export class SessionStore {
     try {
       const db = await getDb();
       if (!db) { this.loaded = true; return; }
-      const rows = await db.select().from(compleoSessions);
+      let rows;
+      try {
+        rows = await db.select().from(compleoSessions);
+      } catch (dbErr: any) {
+        // Table may not exist yet (first startup before bootstrap)
+        if (dbErr?.cause?.code === "ER_NO_SUCH_TABLE" || dbErr?.cause?.errno === 1146) {
+          console.warn("[SessionStore] Table compleo_sessions not found — will be created by bootstrap");
+          this.loaded = true;
+          return;
+        }
+        throw dbErr;
+      }
       for (const row of rows) {
         const session: CompleoSession = {
           id: row.id,
