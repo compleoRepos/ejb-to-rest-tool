@@ -37,6 +37,9 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  // ── Bootstrap Code First : migration + seed (AVANT les routes) ──
+  await bootstrap();
+
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
@@ -89,9 +92,6 @@ async function startServer() {
   } else {
     serveStatic(app);
   }
-
-  // ── Bootstrap Code First : migration + seed ───────────────
-  await bootstrap();
 
   const preferredPort = parseInt(process.env.PORT || "3000");
   const port = await findAvailablePort(preferredPort);
