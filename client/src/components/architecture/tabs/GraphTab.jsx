@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { LEGACY, SPRING, RESOURCES, FLUX } from "../shared/data";
 import { C, FLUX_COLORS, Chip, CriticiteBadge, SectionTitle, Box } from "../shared/primitives";
+import ExportButtons from "../shared/ExportButtons";
 
 // ─── Layout engine (simple force-directed) ─────────────────────────────────
 
@@ -109,6 +110,7 @@ function computeLayout(nodes, edges, width, height) {
 
 export default function GraphTab({ onSelectNode }) {
   const svgRef = useRef(null);
+  const svgExportRef = useRef(null);
   const [hoveredNode, setHoveredNode] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
   const [filterType, setFilterType] = useState("ALL");
@@ -184,6 +186,8 @@ export default function GraphTab({ onSelectNode }) {
           ))}
         </div>
 
+        <ExportButtons svgRef={svgExportRef} filename="graphe-relations" />
+
         <button
           onClick={() => setShowLabels(!showLabels)}
           style={{
@@ -199,7 +203,7 @@ export default function GraphTab({ onSelectNode }) {
       {/* SVG Graph */}
       <div style={{ flex: 1, overflow: "auto", background: C.dark, borderRadius: 8, border: `1px solid ${C.border}` }}>
         <svg
-          ref={svgRef}
+          ref={(el) => { svgRef.current = el; svgExportRef.current = el; }}
           width={WIDTH}
           height={HEIGHT}
           style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace", display: "block", margin: "0 auto" }}

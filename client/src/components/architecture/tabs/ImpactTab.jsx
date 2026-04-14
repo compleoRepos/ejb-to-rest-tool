@@ -5,9 +5,10 @@
  *
  * @author Hamza NORDINE
  */
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { LEGACY, SPRING, RESOURCES, FLUX, findModule, getIncomingFlux, getOutgoingFlux } from "../shared/data";
 import { C, FLUX_COLORS, Chip, CriticiteBadge, StatutBadge, SectionTitle, Box } from "../shared/primitives";
+import ExportButtons from "../shared/ExportButtons";
 
 // ─── Impact computation ────────────────────────────────────────────────────
 
@@ -103,6 +104,7 @@ function getScoreLabel(score) {
 
 export default function ImpactTab() {
   const [selectedModuleId, setSelectedModuleId] = useState(null);
+  const impactSvgRef = useRef(null);
 
   const modules = useMemo(() =>
     LEGACY.map(m => ({
@@ -257,6 +259,7 @@ export default function ImpactTab() {
             {/* Impact cascade visualization */}
             <div style={{ flex: 1, overflow: "auto" }}>
               <ImpactCascade
+                svgRef={impactSvgRef}
                 moduleId={selectedModuleId}
                 moduleName={selectedModule?.name}
                 moduleIcon={selectedModule?.icon}
@@ -273,7 +276,7 @@ export default function ImpactTab() {
 
 // ─── Impact Cascade Visualization ──────────────────────────────────────────
 
-function ImpactCascade({ moduleId, moduleName, moduleIcon, moduleColor, layers }) {
+function ImpactCascade({ moduleId, moduleName, moduleIcon, moduleColor, layers, svgRef }) {
   const WIDTH = 800;
   const layerHeight = 120;
   const centerX = WIDTH / 2;
@@ -282,7 +285,11 @@ function ImpactCascade({ moduleId, moduleName, moduleIcon, moduleColor, layers }
 
   return (
     <div style={{ overflow: "auto" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <ExportButtons svgRef={svgRef} filename={`impact-${moduleName || 'cascade'}`} />
+      </div>
       <svg
+        ref={svgRef}
         width={WIDTH}
         height={totalHeight}
         style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace", display: "block", margin: "0 auto" }}

@@ -5,9 +5,10 @@
  *
  * @author Hamza NORDINE
  */
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { LEGACY, SPRING, RESOURCES, FLUX } from "../shared/data";
 import { C, FLUX_COLORS, Chip, CriticiteBadge, SectionTitle, Box } from "../shared/primitives";
+import ExportButtons from "../shared/ExportButtons";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ export default function FluxMatrixTab({ onSelectFlux }) {
   const [selectedCell, setSelectedCell] = useState(null);
   const [filterType, setFilterType] = useState("ALL");
   const [showLegend, setShowLegend] = useState(true);
+  const matrixSvgRef = useRef(null);
 
   const filteredFluxMap = useMemo(() => {
     if (filterType === "ALL") return fluxMap;
@@ -106,6 +108,8 @@ export default function FluxMatrixTab({ onSelectFlux }) {
           ))}
         </div>
 
+        <ExportButtons svgRef={matrixSvgRef} filename="matrice-flux" />
+
         <button
           onClick={() => setShowLegend(!showLegend)}
           style={{
@@ -148,6 +152,7 @@ export default function FluxMatrixTab({ onSelectFlux }) {
       <div style={{ flex: 1, overflow: "auto", position: "relative" }}>
         <div style={{ display: "inline-block", minWidth: "100%" }}>
           <svg
+            ref={matrixSvgRef}
             width={headerWidth + nodes.length * cellSize + 2}
             height={headerHeight + nodes.length * cellSize + 2}
             style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }}

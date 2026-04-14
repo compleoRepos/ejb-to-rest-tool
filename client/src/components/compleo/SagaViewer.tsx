@@ -10,7 +10,8 @@
  * @author Hamza NORDINE
  */
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, forwardRef, useImperativeHandle } from "react";
+import { useExportDiagram } from "@/hooks/useExportDiagram";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -106,7 +107,7 @@ function getStepColor(type: string) {
 
 // ─── SVG Flow Diagram ───────────────────────────────────────────────────────
 
-function SagaFlowDiagram({ steps, domain }: { steps: SagaStepDetail[]; domain: string }) {
+const SagaFlowDiagram = forwardRef<SVGSVGElement, { steps: SagaStepDetail[]; domain: string }>(function SagaFlowDiagram({ steps, domain }, ref) {
   const nodeWidth = 200;
   const nodeHeight = 56;
   const gapX = 40;
@@ -129,6 +130,7 @@ function SagaFlowDiagram({ steps, domain }: { steps: SagaStepDetail[]; domain: s
   return (
     <div className="overflow-auto">
       <svg
+        ref={ref}
         width={svgWidth}
         height={svgHeight}
         viewBox={`0 0 ${svgWidth} ${svgHeight}`}
@@ -308,7 +310,7 @@ function SagaFlowDiagram({ steps, domain }: { steps: SagaStepDetail[]; domain: s
       </svg>
     </div>
   );
-}
+});
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
@@ -319,6 +321,8 @@ export default function SagaViewer({ sessionId, compact = false }: SagaViewerPro
   const [activeSaga, setActiveSaga] = useState<string>("");
   const [activeView, setActiveView] = useState<"flow" | "table" | "report">("flow");
   const [expanded, setExpanded] = useState(false);
+  const sagaSvgRef = useRef<SVGSVGElement>(null);
+  const { exportAsSVG, exportAsPNG } = useExportDiagram(sagaSvgRef, "saga-flow");
 
   // Fetch saga data
   useEffect(() => {
@@ -536,7 +540,17 @@ export default function SagaViewer({ sessionId, compact = false }: SagaViewerPro
                 {currentSaga.steps.length} steps
               </span>
             </div>
-            <SagaFlowDiagram steps={currentSaga.steps} domain={currentSaga.domain} />
+            <div className="flex items-center gap-2 mb-3">
+              <Button variant="outline" size="sm" onClick={() => exportAsSVG(`saga-${currentSaga.domain}`)} className="gap-1.5 text-xs h-7">
+                <Download className="w-3 h-3" />
+                SVG
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => exportAsPNG(`saga-${currentSaga.domain}`)} className="gap-1.5 text-xs h-7">
+                <Download className="w-3 h-3" />
+                PNG
+              </Button>
+            </div>
+            <SagaFlowDiagram ref={sagaSvgRef} steps={currentSaga.steps} domain={currentSaga.domain} />
 
             {/* Legend */}
             <div className="mt-4 flex items-center gap-4 flex-wrap border-t border-border/20 pt-3">

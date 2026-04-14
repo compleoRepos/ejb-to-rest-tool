@@ -5,9 +5,10 @@
  *
  * @author Hamza NORDINE
  */
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { LEGACY, FLUX } from "../shared/data";
 import { C, FLUX_COLORS, Chip, CriticiteBadge, StatutBadge, SectionTitle, Box } from "../shared/primitives";
+import ExportButtons from "../shared/ExportButtons";
 
 // ─── Phase computation (topological sort) ──────────────────────────────────
 
@@ -51,6 +52,7 @@ function computeCriticalPath(phases) {
 
 export default function TimelineTab() {
   const [hoveredModule, setHoveredModule] = useState(null);
+  const timelineSvgRef = useRef(null);
   const [selectedPhase, setSelectedPhase] = useState(null);
   const [showDetails, setShowDetails] = useState(true);
 
@@ -114,6 +116,8 @@ export default function TimelineTab() {
           <StatBox label="Critiques" value={criticalPath.length} color={C.red} />
         </div>
 
+        <ExportButtons svgRef={timelineSvgRef} filename="timeline-migration" />
+
         <button
           onClick={() => setShowDetails(!showDetails)}
           style={{
@@ -129,6 +133,7 @@ export default function TimelineTab() {
       {/* Gantt chart */}
       <div style={{ flex: 1, overflow: "auto", background: C.dark, borderRadius: 8, border: `1px solid ${C.border}` }}>
         <svg
+          ref={timelineSvgRef}
           width={SVG_WIDTH}
           height={SVG_HEIGHT}
           style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace", display: "block" }}
