@@ -885,7 +885,7 @@ export class CompleoAgent {
           enabled: true,
           ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
           chromaUrl: process.env.CHROMA_URL || "http://localhost:8000",
-          model: process.env.ML_MODEL || "qwen2.5:1.5b",
+          model: process.env.ML_MODEL || "qwen2.5-coder:1.5b",
           minConfidence: parseFloat(process.env.ML_MIN_CONFIDENCE || "0.6"),
         };
         const enhancer = new MLEnhancer(mlConfig);
@@ -1017,7 +1017,7 @@ export class CompleoAgent {
       try {
         const mlEnricher = new SagaMLEnricher({
           ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
-          model: process.env.ML_MODEL || "qwen2.5:1.5b",
+          model: process.env.ML_MODEL || "qwen2.5-coder:1.5b",
         });
 
         if (await mlEnricher.isAvailable()) {
@@ -1160,7 +1160,7 @@ export class CompleoAgent {
       const enhancerConfig: ReportEnhancerConfig = {
         enabled:   true,
         ollamaUrl,
-        model:     process.env.REPORT_ML_MODEL || "qwen2.5:1.5b",
+        model:     process.env.REPORT_ML_MODEL || "qwen2.5-coder:1.5b",
         language:  "fr",
         timeoutMs: 300_000,
       };

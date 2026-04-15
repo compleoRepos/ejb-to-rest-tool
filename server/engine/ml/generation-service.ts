@@ -14,7 +14,7 @@
  *       et le type retour.
  *
  * Dépendance externe (optionnelle, via fetch) :
- *   - Ollama : http://localhost:11434 (modèle qwen2.5:1.5b)
+ *   - Ollama : http://localhost:11434 (modèle qwen2.5-coder:1.5b)
  */
 
 import type { MigrationPair } from "./embedding-service";
@@ -37,7 +37,7 @@ export class GenerationService {
 
   constructor(
     ollamaUrl: string,
-    model = "qwen2.5:1.5b"
+    model = "qwen2.5-coder:1.5b"
   ) {
     this.ollamaUrl = ollamaUrl.replace(/\/$/, "");
     this.model     = model;

@@ -2,7 +2,7 @@
  * SagaMLEnricher — Compleo v7.10
  *
  * Orchestrateur ML pour l'enrichissement des steps Saga.
- * Utilise Ollama (qwen2.5:1.5b) pour enrichir les squelettes Saga
+ * Utilise Ollama (qwen2.5-coder:1.5b) pour enrichir les squelettes Saga
  * générés par le rule engine avec :
  *   - Corps Java des steps (logique métier migrée)
  *   - Corps Java des compensations (actions inverses concrètes)
@@ -32,7 +32,7 @@ import { generateFallbackEnrichment } from "./fallback";
 export interface SagaMLConfig {
   /** URL Ollama (ex: http://localhost:11434) */
   ollamaUrl: string;
-  /** Modèle LLM (ex: qwen2.5:1.5b) */
+  /** Modèle LLM (ex: qwen2.5-coder:1.5b) */
   model: string;
   /** Timeout par appel en ms (défaut: 30000) */
   timeout?: number;
