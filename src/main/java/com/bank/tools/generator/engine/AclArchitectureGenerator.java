@@ -946,6 +946,10 @@ public class AclArchitectureGenerator {
         sb.append("    private String jndiFactory;\n\n");
         sb.append("    @Value(\"${ejb.jndi.provider.url:remote+http://serveur-ejb:8080}\")\n");
         sb.append("    private String jndiProviderUrl;\n\n");
+        // Cache JNDI : contexte reutilisable (volatile pour thread-safety)
+        sb.append("    /** Contexte JNDI cache \u2014 initialise une seule fois (lazy) et reutilise. */\n");
+        sb.append("    private volatile javax.naming.InitialContext cachedContext;\n");
+        sb.append("    private final Object jndiLock = new Object();\n\n");
 
         // Champs injectes : mappers + exception translator
         sb.append("    private final ExceptionTranslator exceptionTranslator;\n");
@@ -972,8 +976,37 @@ public class AclArchitectureGenerator {
             sb.append("        this.").append(fieldName).append(" = ").append(fieldName).append(";\n");
         }
         sb.append("    }\n\n");
+        // Methode getOrCreateContext avec cache
+        sb.append("    /**\n");
+        sb.append("     * Retourne le contexte JNDI cache ou en cree un nouveau (double-checked locking).\n");
+        sb.append("     * Evite de creer un InitialContext a chaque appel HTTP.\n");
+        sb.append("     */\n");
+        sb.append("    private javax.naming.InitialContext getOrCreateContext() throws javax.naming.NamingException {\n");
+        sb.append("        javax.naming.InitialContext ctx = cachedContext;\n");
+        sb.append("        if (ctx != null) return ctx;\n");
+        sb.append("        synchronized (jndiLock) {\n");
+        sb.append("            if (cachedContext != null) return cachedContext;\n");
+        sb.append("            java.util.Properties props = new java.util.Properties();\n");
+        sb.append("            props.put(javax.naming.Context.INITIAL_CONTEXT_FACTORY, jndiFactory);\n");
+        sb.append("            props.put(javax.naming.Context.PROVIDER_URL, jndiProviderUrl);\n");
+        sb.append("            cachedContext = new javax.naming.InitialContext(props);\n");
+        sb.append("            log.info(\"[JNDI-CACHE] Nouveau contexte JNDI cree\");\n");
+        sb.append("            return cachedContext;\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
+        // Methode invalidateCache
+        sb.append("    /** Invalide le cache JNDI pour forcer une reconnexion au prochain appel. */\n");
+        sb.append("    private void invalidateJndiCache() {\n");
+        sb.append("        synchronized (jndiLock) {\n");
+        sb.append("            if (cachedContext != null) {\n");
+        sb.append("                try { cachedContext.close(); } catch (Exception ignored) {}\n");
+        sb.append("            }\n");
+        sb.append("            cachedContext = null;\n");
+        sb.append("            log.info(\"[JNDI-CACHE] Cache invalide \u2014 reconnexion au prochain appel\");\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
 
-        // Methodes avec code JNDI reel
+        // Methodes avec code JNDI reel (utilisant le cache)
         for (BianEndpoint ep : group.endpoints) {
             String returnType = ep.responseDtoName != null ? ep.responseDtoName : "void";
             boolean hasReturn = ep.responseDtoName != null;
@@ -996,20 +1029,16 @@ public class AclArchitectureGenerator {
             sb.append(") {\n");
 
             sb.append("        log.info(\"[EJB-CALL] ").append(ep.useCaseName).append("\");\n");
-            sb.append("        javax.naming.InitialContext ctx = null;\n");
             sb.append("        try {\n");
 
-            // Mapper Request → VoIn
+            // Mapper Request -> VoIn
             if (ep.requestDtoName != null && ep.ejbInputDtoName != null) {
                 sb.append("            ").append(ep.ejbInputDtoName).append(" voIn = ").append(mapperField).append(".toEjb(request);\n");
             }
 
-            // JNDI lookup
-            sb.append("            java.util.Properties props = new java.util.Properties();\n");
-            sb.append("            props.put(javax.naming.Context.INITIAL_CONTEXT_FACTORY, jndiFactory);\n");
-            sb.append("            props.put(javax.naming.Context.PROVIDER_URL, jndiProviderUrl);\n");
-            sb.append("            ctx = new javax.naming.InitialContext(props);\n");
-            sb.append("            log.debug(\"[EJB-LOOKUP] ").append(jndiName).append("\");\n");
+            // JNDI lookup via cache
+            sb.append("            javax.naming.InitialContext ctx = getOrCreateContext();\n");
+            sb.append("            log.debug(\"[EJB-LOOKUP] ").append(jndiName).append(" (cache)\");\n");
             sb.append("            BaseUseCase useCase = (BaseUseCase) ctx.lookup(\"").append(jndiName).append("\");\n");
 
             // Execute avec cast type
@@ -1038,12 +1067,13 @@ public class AclArchitectureGenerator {
                 sb.append("            log.debug(\"[EJB-RESPONSE] Appel EJB termine pour ").append(ep.useCaseName).append("\");\n");
             }
 
+            sb.append("        } catch (javax.naming.CommunicationException | javax.naming.ServiceUnavailableException e) {\n");
+            sb.append("            log.warn(\"[EJB-ERROR] Connexion JNDI perdue, invalidation du cache : {}\", e.getMessage());\n");
+            sb.append("            invalidateJndiCache();\n");
+            sb.append("            throw exceptionTranslator.translate(e);\n");
             sb.append("        } catch (Exception e) {\n");
             sb.append("            log.error(\"[EJB-ERROR] Erreur lors de l'appel EJB ").append(ep.useCaseName).append("\", e);\n");
             sb.append("            throw exceptionTranslator.translate(e);\n");
-            sb.append("        } finally {\n");
-            sb.append("            if (ctx != null) { try { ctx.close(); } catch (Exception ignored) {} }\n");
-             sb.append("            log.info(\"[EJB-CLEANUP] Fin appel ").append(ep.useCaseName).append("\");");
             sb.append("        }\n");
             sb.append("    }\n\n");
 

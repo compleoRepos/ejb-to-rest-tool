@@ -1036,6 +1036,64 @@ public class CodeGenerationEngine {
         sb.append("    private String jndiProviderUrl;\n\n");
         sb.append("    @Value(\"${ejb.jndi.factory:org.jboss.naming.remote.client.InitialContextFactory}\")\n");
         sb.append("    private String jndiFactory;\n\n");
+        // Cache JNDI : contexte et stub EJB reutilisables (volatile pour thread-safety)
+        sb.append("    /** Contexte JNDI cache — initialise une seule fois (lazy) et reutilise. */\n");
+        sb.append("    private volatile InitialContext cachedContext;\n");
+        sb.append("    /** Stub EJB cache — evite un lookup a chaque appel. */\n");
+        sb.append("    private volatile Object cachedEjb;\n");
+        sb.append("    private final Object lock = new Object();\n\n");
+        // Methode getOrCreateContext
+        sb.append("    /**\n");
+        sb.append("     * Retourne le contexte JNDI cache ou en cree un nouveau (double-checked locking).\n");
+        sb.append("     * En cas d'erreur, invalide le cache et retente une creation.\n");
+        sb.append("     */\n");
+        sb.append("    private InitialContext getOrCreateContext() throws NamingException {\n");
+        sb.append("        InitialContext ctx = cachedContext;\n");
+        sb.append("        if (ctx != null) return ctx;\n");
+        sb.append("        synchronized (lock) {\n");
+        sb.append("            if (cachedContext != null) return cachedContext;\n");
+        sb.append("            Properties props = new Properties();\n");
+        sb.append("            props.put(Context.INITIAL_CONTEXT_FACTORY, jndiFactory);\n");
+        sb.append("            props.put(Context.PROVIDER_URL, jndiProviderUrl);\n");
+        sb.append("            cachedContext = new InitialContext(props);\n");
+        sb.append("            log.info(\"[JNDI-CACHE] Nouveau contexte JNDI cree\");\n");
+        sb.append("            return cachedContext;\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
+        // Methode lookupEjbCached
+        sb.append("    /**\n");
+        sb.append("     * Retourne le stub EJB cache ou effectue un lookup JNDI (une seule fois).\n");
+        sb.append("     * Si le lookup echoue, invalide le cache contexte pour forcer une reconnexion.\n");
+        sb.append("     */\n");
+        sb.append("    private Object lookupEjbCached() throws NamingException {\n");
+        sb.append("        Object ejb = cachedEjb;\n");
+        sb.append("        if (ejb != null) return ejb;\n");
+        sb.append("        synchronized (lock) {\n");
+        sb.append("            if (cachedEjb != null) return cachedEjb;\n");
+        sb.append("            try {\n");
+        sb.append("                InitialContext ctx = getOrCreateContext();\n");
+        sb.append("                cachedEjb = ctx.lookup(\"").append(jndiName).append("\");\n");
+        sb.append("                log.info(\"[JNDI-CACHE] Stub EJB cache pour ").append(jndiName).append("\");\n");
+        sb.append("                return cachedEjb;\n");
+        sb.append("            } catch (NamingException e) {\n");
+        sb.append("                log.warn(\"[JNDI-CACHE] Lookup echoue, invalidation du cache\");\n");
+        sb.append("                invalidateCache();\n");
+        sb.append("                throw e;\n");
+        sb.append("            }\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
+        // Methode invalidateCache
+        sb.append("    /** Invalide le cache JNDI (contexte + stub) pour forcer une reconnexion au prochain appel. */\n");
+        sb.append("    private void invalidateCache() {\n");
+        sb.append("        synchronized (lock) {\n");
+        sb.append("            if (cachedContext != null) {\n");
+        sb.append("                try { cachedContext.close(); } catch (Exception ignored) {}\n");
+        sb.append("            }\n");
+        sb.append("            cachedContext = null;\n");
+        sb.append("            cachedEjb = null;\n");
+        sb.append("            log.info(\"[JNDI-CACHE] Cache invalide — reconnexion au prochain appel\");\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
 
         // Resilience4j annotations sur la methode execute()
         sb.append("    @CircuitBreaker(name = \"ejbService\", fallbackMethod = \"executeFallback\")\n");
@@ -1044,20 +1102,13 @@ public class CodeGenerationEngine {
         sb.append("    public ").append(outputDto).append(" execute(").append(inputDto).append(" input) throws Exception {\n");
         sb.append("        // [EJB-CALL] Debut de l'appel EJB\n");
         sb.append("        log.info(\"[EJB-CALL] Appel de ").append(useCase.getClassName()).append(".execute() — JNDI: ").append(jndiName).append("\");\n\n");
-        sb.append("        // [EJB-LOOKUP] Recherche JNDI\n");
-        sb.append("        log.debug(\"[EJB-LOOKUP] Recherche EJB : ").append(jndiName).append("\");\n");
-        sb.append("        Properties props = new Properties();\n");
-        sb.append("        props.put(Context.INITIAL_CONTEXT_FACTORY, jndiFactory);\n");
-        sb.append("        props.put(Context.PROVIDER_URL, jndiProviderUrl);\n\n");
-        sb.append("        InitialContext ctx = null;\n");
         sb.append("        try {\n");
-        sb.append("            ctx = new InitialContext(props);\n");
-        sb.append("            Object ejb = ctx.lookup(\"").append(jndiName).append("\");\n");
-        sb.append("            log.debug(\"[EJB-LOOKUP] EJB trouve avec succes : {}\", ejb.getClass().getName());\n\n");
+        sb.append("            // [EJB-LOOKUP] Recuperation du stub EJB depuis le cache\n");
+        sb.append("            Object ejb = lookupEjbCached();\n");
+        sb.append("            log.debug(\"[EJB-LOOKUP] EJB trouve (cache) : {}\", ejb.getClass().getName());\n\n");
         sb.append("            // [EJB-EXECUTE] Appel par reflection — decouple du framework EJB\n");
         sb.append("            log.debug(\"[EJB-EXECUTE] Execution de execute() avec input : {}\", input);\n");
         sb.append("            long start = System.currentTimeMillis();\n");
-        sb.append("            // Trouver la methode 'execute' ou 'process' par reflection\n");
         sb.append("            Method executeMethod = findExecuteMethod(ejb);\n");
         sb.append("            Object result = executeMethod.invoke(ejb, input);\n");
         sb.append("            long duration = System.currentTimeMillis() - start;\n\n");
@@ -1066,18 +1117,19 @@ public class CodeGenerationEngine {
         sb.append("            log.debug(\"[EJB-RESPONSE] Resultat brut : {}\", result);\n");
         sb.append("            return objectMapper.convertValue(result, ").append(outputDto).append(".class);\n");
         sb.append("        } catch (NamingException e) {\n");
-        sb.append("            // [EJB-ERROR] Erreur de lookup\n");
+        sb.append("            // [EJB-ERROR] Erreur de lookup — invalidation du cache\n");
         sb.append("            log.error(\"[EJB-ERROR] Lookup JNDI echoue pour ").append(jndiName).append(" : {}\", e.getMessage());\n");
+        sb.append("            invalidateCache();\n");
         sb.append("            throw new RuntimeException(\"Service EJB indisponible : ").append(jndiName).append("\", e);\n");
+        sb.append("        } catch (java.rmi.ConnectException | java.rmi.NoSuchObjectException e) {\n");
+        sb.append("            // [EJB-ERROR] Stub EJB perime — invalidation du cache et retry\n");
+        sb.append("            log.warn(\"[EJB-ERROR] Stub EJB perime, invalidation du cache : {}\", e.getMessage());\n");
+        sb.append("            invalidateCache();\n");
+        sb.append("            throw e;\n");
         sb.append("        } catch (Exception e) {\n");
         sb.append("            // [EJB-ERROR] Erreur d'execution\n");
         sb.append("            log.error(\"[EJB-ERROR] Erreur execute() sur ").append(useCase.getClassName()).append(" : {}\", e.getMessage());\n");
         sb.append("            throw e;\n");
-        sb.append("        } finally {\n");
-        sb.append("            // [EJB-CLEANUP] Fermeture du contexte JNDI\n");
-        sb.append("            if (ctx != null) {\n");
-        sb.append("                try { ctx.close(); log.debug(\"[EJB-CLEANUP] Contexte JNDI ferme\"); } catch (NamingException e) { log.warn(\"[EJB-CLEANUP] Erreur fermeture JNDI\", e); }\n");
-        sb.append("            }\n");
         sb.append("        }\n");
         sb.append("    }\n\n");
 
@@ -1183,17 +1235,61 @@ public class CodeGenerationEngine {
         sb.append("    private String jndiProviderUrl;\n\n");
         sb.append("    @Value(\"${ejb.jndi.factory:org.jboss.naming.remote.client.InitialContextFactory}\")\n");
         sb.append("    private String jndiFactory;\n\n");
-
-        // Methode utilitaire de lookup
-        sb.append("    private Object lookupEjb() throws Exception {\n");
-        sb.append("        Properties props = new Properties();\n");
-        sb.append("        props.put(Context.INITIAL_CONTEXT_FACTORY, jndiFactory);\n");
-        sb.append("        props.put(Context.PROVIDER_URL, jndiProviderUrl);\n");
-        sb.append("        InitialContext ctx = new InitialContext(props);\n");
-        sb.append("        try {\n");
-        sb.append("            return ctx.lookup(\"").append(jndiName).append("\");\n");
-        sb.append("        } finally {\n");
-        sb.append("            try { ctx.close(); } catch (NamingException e) { log.warn(\"Erreur fermeture JNDI\", e); }\n");
+        // Cache JNDI : contexte et stub EJB reutilisables (volatile pour thread-safety)
+        sb.append("    /** Contexte JNDI cache — initialise une seule fois (lazy) et reutilise. */\n");
+        sb.append("    private volatile InitialContext cachedContext;\n");
+        sb.append("    /** Stub EJB cache — evite un lookup a chaque appel. */\n");
+        sb.append("    private volatile Object cachedEjb;\n");
+        sb.append("    private final Object lock = new Object();\n\n");
+        // Methode getOrCreateContext
+        sb.append("    /**\n");
+        sb.append("     * Retourne le contexte JNDI cache ou en cree un nouveau (double-checked locking).\n");
+        sb.append("     */\n");
+        sb.append("    private InitialContext getOrCreateContext() throws NamingException {\n");
+        sb.append("        InitialContext ctx = cachedContext;\n");
+        sb.append("        if (ctx != null) return ctx;\n");
+        sb.append("        synchronized (lock) {\n");
+        sb.append("            if (cachedContext != null) return cachedContext;\n");
+        sb.append("            Properties props = new Properties();\n");
+        sb.append("            props.put(Context.INITIAL_CONTEXT_FACTORY, jndiFactory);\n");
+        sb.append("            props.put(Context.PROVIDER_URL, jndiProviderUrl);\n");
+        sb.append("            cachedContext = new InitialContext(props);\n");
+        sb.append("            log.info(\"[JNDI-CACHE] Nouveau contexte JNDI cree\");\n");
+        sb.append("            return cachedContext;\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
+        // Methode lookupEjb avec cache
+        sb.append("    /**\n");
+        sb.append("     * Retourne le stub EJB cache ou effectue un lookup JNDI (une seule fois).\n");
+        sb.append("     * Si le lookup echoue, invalide le cache pour forcer une reconnexion.\n");
+        sb.append("     */\n");
+        sb.append("    private Object lookupEjb() throws NamingException {\n");
+        sb.append("        Object ejb = cachedEjb;\n");
+        sb.append("        if (ejb != null) return ejb;\n");
+        sb.append("        synchronized (lock) {\n");
+        sb.append("            if (cachedEjb != null) return cachedEjb;\n");
+        sb.append("            try {\n");
+        sb.append("                InitialContext ctx = getOrCreateContext();\n");
+        sb.append("                cachedEjb = ctx.lookup(\"").append(jndiName).append("\");\n");
+        sb.append("                log.info(\"[JNDI-CACHE] Stub EJB cache pour ").append(jndiName).append("\");\n");
+        sb.append("                return cachedEjb;\n");
+        sb.append("            } catch (NamingException e) {\n");
+        sb.append("                log.warn(\"[JNDI-CACHE] Lookup echoue, invalidation du cache\");\n");
+        sb.append("                invalidateCache();\n");
+        sb.append("                throw e;\n");
+        sb.append("            }\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
+        // Methode invalidateCache
+        sb.append("    /** Invalide le cache JNDI (contexte + stub) pour forcer une reconnexion au prochain appel. */\n");
+        sb.append("    private void invalidateCache() {\n");
+        sb.append("        synchronized (lock) {\n");
+        sb.append("            if (cachedContext != null) {\n");
+        sb.append("                try { cachedContext.close(); } catch (Exception ignored) {}\n");
+        sb.append("            }\n");
+        sb.append("            cachedContext = null;\n");
+        sb.append("            cachedEjb = null;\n");
+        sb.append("            log.info(\"[JNDI-CACHE] Cache invalide — reconnexion au prochain appel\");\n");
         sb.append("        }\n");
         sb.append("    }\n");
 
