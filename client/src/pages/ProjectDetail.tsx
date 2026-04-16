@@ -4,6 +4,7 @@
  * Redirige vers le pipeline Agent IA pour relancer l'analyse.
  * @author Hamza NORDINE
  */
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   ArrowLeft, Bot, FileCode2, Layers, Clock, TrendingUp,
   Network, GitBranch, AlertTriangle, CheckCircle2, Activity,
-  BarChart3, Shield, Loader2, ExternalLink,
+  BarChart3, Shield, Loader2, ExternalLink, Workflow,
 } from "lucide-react";
 
 // ─── Technology color mapping ────────────────────────────────────────────────
@@ -31,6 +32,8 @@ const TECH_COLORS: Record<string, string> = {
   SOAP: "bg-red-500/20 text-red-400 border-red-500/30",
   BATCH: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
   EAI_CUSTOM: "bg-pink-500/20 text-pink-400 border-pink-500/30",
+  JAX_RS: "bg-indigo-500/20 text-indigo-400 border-indigo-500/30",
+  JPA: "bg-teal-500/20 text-teal-400 border-teal-500/30",
 };
 
 function getTechColor(tech: string): string {
@@ -69,6 +72,83 @@ function StatusBadge({ status }: { status: string }) {
       {c.label}
     </Badge>
   );
+}
+
+// ─── Saga info types ─────────────────────────────────────────────────────────
+interface SagaCandidate {
+  className: string;
+  domain: string;
+  stepsCount: number;
+  compensableCount: number;
+}
+
+interface SagaInfo {
+  detected: boolean;
+  candidates: SagaCandidate[];
+  filesGenerated: number;
+  sessionId: string | null;
+}
+
+// ─── Hook: fetch saga info for a project ─────────────────────────────────────
+function useSagaInfo(projectName: string | undefined): { sagaInfo: SagaInfo | null; loading: boolean } {
+  const [sagaInfo, setSagaInfo] = useState<SagaInfo | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!projectName) return;
+    let cancelled = false;
+
+    const fetchSagaInfo = async () => {
+      setLoading(true);
+      try {
+        // Step 1: Get all completed agent sessions
+        const sessionsRes = await fetch("/api/agent/sessions");
+        if (!sessionsRes.ok) { setLoading(false); return; }
+        const sessionsJson = await sessionsRes.json();
+        const allSessions = sessionsJson.sessions || [];
+
+        // Step 2: Find the latest completed session for this project (by name)
+        const matchingSessions = allSessions
+          .filter((s: any) => s.state === "COMPLETED" && s.projectName === projectName)
+          .sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+        if (matchingSessions.length === 0) {
+          if (!cancelled) setSagaInfo({ detected: false, candidates: [], filesGenerated: 0, sessionId: null });
+          setLoading(false);
+          return;
+        }
+
+        const sessionId = matchingSessions[0].id;
+
+        // Step 3: Get saga data for that session
+        const sagaRes = await fetch(`/api/agent/${sessionId}/sagas`);
+        if (!sagaRes.ok) {
+          if (!cancelled) setSagaInfo({ detected: false, candidates: [], filesGenerated: 0, sessionId });
+          setLoading(false);
+          return;
+        }
+
+        const sagaJson = await sagaRes.json();
+        if (!cancelled) {
+          setSagaInfo({
+            detected: sagaJson.detected ?? false,
+            candidates: sagaJson.candidates ?? [],
+            filesGenerated: sagaJson.filesGenerated ?? 0,
+            sessionId,
+          });
+        }
+      } catch {
+        if (!cancelled) setSagaInfo(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    fetchSagaInfo();
+    return () => { cancelled = true; };
+  }, [projectName]);
+
+  return { sagaInfo, loading };
 }
 
 // ─── Scan result card ────────────────────────────────────────────────────────
@@ -125,6 +205,128 @@ function ScanCard({ scan }: { scan: any }) {
   );
 }
 
+// ─── Saga card ───────────────────────────────────────────────────────────────
+function SagaCard({ sagaInfo, loading, onNavigate }: {
+  sagaInfo: SagaInfo | null;
+  loading: boolean;
+  onNavigate: (path: string) => void;
+}) {
+  if (loading) {
+    return (
+      <Card className="border-amber-500/30 bg-amber-500/5">
+        <CardContent className="p-6">
+          <div className="flex items-center gap-3">
+            <Loader2 className="w-5 h-5 animate-spin text-amber-400" />
+            <span className="text-sm text-muted-foreground">Chargement des Sagas...</span>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const detected = sagaInfo?.detected ?? false;
+  const candidateCount = sagaInfo?.candidates?.length ?? 0;
+  const filesGenerated = sagaInfo?.filesGenerated ?? 0;
+  const totalSteps = sagaInfo?.candidates?.reduce((sum, c) => sum + c.stepsCount, 0) ?? 0;
+
+  return (
+    <Card className={`border-amber-500/30 ${detected ? "bg-amber-500/5" : "bg-card"}`}>
+      <CardContent className="p-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className={`p-2.5 rounded-lg shrink-0 ${detected ? "bg-amber-500/20" : "bg-muted"}`}>
+              <Workflow className={`w-5 h-5 ${detected ? "text-amber-400" : "text-muted-foreground"}`} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-lg font-semibold">Saga Orchestration</h3>
+                {detected ? (
+                  <Badge variant="outline" className="bg-amber-500/20 text-amber-400 border-amber-500/30 gap-1">
+                    <CheckCircle2 className="w-3 h-3" />
+                    {candidateCount} saga{candidateCount > 1 ? "s" : ""}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="bg-muted text-muted-foreground border-border">
+                    Non détectées
+                  </Badge>
+                )}
+              </div>
+              {detected ? (
+                <p className="text-sm text-muted-foreground mt-1">
+                  {candidateCount} saga{candidateCount > 1 ? "s" : ""} générée{candidateCount > 1 ? "s" : ""} avec{" "}
+                  {totalSteps} step{totalSteps > 1 ? "s" : ""} et {filesGenerated} fichier{filesGenerated > 1 ? "s" : ""} Java.
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground mt-1">
+                  Aucune saga détectée pour ce projet. Relancez l'analyse pour détecter les transactions distribuées.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Stats mini-cards (only when detected) */}
+          {detected && (
+            <div className="flex gap-3 shrink-0">
+              <div className="flex flex-col items-center px-3 py-2 rounded-md bg-card border border-border">
+                <span className="text-lg font-bold font-mono text-amber-400">{candidateCount}</span>
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Sagas</span>
+              </div>
+              <div className="flex flex-col items-center px-3 py-2 rounded-md bg-card border border-border">
+                <span className="text-lg font-bold font-mono">{totalSteps}</span>
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Steps</span>
+              </div>
+              <div className="flex flex-col items-center px-3 py-2 rounded-md bg-card border border-border">
+                <span className="text-lg font-bold font-mono">{filesGenerated}</span>
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Fichiers</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Candidates list (when detected and more than 1) */}
+        {detected && candidateCount > 0 && (
+          <>
+            <Separator className="my-4" />
+            <div className="space-y-2">
+              <span className="text-xs text-muted-foreground uppercase tracking-wider">Domaines</span>
+              <div className="flex flex-wrap gap-2">
+                {sagaInfo!.candidates.map((c) => (
+                  <Badge
+                    key={c.domain}
+                    variant="outline"
+                    className="bg-amber-500/10 text-amber-300 border-amber-500/20 font-mono text-xs gap-1.5"
+                  >
+                    <GitBranch className="w-3 h-3" />
+                    {c.domain}
+                    <span className="text-amber-500/60">({c.stepsCount} steps, {c.compensableCount} comp.)</span>
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Action button */}
+        <div className="mt-4 flex justify-end">
+          <Button
+            variant={detected ? "default" : "outline"}
+            size="sm"
+            className={detected
+              ? "bg-amber-600 hover:bg-amber-700 text-white gap-2"
+              : "gap-2"
+            }
+            onClick={() => onNavigate("/compleo/sagas")}
+          >
+            <Workflow className="w-4 h-4" />
+            {detected ? "Voir les Sagas" : "Explorer les Sagas"}
+            <ExternalLink className="w-3 h-3" />
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Loading skeleton ────────────────────────────────────────────────────────
 function ProjectDetailSkeleton() {
   return (
@@ -148,6 +350,7 @@ export default function ProjectDetail({ id }: { id: number }) {
   const [, setLocation] = useLocation();
   const { data: project, isLoading: projectLoading } = trpc.projects.getById.useQuery({ id });
   const { data: scans, isLoading: scansLoading } = trpc.scans.list.useQuery({ projectId: id });
+  const { sagaInfo, loading: sagaLoading } = useSagaInfo(project?.name);
 
   if (projectLoading || scansLoading) return <ProjectDetailSkeleton />;
 
@@ -254,7 +457,7 @@ export default function ProjectDetail({ id }: { id: number }) {
           </div>
         )}
 
-        {/* ── Technologies ───────────────────────────────────────────── */}
+        {/* ── Technologies ────────────────────────────────────────────── */}
         {technologies.length > 0 && (
           <Card className="border-border bg-card">
             <CardHeader className="pb-3">
@@ -301,7 +504,14 @@ export default function ProjectDetail({ id }: { id: number }) {
         {/* ── Last scan ──────────────────────────────────────────────── */}
         {lastScan && <ScanCard scan={lastScan} />}
 
-        {/* ── Actions ────────────────────────────────────────────────── */}
+        {/* ── Saga Orchestration card ────────────────────────────────── */}
+        <SagaCard
+          sagaInfo={sagaInfo}
+          loading={sagaLoading}
+          onNavigate={setLocation}
+        />
+
+        {/* ── Pipeline Agent IA ──────────────────────────────────────── */}
         <Card className="border-emerald-500/30 bg-emerald-500/5">
           <CardContent className="p-6">
             <div className="flex flex-col sm:flex-row items-center gap-4">
