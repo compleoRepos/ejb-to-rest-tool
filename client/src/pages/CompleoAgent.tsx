@@ -21,7 +21,7 @@ import {
   ArrowLeft, RefreshCw, Globe, Lock, Info, Star,
   Activity, Radio, Pause, SkipForward, Network,
 } from "lucide-react";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import ReportViewer from "@/components/compleo/ReportViewer";
 import SagaViewer from "@/components/compleo/SagaViewer";
 
@@ -105,8 +105,16 @@ function formatElapsed(ms: number): string {
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function CompleoAgentPage() {
+  // Parse query params for projectId
+  const searchString = useSearch();
+  const queryProjectId = useMemo(() => {
+    const params = new URLSearchParams(searchString);
+    const pid = params.get("projectId");
+    return pid ? parseInt(pid, 10) : null;
+  }, [searchString]);
+
   // Source config
-  const [sourceMode, setSourceMode] = useState<SourceMode>("zip");
+  const [sourceMode, setSourceMode] = useState<SourceMode>(queryProjectId ? "project" as any : "zip");
   const [gitUrl, setGitUrl] = useState("");
   const [gitToken, setGitToken] = useState("");
   const [gitBranch, setGitBranch] = useState("main");
@@ -117,6 +125,9 @@ export default function CompleoAgentPage() {
   const [enableReportEnhancer, setEnableReportEnhancer] = useState(false);
   const [enableSaga, setEnableSaga] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [projectFromDb, setProjectFromDb] = useState<{ id: number; name: string; fileCount: number } | null>(null);
+  const [isLoadingProject, setIsLoadingProject] = useState(false);
+  const autoStartTriggered = useRef(false);
 
   // Agent state
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -314,7 +325,103 @@ export default function CompleoAgentPage() {
     setUploadSessionId(null);
   }, []);
 
-  // ─── Cleanup on unmount ─────────────────────────────────────────────────
+  // ─── Auto-start from project DB ─────────────────────────────────────
+
+  const handleStartFromProject = useCallback(async (pid: number) => {
+    setIsStarting(true);
+    try {
+      const res = await fetch("/api/agent/start-from-project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: pid,
+          options: {
+            autoResolveAmbiguities: autoResolve,
+            enableMicroservices,
+            enableML: enableMicroservices && enableML,
+            enableReportEnhancer,
+            enableSaga: enableMicroservices && enableSaga,
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Erreur de d\u00e9marrage");
+      }
+
+      const data = await res.json();
+      setSessionId(data.sessionId);
+      setIsRunning(true);
+      setEvents([]);
+      setAmbiguities([]);
+      setChoices({});
+      startTimeRef.current = Date.now();
+
+      timerRef.current = setInterval(() => {
+        setElapsedMs(Date.now() - startTimeRef.current);
+      }, 1000);
+
+      const es = new EventSource(`/api/agent/${data.sessionId}/events`);
+      eventSourceRef.current = es;
+
+      es.onmessage = (e) => {
+        try {
+          const event: AgentEvent = JSON.parse(e.data);
+          setEvents((prev) => [...prev, event]);
+          if ((event.type === "AMBIGUITY_DETECTED" || event.type === "AWAITING_INPUT") && event.data?.ambiguities) {
+            setAmbiguities(event.data.ambiguities as AgentAmbiguity[]);
+            setActiveTab("ambiguities");
+          }
+          if (event.type === "SUCCESS" || event.type === "FAILURE" || event.type === "CANCELLED") {
+            setIsRunning(false);
+            if (timerRef.current) clearInterval(timerRef.current);
+            es.close();
+          }
+        } catch { /* ignore */ }
+      };
+
+      es.onerror = () => {
+        setIsRunning(false);
+        if (timerRef.current) clearInterval(timerRef.current);
+      };
+
+      toast.success(`Agent d\u00e9marr\u00e9 depuis le projet ${data.projectName} (${data.fileCount} fichiers)`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erreur de d\u00e9marrage");
+    } finally {
+      setIsStarting(false);
+    }
+  }, [autoResolve, enableMicroservices, enableML, enableReportEnhancer, enableSaga]);
+
+  // Load project info from DB when projectId is present
+  useEffect(() => {
+    if (!queryProjectId) return;
+    setIsLoadingProject(true);
+    fetch(`/api/trpc/projects.getById?batch=1&input=${encodeURIComponent(JSON.stringify({ "0": { json: queryProjectId } }))}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const result = data?.[0]?.result?.data?.json;
+        if (result) {
+          setProjectFromDb({ id: result.id, name: result.name, fileCount: result.totalFiles || 0 });
+          setProjectName(result.name);
+        } else {
+          toast.error("Projet introuvable en base de donn\u00e9es");
+        }
+      })
+      .catch(() => toast.error("Erreur lors du chargement du projet"))
+      .finally(() => setIsLoadingProject(false));
+  }, [queryProjectId]);
+
+  // Auto-start when project is loaded from DB
+  useEffect(() => {
+    if (queryProjectId && projectFromDb && !autoStartTriggered.current && !sessionId) {
+      autoStartTriggered.current = true;
+      handleStartFromProject(queryProjectId);
+    }
+  }, [queryProjectId, projectFromDb, sessionId, handleStartFromProject]);
+
+  // ─── Cleanup on unmount ─────────────────────────────────────────────
 
   useEffect(() => {
     return () => {
@@ -345,7 +452,11 @@ export default function CompleoAgentPage() {
   const errorCount = logEvents.filter((e) => e.level === "error").length;
   const warningCount = logEvents.filter((e) => e.level === "warning").length;
 
-  const canStart = sourceMode === "zip" ? !!uploadSessionId : !!gitUrl;
+  const canStart = queryProjectId
+    ? !!projectFromDb
+    : sourceMode === "zip"
+      ? !!uploadSessionId
+      : !!gitUrl;
 
   // ─── Render ─────────────────────────────────────────────────────────────
 
@@ -389,8 +500,21 @@ export default function CompleoAgentPage() {
       </div>
 
       <div className="container py-6">
-        {!sessionId ? (
-          /* ─── Configuration Panel ──────────────────────────────────────── */
+        {/* Loading state when auto-starting from project DB */}
+        {queryProjectId && !sessionId && (isLoadingProject || isStarting) ? (
+          <div className="max-w-xl mx-auto text-center py-20 space-y-4">
+            <Loader2 className="w-12 h-12 mx-auto text-emerald-400 animate-spin" />
+            <h2 className="text-xl font-semibold">
+              {isLoadingProject ? "Chargement du projet..." : "D\u00e9marrage de l'Agent IA..."}
+            </h2>
+            <p className="text-muted-foreground">
+              {projectFromDb
+                ? `Projet ${projectFromDb.name} (${projectFromDb.fileCount} fichiers) — lancement automatique`
+                : "R\u00e9cup\u00e9ration des fichiers depuis la base de donn\u00e9es..."}
+            </p>
+          </div>
+        ) : !sessionId ? (
+          /* ─── Configuration Panel ────────────────────────────────────────── */
           <div className="max-w-3xl mx-auto space-y-6">
             <div className="text-center space-y-2 mb-8">
               <h2 className="text-2xl font-bold">Lancer une migration autonome</h2>

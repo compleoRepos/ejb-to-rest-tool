@@ -14,6 +14,7 @@
 
 import { Router, type Express, type Request, type Response } from "express";
 import { getAgent, getAgentStore, type AgentConfig, type AgentEvent } from "./agent/CompleoAgent";
+import * as db from "./db";
 import archiver from "archiver";
 import { LearningEngine } from "./learning/LearningEngine";
 import type { ChoiceWithAutoResolve } from "./learning/ConfidenceScorer";
@@ -388,6 +389,98 @@ export function registerAgentRoutes(app: Express) {
       report: session.sagaResult.report,
       details,
     });
+  });
+
+  // ─── POST /api/agent/start-from-project ──────────────────────────────────────
+  // Start agent directly from an existing project in DB (no re-upload needed)
+  router.post("/start-from-project", async (req: Request, res: Response) => {
+    try {
+      const { projectId, options } = req.body as {
+        projectId: number;
+        options?: {
+          autoResolveAmbiguities?: boolean;
+          enableMicroservices?: boolean;
+          enableML?: boolean;
+          enableReportEnhancer?: boolean;
+          enableSaga?: boolean;
+        };
+      };
+
+      if (!projectId) {
+        return res.status(400).json({ error: "projectId est requis" });
+      }
+
+      // 1. Fetch project from DB
+      const project = await db.getProjectById(projectId);
+      if (!project) {
+        return res.status(404).json({ error: `Projet #${projectId} introuvable` });
+      }
+
+      // 2. Fetch project files from DB
+      const projectFiles = await db.getProjectFiles(projectId);
+      if (!projectFiles || projectFiles.length === 0) {
+        return res.status(400).json({ error: `Aucun fichier trouvé pour le projet #${projectId}` });
+      }
+
+      // 3. Convert to SourceFile format
+      const sourceFiles = projectFiles.map((f) => ({
+        path: f.filePath,
+        content: f.content,
+      }));
+
+      console.log(`[Agent] Démarrage depuis projet DB #${projectId} (${project.name}): ${sourceFiles.length} fichiers`);
+
+      // 4. Build agent config with files directly
+      const config: AgentConfig = {
+        source: { type: "zip", files: sourceFiles } as any,
+        output: { type: "zip" },
+        options: {
+          projectName: project.name,
+          autoResolveAmbiguities: options?.autoResolveAmbiguities ?? false,
+          maxCompilationAttempts: 5,
+          enableMicroservices: options?.enableMicroservices ?? false,
+          enableML: options?.enableML ?? false,
+          enableReportEnhancer: options?.enableReportEnhancer ?? false,
+          enableSaga: options?.enableSaga ?? false,
+        },
+      };
+
+      // 5. Create session and start agent
+      const agent = getAgent();
+      const store = getAgentStore();
+      const session = store.create(config);
+      const sessionId = session.id;
+
+      (async () => {
+        try {
+          const agentGen = agent.run(config, sessionId);
+          for await (const event of agentGen) {
+            store.addEvent(sessionId, event);
+          }
+        } catch (err) {
+          store.addEvent(sessionId, {
+            type: "FAILURE",
+            timestamp: Date.now(),
+            level: "error",
+            message: `Agent error: ${err instanceof Error ? err.message : String(err)}`,
+            phase: "FAILED",
+          });
+          store.update(sessionId, { state: "FAILED", currentPhase: "FAILED" });
+        }
+      })();
+
+      res.json({
+        sessionId,
+        projectName: project.name,
+        fileCount: sourceFiles.length,
+        message: `Agent démarré depuis le projet ${project.name}`,
+        eventsUrl: `/api/agent/${sessionId}/events`,
+        statusUrl: `/api/agent/${sessionId}/status`,
+      });
+    } catch (err) {
+      console.error("[Agent] start-from-project error:", err);
+      res.status(500).json({ error: err instanceof Error ? err.message : "Erreur interne" });
+    }
   });
 
   // ─── GET /api/agent/sessions ────────────────────────────────────────────────

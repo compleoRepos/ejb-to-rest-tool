@@ -525,7 +525,7 @@ export default function ProjectDetail({ id }: { id: number }) {
               <Button
                 size="lg"
                 className="bg-emerald-600 hover:bg-emerald-700 text-white shrink-0 gap-2"
-                onClick={() => setLocation("/compleo/agent")}
+                onClick={() => setLocation(`/compleo/agent?projectId=${id}`)}
               >
                 <Bot className="w-5 h-5" />
                 Lancer l'Agent IA
