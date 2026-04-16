@@ -92,7 +92,8 @@ public class BianAutoDetector {
         // INITIATION — Creer une nouvelle ressource (POST, pas de {cr-ref-id}, 201)
         ACTION_VERBS.put("initiation", List.of(
             "ouvrir", "creer", "create", "add", "register", "open",
-            "souscrire", "initier", "demander", "enregistrer", "inscrire"
+            "souscrire", "initier", "demander", "enregistrer", "inscrire",
+            "virement", "virer", "transferer", "transfer"
         ));
 
         // EVALUATION — Calculer/simuler sans modifier (POST, pas de {cr-ref-id}, 200)
@@ -139,7 +140,7 @@ public class BianAutoDetector {
         ACTION_VERBS.put("execution", List.of(
             "executer", "execute", "traiter", "process", "run", "perform",
             "activer", "activate", "receptionner", "effectuer",
-            "debiter", "crediter", "transferer", "virer", "payer"
+            "debiter", "crediter", "payer"
         ));
     }
 

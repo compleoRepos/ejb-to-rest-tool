@@ -233,6 +233,29 @@ class BianAutoDetectorTest {
         void detectScoringEvaluation() {
             assertEquals("evaluation", detector.detectAction(buildUseCase("CreditScoringEJB")));
         }
+
+        @Test
+        @DisplayName("VirementSEPAOrchestrateurEJB → initiation (virement)")
+        void virementSEPA_shouldBeInitiation() {
+            UseCaseInfo uc = new UseCaseInfo();
+            uc.setClassName("VirementSEPAOrchestrateurEJB");
+            BianMapping result = detector.autoDetect(uc);
+            assertEquals("initiation", result.getAction());
+            assertEquals("payment-initiation", result.getServiceDomain());
+            assertFalse(result.getUrl().contains("{cr-reference-id}"));
+        }
+
+        @Test
+        @DisplayName("TransfererFondsEJB → initiation (transferer)")
+        void transfererFonds_shouldBeInitiation() {
+            assertEquals("initiation", detector.detectAction(buildUseCase("TransfererFondsEJB")));
+        }
+
+        @Test
+        @DisplayName("VirerMontantUC → initiation (virer)")
+        void virerMontant_shouldBeInitiation() {
+            assertEquals("initiation", detector.detectAction(buildUseCase("VirerMontantUC")));
+        }
     }
 
     // ===================== BEHAVIOR QUALIFIER DETECTION =====================
