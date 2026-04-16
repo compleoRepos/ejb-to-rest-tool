@@ -24,6 +24,8 @@ import { extractSagaSteps, extractIntermediateResults } from "./saga-step-extrac
 import { generateSharedSagaFiles } from "./saga-shared-generators";
 import type { SagaMLEnricher, SagaMLResult } from "./ml/SagaMLEnricher";
 import type { MLStepEnrichment } from "./ml/prompts";
+import { getStepBody, getAdditionalServicesForDomain } from "./step-body-mapper";
+import { getCompensationBody } from "./compensation-mapper";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -689,10 +691,10 @@ function generateOrchestrator(
 ): string {
   const phases = splitIntoPhases(steps);
   const compensableSteps = steps.filter((s) => s.isCompensable).reverse();
-  const injections = buildInjections(steps, candidate, basePackage);
-  const stepMethods = steps.map((s) => buildStepMethod(s, domainPascal));
+  const injections = buildInjections(steps, candidate, basePackage, candidate.domain);
+  const stepMethods = steps.map((s) => buildStepMethod(s, domainPascal, candidate.domain));
   const compensationMethods = compensableSteps.map((s) =>
-    buildCompensationMethod(s, domainPascal),
+    buildCompensationMethod(s, domainPascal, candidate.domain),
   );
 
   // Build retry policy map initialization
@@ -1158,6 +1160,7 @@ function buildInjections(
   steps: SagaStep[],
   candidate: SagaCandidate,
   basePackage: string,
+  domain?: string,
 ): {
   imports: string[];
   fields: string[];
@@ -1219,6 +1222,19 @@ function buildInjections(
     }
   }
 
+  // v8.2 STEP 2: Ajouter les services additionnels du step-body-mapper
+  if (domain) {
+    const additionalServices = getAdditionalServicesForDomain(domain);
+    for (const svcField of additionalServices) {
+      if (!seen.has(svcField)) {
+        seen.add(svcField);
+        const svcType = svcField.charAt(0).toUpperCase() + svcField.slice(1);
+        seen.add(svcType);
+        deps.push({ type: svcType, field: svcField });
+      }
+    }
+  }
+
   const fields = deps.map(d => `    private final ${d.type} ${d.field};`);
   const constructorParams = deps.map(d => `            ${d.type} ${d.field}`);
   const constructorAssignments = deps.map(d => `        this.${d.field} = ${d.field};`);
@@ -1229,7 +1245,7 @@ function buildInjections(
 /**
  * Post-Audit STEP 7: Step methods now store intermediate results in context.
  */
-function buildStepMethod(step: SagaStep, domainPascal: string): string {
+function buildStepMethod(step: SagaStep, domainPascal: string, domain?: string): string {
   const methodName = `step${step.order}${toPascalCase(step.name)}`;
   const asyncTag = step.isAsync ? " [ASYNC]" : "";
   const criticalTag = step.isCritical ? " [CRITICAL]" : "";
@@ -1249,6 +1265,20 @@ function buildStepMethod(step: SagaStep, domainPascal: string): string {
     ? `Compensable: OUI — en cas d'échec ultérieur, compensateStep${step.order}${toPascalCase(step.name)}() sera appelé`
     : `Compensable: NON — step en lecture seule ou non réversible`;
 
+  // v8.2 STEP 2: Utiliser le step-body-mapper si un mapping existe
+  const mappedBody = domain ? getStepBody(domain, step.order) : null;
+
+  const bodyBlock = mappedBody
+    ? mappedBody.split("\n").map(line => line.trimEnd()).join("\n")
+    : `            // TODO: Implémenter l'appel au service ${step.targetService || "local"}
+            //
+            // Exemple d'implémentation :
+            //   var result = ${serviceCall};
+            //   ctx.set...(result);  // Stocker le résultat intermédiaire dans le context
+            //
+            // Après succès, ce step est ajouté à ctx.getCompletedSteps()
+            // pour que la compensation LIFO sache quels steps annuler.`;
+
   return `    /**
      * Step ${step.order}: ${step.label}${asyncTag}${criticalTag}
      *
@@ -1267,14 +1297,7 @@ function buildStepMethod(step: SagaStep, domainPascal: string): string {
         log.info("[SAGA:${domainPascal}] Step ${step.order} — ${step.label}");
         long start = System.currentTimeMillis();
         try {
-            // TODO: Implémenter l'appel au service ${step.targetService || "local"}
-            //
-            // Exemple d'implémentation :
-            //   var result = ${serviceCall};
-            //   ctx.set...(result);  // Stocker le résultat intermédiaire dans le context
-            //
-            // Après succès, ce step est ajouté à ctx.getCompletedSteps()
-            // pour que la compensation LIFO sache quels steps annuler.
+${bodyBlock}
             logTransition(ctx, "${domainPascal}SagaState.STEP_${step.order}_${toConstCase(step.name)}", "SUCCESS", null);
         } catch (Exception ex) {
             // L'exception remonte à l'orchestrateur qui déclenchera la compensation LIFO.
@@ -1287,50 +1310,61 @@ function buildStepMethod(step: SagaStep, domainPascal: string): string {
     }`;
 }
 
-function buildCompensationMethod(step: SagaStep, domainPascal: string): string {
+function buildCompensationMethod(step: SagaStep, domainPascal: string, domain?: string): string {
   const methodName = `compensateStep${step.order}${toPascalCase(step.name)}`;
   const comp = step.compensation;
 
+  // v8.2 STEP 3: Utiliser le compensation-mapper si un mapping existe
+  const mappedCompBody = domain ? getCompensationBody(domain, step.order) : null;
+
   const sqlHintComment = comp?.sqlHint ? `\n     * <p>Indice SQL: <code>${comp.sqlHint}</code></p>` : '';
 
-  return `    /**
-     * Compensation du Step ${step.order}: ${step.label}
-     *
-     * <p><b>Rôle :</b> ${comp?.description || "Annuler les effets du step " + step.order + " pour restaurer l'état cohérent."}</p>
-     *${sqlHintComment}
-     * <h4>Mécanisme de compensation</h4>
-     * <ul>
-     *   <li><b>Ordre LIFO</b> — Cette compensation est appelée en ordre inverse :
-     *       si les steps 1→3→4 ont réussi et le step 5 échoue, on compense
-     *       dans l'ordre 4→3→1 (Last In, First Out).</li>
-     *   <li><b>Retry dédié</b> — RetryPolicy.forCompensation() : 5 tentatives avec
-     *       backoff multiplicateur 3x (1s → 3s → 9s → 27s → 81s). Plus agressif
-     *       que le retry normal car une compensation qui échoue laisse le système
-     *       dans un état incohérent.</li>
-     *   <li><b>Dead Letter</b> — Si la compensation échoue après 5 tentatives,
-     *       elle est envoyée en Dead Letter Queue. Le SagaRecoveryScheduler
-     *       la reprendra automatiquement ou une alerte sera générée pour
-     *       intervention manuelle.</li>
-     * </ul>
-     */
-    private void ${methodName}(${domainPascal}SagaContext ctx) {
-        try {
-            log.warn("[SAGA:${domainPascal}] Compensation step ${step.order} — ${comp?.method || step.name}");
+  // Build the compensation body block
+  let compensationBodyBlock: string;
+  if (mappedCompBody) {
+    compensationBodyBlock = mappedCompBody.split("\n").map(line => line.trimEnd()).join("\n");
+  } else {
+    compensationBodyBlock = `
+            log.warn("[SAGA:${domainPascal}] Compensation step ${step.order} \u2014 ${comp?.method || step.name}");
 
-            // TODO: Implémenter la compensation (action inverse du step ${step.order})
+            // TODO: Impl\u00e9menter la compensation (action inverse du step ${step.order})
             //
             // Exemple :
             //   ${comp?.method || "compensate"}(ctx);
             //
-            // La compensation doit être IDEMPOTENTE : si elle est appelée
-            // plusieurs fois (retry), le résultat doit être identique.
+            // La compensation doit \u00eatre IDEMPOTENTE : si elle est appel\u00e9e
+            // plusieurs fois (retry), le r\u00e9sultat doit \u00eatre identique.
 
-            logTransition(ctx, "COMPENSATING", "COMPENSATED", null);
+            logTransition(ctx, "COMPENSATING", "COMPENSATED", null);`;
+  }
+
+  return `    /**
+     * Compensation du Step ${step.order}: ${step.label}
+     *
+     * <p><b>R\u00f4le :</b> ${comp?.description || "Annuler les effets du step " + step.order + " pour restaurer l'\u00e9tat coh\u00e9rent."}</p>
+     *${sqlHintComment}
+     * <h4>M\u00e9canisme de compensation</h4>
+     * <ul>
+     *   <li><b>Ordre LIFO</b> \u2014 Cette compensation est appel\u00e9e en ordre inverse :
+     *       si les steps 1\u21923\u21924 ont r\u00e9ussi et le step 5 \u00e9choue, on compense
+     *       dans l'ordre 4\u21923\u21921 (Last In, First Out).</li>
+     *   <li><b>Retry d\u00e9di\u00e9</b> \u2014 RetryPolicy.forCompensation() : 5 tentatives avec
+     *       backoff multiplicateur 3x (1s \u2192 3s \u2192 9s \u2192 27s \u2192 81s). Plus agressif
+     *       que le retry normal car une compensation qui \u00e9choue laisse le syst\u00e8me
+     *       dans un \u00e9tat incoh\u00e9rent.</li>
+     *   <li><b>Dead Letter</b> \u2014 Si la compensation \u00e9choue apr\u00e8s 5 tentatives,
+     *       elle est envoy\u00e9e en Dead Letter Queue. Le SagaRecoveryScheduler
+     *       la reprendra automatiquement ou une alerte sera g\u00e9n\u00e9r\u00e9e pour
+     *       intervention manuelle.</li>
+     * </ul>
+     */
+    private void ${methodName}(${domainPascal}SagaContext ctx) {
+        try {${compensationBodyBlock}
         } catch (Exception ex) {
-            // L'exception remonte à l'orchestrateur pour retry via
-            // RetryPolicy.forCompensation(). Après épuisement des retries,
-            // ce step sera envoyé en Dead Letter Queue.
-            log.error("[SAGA:${domainPascal}] Échec compensation step ${step.order} — {}", ex.getMessage());
+            // L'exception remonte \u00e0 l'orchestrateur pour retry via
+            // RetryPolicy.forCompensation(). Apr\u00e8s \u00e9puisement des retries,
+            // ce step sera envoy\u00e9 en Dead Letter Queue.
+            log.error("[SAGA:${domainPascal}] \u00c9chec compensation step ${step.order} \u2014 {}", ex.getMessage());
             logTransition(ctx, "COMPENSATING", "COMPENSATION_FAILED", ex.getMessage());
             throw ex;
         }
@@ -1463,7 +1497,7 @@ function generateOrchestratorWithML(
 ): string {
   const phases = splitIntoPhases(steps);
   const compensableSteps = steps.filter((s) => s.isCompensable).reverse();
-  const injections = buildInjections(steps, candidate, basePackage);
+  const injections = buildInjections(steps, candidate, basePackage, candidate.domain);
   const stepMethods = steps.map((s) => buildStepMethodWithML(s, domainPascal, mlResult));
   const compensationMethods = compensableSteps.map((s) =>
     buildCompensationMethodWithML(s, domainPascal, mlResult),

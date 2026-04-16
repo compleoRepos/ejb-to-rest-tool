@@ -390,56 +390,126 @@ function enrichBankingResults(
         { stepName: "controle-sanctions", type: "SanctionsCheckResult", fieldName: "sanctionsResult" },
       ],
     },
-    // Post-Audit STEP 7: Additional banking patterns for Credit, Virement, Client
+    // ── v8.2 STEP 4: Champs typés Credit ─────────────────────────────────────
     {
-      stepPattern: /scoring|score.*global|décision/i,
+      stepPattern: /scoring|score.*composite|score.*global|décision/i,
       fields: [
-        { stepName: "scoring", type: "Integer", fieldName: "scoreGlobal" },
+        { stepName: "scoring", type: "int", fieldName: "scoreComposite" },
         { stepName: "scoring", type: "String", fieldName: "decisionCredit" },
       ],
     },
     {
-      stepPattern: /décaissement|deblocage|versement/i,
+      stepPattern: /garantie|collateral|hypotheque|évaluation.*garantie/i,
       fields: [
-        { stepName: "decaissement", type: "String", fieldName: "referenceDecaissement" },
-        { stepName: "decaissement", type: "BigDecimal", fieldName: "montantDecaisse" },
+        { stepName: "garantie", type: "BigDecimal", fieldName: "valeurGaranties" },
+        { stepName: "garantie", type: "Long", fieldName: "idGarantie" },
       ],
     },
     {
-      stepPattern: /garantie|collateral|hypotheque/i,
+      stepPattern: /création.*dossier|dossier.*crédit|ligne.*crédit/i,
       fields: [
-        { stepName: "garantie", type: "String", fieldName: "referenceGarantie" },
+        { stepName: "creation-dossier", type: "Long", fieldName: "idDossier" },
+        { stepName: "creation-dossier", type: "Long", fieldName: "idCredit" },
       ],
     },
     {
-      stepPattern: /echeancier|amortissement|plan.*remboursement/i,
+      stepPattern: /écriture.*comptable|comptabilité|passation/i,
       fields: [
-        { stepName: "echeancier", type: "String", fieldName: "echeancierJson" },
+        { stepName: "ecritures-comptables", type: "long", fieldName: "idEcriture" },
       ],
     },
     {
-      stepPattern: /kyc|know.*your.*customer|vérification.*identit/i,
+      stepPattern: /déblocage|décaissement|versement.*fonds/i,
+      fields: [
+        { stepName: "deblocage", type: "BigDecimal", fieldName: "montant" },
+        { stepName: "deblocage", type: "String", fieldName: "compteDebiteur" },
+      ],
+    },
+    {
+      stepPattern: /kyc|know.*your.*customer|vérification.*identit|éligibilité/i,
       fields: [
         { stepName: "verification-kyc", type: "Boolean", fieldName: "kycValide" },
-        { stepName: "verification-kyc", type: "String", fieldName: "kycReference" },
+      ],
+    },
+    // ── v8.2 STEP 4: Champs typés Virement ───────────────────────────────────
+    {
+      stepPattern: /conversion.*devise|devise.*conversion|taux.*change/i,
+      fields: [
+        { stepName: "conversion-devise", type: "BigDecimal", fieldName: "tauxChange" },
+        { stepName: "conversion-devise", type: "BigDecimal", fieldName: "montantMAD" },
       ],
     },
     {
-      stepPattern: /ouverture.*compte|création.*compte/i,
+      stepPattern: /frais|commission/i,
       fields: [
-        { stepName: "ouverture-compte", type: "String", fieldName: "numeroCompte" },
+        { stepName: "frais", type: "BigDecimal", fieldName: "fraisSwift" },
+        { stepName: "frais", type: "BigDecimal", fieldName: "commissionChange" },
+      ],
+    },
+    {
+      stepPattern: /swift|soumission.*swift|envoi.*swift/i,
+      fields: [
+        { stepName: "soumission-swift", type: "String", fieldName: "refSwift" },
+        { stepName: "soumission-swift", type: "String", fieldName: "uetr" },
+      ],
+    },
+    {
+      stepPattern: /enregistrement.*virement|virement.*international/i,
+      fields: [
+        { stepName: "enregistrement-virement", type: "Long", fieldName: "idVirement" },
       ],
     },
     {
       stepPattern: /débit|prélèvement|mouvement.*comptable/i,
       fields: [
-        { stepName: "debit", type: "String", fieldName: "referenceEcriture" },
+        { stepName: "debit", type: "BigDecimal", fieldName: "montantDebite" },
       ],
     },
+    // ── v8.2 STEP 4: Champs typés Client ─────────────────────────────────────
+    {
+      stepPattern: /ouverture.*compte|création.*compte/i,
+      fields: [
+        { stepName: "ouverture-compte", type: "String", fieldName: "numCompte" },
+      ],
+    },
+    {
+      stepPattern: /création.*client|dossier.*client|enregistrement.*client/i,
+      fields: [
+        { stepName: "creation-client", type: "String", fieldName: "codeClient" },
+      ],
+    },
+    {
+      stepPattern: /risque|niveau.*risque|évaluation.*risque/i,
+      fields: [
+        { stepName: "evaluation-risque", type: "String", fieldName: "niveauRisque" },
+      ],
+    },
+    {
+      stepPattern: /enregistrement.*kyc/i,
+      fields: [
+        { stepName: "enregistrement-kyc", type: "Long", fieldName: "idKyc" },
+      ],
+    },
+    // ── Champs génériques (notification, etc.) ───────────────────────────────
     {
       stepPattern: /notification|envoi.*mail|sms/i,
       fields: [
         { stepName: "notification", type: "Boolean", fieldName: "notificationEnvoyee" },
+      ],
+    },
+    // Champs communs (compte, agence)
+    {
+      stepPattern: /chargement.*compte|compte.*client/i,
+      fields: [
+        { stepName: "chargement-compte", type: "String", fieldName: "numCompte" },
+        { stepName: "chargement-compte", type: "String", fieldName: "codeClient" },
+        { stepName: "chargement-compte", type: "String", fieldName: "codeAgence" },
+      ],
+    },
+    {
+      stepPattern: /controle.*sanction|sanction/i,
+      fields: [
+        { stepName: "controle-sanctions", type: "SanctionsCheckResult", fieldName: "sanctionsResult" },
       ],
     },
   ];
