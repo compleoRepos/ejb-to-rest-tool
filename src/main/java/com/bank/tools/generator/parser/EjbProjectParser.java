@@ -494,7 +494,7 @@ public class EjbProjectParser {
         if (bianMappingResolver != null) {
             log.info("[BIAN] Resolution du mapping BIAN pour {} UseCases", result.getUseCases().size());
             for (UseCaseInfo uc : result.getUseCases()) {
-                BianMapping bianMapping = bianMappingResolver.resolve(uc.getClassName());
+                BianMapping bianMapping = bianMappingResolver.resolve(uc);
                 uc.setBianMapping(bianMapping);
                 // Mettre a jour l'URL REST avec l'URL BIAN
                 if (bianMapping.getUrl() != null) {

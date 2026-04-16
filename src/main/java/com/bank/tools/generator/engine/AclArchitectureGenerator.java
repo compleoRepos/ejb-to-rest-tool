@@ -1820,6 +1820,26 @@ public class AclArchitectureGenerator {
     private String deriveRestDtoName(String ejbDtoName, String suffix, BianMapping mapping) {
         if (ejbDtoName == null) return null;
 
+        // Cas speciaux : types primitifs ou void — pas de DTO
+        if ("void".equals(ejbDtoName) || "Void".equals(ejbDtoName)) return null;
+        if ("String".equals(ejbDtoName) || "string".equals(ejbDtoName)) {
+            // Generer un nom significatif depuis le mapping BIAN
+            String base = toPascalCase(mapping.getServiceDomain());
+            String bq = mapping.getBehaviorQualifier();
+            if (bq != null && !bq.isEmpty()) base += toPascalCase(bq);
+            return base + suffix;
+        }
+        if ("boolean".equals(ejbDtoName) || "Boolean".equals(ejbDtoName)
+            || "int".equals(ejbDtoName) || "Integer".equals(ejbDtoName)
+            || "long".equals(ejbDtoName) || "Long".equals(ejbDtoName)
+            || "double".equals(ejbDtoName) || "Double".equals(ejbDtoName)
+            || "byte[]".equals(ejbDtoName)) {
+            String base = toPascalCase(mapping.getServiceDomain());
+            String bq = mapping.getBehaviorQualifier();
+            if (bq != null && !bq.isEmpty()) base += toPascalCase(bq);
+            return base + suffix;
+        }
+
         // Retirer VoIn/VoOut/Vo
         String base = ejbDtoName.replaceAll("(VoIn|VoOut|Vo)$", "");
         // Retirer UC/UseCase
@@ -1831,6 +1851,17 @@ public class AclArchitectureGenerator {
                 base = entry.getValue() + base.substring(entry.getKey().length());
                 break;
             }
+        }
+
+        // Eviter les doublons : si base se termine deja par Request/Response, ne pas re-suffixer
+        if (base.endsWith("Request") && "Request".equals(suffix)) return base;
+        if (base.endsWith("Response") && "Response".equals(suffix)) return base;
+
+        // Eviter les noms trop courts (< 3 chars) — utiliser le Service Domain
+        if (base.length() < 3) {
+            base = toPascalCase(mapping.getServiceDomain());
+            String bq = mapping.getBehaviorQualifier();
+            if (bq != null && !bq.isEmpty()) base += toPascalCase(bq);
         }
 
         return base + suffix;

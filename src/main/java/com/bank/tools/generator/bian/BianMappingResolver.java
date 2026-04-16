@@ -1,5 +1,6 @@
 package com.bank.tools.generator.bian;
 
+import com.bank.tools.generator.model.UseCaseInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -10,10 +11,11 @@ import java.util.stream.Collectors;
 /**
  * Resout le mapping BIAN pour chaque UseCase detecte.
  *
- * Strategie de resolution :
+ * Strategie de resolution (3 niveaux) :
  * 1. Chercher un mapping explicite dans bian-mapping.yml
- * 2. Mapping automatique par mots-cles dans le nom du UseCase
- * 3. Fallback : kebab-case du nom + action "execution"
+ * 2. Auto-detection intelligente via BianAutoDetector (analyse multi-criteres)
+ * 3. Fallback YAML par mots-cles simples (retro-compatibilite)
+ * 4. Fallback ultime : kebab-case du nom + action "execution"
  */
 @Component
 public class BianMappingResolver {
@@ -21,15 +23,18 @@ public class BianMappingResolver {
     private static final Logger log = LoggerFactory.getLogger(BianMappingResolver.class);
 
     private final BianMappingConfig config;
+    private final BianAutoDetector autoDetector;
 
-    public BianMappingResolver(BianMappingConfig config) {
+    public BianMappingResolver(BianMappingConfig config, BianAutoDetector autoDetector) {
         this.config = config;
+        this.autoDetector = autoDetector;
     }
 
     // ===================== RESOLUTION PRINCIPALE =====================
 
     /**
-     * Resout le mapping BIAN pour un UseCase donne.
+     * Resout le mapping BIAN pour un UseCase donne (par nom uniquement).
+     * Methode retro-compatible — conservee pour ne pas casser l'existant.
      *
      * @param useCaseName nom du UseCase (ex: "ActiverCarteUC")
      * @return le BianMapping resolu
@@ -47,10 +52,53 @@ public class BianMappingResolver {
             return explicit.get();
         }
 
-        // 2. Mapping automatique
+        // 2. Mapping automatique YAML (retro-compatible)
         BianMapping auto = resolveAutomatic(useCaseName);
         log.info("[BianResolver] Mapping AUTO pour {} → {}", useCaseName, auto);
         return auto;
+    }
+
+    /**
+     * Resout le mapping BIAN pour un UseCase complet (avec metadonnees).
+     * Utilise le BianAutoDetector pour une detection intelligente multi-criteres.
+     *
+     * @param useCase le UseCase complet avec package, VoIn, VoOut, methodes
+     * @return le BianMapping resolu
+     */
+    public BianMapping resolve(UseCaseInfo useCase) {
+        String useCaseName = useCase.getClassName();
+
+        if (!config.isLoaded()) {
+            log.debug("[BianResolver] Config non chargee — auto-detection pour {}", useCaseName);
+            return autoDetector.autoDetect(useCase);
+        }
+
+        // 1. Mapping explicite (priorite absolue)
+        Optional<BianMapping> explicit = resolveExplicit(useCaseName);
+        if (explicit.isPresent()) {
+            log.info("[BianResolver] Mapping EXPLICITE pour {} → {}", useCaseName, explicit.get());
+            return explicit.get();
+        }
+
+        // 2. Auto-detection intelligente (BianAutoDetector)
+        BianMapping autoDetected = autoDetector.autoDetect(useCase);
+        int confidence = autoDetector.calculateConfidence(useCase, autoDetected);
+
+        if (confidence >= 50) {
+            log.info("[BianResolver] AUTO-DETECT pour {} → {} (confiance: {}%)", useCaseName, autoDetected, confidence);
+            return autoDetected;
+        }
+
+        // 3. Fallback YAML par mots-cles simples (si confiance < 50%)
+        BianMapping yamlAuto = resolveAutomatic(useCaseName);
+        if (yamlAuto.getBianId() != null && !yamlAuto.getBianId().isEmpty()) {
+            log.info("[BianResolver] YAML-AUTO pour {} → {} (auto-detect confiance trop basse: {}%)", useCaseName, yamlAuto, confidence);
+            return yamlAuto;
+        }
+
+        // 4. Retourner l'auto-detection meme si confiance basse (mieux que le fallback kebab)
+        log.warn("[BianResolver] AUTO-DETECT basse confiance pour {} → {} (confiance: {}%)", useCaseName, autoDetected, confidence);
+        return autoDetected;
     }
 
     /**
@@ -61,6 +109,22 @@ public class BianMappingResolver {
      */
     public Map<String, List<BianMapping>> resolveAndGroup(List<String> useCaseNames) {
         return useCaseNames.stream()
+                .map(this::resolve)
+                .collect(Collectors.groupingBy(
+                        BianMapping::getServiceDomain,
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
+    }
+
+    /**
+     * Resout les mappings BIAN pour une liste de UseCaseInfo et les regroupe par Service Domain.
+     *
+     * @param useCases liste des UseCaseInfo complets
+     * @return Map<serviceDomain, List<BianMapping>> regroupes
+     */
+    public Map<String, List<BianMapping>> resolveAndGroupUseCases(List<UseCaseInfo> useCases) {
+        return useCases.stream()
                 .map(this::resolve)
                 .collect(Collectors.groupingBy(
                         BianMapping::getServiceDomain,
@@ -96,7 +160,7 @@ public class BianMappingResolver {
         return Optional.empty();
     }
 
-    // ===================== RESOLUTION AUTOMATIQUE =====================
+    // ===================== RESOLUTION AUTOMATIQUE (YAML) =====================
 
     private BianMapping resolveAutomatic(String useCaseName) {
         String nameLower = cleanUseCaseName(useCaseName).toLowerCase();
