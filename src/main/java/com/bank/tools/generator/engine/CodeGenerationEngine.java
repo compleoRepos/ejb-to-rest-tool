@@ -168,6 +168,7 @@ public class CodeGenerationEngine {
         generatePomXml(projectRoot, projectHasXml, projectHasValidation, analysisResult);
         generateApplicationClass(srcMain);
         generateApplicationProperties(resourcesDir);
+        generateJndiHealthIndicator(srcMain);
 
         if (!aclActive) {
             // Mode legacy uniquement
@@ -395,6 +396,23 @@ public class CodeGenerationEngine {
                 """);
         }
 
+        // Resilience4j (Circuit Breaker, Retry, Bulkhead, TimeLimiter)
+        deps.append("""
+                
+                        <!-- Resilience4j (Circuit Breaker, Retry, Bulkhead, TimeLimiter) -->
+                        <dependency>
+                            <groupId>io.github.resilience4j</groupId>
+                            <artifactId>resilience4j-spring-boot3</artifactId>
+                            <version>2.2.0</version>
+                        </dependency>
+                
+                        <!-- Spring Boot Actuator (Health Checks, Metriques) -->
+                        <dependency>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-starter-actuator</artifactId>
+                        </dependency>
+                """);
+
         deps.append("""
                 
                         <!-- Testing -->
@@ -515,9 +533,121 @@ public class CodeGenerationEngine {
                 springdoc.api-docs.path=/v3/api-docs
                 springdoc.swagger-ui.path=/swagger-ui.html
                 springdoc.swagger-ui.url=/v3/api-docs
+                
+                # ===================== Resilience4j =====================
+                
+                # Circuit Breaker : s'ouvre si le serveur EJB/WAS ne repond plus
+                resilience4j.circuitbreaker.instances.ejbService.slidingWindowSize=10
+                resilience4j.circuitbreaker.instances.ejbService.failureRateThreshold=50
+                resilience4j.circuitbreaker.instances.ejbService.waitDurationInOpenState=30s
+                resilience4j.circuitbreaker.instances.ejbService.permittedNumberOfCallsInHalfOpenState=3
+                resilience4j.circuitbreaker.instances.ejbService.slidingWindowType=COUNT_BASED
+                resilience4j.circuitbreaker.instances.ejbService.registerHealthIndicator=true
+                
+                # Retry : 3 tentatives avec backoff exponentiel
+                resilience4j.retry.instances.ejbService.maxAttempts=3
+                resilience4j.retry.instances.ejbService.waitDuration=2s
+                resilience4j.retry.instances.ejbService.enableExponentialBackoff=true
+                resilience4j.retry.instances.ejbService.exponentialBackoffMultiplier=2
+                resilience4j.retry.instances.ejbService.retryExceptions=java.net.ConnectException,javax.naming.CommunicationException
+                
+                # TimeLimiter : timeout de 30s sur les appels EJB
+                resilience4j.timelimiter.instances.ejbService.timeoutDuration=30s
+                resilience4j.timelimiter.instances.ejbService.cancelRunningFuture=true
+                
+                # Bulkhead : max 10 appels concurrents par EJB
+                resilience4j.bulkhead.instances.ejbService.maxConcurrentCalls=10
+                resilience4j.bulkhead.instances.ejbService.maxWaitDuration=500ms
+                
+                # ===================== Actuator =====================
+                
+                # Exposer les endpoints health, info, metrics et resilience4j
+                management.endpoints.web.exposure.include=health,info,metrics,circuitbreakers,retries,bulkheads
+                management.endpoint.health.show-details=always
+                management.health.circuitbreakers.enabled=true
                 """;
 
         Files.writeString(resourcesDir.resolve("application.properties"), props);
+    }
+
+    // ===================== JNDI HEALTH INDICATOR (Resilience) =====================
+
+    /**
+     * Genere un JndiHealthIndicator custom qui verifie la connectivite JNDI
+     * et expose le resultat via /actuator/health.
+     * Permet de detecter si le serveur EJB/WAS est accessible.
+     */
+    private void generateJndiHealthIndicator(Path srcMain) throws IOException {
+        Path healthDir = srcMain.resolve("health");
+        Files.createDirectories(healthDir);
+
+        String code = """
+                package %s.health;
+                
+                import org.slf4j.Logger;
+                import org.slf4j.LoggerFactory;
+                import org.springframework.beans.factory.annotation.Value;
+                import org.springframework.boot.actuate.health.Health;
+                import org.springframework.boot.actuate.health.HealthIndicator;
+                import org.springframework.stereotype.Component;
+                
+                import javax.naming.Context;
+                import javax.naming.InitialContext;
+                import java.util.Properties;
+                
+                /**
+                 * Health Indicator custom pour verifier la connectivite JNDI vers le serveur EJB/WAS.
+                 * Expose via /actuator/health sous la cle "jndi".
+                 *
+                 * Etats possibles :
+                 * - UP : le serveur EJB est accessible via JNDI
+                 * - DOWN : le serveur EJB est inaccessible (timeout, connexion refusee, etc.)
+                 */
+                @Component
+                public class JndiHealthIndicator implements HealthIndicator {
+                
+                    private static final Logger log = LoggerFactory.getLogger(JndiHealthIndicator.class);
+                
+                    @Value("${ejb.jndi.provider.url:localhost:1099}")
+                    private String jndiProviderUrl;
+                
+                    @Value("${ejb.jndi.factory:org.jboss.naming.remote.client.InitialContextFactory}")
+                    private String jndiFactory;
+                
+                    @Override
+                    public Health health() {
+                        long start = System.currentTimeMillis();
+                        try {
+                            Properties props = new Properties();
+                            props.put(Context.INITIAL_CONTEXT_FACTORY, jndiFactory);
+                            props.put(Context.PROVIDER_URL, jndiProviderUrl);
+                            // Timeout de 5 secondes pour le health check
+                            props.put("jndi.connection.timeout", "5000");
+                
+                            InitialContext ctx = new InitialContext(props);
+                            ctx.close();
+                
+                            long duration = System.currentTimeMillis() - start;
+                            log.debug("[HEALTH-JNDI] Connexion JNDI OK en {}ms", duration);
+                            return Health.up()
+                                    .withDetail("jndiProviderUrl", jndiProviderUrl)
+                                    .withDetail("responseTime", duration + "ms")
+                                    .build();
+                        } catch (Exception e) {
+                            long duration = System.currentTimeMillis() - start;
+                            log.warn("[HEALTH-JNDI] Connexion JNDI echouee en {}ms : {}", duration, e.getMessage());
+                            return Health.down()
+                                    .withDetail("jndiProviderUrl", jndiProviderUrl)
+                                    .withDetail("error", e.getMessage())
+                                    .withDetail("responseTime", duration + "ms")
+                                    .build();
+                        }
+                    }
+                }
+                """.formatted(BASE_PACKAGE);
+
+        Files.writeString(healthDir.resolve("JndiHealthIndicator.java"), code);
+        log.info("JndiHealthIndicator genere dans le package health");
     }
 
     // ===================== BASE INTERFACES =====================
@@ -879,6 +1009,11 @@ public class CodeGenerationEngine {
         if (!scopeAnnotation.isEmpty()) {
             sb.append("import org.springframework.context.annotation.Scope;\n");
         }
+        // Resilience4j imports
+        sb.append("import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;\n");
+        sb.append("import io.github.resilience4j.retry.annotation.Retry;\n");
+        sb.append("import io.github.resilience4j.bulkhead.annotation.Bulkhead;\n");
+        sb.append("import io.github.resilience4j.timelimiter.annotation.TimeLimiter;\n");
         sb.append("\nimport javax.naming.Context;\n");
         sb.append("import javax.naming.InitialContext;\n");
         sb.append("import javax.naming.NamingException;\n");
@@ -902,6 +1037,10 @@ public class CodeGenerationEngine {
         sb.append("    @Value(\"${ejb.jndi.factory:org.jboss.naming.remote.client.InitialContextFactory}\")\n");
         sb.append("    private String jndiFactory;\n\n");
 
+        // Resilience4j annotations sur la methode execute()
+        sb.append("    @CircuitBreaker(name = \"ejbService\", fallbackMethod = \"executeFallback\")\n");
+        sb.append("    @Retry(name = \"ejbService\")\n");
+        sb.append("    @Bulkhead(name = \"ejbService\")\n");
         sb.append("    public ").append(outputDto).append(" execute(").append(inputDto).append(" input) throws Exception {\n");
         sb.append("        // [EJB-CALL] Debut de l'appel EJB\n");
         sb.append("        log.info(\"[EJB-CALL] Appel de ").append(useCase.getClassName()).append(".execute() — JNDI: ").append(jndiName).append("\");\n\n");
@@ -958,6 +1097,20 @@ public class CodeGenerationEngine {
         sb.append("            }\n");
         sb.append("        }\n");
         sb.append("        throw new NoSuchMethodException(\"Aucune methode execute() ou process() trouvee sur \" + ejb.getClass().getName());\n");
+        sb.append("    }\n\n");
+
+        // Methode fallback Resilience4j
+        sb.append("    /**\n");
+        sb.append("     * Fallback appele automatiquement par Resilience4j lorsque :\n");
+        sb.append("     * - Le circuit breaker est ouvert (serveur EJB/WAS indisponible)\n");
+        sb.append("     * - Les retries sont epuises\n");
+        sb.append("     * - Le bulkhead est sature (trop d'appels concurrents)\n");
+        sb.append("     * Retourne une reponse degradee plutot qu'une erreur 500.\n");
+        sb.append("     */\n");
+        sb.append("    public ").append(outputDto).append(" executeFallback(").append(inputDto).append(" input, Throwable t) {\n");
+        sb.append("        log.error(\"[RESILIENCE-FALLBACK] Service EJB indisponible pour ").append(useCase.getClassName()).append(" — cause : {}\", t.getMessage());\n");
+        sb.append("        log.warn(\"[RESILIENCE-FALLBACK] Retour d'une reponse degradee pour ").append(useCase.getClassName()).append("\");\n");
+        sb.append("        throw new RuntimeException(\"Service EJB temporairement indisponible (").append(useCase.getClassName()).append("). Veuillez reessayer plus tard.\", t);\n");
         sb.append("    }\n");
         sb.append("}\n");
 
@@ -980,6 +1133,10 @@ public class CodeGenerationEngine {
         imports.add("javax.naming.InitialContext");
         imports.add("javax.naming.NamingException");
         imports.add("java.util.Properties");
+        // Resilience4j imports
+        imports.add("io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker");
+        imports.add("io.github.resilience4j.retry.annotation.Retry");
+        imports.add("io.github.resilience4j.bulkhead.annotation.Bulkhead");
 
         // AXE 2 : Importer l'interface @Remote si connue
         String remoteIfaceName = useCase.getRemoteInterfaceName();
@@ -1054,6 +1211,11 @@ public class CodeGenerationEngine {
                     .map(UseCaseInfo.ParameterInfo::getName)
                     .collect(Collectors.joining(", "));
 
+            // Resilience4j annotations
+            String fallbackName = method.getName() + "Fallback";
+            sb.append("    @CircuitBreaker(name = \"ejbService\", fallbackMethod = \"").append(fallbackName).append("\")\n");
+            sb.append("    @Retry(name = \"ejbService\")\n");
+            sb.append("    @Bulkhead(name = \"ejbService\")\n");
             sb.append("    public ").append(returnType).append(" ").append(method.getName()).append("(").append(params).append(") throws Exception {\n");
             // BUG K : Tracabilite complete avec 6 prefixes EJB
             sb.append("        // --- DEBUT APPEL EJB ---\n");
@@ -1114,6 +1276,22 @@ public class CodeGenerationEngine {
                     sb.append("        log.debug(\"[EJB-RESPONSE] Resultat : {}\", result);\n");
                     sb.append("        return result;\n");
                 }
+            }
+            sb.append("    }\n");
+
+            // Methode fallback Resilience4j pour cette methode
+            sb.append("\n");
+            sb.append("    /**\n");
+            sb.append("     * Fallback Resilience4j pour ").append(method.getName()).append("().\n");
+            sb.append("     * Appele quand le circuit breaker est ouvert, les retries epuises ou le bulkhead sature.\n");
+            sb.append("     */\n");
+            String fallbackParams = params.isEmpty() ? "Throwable t" : params + ", Throwable t";
+            sb.append("    public ").append(returnType).append(" ").append(fallbackName).append("(").append(fallbackParams).append(") {\n");
+            sb.append("        log.error(\"[RESILIENCE-FALLBACK] Service EJB indisponible pour ").append(useCase.getClassName()).append(".").append(method.getName()).append(" \u2014 cause : {}\", t.getMessage());\n");
+            if (method.getReturnType().equals("void")) {
+                sb.append("        throw new RuntimeException(\"Service EJB temporairement indisponible (").append(useCase.getClassName()).append(".").append(method.getName()).append("). Veuillez reessayer plus tard.\", t);\n");
+            } else {
+                sb.append("        throw new RuntimeException(\"Service EJB temporairement indisponible (").append(useCase.getClassName()).append(".").append(method.getName()).append("). Veuillez reessayer plus tard.\", t);\n");
             }
             sb.append("    }\n");
         }

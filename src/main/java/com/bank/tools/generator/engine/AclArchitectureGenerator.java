@@ -927,6 +927,10 @@ public class AclArchitectureGenerator {
         imports.add("import org.springframework.beans.factory.annotation.Value;");
         imports.add("import org.springframework.context.annotation.Profile;");
         imports.add("import org.springframework.stereotype.Service;");
+        // Resilience4j imports
+        imports.add("import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;");
+        imports.add("import io.github.resilience4j.retry.annotation.Retry;");
+        imports.add("import io.github.resilience4j.bulkhead.annotation.Bulkhead;");
 
         for (String imp : imports) sb.append(imp).append("\n");
         sb.append("\n");
@@ -976,6 +980,11 @@ public class AclArchitectureGenerator {
             String mapperField = toLowerCamel(deriveMapperName(ep));
             String jndiName = "java:global/bank/" + ep.useCaseName;
 
+            // Resilience4j annotations
+            String fallbackName = ep.methodName + "Fallback";
+            sb.append("    @CircuitBreaker(name = \"ejbService\", fallbackMethod = \"").append(fallbackName).append("\")\n");
+            sb.append("    @Retry(name = \"ejbService\")\n");
+            sb.append("    @Bulkhead(name = \"ejbService\")\n");
             sb.append("    @Override\n");
             sb.append("    public ").append(returnType).append(" ").append(ep.methodName).append("(");
 
@@ -1034,8 +1043,22 @@ public class AclArchitectureGenerator {
             sb.append("            throw exceptionTranslator.translate(e);\n");
             sb.append("        } finally {\n");
             sb.append("            if (ctx != null) { try { ctx.close(); } catch (Exception ignored) {} }\n");
-            sb.append("            log.info(\"[EJB-CLEANUP] Fin appel ").append(ep.useCaseName).append("\");\n");
+             sb.append("            log.info(\"[EJB-CLEANUP] Fin appel ").append(ep.useCaseName).append("\");");
             sb.append("        }\n");
+            sb.append("    }\n\n");
+
+            // Methode fallback Resilience4j
+            sb.append("    /**\n");
+            sb.append("     * Fallback Resilience4j pour ").append(ep.methodName).append("().\n");
+            sb.append("     * Appele quand le circuit breaker est ouvert, les retries epuises ou le bulkhead sature.\n");
+            sb.append("     */\n");
+            sb.append("    public ").append(returnType).append(" ").append(fallbackName).append("(");
+            List<String> fallbackParams = new ArrayList<>(params);
+            fallbackParams.add("Throwable t");
+            sb.append(String.join(", ", fallbackParams));
+            sb.append(") {\n");
+            sb.append("        log.error(\"[RESILIENCE-FALLBACK] Service EJB indisponible pour ").append(ep.useCaseName).append(" \u2014 cause : {}\", t.getMessage());\n");
+            sb.append("        throw new RuntimeException(\"Service EJB temporairement indisponible (").append(ep.useCaseName).append("). Veuillez reessayer plus tard.\", t);\n");
             sb.append("    }\n\n");
 
             // Methode Bytes supplementaire pour les endpoints byte[]
