@@ -417,7 +417,7 @@ public class AclArchitectureGenerator {
 
         sb.append("/**\n");
         sb.append(" * Request DTO pour ").append(humanize(ep.methodName)).append(".\n");
-        sb.append(" * Genere depuis ").append(ep.ejbInputDtoName != null ? ep.ejbInputDtoName : "auto").append(".\n");
+        // Commentaire de tracabilite supprime pour proprete architecturale
         sb.append(" */\n");
         sb.append("public class ").append(ep.requestDtoName).append(" {\n\n");
 
@@ -484,7 +484,7 @@ public class AclArchitectureGenerator {
 
         sb.append("/**\n");
         sb.append(" * Response DTO pour ").append(humanize(ep.methodName)).append(".\n");
-        sb.append(" * Genere depuis ").append(ep.ejbOutputDtoName != null ? ep.ejbOutputDtoName : "auto").append(".\n");
+        // Commentaire de tracabilite supprime pour proprete architecturale
         sb.append(" */\n");
         sb.append("public class ").append(ep.responseDtoName).append(" {\n\n");
 
@@ -662,7 +662,7 @@ public class AclArchitectureGenerator {
 
         sb.append("/**\n");
         sb.append(" * Interface Service pour le domaine BIAN ").append(group.serviceDomainTitle).append(".\n");
-        sb.append(" * Aucune dependance EJB — contrat purement REST.\n");
+        sb.append(" * Contrat de service purement REST.\n");
         sb.append(" */\n");
         sb.append("public interface ").append(group.serviceInterfaceName).append(" {\n\n");
 
@@ -1333,9 +1333,7 @@ public class AclArchitectureGenerator {
         for (String imp : imports) sb.append(imp).append("\n");
         sb.append("\n");
 
-        // AUCUN import EJB
-        sb.append("// AUCUN import de VoIn, VoOut, BaseUseCase, ValueObject, FwkRollbackException\n");
-        sb.append("// Le controller ne sait pas que des EJBs existent derriere\n\n");
+        // Isolation respectee — aucun commentaire revelant l'implementation interne
 
         String basePath = "/api/v1/" + group.serviceDomain;
         String tagName = group.serviceDomainTitle;
