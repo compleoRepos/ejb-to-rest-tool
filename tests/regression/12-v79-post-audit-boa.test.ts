@@ -769,11 +769,13 @@ describe("Intégration — Pipeline BMCE avec Saga + Microservices", () => {
     }
   });
 
-  it("T-INT-3: generateAllSagas produit des fichiers pour chaque candidat", () => {
+  it("T-INT-3: generateAllSagas produit des fichiers pour chaque domaine unique", () => {
     if (!fs.existsSync(ZIP_PATH)) return;
     if (sagaCandidates.length === 0) return;
     const results = generateAllSagas(sagaCandidates, "com.bmce.banking.saga");
-    expect(results.length).toBe(sagaCandidates.length);
+    // v8.1: deduplication par domaine — results.length <= candidates.length
+    const uniqueDomains = new Set(sagaCandidates.map(c => c.domain));
+    expect(results.length).toBe(uniqueDomains.size);
     for (const r of results) {
       expect(r.files.length).toBeGreaterThanOrEqual(5);
       // Chaque saga doit avoir les 5 types de fichiers

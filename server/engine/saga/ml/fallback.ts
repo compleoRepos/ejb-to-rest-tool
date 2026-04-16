@@ -1,15 +1,21 @@
 /**
- * Saga ML Fallback — Compleo v8.0
+ * Saga ML Fallback — Compleo v8.1
  *
- * Fallback rule-based quand Ollama est absent ou que la réponse ML
- * échoue à la validation. Produit un enrichissement minimal mais
- * fonctionnel basé sur des patterns bancaires connus.
+ * Fallback rule-based quand Ollama est absent ou que la reponse ML
+ * echoue a la validation. Produit un enrichissement minimal mais
+ * fonctionnel base sur des patterns bancaires connus.
  *
  * v8.0 fixes:
  *   - BUG-3: All references use "ctx" (not "context")
  *   - BUG-3: No hyphens in method names (camelCase only)
  *   - BUG-3: No "localService" fallback (use jdbcTemplate or real service)
  *   - BUG-4: All services referenced are from the injected set or jdbcTemplate
+ *
+ * v8.1 fixes:
+ *   - BUG-2: No SAGA_ID on business tables — use real business IDs
+ *            (REFERENCE, ID_TRANSACTION, NUM_COMPTE, etc.)
+ *   - BUG-3: No T_SAGA_LOG in compensations — compensations call real
+ *            business services or update real business tables
  *
  * @author Hamza NORDINE
  */
@@ -29,6 +35,14 @@ interface CompensationPattern {
   requiredService: string;
 }
 
+/**
+ * v8.1 BUG-2 fix: Toutes les compensations utilisent des IDs metier reels
+ * (REFERENCE, ID_TRANSACTION, NUM_COMPTE, etc.) — jamais SAGA_ID sur tables business.
+ *
+ * v8.1 BUG-3 fix: Aucune compensation ne touche T_SAGA_LOG.
+ * Les compensations appellent les vrais services metier ou mettent a jour
+ * les vraies tables business.
+ */
 const BANKING_COMPENSATION_PATTERNS: CompensationPattern[] = [
   {
     stepPattern: /débit|prélèvement|mouvement.*comptable|debit/i,
@@ -65,8 +79,11 @@ const BANKING_COMPENSATION_PATTERNS: CompensationPattern[] = [
     stepPattern: /mise.*à.*jour.*statut|update.*status|mise.*a.*jour.*statut/i,
     compensationTemplate: `// Restauration du statut precedent
         log.info("Compensation statut: restauration statut precedent");
-        jdbcTemplate.update("UPDATE T_SAGA_LOG SET STATUT = 'ROLLBACK' WHERE SAGA_ID = ?", ctx.getSagaId());`,
-    contextFields: [],
+        jdbcTemplate.update("UPDATE T_OPERATIONS SET STATUT = ? WHERE REFERENCE_OPERATION = ?", ctx.getStatutPrecedent(), ctx.getReferenceOperation());`,
+    contextFields: [
+      { name: "referenceOperation", type: "String" },
+      { name: "statutPrecedent", type: "String" },
+    ],
     requiredService: "jdbcTemplate",
   },
   {
@@ -83,11 +100,12 @@ const BANKING_COMPENSATION_PATTERNS: CompensationPattern[] = [
   {
     stepPattern: /décaissement|deblocage|versement|déblocage/i,
     compensationTemplate: `// Annulation du decaissement
-        log.info("Compensation decaissement: annulation {}", ctx.getSagaId());
-        jdbcTemplate.update("UPDATE T_COMPTES SET SOLDE = SOLDE - ? WHERE NUM_COMPTE = ?", ctx.getMontant(), ctx.getCompteDebiteur());`,
+        log.info("Compensation decaissement: annulation ref={}", ctx.getReferenceDecaissement());
+        jdbcTemplate.update("UPDATE T_COMPTES SET SOLDE = SOLDE - ? WHERE NUM_COMPTE = ?", ctx.getMontantDecaisse(), ctx.getCompteDebiteur());`,
     contextFields: [
       { name: "referenceDecaissement", type: "String" },
       { name: "montantDecaisse", type: "BigDecimal" },
+      { name: "compteDebiteur", type: "String" },
     ],
     requiredService: "jdbcTemplate",
   },
@@ -114,44 +132,50 @@ const BANKING_COMPENSATION_PATTERNS: CompensationPattern[] = [
   {
     stepPattern: /echeancier|échéancier|amortissement|plan.*remboursement/i,
     compensationTemplate: `// Suppression de l'echeancier genere
-        log.info("Compensation echeancier: suppression");
-        jdbcTemplate.update("DELETE FROM T_ECHEANCIERS WHERE SAGA_ID = ?", ctx.getSagaId());`,
-    contextFields: [],
+        log.info("Compensation echeancier: suppression ref={}", ctx.getReferenceCredit());
+        jdbcTemplate.update("DELETE FROM T_ECHEANCIERS WHERE REFERENCE_CREDIT = ?", ctx.getReferenceCredit());`,
+    contextFields: [
+      { name: "referenceCredit", type: "String" },
+    ],
     requiredService: "jdbcTemplate",
   },
   {
     stepPattern: /conversion.*devise|change/i,
     compensationTemplate: `// Contre-passation de la conversion de devise
         log.info("Compensation conversion: contre-passation au taux {}", ctx.getTauxChange());
-        jdbcTemplate.update("UPDATE T_CONVERSIONS SET STATUT = 'ANNULE' WHERE SAGA_ID = ?", ctx.getSagaId());`,
+        jdbcTemplate.update("UPDATE T_CONVERSIONS SET STATUT = 'ANNULE' WHERE REFERENCE_CONVERSION = ?", ctx.getReferenceConversion());`,
     contextFields: [
       { name: "tauxChange", type: "BigDecimal" },
       { name: "montantMAD", type: "BigDecimal" },
+      { name: "referenceConversion", type: "String" },
     ],
     requiredService: "jdbcTemplate",
   },
   {
     stepPattern: /scoring|score/i,
     compensationTemplate: `// Invalidation du score calcule
-        log.info("Compensation scoring: invalidation");
-        jdbcTemplate.update("UPDATE T_SCORES_CREDIT SET STATUT = 'INVALIDE' WHERE SAGA_ID = ?", ctx.getSagaId());`,
-    contextFields: [],
+        log.info("Compensation scoring: invalidation ref={}", ctx.getReferenceScore());
+        jdbcTemplate.update("UPDATE T_SCORES_CREDIT SET STATUT = 'INVALIDE' WHERE REFERENCE_SCORE = ?", ctx.getReferenceScore());`,
+    contextFields: [
+      { name: "referenceScore", type: "String" },
+    ],
     requiredService: "jdbcTemplate",
   },
   {
     stepPattern: /vérification|verification|contrôle|controle|eligibilit|éligibilit/i,
     compensationTemplate: `// Annulation de la verification
-        log.info("Compensation verification: rollback");
-        jdbcTemplate.update("UPDATE T_SAGA_LOG SET STATUT = 'ROLLBACK' WHERE SAGA_ID = ? AND STEP_NAME = ?", ctx.getSagaId(), "${/* placeholder */""}"
-        );`,
-    contextFields: [],
+        log.info("Compensation verification: rollback ref={}", ctx.getReferenceVerification());
+        jdbcTemplate.update("UPDATE T_VERIFICATIONS SET STATUT = 'ANNULE' WHERE REFERENCE_VERIFICATION = ?", ctx.getReferenceVerification());`,
+    contextFields: [
+      { name: "referenceVerification", type: "String" },
+    ],
     requiredService: "jdbcTemplate",
   },
   {
     stepPattern: /création.*dossier|creation.*dossier|dossier.*crédit|dossier.*credit/i,
     compensationTemplate: `// Annulation du dossier cree
-        log.info("Compensation dossier: annulation");
-        jdbcTemplate.update("UPDATE T_DOSSIERS_CREDIT SET STATUT = 'ANNULE' WHERE SAGA_ID = ?", ctx.getSagaId());`,
+        log.info("Compensation dossier: annulation id={}", ctx.getInsertedId());
+        jdbcTemplate.update("UPDATE T_DOSSIERS_CREDIT SET STATUT = 'ANNULE' WHERE ID_DOSSIER = ?", ctx.getInsertedId());`,
     contextFields: [
       { name: "insertedId", type: "Long" },
     ],
@@ -160,41 +184,52 @@ const BANKING_COMPENSATION_PATTERNS: CompensationPattern[] = [
   {
     stepPattern: /décision|decision/i,
     compensationTemplate: `// Annulation de la decision
-        log.info("Compensation decision: rollback");
-        jdbcTemplate.update("UPDATE T_DECISIONS SET STATUT = 'ANNULE' WHERE SAGA_ID = ?", ctx.getSagaId());`,
-    contextFields: [],
+        log.info("Compensation decision: rollback ref={}", ctx.getReferenceDecision());
+        jdbcTemplate.update("UPDATE T_DECISIONS SET STATUT = 'ANNULE' WHERE REFERENCE_DECISION = ?", ctx.getReferenceDecision());`,
+    contextFields: [
+      { name: "referenceDecision", type: "String" },
+    ],
     requiredService: "jdbcTemplate",
   },
   {
     stepPattern: /calcul.*condition|conditions.*financ/i,
     compensationTemplate: `// Annulation des conditions financieres calculees
-        log.info("Compensation conditions financieres: rollback");
-        jdbcTemplate.update("UPDATE T_CONDITIONS_FINANCIERES SET STATUT = 'ANNULE' WHERE SAGA_ID = ?", ctx.getSagaId());`,
-    contextFields: [],
+        log.info("Compensation conditions financieres: rollback ref={}", ctx.getReferenceConditions());
+        jdbcTemplate.update("UPDATE T_CONDITIONS_FINANCIERES SET STATUT = 'ANNULE' WHERE REFERENCE_CONDITIONS = ?", ctx.getReferenceConditions());`,
+    contextFields: [
+      { name: "referenceConditions", type: "String" },
+    ],
     requiredService: "jdbcTemplate",
   },
   {
     stepPattern: /limite.*engagement|engagement/i,
     compensationTemplate: `// Restauration des limites d'engagement
-        log.info("Compensation limites engagement: rollback");
-        jdbcTemplate.update("UPDATE T_SAGA_LOG SET STATUT = 'ROLLBACK' WHERE SAGA_ID = ? AND STEP_NAME = ?", ctx.getSagaId(), "limites-engagement");`,
-    contextFields: [],
+        log.info("Compensation limites engagement: restauration ref={}", ctx.getReferenceEngagement());
+        jdbcTemplate.update("UPDATE T_ENGAGEMENTS SET MONTANT_ENGAGE = MONTANT_ENGAGE - ? WHERE REFERENCE_ENGAGEMENT = ?", ctx.getMontant(), ctx.getReferenceEngagement());`,
+    contextFields: [
+      { name: "referenceEngagement", type: "String" },
+      { name: "montant", type: "BigDecimal" },
+    ],
     requiredService: "jdbcTemplate",
   },
   {
     stepPattern: /évaluation|evaluation/i,
     compensationTemplate: `// Annulation de l'evaluation
-        log.info("Compensation evaluation: rollback");
-        jdbcTemplate.update("UPDATE T_SAGA_LOG SET STATUT = 'ROLLBACK' WHERE SAGA_ID = ? AND STEP_NAME = ?", ctx.getSagaId(), "evaluation");`,
-    contextFields: [],
+        log.info("Compensation evaluation: rollback ref={}", ctx.getReferenceEvaluation());
+        jdbcTemplate.update("UPDATE T_EVALUATIONS SET STATUT = 'ANNULE' WHERE REFERENCE_EVALUATION = ?", ctx.getReferenceEvaluation());`,
+    contextFields: [
+      { name: "referenceEvaluation", type: "String" },
+    ],
     requiredService: "jdbcTemplate",
   },
   {
     stepPattern: /validation|pièces|pieces|justificati/i,
     compensationTemplate: `// Annulation de la validation
-        log.info("Compensation validation: rollback");
-        jdbcTemplate.update("UPDATE T_SAGA_LOG SET STATUT = 'ROLLBACK' WHERE SAGA_ID = ? AND STEP_NAME = ?", ctx.getSagaId(), "validation");`,
-    contextFields: [],
+        log.info("Compensation validation: rollback ref={}", ctx.getReferenceValidation());
+        jdbcTemplate.update("UPDATE T_VALIDATIONS SET STATUT = 'ANNULE' WHERE REFERENCE_VALIDATION = ?", ctx.getReferenceValidation());`,
+    contextFields: [
+      { name: "referenceValidation", type: "String" },
+    ],
     requiredService: "jdbcTemplate",
   },
   {
@@ -207,17 +242,21 @@ const BANKING_COMPENSATION_PATTERNS: CompensationPattern[] = [
   {
     stepPattern: /enregistrement.*virement|insert.*virement/i,
     compensationTemplate: `// Annulation du virement enregistre
-        log.info("Compensation virement: annulation");
-        jdbcTemplate.update("UPDATE T_VIREMENTS_INTERNATIONAUX SET STATUT = 'ANNULE' WHERE SAGA_ID = ?", ctx.getSagaId());`,
-    contextFields: [],
+        log.info("Compensation virement: annulation ref={}", ctx.getReferenceVirement());
+        jdbcTemplate.update("UPDATE T_VIREMENTS_INTERNATIONAUX SET STATUT = 'ANNULE' WHERE REFERENCE_VIREMENT = ?", ctx.getReferenceVirement());`,
+    contextFields: [
+      { name: "referenceVirement", type: "String" },
+    ],
     requiredService: "jdbcTemplate",
   },
   {
     stepPattern: /création.*client|creation.*client|onboarding/i,
     compensationTemplate: `// Archivage du client cree
-        log.info("Compensation client: archivage");
-        jdbcTemplate.update("UPDATE T_CLIENTS SET STATUT = 'ARCHIVE' WHERE SAGA_ID = ?", ctx.getSagaId());`,
-    contextFields: [],
+        log.info("Compensation client: archivage id={}", ctx.getIdClient());
+        jdbcTemplate.update("UPDATE T_CLIENTS SET STATUT = 'ARCHIVE' WHERE ID_CLIENT = ?", ctx.getIdClient());`,
+    contextFields: [
+      { name: "idClient", type: "Long" },
+    ],
     requiredService: "jdbcTemplate",
   },
 ];
@@ -225,11 +264,12 @@ const BANKING_COMPENSATION_PATTERNS: CompensationPattern[] = [
 // ── API publique ────────────────────────────────────────────────────────────
 
 /**
- * Génère un enrichissement fallback rule-based pour un step Saga.
- * Utilisé quand Ollama est absent ou que la réponse ML est invalide.
+ * Genere un enrichissement fallback rule-based pour un step Saga.
+ * Utilise quand Ollama est absent ou que la reponse ML est invalide.
  *
  * v8.0: All generated code uses "ctx" (not "context"), camelCase method names,
  * and only references jdbcTemplate or actually-injected services.
+ * v8.1: No SAGA_ID on business tables, no T_SAGA_LOG in compensations.
  */
 export function generateFallbackEnrichment(ctx: StepContext): MLStepEnrichment {
   const stepBody = generateFallbackStepBody(ctx);
@@ -251,12 +291,12 @@ export function generateFallbackEnrichment(ctx: StepContext): MLStepEnrichment {
   };
 }
 
-// ── Générateurs fallback ────────────────────────────────────────────────────
+// ── Generateurs fallback ────────────────────────────────────────────────────
 
 /**
  * Converts a step label to a valid Java camelCase method name.
  * Transliterates accents and removes hyphens.
- * "vérification-éligibilité-kyc" → "verificationEligibiliteKyc"
+ * "verification-eligibilite-kyc" → "verificationEligibiliteKyc"
  */
 function toSafeMethodName(label: string): string {
   return label
@@ -363,6 +403,12 @@ function generateFallbackStepBody(ctx: StepContext): string {
   }
 }
 
+/**
+ * v8.1 BUG-2 + BUG-3 fix:
+ * - Compensations use real business IDs (REFERENCE, ID_TRANSACTION, etc.)
+ * - Compensations never touch T_SAGA_LOG — they update real business tables
+ * - Fallback generique uses the resolved service, not T_SAGA_LOG
+ */
 function generateFallbackCompensation(ctx: StepContext): string {
   // Chercher un pattern bancaire connu
   for (const pattern of BANKING_COMPENSATION_PATTERNS) {
@@ -371,11 +417,23 @@ function generateFallbackCompensation(ctx: StepContext): string {
     }
   }
 
-  // BUG-3 fix: Fallback générique uses jdbcTemplate (not localService)
-  // and camelCase method name (not kebab-case)
+  // v8.1 BUG-3 fix: Fallback generique appelle le vrai service metier
+  // au lieu de toucher T_SAGA_LOG
+  const service = resolveService(ctx);
+  const method = toSafeMethodName(ctx.stepLabel);
+
+  if (service !== "jdbcTemplate") {
+    // Service-based compensation: call the service's cancel/rollback method
+    return `// Compensation generique : ${ctx.stepLabel}
+        log.info("Compensation step ${ctx.stepNumber}: annulation via ${service}");
+        ${service}.annuler${method.charAt(0).toUpperCase() + method.slice(1)}(ctx);`;
+  }
+
+  // jdbcTemplate fallback: log the compensation without touching T_SAGA_LOG
   return `// Compensation generique : ${ctx.stepLabel}
         log.info("Compensation step ${ctx.stepNumber}: annulation");
-        jdbcTemplate.update("UPDATE T_SAGA_LOG SET STATUT = 'ROLLBACK' WHERE SAGA_ID = ? AND STEP_NAME = ?", ctx.getSagaId(), "${toSafeMethodName(ctx.stepLabel)}");`;
+        // TODO: implement compensation for ${ctx.stepLabel}
+        // Use the appropriate business table and business ID`;
 }
 
 function inferContextFields(ctx: StepContext): Array<{ name: string; type: string }> {
@@ -386,7 +444,7 @@ function inferContextFields(ctx: StepContext): Array<{ name: string; type: strin
     }
   }
 
-  // Inférer depuis les SQL statements
+  // Inferer depuis les SQL statements
   if (ctx.sqlStatements.length > 0) {
     const fields: Array<{ name: string; type: string }> = [];
     for (const sql of ctx.sqlStatements) {

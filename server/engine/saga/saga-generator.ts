@@ -130,9 +130,9 @@ export function generateSaga(
     category: "saga-orchestrator",
   });
 
-  // 5. SQL migration (audit log)
+  // 5. SQL migration (audit log) — v8.1: path unique par domaine
   files.push({
-    path: `src/main/resources/db/migration/V3__create_saga_log.sql`,
+    path: `src/main/resources/db/migration/V3__create_${domain.replace(/[^a-z0-9]/g, '_')}_saga_log.sql`,
     content: generateSqlMigration(domainPascal),
     category: "saga-migration",
   });
@@ -159,16 +159,22 @@ export function generateSaga(
 /**
  * Génère les Sagas pour tous les candidats détectés.
  * Inclut les fichiers partagés (retry, CB, savepoints, recovery) UNE SEULE FOIS.
+ *
+ * v8.1 BUG-1 fix: Déduplique par domaine — si plusieurs candidats partagent le même
+ * domaine (ex: 3 méthodes du même EJB), on ne garde que le candidat le plus riche
+ * (celui avec le plus de writeOperations) pour éviter les fichiers dupliqués.
  */
 export function generateAllSagas(
   candidates: SagaCandidate[],
   basePackage: string,
 ): SagaGenerationResult[] {
-  const perSagaResults = candidates.map((c) => generateSaga(c, basePackage));
+  // BUG-1 fix: Dédupliquer par domaine — garder le candidat le plus riche
+  const deduped = deduplicateCandidatesByDomain(candidates);
+  const perSagaResults = deduped.map((c) => generateSaga(c, basePackage));
 
   // Fichiers partagés — générés 1 seule fois, ajoutés au premier résultat
   if (perSagaResults.length > 0) {
-    const sharedFiles = generateSharedSagaFiles(basePackage, candidates);
+    const sharedFiles = generateSharedSagaFiles(basePackage, deduped);
     perSagaResults[0].files = [...perSagaResults[0].files, ...sharedFiles];
   }
 
@@ -236,9 +242,9 @@ export async function generateSagaWithML(
     category: "saga-orchestrator",
   });
 
-  // SQL migration (identique)
+  // SQL migration — v8.1: path unique par domaine
   files.push({
-    path: `src/main/resources/db/migration/V3__create_saga_log.sql`,
+    path: `src/main/resources/db/migration/V3__create_${domain.replace(/[^a-z0-9]/g, '_')}_saga_log.sql`,
     content: generateSqlMigration(domainPascal),
     category: "saga-migration",
   });
@@ -271,20 +277,24 @@ export async function generateSagaWithML(
 /**
  * Génère toutes les Sagas avec enrichissement ML.
  * Version async de generateAllSagas.
+ *
+ * v8.1 BUG-1 fix: Déduplique par domaine avant génération.
  */
 export async function generateAllSagasWithML(
   candidates: SagaCandidate[],
   basePackage: string,
   mlEnricher: SagaMLEnricher,
 ): Promise<SagaGenerationResult[]> {
+  // BUG-1 fix: Dédupliquer par domaine
+  const deduped = deduplicateCandidatesByDomain(candidates);
   const results: SagaGenerationResult[] = [];
-  for (const c of candidates) {
+  for (const c of deduped) {
     results.push(await generateSagaWithML(c, basePackage, mlEnricher));
   }
 
   // Fichiers partagés — générés 1 seule fois
   if (results.length > 0) {
-    const sharedFiles = generateSharedSagaFiles(basePackage, candidates);
+    const sharedFiles = generateSharedSagaFiles(basePackage, deduped);
     results[0].files = [...results[0].files, ...sharedFiles];
   }
 
@@ -1790,3 +1800,44 @@ function toConstCase(s: string): string {
 function lcFirst(s: string): string {
   return s.charAt(0).toLowerCase() + s.slice(1);
 }
+
+/**
+ * v8.1 BUG-1 fix: Déduplique les candidats par domaine.
+ *
+ * Quand le détecteur crée un candidat par méthode (ex: 3 méthodes du même EJB
+ * génèrent 3 candidats "credit"), on ne garde que le candidat le plus riche
+ * pour chaque domaine (celui avec le plus de writeOperations, puis le plus de
+ * dépendances inter-services).
+ *
+ * Cela évite les fichiers dupliqués (CreditSagaState.java x3) et les paths
+ * de migration SQL en conflit.
+ */
+function deduplicateCandidatesByDomain(candidates: SagaCandidate[]): SagaCandidate[] {
+  const byDomain = new Map<string, SagaCandidate>();
+
+  for (const c of candidates) {
+    const existing = byDomain.get(c.domain);
+    if (!existing) {
+      byDomain.set(c.domain, c);
+    } else {
+      // Garder le candidat le plus riche :
+      // 1. Plus de writeOperations
+      // 2. Plus de dépendances inter-services
+      // 3. Plus de code source (rawSource plus long)
+      const score = (cand: SagaCandidate) =>
+        cand.writeOperations.length * 100 +
+        cand.interServiceCount * 10 +
+        cand.rawSource.length / 1000;
+      if (score(c) > score(existing)) {
+        byDomain.set(c.domain, c);
+      }
+    }
+  }
+
+  return [...byDomain.values()];
+}
+
+/**
+ * Exported for testing.
+ */
+export { deduplicateCandidatesByDomain };
