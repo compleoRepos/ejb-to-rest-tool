@@ -1314,7 +1314,10 @@ public class AclArchitectureGenerator {
         imports.add("import " + PKG_DOMAIN_SERVICE + "." + group.serviceInterfaceName + ";");
         imports.add("import io.swagger.v3.oas.annotations.Operation;");
         imports.add("import io.swagger.v3.oas.annotations.Parameter;");
+        imports.add("import io.swagger.v3.oas.annotations.responses.ApiResponse;");
+        imports.add("import io.swagger.v3.oas.annotations.responses.ApiResponses;");
         imports.add("import io.swagger.v3.oas.annotations.tags.Tag;");
+        imports.add("import org.springframework.validation.annotation.Validated;");
         imports.add("import jakarta.validation.Valid;");
         imports.add("import org.slf4j.Logger;");
         imports.add("import org.slf4j.LoggerFactory;");
@@ -1345,6 +1348,7 @@ public class AclArchitectureGenerator {
 
         sb.append("@RestController\n");
         sb.append("@RequestMapping(\"").append(basePath).append("\")\n");
+        sb.append("@Validated\n");
         sb.append("@Tag(name = \"").append(tagName).append("\", description = \"").append(tagDesc).append("\")\n");
         sb.append("public class ").append(group.controllerName).append(" {\n\n");
 
@@ -1373,6 +1377,18 @@ public class AclArchitectureGenerator {
 
             sb.append("    @Operation(operationId = \"").append(operationId).append("\",\n");
             sb.append("               summary = \"").append(summary).append("\")\n");
+            // @ApiResponses Swagger — documentation des codes de reponse
+            sb.append("    @ApiResponses(value = {\n");
+            if (httpStatus == 201) {
+                sb.append("        @ApiResponse(responseCode = \"201\", description = \"Ressource creee avec succes\"),\n");
+            } else {
+                sb.append("        @ApiResponse(responseCode = \"200\", description = \"Operation reussie\"),\n");
+            }
+            sb.append("        @ApiResponse(responseCode = \"400\", description = \"Requete invalide\"),\n");
+            sb.append("        @ApiResponse(responseCode = \"401\", description = \"Non authentifie\"),\n");
+            sb.append("        @ApiResponse(responseCode = \"403\", description = \"Acces refuse\"),\n");
+            sb.append("        @ApiResponse(responseCode = \"500\", description = \"Erreur interne du serveur\")\n");
+            sb.append("    })\n");
 
             // BUG 4: @PreAuthorize si @RolesAllowed detecte sur le UseCase
             if (ep.useCaseInfo != null && ep.useCaseInfo.getRolesAllowed() != null
@@ -1483,8 +1499,12 @@ public class AclArchitectureGenerator {
                 package %s;
 
                 import %s.ApiException;
+                import org.slf4j.Logger;
+                import org.slf4j.LoggerFactory;
+                import org.slf4j.MDC;
                 import org.springframework.http.HttpStatus;
                 import org.springframework.http.ResponseEntity;
+                import org.springframework.security.access.AccessDeniedException;
                 import org.springframework.web.bind.MethodArgumentNotValidException;
                 import org.springframework.web.bind.annotation.ControllerAdvice;
                 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -1494,16 +1514,32 @@ public class AclArchitectureGenerator {
                 import java.util.Map;
                 import java.util.stream.Collectors;
 
+                /**
+                 * Gestionnaire global des exceptions REST.
+                 * Produit des reponses JSON structurees avec correlation-id pour la tracabilite.
+                 */
                 @ControllerAdvice
                 public class GlobalExceptionHandler {
 
-                    @ExceptionHandler(ApiException.class)
-                    public ResponseEntity<Map<String, Object>> handleApiException(ApiException ex) {
+                    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+                    private Map<String, Object> buildErrorBody(int status, String code, String message) {
                         Map<String, Object> body = new LinkedHashMap<>();
                         body.put("timestamp", LocalDateTime.now().toString());
-                        body.put("status", ex.getHttpStatus());
-                        body.put("code", ex.getCode());
-                        body.put("message", ex.getMessage());
+                        body.put("status", status);
+                        body.put("code", code);
+                        body.put("message", message);
+                        String correlationId = MDC.get("correlationId");
+                        if (correlationId != null) {
+                            body.put("correlationId", correlationId);
+                        }
+                        return body;
+                    }
+
+                    @ExceptionHandler(ApiException.class)
+                    public ResponseEntity<Map<String, Object>> handleApiException(ApiException ex) {
+                        log.warn("[EXCEPTION] ApiException: {} (code={})", ex.getMessage(), ex.getCode());
+                        Map<String, Object> body = buildErrorBody(ex.getHttpStatus(), ex.getCode(), ex.getMessage());
                         return new ResponseEntity<>(body, HttpStatus.valueOf(ex.getHttpStatus()));
                     }
 
@@ -1512,21 +1548,32 @@ public class AclArchitectureGenerator {
                         String errors = ex.getBindingResult().getFieldErrors().stream()
                             .map(e -> e.getField() + ": " + e.getDefaultMessage())
                             .collect(Collectors.joining(", "));
-                        Map<String, Object> body = new LinkedHashMap<>();
-                        body.put("timestamp", LocalDateTime.now().toString());
-                        body.put("status", 400);
-                        body.put("code", "VALIDATION_ERROR");
-                        body.put("message", errors);
+                        log.warn("[EXCEPTION] Validation: {}", errors);
+                        Map<String, Object> body = buildErrorBody(400, "VALIDATION_ERROR", errors);
                         return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
+                    }
+
+                    @ExceptionHandler(AccessDeniedException.class)
+                    public ResponseEntity<Map<String, Object>> handleAccessDenied(AccessDeniedException ex) {
+                        log.warn("[EXCEPTION] Acces refuse: {}", ex.getMessage());
+                        Map<String, Object> body = buildErrorBody(403, "ACCESS_DENIED", "Acces refuse");
+                        return new ResponseEntity<>(body, HttpStatus.FORBIDDEN);
+                    }
+
+                    @ExceptionHandler(RuntimeException.class)
+                    public ResponseEntity<Map<String, Object>> handleRuntime(RuntimeException ex) {
+                        log.error("[EXCEPTION] RuntimeException: {}", ex.getMessage(), ex);
+                        String message = ex.getMessage() != null && ex.getMessage().contains("temporairement indisponible")
+                            ? ex.getMessage()
+                            : "Service temporairement indisponible";
+                        Map<String, Object> body = buildErrorBody(503, "SERVICE_UNAVAILABLE", message);
+                        return new ResponseEntity<>(body, HttpStatus.SERVICE_UNAVAILABLE);
                     }
 
                     @ExceptionHandler(Exception.class)
                     public ResponseEntity<Map<String, Object>> handleGeneric(Exception ex) {
-                        Map<String, Object> body = new LinkedHashMap<>();
-                        body.put("timestamp", LocalDateTime.now().toString());
-                        body.put("status", 500);
-                        body.put("code", "INTERNAL_ERROR");
-                        body.put("message", "Erreur interne du serveur");
+                        log.error("[EXCEPTION] Erreur interne: {}", ex.getMessage(), ex);
+                        Map<String, Object> body = buildErrorBody(500, "INTERNAL_ERROR", "Erreur interne du serveur");
                         return new ResponseEntity<>(body, HttpStatus.INTERNAL_SERVER_ERROR);
                     }
                 }
@@ -1560,7 +1607,24 @@ public class AclArchitectureGenerator {
                 # carte-service.url=http://carte-service:8080
                 """);
 
-        log.info("[ACL] Profils Spring generes (jndi, mock, http)");
+        Files.writeString(resourcesDir.resolve("application-dev.properties"), """
+                # Profil Developpement
+                spring.profiles.active=mock
+                logging.level.com.bank.api=DEBUG
+                springdoc.swagger-ui.enabled=true
+                management.endpoints.web.exposure.include=health,info,metrics,circuitbreakers,retries,bulkheads
+                """);
+
+        Files.writeString(resourcesDir.resolve("application-prod.properties"), """
+                # Profil Production
+                spring.profiles.active=jndi
+                logging.level.com.bank.api=WARN
+                springdoc.swagger-ui.enabled=false
+                management.endpoints.web.exposure.include=health,metrics
+                management.endpoint.health.show-details=never
+                """);
+
+        log.info("[ACL] Profils Spring generes (jndi, mock, http, dev, prod)");
     }
 
     // =====================================================================
@@ -1587,6 +1651,7 @@ public class AclArchitectureGenerator {
                 if (ep.requestDtoName != null) imports.add("import " + PKG_API_DTO_REQUEST + "." + ep.requestDtoName + ";");
             }
             imports.add("import com.fasterxml.jackson.databind.ObjectMapper;");
+            imports.add("import org.junit.jupiter.api.DisplayName;");
             imports.add("import org.junit.jupiter.api.Test;");
             imports.add("import org.springframework.beans.factory.annotation.Autowired;");
             imports.add("import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;");
@@ -1644,12 +1709,19 @@ public class AclArchitectureGenerator {
                     sb.append("        mockMvc.perform(").append(mockMvcMethod).append("(\"").append(testUrl).append("\"))\n");
                 }
 
-                sb.append("                .andExpect(status().is(").append(expectedStatus).append("));\n");
-                sb.append("    }\n\n");
+                 sb.append("                .andExpect(status().is(").append(expectedStatus).append("))");
+                // Verifier le content-type JSON si reponse non-byte[]
+                boolean isByteArray = isByteArrayResponse(ep, analysis);
+                if (!isByteArray && ep.responseDtoName != null) {
+                    sb.append("\n                .andExpect(content().contentType(MediaType.APPLICATION_JSON))");
+                }
+                sb.append(";\n");
+                sb.append("    }\n\n");;
 
                 // Test validation (pour les endpoints avec body)
                 if (ep.requestDtoName != null && !"GET".equals(httpMethod)) {
                     sb.append("    @Test\n");
+                    sb.append("    @DisplayName(\"Validation: ").append(ep.methodName).append(" avec body vide doit retourner 400\")\n");
                     sb.append("    void ").append(ep.methodName).append("_withEmptyBody_shouldReturn400() throws Exception {\n");
                     sb.append("        mockMvc.perform(").append(mockMvcMethod).append("(\"").append(testUrl).append("\")\n");
                     sb.append("                .contentType(MediaType.APPLICATION_JSON)\n");
@@ -1675,7 +1747,9 @@ public class AclArchitectureGenerator {
 
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(testPkg).append(";\n\n");
+        sb.append("import org.junit.jupiter.api.DisplayName;\n");
         sb.append("import org.junit.jupiter.api.Test;\n");
+        sb.append("import org.springframework.http.MediaType;\n");
         sb.append("import org.springframework.beans.factory.annotation.Autowired;\n");
         sb.append("import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;\n");
         sb.append("import org.springframework.boot.test.context.SpringBootTest;\n");
@@ -1707,6 +1781,22 @@ public class AclArchitectureGenerator {
         sb.append("    @Test\n");
         sb.append("    void swaggerUi_shouldReturn200() throws Exception {\n");
         sb.append("        mockMvc.perform(get(\"/swagger-ui/index.html\"))\n");
+        sb.append("                .andExpect(status().isOk());\n");
+        sb.append("    }\n\n");
+
+        sb.append("    @Test\n");
+        sb.append("    @DisplayName(\"Actuator: health contient le status UP\")\n");
+        sb.append("    void actuatorHealth_shouldContainStatusUp() throws Exception {\n");
+        sb.append("        mockMvc.perform(get(\"/actuator/health\"))\n");
+        sb.append("                .andExpect(status().isOk())\n");
+        sb.append("                .andExpect(content().contentType(MediaType.APPLICATION_JSON))\n");
+        sb.append("                .andExpect(jsonPath(\"$.status\").value(\"UP\"));\n");
+        sb.append("    }\n\n");
+
+        sb.append("    @Test\n");
+        sb.append("    @DisplayName(\"Actuator: metrics Resilience4j accessibles\")\n");
+        sb.append("    void actuatorMetrics_shouldReturn200() throws Exception {\n");
+        sb.append("        mockMvc.perform(get(\"/actuator/metrics\"))\n");
         sb.append("                .andExpect(status().isOk());\n");
         sb.append("    }\n\n");
 

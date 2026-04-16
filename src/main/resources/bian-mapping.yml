@@ -171,6 +171,31 @@ bian:
         service-domain: "document-management"
         bian-id: "SD0281"
 
+      # --- Regulatory Compliance (SD0137) ---
+      - keywords: ["compliance", "conformite", "lbc", "lbcft", "kyc", "aml"]
+        service-domain: "regulatory-compliance"
+        bian-id: "SD0137"
+
+      # --- Risk Management (SD0410) ---
+      - keywords: ["risque", "risk", "var", "stress", "exposition"]
+        service-domain: "risk-management"
+        bian-id: "SD0410"
+
+      # --- Currency Exchange (SD0162) ---
+      - keywords: ["devise", "conversion", "forex", "change", "taux"]
+        service-domain: "currency-exchange"
+        bian-id: "SD0162"
+
+      # --- Payment Execution (SD0250) ---
+      - keywords: ["sepa", "swift", "international", "orchestrateur", "orchestration"]
+        service-domain: "payment-execution"
+        bian-id: "SD0250"
+
+      # --- Credit Scoring ---
+      - keywords: ["scoring", "notation", "score", "creditscoring"]
+        service-domain: "party-credit-risk"
+        bian-id: "SD0255"
+
     keywords-to-action:
       - keywords: ["ouvrir", "creer", "create", "open", "initier"]
         action: "initiation"
@@ -211,3 +236,23 @@ bian:
         action: "notification"
         http-method: "POST"
         http-status: 201
+
+      - keywords: ["calculer", "compute", "calculate", "scorer"]
+        action: "execution"
+        http-method: "POST"
+        http-status: 200
+
+      - keywords: ["valider", "validate", "verify", "verifier"]
+        action: "control"
+        http-method: "PUT"
+        http-status: 200
+
+      - keywords: ["annuler", "cancel", "reverse", "rejeter"]
+        action: "termination"
+        http-method: "PUT"
+        http-status: 200
+
+      - keywords: ["enrichir", "enrich", "completer"]
+        action: "update"
+        http-method: "PUT"
+        http-status: 200

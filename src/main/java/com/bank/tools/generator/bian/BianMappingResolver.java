@@ -218,15 +218,15 @@ public class BianMappingResolver {
         domainTitle = domainTitle.substring(0, 1).toUpperCase() + domainTitle.substring(1);
 
         return switch (action) {
-            case "initiation" -> "Creation / Ouverture — " + domainTitle;
-            case "retrieval" -> "Consultation — " + domainTitle;
-            case "update" -> "Mise a jour — " + domainTitle;
-            case "execution" -> "Execution — " + cleanName;
-            case "termination" -> "Cloture / Resiliation — " + domainTitle;
-            case "evaluation" -> "Simulation / Evaluation — " + domainTitle;
-            case "notification" -> "Notification — " + domainTitle;
-            case "control" -> "Controle / Changement statut — " + domainTitle;
-            default -> "Operation " + cleanName + " — " + domainTitle;
+            case "initiation" -> "Initier une nouvelle instance de " + domainTitle + " (" + cleanName + ")";
+            case "retrieval" -> "Consulter les informations de " + domainTitle + " (" + cleanName + ")";
+            case "update" -> "Mettre a jour une instance de " + domainTitle + " (" + cleanName + ")";
+            case "execution" -> "Executer l'operation " + cleanName + " sur " + domainTitle;
+            case "termination" -> "Cloturer / Resilier une instance de " + domainTitle + " (" + cleanName + ")";
+            case "evaluation" -> "Evaluer / Simuler une operation de " + domainTitle + " (" + cleanName + ")";
+            case "notification" -> "Envoyer une notification via " + domainTitle + " (" + cleanName + ")";
+            case "control" -> "Controler / Changer le statut de " + domainTitle + " (" + cleanName + ")";
+            default -> "Operation " + cleanName + " sur " + domainTitle;
         };
     }
 }
