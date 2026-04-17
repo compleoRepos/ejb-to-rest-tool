@@ -569,13 +569,25 @@ public class AclArchitectureGenerator {
         DtoInfo ejbDto = findDto(analysis, ep.ejbOutputDtoName);
         List<RestField> fields = deriveRestFields(ejbDto, false, analysis);
 
+        // Si le Response DTO est vide (aucun champ derive), ajouter des champs par defaut
+        // pour que Jackson puisse serialiser la reponse (evite HttpMediaTypeNotAcceptableException)
+        boolean addedDefaults = false;
+        if (fields.isEmpty()) {
+            fields.add(new RestField("code", "String", false));
+            fields.add(new RestField("message", "String", false));
+            fields.add(new RestField("data", "java.util.Map<String, Object>", false));
+            addedDefaults = true;
+        }
+
         boolean hasBigDecimal = fields.stream().anyMatch(f -> "BigDecimal".equals(f.type));
         boolean hasEnum = fields.stream().anyMatch(f -> isEnumType(f.type, analysis));
+        boolean hasMap = fields.stream().anyMatch(f -> f.type.contains("Map<"));
 
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(PKG_API_DTO_RESPONSE).append(";\n\n");
 
         if (hasBigDecimal) sb.append("import java.math.BigDecimal;\n");
+        if (hasMap) sb.append("import java.util.Map;\n");
         for (RestField f : fields) {
             if (isEnumType(f.type, analysis)) {
                 sb.append("import ").append(PKG_API_ENUM).append(".").append(f.type).append(";\n");
@@ -590,17 +602,19 @@ public class AclArchitectureGenerator {
         sb.append("public class ").append(ep.responseDtoName).append(" {\n\n");
 
         for (RestField f : fields) {
-            sb.append("    private ").append(f.type).append(" ").append(f.name).append(";\n");
+            String fieldType = f.type.replace("java.util.", "");
+            sb.append("    private ").append(fieldType).append(" ").append(f.name).append(";\n");
         }
         sb.append("\n");
 
         sb.append("    public ").append(ep.responseDtoName).append("() {}\n\n");
 
         for (RestField f : fields) {
+            String fieldType = f.type.replace("java.util.", "");
             String cap = capitalize(f.name);
             String getter = ("boolean".equals(f.type) ? "is" : "get") + cap;
-            sb.append("    public ").append(f.type).append(" ").append(getter).append("() { return ").append(f.name).append("; }\n");
-            sb.append("    public void set").append(cap).append("(").append(f.type).append(" ").append(f.name).append(") { this.").append(f.name).append(" = ").append(f.name).append("; }\n\n");
+            sb.append("    public ").append(fieldType).append(" ").append(getter).append("() { return ").append(f.name).append("; }\n");
+            sb.append("    public void set").append(cap).append("(").append(fieldType).append(" ").append(f.name).append(") { this.").append(f.name).append(" = ").append(f.name).append("; }\n\n");
         }
 
         sb.append("}\n");
@@ -1029,7 +1043,10 @@ public class AclArchitectureGenerator {
                         sb.append("        if (data.containsKey(\"").append(field.getName()).append("\")) response.").append(setter).append("((").append(castType).append(") data.get(\"").append(field.getName()).append("\")); \n");
                     }
                 } else {
-                    sb.append("        // TODO: mapper les champs du payload Envelope vers la response\n");
+                    // DTO EJB inconnu : extraire code/message du payload Envelope et passer le reste dans data
+                    sb.append("        if (data.containsKey(\"code\")) response.setCode((String) data.get(\"code\"));\n");
+                    sb.append("        if (data.containsKey(\"message\")) response.setMessage((String) data.get(\"message\"));\n");
+                    sb.append("        response.setData(data);\n");
                 }
                 sb.append("        return response;\n");
                 sb.append("    }\n\n");
@@ -1550,7 +1567,16 @@ public class AclArchitectureGenerator {
 
     private void generateMockFieldValues(StringBuilder sb, BianEndpoint ep, ProjectAnalysisResult analysis) {
         DtoInfo ejbOut = findDto(analysis, ep.ejbOutputDtoName);
-        if (ejbOut == null) return;
+        if (ejbOut == null) {
+            // Pas de DTO EJB source : peupler les champs par defaut (code, message, data)
+            sb.append("        response.setCode(\"000\");\n");
+            sb.append("        response.setMessage(\"Operation realisee avec succes\");\n");
+            sb.append("        java.util.Map<String, Object> mockData = new java.util.LinkedHashMap<>();\n");
+            sb.append("        mockData.put(\"timestamp\", java.time.Instant.now().toString());\n");
+            sb.append("        mockData.put(\"reference\", \"REF-" + ep.methodName.toUpperCase() + "\");\n");
+            sb.append("        response.setData(mockData);\n");
+            return;
+        }
 
         for (DtoInfo.FieldInfo field : ejbOut.getFields()) {
             if ("serialVersionUID".equals(field.getName()) || field.isStatic()) continue;
