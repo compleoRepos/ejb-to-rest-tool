@@ -950,8 +950,8 @@ public class AclArchitectureGenerator {
         if (ep.responseDtoName != null) imports.add("import " + PKG_API_DTO_RESPONSE + "." + ep.responseDtoName + ";");
         boolean isActionHandlerMapper = ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler();
         if (!isActionHandlerMapper) {
-            if (ep.ejbInputDtoName != null) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
-            if (ep.ejbOutputDtoName != null) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
+            if (ep.ejbInputDtoName != null && !isNonImportableEjbType(ep.ejbInputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
+            if (ep.ejbOutputDtoName != null && !isNonImportableEjbType(ep.ejbOutputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
         } else {
             imports.add("import " + PKG_INFRA_EJB_TYPES + ".Envelope;");
         }
@@ -1167,8 +1167,8 @@ public class AclArchitectureGenerator {
             // Pour ACTION_HANDLER, les types EJB sont remplaces par Envelope — ne pas importer les types EJB individuels
             boolean isActionHandlerEp = ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler();
             if (!isActionHandlerEp) {
-                if (ep.ejbInputDtoName != null) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
-                if (ep.ejbOutputDtoName != null) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
+            if (ep.ejbInputDtoName != null && !isNonImportableEjbType(ep.ejbInputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
+            if (ep.ejbOutputDtoName != null && !isNonImportableEjbType(ep.ejbOutputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
             }
             imports.add("import " + PKG_INFRA_EJB_MAPPER + "." + deriveMapperName(ep) + ";");
         }
@@ -1329,8 +1329,16 @@ public class AclArchitectureGenerator {
                 // ===== PATTERN CLASSIQUE : BaseUseCase.execute(VoIn) =====
 
                 // Mapper Request -> VoIn
+                boolean ejbInputIsStandardType = ep.ejbInputDtoName != null && isNonImportableEjbType(ep.ejbInputDtoName);
                 if (ep.requestDtoName != null && ep.ejbInputDtoName != null) {
-                    sb.append("            ").append(ep.ejbInputDtoName).append(" voIn = ").append(mapperField).append(".toEjb(request);\n");
+                    if (ejbInputIsStandardType) {
+                        // Le type EJB input est un type Java standard (String, void, etc.)
+                        // Le mapper retourne ce type, mais execute() attend ValueObject
+                        // On utilise un cast (ValueObject) car le runtime EJB accepte ce type
+                        sb.append("            Object voIn = ").append(mapperField).append(".toEjb(request);\n");
+                    } else {
+                        sb.append("            ").append(ep.ejbInputDtoName).append(" voIn = ").append(mapperField).append(".toEjb(request);\n");
+                    }
                 }
 
                 // JNDI lookup via cache
@@ -1343,7 +1351,11 @@ public class AclArchitectureGenerator {
                 if (hasReturn && ep.ejbOutputDtoName != null) {
                     sb.append("            ValueObject result = useCase.execute(");
                     if (ep.ejbInputDtoName != null) {
-                        sb.append("voIn");
+                        if (ejbInputIsStandardType) {
+                            sb.append("(ValueObject) voIn");
+                        } else {
+                            sb.append("voIn");
+                        }
                     } else {
                         sb.append("null");
                     }
@@ -1355,7 +1367,11 @@ public class AclArchitectureGenerator {
                 } else {
                     sb.append("            useCase.execute(");
                     if (ep.ejbInputDtoName != null) {
-                        sb.append("voIn");
+                        if (ejbInputIsStandardType) {
+                            sb.append("(ValueObject) voIn");
+                        } else {
+                            sb.append("voIn");
+                        }
                     } else {
                         sb.append("null");
                     }
@@ -2268,6 +2284,19 @@ public class AclArchitectureGenerator {
             "UUID", "Object", "Map", "List", "Set", "Collection", "HashMap", "ArrayList",
             "LinkedHashMap", "TreeMap", "HashSet", "TreeSet", "LinkedList"
     );
+
+    /**
+     * Returns true if the type should NOT be imported as an EJB type.
+     * Filters out Java primitives, standard types, void, and framework types.
+     */
+    private boolean isNonImportableEjbType(String type) {
+        if (type == null) return true;
+        return Set.of("void", "Void", "String", "Integer", "Long", "Double", "Float",
+                "Boolean", "Short", "Byte", "Character", "Number", "BigDecimal", "BigInteger",
+                "Object", "Date", "LocalDate", "LocalDateTime", "Instant", "Map", "List",
+                "Set", "Collection", "Serializable", "int", "long", "double", "float",
+                "boolean", "short", "byte", "char").contains(type);
+    }
 
     private boolean isFrameworkType(String type) {
         if (type == null) return false;
