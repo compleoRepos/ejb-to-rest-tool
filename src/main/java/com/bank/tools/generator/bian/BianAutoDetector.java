@@ -163,15 +163,18 @@ public class BianAutoDetector {
     // ===================== VERBES POUR EXTRACTION BQ =====================
 
     private static final String[] ALL_VERBS = {
-        // Prefixes longs d'abord (pour eviter que "Consult" matche avant "Consultation")
+        // Formes nominales longues d'abord (pour eviter que "Consult" matche avant "Consultation")
         "Consultation", "Annulation", "Emission", "Modification",
-        "Suppression", "Verification", "Activation", "MadCore",
-        // Verbes courts
-        "Add", "Ajouter", "Ajout", "Annuler", "Consulter", "Charger",
-        "Control", "Controler", "Get", "Is", "List", "Modif", "Modifier",
-        "Supf", "Supprimer", "Traitement", "Traiter", "Auth", "Authentifier",
+        "Suppression", "Verification", "Activation", "Receptionner",
+        // Formes verbales longues AVANT les courtes ("Modifier" avant "Modif", etc.)
+        "Authentifier", "Modifier", "Consulter", "Controler", "Supprimer",
+        "Annuler", "Verifier", "MadCore",
+        // Formes courtes (matchent apres les longues)
+        "Add", "Ajouter", "Ajout", "Charger",
+        "Control", "Consult", "Get", "Is", "List", "Modif",
+        "Supf", "Supp", "Traitement", "Traiter", "Auth",
         "Emit", "Emettre", "Activer", "Bloquer", "Ouvrir", "Cloturer",
-        "Simuler", "Envoyer", "Generer", "Receptionner", "Creer", "Verifier",
+        "Simuler", "Envoyer", "Generer", "Creer",
         "Executer", "Valider", "Approuver", "Rejeter", "Maj", "Scorer", "Notifier",
         "Virer", "Payer", "Debiter", "Crediter", "Convertir", "Filtrer",
         "Calculer", "Evaluer", "Estimer", "Archiver"

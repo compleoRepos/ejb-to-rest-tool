@@ -1765,6 +1765,18 @@ public class EjbProjectParser {
             return true;
         }
 
+        // 4. implements SynchroneService + contient ActionHandlerFactory/ActionHandler dans le code
+        //    = c'est le dispatcher parent qui route vers les handlers, pas un UseCase metier
+        boolean implementsSynchroneService = classDecl.getImplementedTypes().stream()
+                .anyMatch(t -> t.getNameAsString().equals("SynchroneService"));
+        if (implementsSynchroneService) {
+            String classSource = classDecl.toString();
+            if (classSource.contains("ActionHandlerFactory") || classSource.contains("ActionHandler")
+                    || classSource.contains("handlerFactory") || classSource.contains("getHandler")) {
+                return true;
+            }
+        }
+
         return false;
     }
 

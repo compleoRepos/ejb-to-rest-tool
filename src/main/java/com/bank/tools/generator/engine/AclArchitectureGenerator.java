@@ -399,6 +399,24 @@ public class AclArchitectureGenerator {
                 }
             }
         }
+
+        // ===== FIX 5 : Deduplication des noms de methodes Java =====
+        Map<String, List<BianEndpoint>> methodNameMap = new LinkedHashMap<>();
+        for (BianEndpoint ep : group.endpoints) {
+            methodNameMap.computeIfAbsent(ep.methodName, k -> new ArrayList<>()).add(ep);
+        }
+        for (var entry : methodNameMap.entrySet()) {
+            if (entry.getValue().size() > 1) {
+                int counter = 1;
+                for (BianEndpoint ep : entry.getValue()) {
+                    String originalName = ep.methodName;
+                    ep.methodName = originalName + counter;
+                    counter++;
+                    log.info("[ACL] Methode renommee : {} → {} ({})",
+                            originalName, ep.methodName, ep.useCaseName);
+                }
+            }
+        }
     }
 
     private String deriveMethodName(BianMapping mapping) {
