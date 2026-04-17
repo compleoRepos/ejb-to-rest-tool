@@ -10,6 +10,7 @@
 
 import { detectHandlerPattern, getMethodNameForHandler, getDomainForHandler } from "./engine/detectors/handler-pattern-detector";
 import type { HandlerPatternDetection } from "./engine/detectors/handler-pattern-detector";
+import { filterTestFiles } from "./engine/detectors/source-filter";
 
 // ─── IR Types ───────────────────────────────────────────────────────────────
 
@@ -225,8 +226,20 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
   const warnings: string[] = [];
   const javaFiles: JavaFile[] = [];
 
-  // Parse all Java files
-  for (const file of files) {
+  // v8.4 STEP 1: Filtrer les fichiers de test AVANT le parsing
+  // Seuil minimum : ne filtrer que quand il y a assez de fichiers (vrai projet, pas un test unitaire)
+  const MIN_FILES_FOR_FILTER = 5;
+  let sourceFiles = files;
+  if (files.length >= MIN_FILES_FOR_FILTER) {
+    const { filtered, testCount } = filterTestFiles(files);
+    sourceFiles = filtered;
+    if (testCount > 0) {
+      warnings.push(`[v8.4] ${testCount} fichiers de test exclus du parsing`);
+    }
+  }
+
+  // Parse all Java files (using filtered source files)
+  for (const file of sourceFiles) {
     if (!file.path.endsWith(".java")) continue;
     const packageName = extractPackage(file.content);
     const className = extractClassName(file.path, file.content);

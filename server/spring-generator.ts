@@ -22,6 +22,12 @@ import { isHttpClientClass, detectHttpClient, generateRestTemplateService } from
 import { scanModels, generateEntities } from "./engine/detectors/model-to-entity";
 import { analyzeEnvelope, generateEnvelopeDtos } from "./engine/detectors/envelope-replacer";
 
+// v8.4: Post-generation transformers
+import { transformEaiFrameworkReferences } from "./engine/transformer/eai-framework-transformer";
+import { replaceLegacyTypes } from "./engine/transformer/legacy-type-replacer";
+import { normalizeFieldReferences } from "./engine/transformer/field-name-normalizer";
+import { filterFacadeUseCases } from "./engine/detectors/facade-detector";
+
 // --- Re-export types from shared (backward compatibility) ---
 export type {
   GeneratedFile, GenerationResult, GenerationStats,
@@ -66,13 +72,25 @@ export function generateSpringBootProject(ir: ProjectIR, reportContext?: Migrati
   // Group UseCases by domain
   // v8.3: Exclude the Strategy facade class from service generation
   const facadeClass = ir.handlerPattern?.facadeClass ?? "";
-  const filteredUseCases = ir.useCases.filter(uc => {
+  let filteredUseCases = ir.useCases.filter(uc => {
     if (facadeClass && uc.className === facadeClass) {
       warnings.push(`[v8.3] Excluded facade ${facadeClass} from service generation`);
       return false;
     }
     return true;
   });
+
+  // v8.4 STEP 7: Exclude EJB facades (UCStrategie, AbstractFacade, Factory dispatchers)
+  const rawFiles = (ir as any)._rawFiles ?? [];
+  const { filtered: nonFacadeUseCases, excludedFacades } = filterFacadeUseCases(
+    filteredUseCases.map(uc => ({ className: uc.className, rawSource: uc.rawSource })),
+    rawFiles
+  );
+  if (excludedFacades.length > 0) {
+    warnings.push(`[v8.4] Excluded ${excludedFacades.length} facade(s): ${excludedFacades.join(", ")}`);
+    const nonFacadeNames = new Set(nonFacadeUseCases.map(uc => uc.className));
+    filteredUseCases = filteredUseCases.filter(uc => nonFacadeNames.has(uc.className));
+  }
 
   const domainMap = new Map<string, UseCaseIR[]>();
   for (const uc of filteredUseCases) {
@@ -210,7 +228,19 @@ public class BusinessRuleException extends RuntimeException {
       }
     }
   }
+  // v8.4 STEP 2: Collect domain service names to avoid generating duplicate stubs
+  const domainServiceNames = new Set<string>();
+  for (const [domain] of domainMap) {
+    const svcName = domain.charAt(0).toUpperCase() + domain.slice(1).replace(/[-_](\w)/g, (_: string, c: string) => c.toUpperCase()) + "Service";
+    domainServiceNames.add(svcName);
+  }
+
   for (const [svcType, usedMethods] of serviceMethodUsages) {
+    // v8.4 STEP 2: Skip stub generation if this service is already a domain service
+    if (domainServiceNames.has(svcType)) {
+      warnings.push(`[v8.4] Skipped stub for ${svcType} — already generated as domain service`);
+      continue;
+    }
     // FIX v7.8 BUG-7: Search source file with fallback — _rawFiles has { path, content } only (no className)
     // IMPORTANT: For EJBLocal interfaces (e.g. NotificationMulticanalEJBLocal), the Local interface
     // file is often empty (just `public interface Xxx {}`). We MUST search the EJB implementation first.
@@ -355,6 +385,24 @@ public class BusinessRuleException extends RuntimeException {
       if (resolvedImports.length > 0) {
         file.content = importResolver.injectImports(file.content, resolvedImports);
       }
+    }
+  }
+
+  // ─── v8.4: Post-generation transformers (STEP 3+4+5+6) ───
+  // Applied AFTER import resolution, BEFORE quality scoring.
+  // All transforms are idempotent.
+  for (const file of files) {
+    if (!file.path.endsWith(".java")) continue;
+
+    // STEP 3+4: EaiLog → @Slf4j log, FwkRollbackException → Spring
+    file.content = transformEaiFrameworkReferences(file.content);
+
+    // STEP 5: ValueObject/Envelope → DTOs (generic pass without UseCase context)
+    file.content = replaceLegacyTypes(file.content);
+
+    // STEP 6: Normalize field references in service files
+    if (file.path.includes("/service/") && file.path.endsWith("Service.java")) {
+      file.content = normalizeFieldReferences(file.content);
     }
   }
 
