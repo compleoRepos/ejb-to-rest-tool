@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
 import java.util.regex.*;
+import com.bank.tools.generator.engine.util.CodeGenUtils;
 
 /**
  * Parseur de contrats OpenAPI/Swagger (JSON).
@@ -327,7 +328,7 @@ public class OpenApiContractParser {
                 .replaceAll("/", "_")
                 .replaceAll("[^a-zA-Z0-9_]", "");
         if (clean.startsWith("_")) clean = clean.substring(1);
-        return method.toLowerCase() + capitalize(toCamelCase(clean));
+        return method.toLowerCase() + CodeGenUtils.capitalize(toCamelCase(clean));
     }
 
     private String extractJsonValue(String json, String key) {
@@ -399,12 +400,6 @@ public class OpenApiContractParser {
 
         return json.substring(startBracket);
     }
-
-    private String capitalize(String s) {
-        if (s == null || s.isEmpty()) return s;
-        return s.substring(0, 1).toUpperCase() + s.substring(1);
-    }
-
     private String toCamelCase(String s) {
         if (s == null) return "";
         StringBuilder sb = new StringBuilder();

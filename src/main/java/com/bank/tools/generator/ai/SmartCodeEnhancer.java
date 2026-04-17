@@ -28,10 +28,26 @@ import java.util.List;
  * </p>
  */
 @Component
-public class SmartCodeEnhancer {
+/**
+ * Ameliorateur de code deterministe base sur 118 regles de qualite.
+ *
+ * <p>Applique des regles de verification et de correction automatique
+ * sur le code genere : conventions REST, nommage, securite, logging,
+ * documentation Swagger, conformite BIAN, et bonnes pratiques Spring Boot.</p>
+ *
+ * <p>Fonctionne sans IA generative : chaque regle est un pattern
+ * deterministe garantissant reproductibilite et absence d'hallucinations.</p>
+ *
+ * @see CodeEnhancer
+ * @see EnhancementReport
+ */
+public class SmartCodeEnhancer implements CodeEnhancer {
 
     private static final Logger log = LoggerFactory.getLogger(SmartCodeEnhancer.class);
-    private static final String BASE_PACKAGE = "com.bank.api";
+    private static final String DEFAULT_BASE_PACKAGE = "com.bank.api";
+    private String getBasePackage() {
+        return DEFAULT_BASE_PACKAGE;
+    }
     private static final String BASE_PACKAGE_PATH = "com/bank/api";
 
     /**
@@ -439,7 +455,7 @@ public class SmartCodeEnhancer {
 
         // Déterminer le package des exceptions selon le mode (ACL vs legacy)
         String exceptionPackage = Files.isDirectory(srcMain.resolve("domain/exception"))
-                ? BASE_PACKAGE + ".domain.exception" : BASE_PACKAGE + ".exception";
+                ? getBasePackage() + ".domain.exception" : getBasePackage() + ".exception";
 
         // R29: Créer BusinessException pour les erreurs métier
         Path businessExFile = exceptionDir.resolve("BusinessException.java");
@@ -480,7 +496,7 @@ public class SmartCodeEnhancer {
                         public HttpStatus getStatus() { return status; }
                         public String getErrorCode() { return errorCode; }
                     }
-                    """.formatted(exceptionPackage);
+                    """.formatted(getBasePackage());
             Files.writeString(businessExFile, code);
             report.addEnhancement(new Enhancement("R29", Category.ERROR_HANDLING, Severity.WARNING,
                     "Création de BusinessException pour mapper FwkRollbackException (409 Conflict)",
@@ -508,7 +524,7 @@ public class SmartCodeEnhancer {
                             super(message, cause);
                         }
                     }
-                    """.formatted(exceptionPackage);
+                    """.formatted(getBasePackage());
             Files.writeString(serviceUnavailFile, code);
             report.addEnhancement(new Enhancement("R30", Category.ERROR_HANDLING, Severity.WARNING,
                     "Création de ServiceUnavailableException pour les erreurs JNDI (503)",
@@ -569,7 +585,7 @@ public class SmartCodeEnhancer {
                                     .build();
                         }
                     }
-                    """.formatted(BASE_PACKAGE);
+                    """.formatted(getBasePackage());
             Files.writeString(securityFile, code);
             report.addEnhancement(new Enhancement("R32", Category.SECURITY, Severity.CRITICAL,
                     "Création de SecurityConfig avec SecurityFilterChain (stateless, CSRF désactivé, headers sécurité)",
@@ -619,7 +635,7 @@ public class SmartCodeEnhancer {
                             return source;
                         }
                     }
-                    """.formatted(BASE_PACKAGE);
+                    """.formatted(getBasePackage());
             Files.writeString(corsFile, code);
             report.addEnhancement(new Enhancement("R33", Category.SECURITY, Severity.CRITICAL,
                     "Création de CorsConfig avec origines explicites (pas de wildcard *)",
@@ -798,7 +814,7 @@ public class SmartCodeEnhancer {
                             }
                         }
                     }
-                    """.formatted(BASE_PACKAGE);
+                    """.formatted(getBasePackage());
             Files.writeString(correlationFilter, code);
             report.addEnhancement(new Enhancement("R48", Category.OBSERVABILITY, Severity.CRITICAL,
                     "Création du filtre CorrelationIdFilter (X-Request-ID via MDC)",
@@ -814,7 +830,7 @@ public class SmartCodeEnhancer {
             Path targetDir = Files.isDirectory(srcMain.resolve("config")) ? srcMain.resolve("config") : srcMain.resolve("logging");
             Files.createDirectories(targetDir);
             Path targetFile = targetDir.resolve("LoggingAspect.java");
-            String pkg = Files.isDirectory(srcMain.resolve("config")) ? BASE_PACKAGE + ".config" : BASE_PACKAGE + ".logging";
+            String pkg = Files.isDirectory(srcMain.resolve("config")) ? getBasePackage() + ".config" : getBasePackage() + ".logging";
             String aspectCode = """
                     package %s;
 
@@ -1297,10 +1313,10 @@ public class SmartCodeEnhancer {
                             }
                         }
                         """.formatted(
-                        BASE_PACKAGE,
-                        BASE_PACKAGE, uc.getInputDtoClassName(),
-                        BASE_PACKAGE, uc.getOutputDtoClassName(),
-                        BASE_PACKAGE, uc.getServiceAdapterName(),
+                        getBasePackage(),
+                        getBasePackage(), uc.getInputDtoClassName(),
+                        getBasePackage(), uc.getOutputDtoClassName(),
+                        getBasePackage(), uc.getServiceAdapterName(),
                         extraImports.toString(),
                         uc.getControllerName(),
                         uc.getControllerName(),
@@ -1384,7 +1400,7 @@ public class SmartCodeEnhancer {
         ProjectAnalysisResult.EnumInfo enumInfo = enumIndex.get(fieldType);
         if (enumInfo != null && enumInfo.getValues() != null && !enumInfo.getValues().isEmpty()) {
             // Ajouter l'import de l'enum
-            enumImports.add(BASE_PACKAGE + ".enums." + fieldType);
+            enumImports.add(getBasePackage() + ".enums." + fieldType);
             return fieldType + "." + enumInfo.getValues().get(0);
         }
         return switch (fieldType) {
@@ -1521,7 +1537,7 @@ public class SmartCodeEnhancer {
                             chain.doFilter(request, response);
                         }
                     }
-                    """.formatted(BASE_PACKAGE);
+                    """.formatted(getBasePackage());
             Files.writeString(headerFilter, filterCode);
             hasFilter = true;
         }

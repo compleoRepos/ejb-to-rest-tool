@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
+import com.bank.tools.generator.engine.util.CodeGenUtils;
 
 /**
  * Generateur de clients REST Spring Boot a partir de contrats OpenAPI/Swagger.
@@ -29,7 +30,7 @@ public class OpenApiClientGenerator {
 
     private final BianServiceDomainMapper bianMapper;
 
-    private static final String BASE_PACKAGE = "com.bank.api";
+    private static final String DEFAULT_BASE_PACKAGE = "com.bank.api";
     private static final String BASE_PACKAGE_PATH = "com/bank/api";
 
     public OpenApiClientGenerator(BianServiceDomainMapper bianMapper) {
@@ -67,7 +68,7 @@ public class OpenApiClientGenerator {
     public Path generateClient(OpenApiContractInfo contract, Path outputDir, boolean bianMode) throws IOException {
         String partnerName = contract.getPartnerName();
         String partnerLower = partnerName.toLowerCase();
-        String partnerCapital = capitalize(partnerName.toLowerCase());
+        String partnerCapital = CodeGenUtils.capitalize(partnerName.toLowerCase());
 
         log.info("[OpenAPI-Gen] Generation du client REST pour {} (BIAN={})", partnerName, bianMode);
 
@@ -124,12 +125,12 @@ public class OpenApiClientGenerator {
                                       String partnerLower, String partnerCapital,
                                       boolean bianMode) throws IOException {
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(";\n\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(";\n\n");
 
         // Imports
-        sb.append("import ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".config.")
+        sb.append("import ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".config.")
           .append(partnerCapital).append("FeignConfig;\n");
-        sb.append("import ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".dto.*;\n");
+        sb.append("import ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".dto.*;\n");
         sb.append("import org.springframework.cloud.openfeign.FeignClient;\n");
         sb.append("import org.springframework.web.bind.annotation.*;\n\n");
         sb.append("import java.util.List;\n\n");
@@ -217,7 +218,7 @@ public class OpenApiClientGenerator {
 
     private void generateDto(Path srcMain, SchemaInfo schema, String partnerLower) throws IOException {
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".dto;\n\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".dto;\n\n");
 
         // Imports
         Set<String> imports = new TreeSet<>();
@@ -260,7 +261,7 @@ public class OpenApiClientGenerator {
         // Getters & Setters
         for (SchemaInfo.FieldInfo field : schema.getFields()) {
             String javaType = resolveFieldType(field);
-            String capName = capitalize(field.getName());
+            String capName = CodeGenUtils.capitalize(field.getName());
 
             // Getter
             sb.append("    public ").append(javaType).append(" get").append(capName).append("() {\n");
@@ -285,7 +286,7 @@ public class OpenApiClientGenerator {
     private void generateFeignConfig(Path srcMain, OpenApiContractInfo contract,
                                       String partnerLower, String partnerCapital) throws IOException {
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".config;\n\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".config;\n\n");
 
         sb.append("import feign.RequestInterceptor;\n");
         sb.append("import feign.codec.ErrorDecoder;\n");
@@ -349,11 +350,11 @@ public class OpenApiClientGenerator {
     private void generateServiceWrapper(Path srcMain, OpenApiContractInfo contract,
                                          String partnerLower, String partnerCapital) throws IOException {
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".service;\n\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".service;\n\n");
 
-        sb.append("import ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".")
+        sb.append("import ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".")
           .append(partnerCapital).append("FeignClient;\n");
-        sb.append("import ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".dto.*;\n");
+        sb.append("import ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".dto.*;\n");
         sb.append("import org.slf4j.Logger;\n");
         sb.append("import org.slf4j.LoggerFactory;\n");
         sb.append("import org.springframework.stereotype.Service;\n\n");
@@ -432,7 +433,7 @@ public class OpenApiClientGenerator {
 
     private void generateErrorDecoder(Path srcMain, String partnerLower, String partnerCapital) throws IOException {
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".config;\n\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".config;\n\n");
 
         sb.append("import feign.Response;\n");
         sb.append("import feign.codec.ErrorDecoder;\n");
@@ -498,7 +499,7 @@ public class OpenApiClientGenerator {
         sb.append("# Feign logging\n");
         sb.append("logging:\n");
         sb.append("  level:\n");
-        sb.append("    ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(": DEBUG\n");
+        sb.append("    ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(": DEBUG\n");
 
         Path file = projectRoot.resolve("src/main/resources/application-" + partnerLower + ".yml");
         Files.writeString(file, sb.toString());
@@ -711,14 +712,8 @@ public class OpenApiClientGenerator {
         String path = endpoint.getPath().replaceAll("[{}]", "")
                 .replaceAll("/", "_").replaceAll("[^a-zA-Z0-9_]", "");
         if (path.startsWith("_")) path = path.substring(1);
-        return method + capitalize(toCamelCase(path));
+        return method + CodeGenUtils.capitalize(toCamelCase(path));
     }
-
-    private String capitalize(String s) {
-        if (s == null || s.isEmpty()) return s;
-        return s.substring(0, 1).toUpperCase() + s.substring(1);
-    }
-
     private String toCamelCase(String s) {
         if (s == null) return "";
         StringBuilder sb = new StringBuilder();

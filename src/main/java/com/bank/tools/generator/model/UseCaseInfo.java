@@ -29,7 +29,8 @@ public class UseCaseInfo {
         STATEFUL("@Stateful"),
         SINGLETON("@Singleton"),
         MESSAGE_DRIVEN("@MessageDriven"),
-        USE_CASE_CUSTOM("@UseCase (BOA/EAI)");  // Framework interne BOA — equivalent de @Stateless
+        USE_CASE_CUSTOM("@UseCase (BOA/EAI)"),  // Framework interne BOA — equivalent de @Stateless
+        SPRING_LEGACY("@Service + @Transactional (Spring Legacy)");
         private final String label;
         EjbType(String label) { this.label = label; }
         public String getLabel() { return label; }
@@ -42,7 +43,8 @@ public class UseCaseInfo {
         LOCAL_INTERFACE("Interface @Local"),
         GENERIC_SERVICE("Service generique (methodes publiques)"),
         DAO_REPOSITORY("DAO/Repository (CRUD)"),
-        ACTION_HANDLER("ActionHandler via SynchroneService (handle(Envelope))");
+        ACTION_HANDLER("ActionHandler via SynchroneService (handle(Envelope))"),
+        MULTI_METHOD_SERVICE("Service multi-methodes");
         private final String label;
         EjbPattern(String label) { this.label = label; }
         public String getLabel() { return label; }

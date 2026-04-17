@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
+import com.bank.tools.generator.engine.util.CodeGenUtils;
 
 /**
  * Generateur de clients SOAP Spring Boot a partir de contrats WSDL.
@@ -29,7 +30,7 @@ public class WsdlClientGenerator {
 
     private final BianServiceDomainMapper bianMapper;
 
-    private static final String BASE_PACKAGE = "com.bank.api";
+    private static final String DEFAULT_BASE_PACKAGE = "com.bank.api";
     private static final String BASE_PACKAGE_PATH = "com/bank/api";
 
     // Mapping XSD types → Java types
@@ -67,7 +68,7 @@ public class WsdlClientGenerator {
     public Path generateClient(WsdlContractInfo contract, Path outputDir, boolean bianMode) throws IOException {
         String partnerName = contract.getPartnerName();
         String partnerLower = partnerName.toLowerCase();
-        String partnerCapital = capitalize(partnerName.toLowerCase());
+        String partnerCapital = CodeGenUtils.capitalize(partnerName.toLowerCase());
 
         log.info("[WSDL-Gen] Generation du client SOAP pour {} (BIAN={})", partnerName, bianMode);
 
@@ -128,10 +129,10 @@ public class WsdlClientGenerator {
     private void generateSoapClient(Path srcMain, WsdlContractInfo contract,
                                      String partnerLower, String partnerCapital) throws IOException {
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(";\n\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(";\n\n");
 
         // Imports
-        sb.append("import ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".dto.*;\n");
+        sb.append("import ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".dto.*;\n");
         sb.append("import jakarta.xml.ws.WebServiceClient;\n");
         sb.append("import jakarta.xml.ws.soap.SOAPBinding;\n");
         sb.append("import org.slf4j.Logger;\n");
@@ -219,7 +220,7 @@ public class WsdlClientGenerator {
 
     private void generateDto(Path srcMain, ComplexTypeInfo ct, String partnerLower) throws IOException {
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".dto;\n\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".dto;\n\n");
 
         // Imports
         Set<String> imports = new TreeSet<>();
@@ -269,7 +270,7 @@ public class WsdlClientGenerator {
             String javaType = mapXsdType(elem.getType());
             boolean isList = elem.getMaxOccurs() == -1;
             String fieldName = toCamelCase(elem.getName());
-            String capName = capitalize(fieldName);
+            String capName = CodeGenUtils.capitalize(fieldName);
             String fullType = isList ? "List<" + javaType + ">" : javaType;
 
             // Getter
@@ -295,7 +296,7 @@ public class WsdlClientGenerator {
     private void generateCxfConfig(Path srcMain, WsdlContractInfo contract,
                                     String partnerLower, String partnerCapital) throws IOException {
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".config;\n\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".config;\n\n");
 
         sb.append("import org.springframework.beans.factory.annotation.Value;\n");
         sb.append("import org.springframework.context.annotation.Bean;\n");
@@ -352,12 +353,12 @@ public class WsdlClientGenerator {
         sb.append("        private int readTimeout;\n\n");
 
         for (String field : new String[]{"wsdlUrl", "endpointUrl", "username", "password"}) {
-            String cap = capitalize(field);
+            String cap = CodeGenUtils.capitalize(field);
             sb.append("        public String get").append(cap).append("() { return ").append(field).append("; }\n");
             sb.append("        public void set").append(cap).append("(String ").append(field).append(") { this.").append(field).append(" = ").append(field).append("; }\n");
         }
         for (String field : new String[]{"connectTimeout", "readTimeout"}) {
-            String cap = capitalize(field);
+            String cap = CodeGenUtils.capitalize(field);
             sb.append("        public int get").append(cap).append("() { return ").append(field).append("; }\n");
             sb.append("        public void set").append(cap).append("(int ").append(field).append(") { this.").append(field).append(" = ").append(field).append("; }\n");
         }
@@ -374,11 +375,11 @@ public class WsdlClientGenerator {
     private void generateServiceWrapper(Path srcMain, WsdlContractInfo contract,
                                          String partnerLower, String partnerCapital) throws IOException {
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".service;\n\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".service;\n\n");
 
-        sb.append("import ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".")
+        sb.append("import ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".")
           .append(partnerCapital).append("SoapClient;\n");
-        sb.append("import ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".dto.*;\n");
+        sb.append("import ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".dto.*;\n");
         sb.append("import org.slf4j.Logger;\n");
         sb.append("import org.slf4j.LoggerFactory;\n");
         sb.append("import org.springframework.stereotype.Service;\n\n");
@@ -446,11 +447,11 @@ public class WsdlClientGenerator {
     private void generateRestFacade(Path srcMain, WsdlContractInfo contract,
                                      String partnerLower, String partnerCapital) throws IOException {
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".facade;\n\n");
+        sb.append("package ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".facade;\n\n");
 
-        sb.append("import ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".service.")
+        sb.append("import ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".service.")
           .append(partnerCapital).append("SoapService;\n");
-        sb.append("import ").append(BASE_PACKAGE).append(".client.").append(partnerLower).append(".dto.*;\n");
+        sb.append("import ").append(DEFAULT_BASE_PACKAGE).append(".client.").append(partnerLower).append(".dto.*;\n");
         sb.append("import org.slf4j.Logger;\n");
         sb.append("import org.slf4j.LoggerFactory;\n");
         sb.append("import org.springframework.http.ResponseEntity;\n");
@@ -758,12 +759,6 @@ public class WsdlClientGenerator {
             default -> "PostMapping";
         };
     }
-
-    private String capitalize(String s) {
-        if (s == null || s.isEmpty()) return s;
-        return s.substring(0, 1).toUpperCase() + s.substring(1);
-    }
-
     private String toCamelCase(String s) {
         if (s == null) return "";
         // Si c'est deja en camelCase, retourner tel quel

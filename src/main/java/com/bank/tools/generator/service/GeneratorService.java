@@ -32,6 +32,20 @@ import java.util.zip.ZipOutputStream;
  * et l'amelioration IA du projet API REST a partir d'un projet EJB uploade.
  */
 @Service
+/**
+ * Service orchestrateur du pipeline de transformation EJB vers REST.
+ *
+ * <p>Coordonne les etapes du pipeline : upload du projet EJB,
+ * analyse par le parseur, generation du wrapper REST par le moteur,
+ * amelioration par le SmartCodeEnhancer, et production des rapports.</p>
+ *
+ * <p>Expose les operations principales via des methodes transactionnelles
+ * utilisees par le controller web et le mode CLI.</p>
+ *
+ * @see EjbProjectParser
+ * @see CodeGenerationEngine
+ * @see SmartCodeEnhancer
+ */
 public class GeneratorService {
 
     private static final Logger log = LoggerFactory.getLogger(GeneratorService.class);

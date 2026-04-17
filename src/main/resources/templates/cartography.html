@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="content">
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center">
+                    <i class="fas fa-cubes fa-2x text-primary mb-2"></i>
+                    <h3 class="mb-0" th:text="${totalEjbs ?: 0}">0</h3>
+                    <small class="text-muted">Composants EJB</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center">
+                    <i class="fas fa-exchange-alt fa-2x text-warning mb-2"></i>
+                    <h3 class="mb-0" th:text="${totalDependencies ?: 0}">0</h3>
+                    <small class="text-muted">Dependances</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center">
+                    <i class="fas fa-layer-group fa-2x text-success mb-2"></i>
+                    <h3 class="mb-0" th:text="${totalDtos ?: 0}">0</h3>
+                    <small class="text-muted">DTOs</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Graphe de dependances -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="fas fa-project-diagram me-2"></i>Graphe de dependances</h6>
+            <div>
+                <button class="btn btn-sm btn-outline-primary" onclick="exportGraph('mermaid')">
+                    <i class="fas fa-download me-1"></i>Mermaid
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="exportGraph('visjs')">
+                    <i class="fas fa-share-alt me-1"></i>Interactif
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div th:if="${projectId == null}" class="text-center py-5 text-muted">
+                <i class="fas fa-cloud-upload-alt fa-3x mb-3"></i>
+                <p>Importez un projet pour visualiser la cartographie</p>
+                <a th:href="@{/import}" class="btn btn-primary">
+                    <i class="fas fa-upload me-1"></i>Importer un projet
+                </a>
+            </div>
+            <div th:if="${projectId != null}" id="graph-container" style="min-height:500px;background:#f8f9fa;border-radius:8px;">
+                <div th:if="${mermaidGraph != null}" class="mermaid" th:utext="${mermaidGraph}"></div>
+                <div th:if="${mermaidGraph == null}" class="text-center py-5 text-muted">
+                    <i class="fas fa-spinner fa-spin fa-2x mb-3"></i>
+                    <p>Generation du graphe en cours...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tableau des composants -->
+    <div class="card border-0 shadow-sm" th:if="${components != null}">
+        <div class="card-header bg-white">
+            <h6 class="mb-0"><i class="fas fa-list me-2"></i>Inventaire des composants</h6>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Composant</th>
+                            <th>Type</th>
+                            <th>Pattern</th>
+                            <th>Dependances</th>
+                            <th>Complexite</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr th:each="comp : ${components}">
+                            <td>
+                                <i class="fas fa-cube text-primary me-1"></i>
+                                <strong th:text="${comp.name}">Nom</strong>
+                            </td>
+                            <td><span class="badge bg-info" th:text="${comp.type}">Type</span></td>
+                            <td><span class="badge bg-secondary" th:text="${comp.pattern}">Pattern</span></td>
+                            <td th:text="${comp.dependencyCount}">0</td>
+                            <td>
+                                <div class="progress" style="height:6px;width:80px;">
+                                    <div class="progress-bar" role="progressbar"
+                                         th:style="'width:' + ${comp.complexity} + '%'"
+                                         th:classappend="${comp.complexity > 70 ? 'bg-danger' : (comp.complexity > 40 ? 'bg-warning' : 'bg-success')}">
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+    if (typeof mermaid !== 'undefined') {
+        mermaid.initialize({ startOnLoad: true, theme: 'default' });
+    }
+    function exportGraph(format) {
+        window.location.href = '/api/cartography/export?format=' + format;
+    }
+</script>
+</body>
+</html>

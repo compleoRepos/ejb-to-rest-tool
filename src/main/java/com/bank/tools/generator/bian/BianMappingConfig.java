@@ -9,6 +9,7 @@ import org.yaml.snakeyaml.Yaml;
 import jakarta.annotation.PostConstruct;
 import java.io.InputStream;
 import java.util.*;
+import java.io.IOException;
 
 /**
  * Charge et expose la configuration BIAN depuis bian-mapping.yml.
@@ -81,7 +82,7 @@ public class BianMappingConfig {
                 log.info("[BianConfig] Configuration BIAN v{} chargee : {} domaines, {} actions, {} mappings explicites",
                         bianVersion, keywordsToDomain.size(), keywordsToAction.size(), explicitMappings.size());
             }
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             log.error("[BianConfig] Erreur chargement {} : {}", resourceName, e.getMessage());
         }
     }
