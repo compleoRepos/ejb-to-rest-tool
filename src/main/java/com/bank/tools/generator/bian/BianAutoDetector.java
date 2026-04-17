@@ -160,6 +160,52 @@ public class BianAutoDetector {
         ));
     }
 
+    // ===================== BQ NORMALIZATION TABLE =====================
+
+    private static final Map<String, String> BQ_NORMALIZE = new LinkedHashMap<>();
+    static {
+        // Abréviations BOA → noms complets
+        BQ_NORMALIZE.put("benef", "beneficiary");
+        BQ_NORMALIZE.put("beneficiari", "beneficiary");
+        BQ_NORMALIZE.put("beneficiaries", "beneficiary");
+        BQ_NORMALIZE.put("benef-enregistrer", "beneficiary-registration");
+
+        // Jargon interne → noms fonctionnels
+        BQ_NORMALIZE.put("mad", "transfer");
+        BQ_NORMALIZE.put("hist-mad-attente", "pending-history");
+        BQ_NORMALIZE.put("list-mad-attente", "pending-list");
+        BQ_NORMALIZE.put("core-auth", "authentication");
+
+        // Français → anglais
+        BQ_NORMALIZE.put("eligibilite", "eligibility");
+        BQ_NORMALIZE.put("montant", "amount");
+        BQ_NORMALIZE.put("telephone", "phone");
+        BQ_NORMALIZE.put("virement", "transfer");
+        BQ_NORMALIZE.put("solde", "balance");
+        BQ_NORMALIZE.put("carte", "card");
+        BQ_NORMALIZE.put("compte", "account");
+        BQ_NORMALIZE.put("client", "customer");
+        BQ_NORMALIZE.put("historique", "history");
+        BQ_NORMALIZE.put("consultation", "inquiry");
+        BQ_NORMALIZE.put("emission", "issuance");
+        BQ_NORMALIZE.put("annulation", "cancellation");
+        BQ_NORMALIZE.put("cloture", "closure");
+        BQ_NORMALIZE.put("ouverture", "opening");
+        BQ_NORMALIZE.put("reception", "reception");
+        BQ_NORMALIZE.put("activer-carte", "card-activation");
+        BQ_NORMALIZE.put("client-data", "customer-data");
+    }
+
+    /**
+     * Normalise un BQ brut en nom REST anglais standard.
+     * Remplace les abreviations BOA, le jargon interne et le francais.
+     */
+    public String normalizeBehaviorQualifier(String rawBq) {
+        if (rawBq == null) return null;
+        String normalized = BQ_NORMALIZE.get(rawBq.toLowerCase());
+        return normalized != null ? normalized : rawBq;
+    }
+
     // ===================== VERBES POUR EXTRACTION BQ =====================
 
     private static final String[] ALL_VERBS = {
@@ -332,7 +378,10 @@ public class BianAutoDetector {
         }
 
         // Convertir en kebab-case
-        return bq.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
+        String rawBq = bq.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
+
+        // Normaliser : jargon BOA → noms REST anglais
+        return normalizeBehaviorQualifier(rawBq);
     }
 
     // ===================== BIAN ID =====================

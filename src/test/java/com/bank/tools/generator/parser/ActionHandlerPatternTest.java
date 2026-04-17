@@ -240,23 +240,23 @@ class ActionHandlerPatternTest {
         @DisplayName("ConsultationSoldeHandler → BQ = solde")
         void consultationSoldeBq() {
             BianMapping m = detector.autoDetect(buildHandler("ConsultationSoldeHandler"));
-            // Apres retrait du verbe 'Consultation', le BQ doit etre 'solde'
-            assertEquals("solde", m.getBehaviorQualifier());
+            // Apres retrait du verbe 'Consultation', le BQ brut 'solde' est normalise en 'balance'
+            assertEquals("balance", m.getBehaviorQualifier());
         }
 
         @Test
         @DisplayName("Fix 3 : ModifierTelephoneHandler → BQ = telephone (pas ier-telephone)")
         void modifierTelephoneBq() {
             BianMapping m = detector.autoDetect(buildHandler("ModifierTelephoneHandler"));
-            assertEquals("telephone", m.getBehaviorQualifier(),
-                    "Le verbe 'Modifier' doit etre retire entierement, pas seulement 'Modif'");
+            assertEquals("phone", m.getBehaviorQualifier(),
+                    "Le verbe 'Modifier' doit etre retire, puis 'telephone' normalise en 'phone'");
         }
 
         @Test
         @DisplayName("ConsulterEligibiliteHandler → BQ = eligibilite")
         void consulterEligibiliteBq() {
             BianMapping m = detector.autoDetect(buildHandler("ConsulterEligibiliteHandler"));
-            assertEquals("eligibilite", m.getBehaviorQualifier());
+            assertEquals("eligibility", m.getBehaviorQualifier());
         }
 
         @Test

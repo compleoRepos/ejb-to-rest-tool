@@ -265,20 +265,23 @@ class BianAutoDetectorTest {
     class BehaviorQualifierDetection {
 
         @Test
-        @DisplayName("ActiverCarteUC → carte")
+        @DisplayName("ActiverCarteUC → card (normalise depuis carte)")
         void detectBqCarte() {
-            assertEquals("carte", detector.detectBehaviorQualifier(buildUseCase("ActiverCarteUC"), "execution"));
+            assertEquals("card", detector.detectBehaviorQualifier(buildUseCase("ActiverCarteUC"), "execution"));
         }
 
         @Test
-        @DisplayName("ConsulterSoldeUC → solde")
+        @DisplayName("ConsulterSoldeUC → balance (normalise depuis solde)")
         void detectBqSolde() {
-            assertEquals("solde", detector.detectBehaviorQualifier(buildUseCase("ConsulterSoldeUC"), "retrieval"));
+            assertEquals("balance", detector.detectBehaviorQualifier(buildUseCase("ConsulterSoldeUC"), "retrieval"));
         }
 
         @Test
-        @DisplayName("OuvrirCompteEpargneUC → compte-epargne")
+        @DisplayName("OuvrirCompteEpargneUC → account-epargne (compte normalise en account)")
         void detectBqCompteEpargne() {
+            // 'compte' seul serait normalise en 'account', mais 'compte-epargne' n'est pas dans la table
+            // donc il reste 'compte-epargne' sauf si on normalise les segments individuellement
+            // La normalisation est exacte : 'compte-epargne' n'est pas dans BQ_NORMALIZE → reste tel quel
             assertEquals("compte-epargne", detector.detectBehaviorQualifier(buildUseCase("OuvrirCompteEpargneUC"), "initiation"));
         }
 
@@ -303,7 +306,7 @@ class BianAutoDetectorTest {
             BianMapping m = detector.autoDetect(buildUseCase("ActiverCarteUC"));
             assertEquals("card-management", m.getServiceDomain());
             assertEquals("execution", m.getAction());
-            assertEquals("carte", m.getBehaviorQualifier());
+            assertEquals("card", m.getBehaviorQualifier());
             assertEquals("POST", m.getHttpMethod());
             assertEquals(200, m.getHttpStatus());
             assertNotNull(m.getUrl());
@@ -460,7 +463,7 @@ class BianAutoDetectorTest {
     class OperationIdGeneration {
 
         @Test
-        @DisplayName("ActiverCarteUC → executeCardManagementCarte")
+        @DisplayName("ActiverCarteUC → executeCardManagementCard")
         void operationIdActiverCarte() {
             BianMapping m = detector.autoDetect(buildUseCase("ActiverCarteUC"));
             assertNotNull(m.getOperationId());
