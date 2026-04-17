@@ -28,6 +28,9 @@ import { replaceLegacyTypes } from "./engine/transformer/legacy-type-replacer";
 import { normalizeFieldReferences } from "./engine/transformer/field-name-normalizer";
 import { filterFacadeUseCases } from "./engine/detectors/facade-detector";
 
+// v8.5: UseCase DTO generator
+import { generateMissingDtos } from "./engine/transformer/usecase-dto-generator";
+
 // --- Re-export types from shared (backward compatibility) ---
 export type {
   GeneratedFile, GenerationResult, GenerationStats,
@@ -133,6 +136,13 @@ export function generateSpringBootProject(ir: ProjectIR, reportContext?: Migrati
         if (autoDto) files.push(autoDto);
       }
     }
+  }
+
+  // v8.5: Generate missing DTOs for UseCases without explicit voIn/voOut in dtoMap
+  const missingDtoResult = generateMissingDtos(ir.useCases, dtoMap, basePackage, basePath);
+  if (missingDtoResult.files.length > 0) {
+    files.push(...missingDtoResult.files);
+    warnings.push(`[v8.5] Generated ${missingDtoResult.stats.dtosGenerated} missing DTOs (${missingDtoResult.stats.fieldsExtracted} fields extracted from ${missingDtoResult.stats.useCasesAnalyzed} UseCases)`);
   }
 
   // 1. Generate Main Application
