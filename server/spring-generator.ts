@@ -15,6 +15,13 @@ import type {
   EnumIR, ExceptionIR, ValidatorIR, RemoteInterfaceIR,
 } from "./java-parser";
 
+// v8.3: Strategy/Handler pattern detectors
+import { groupByDomain, getServiceNameForDomain } from "./engine/detectors/domain-grouper";
+import { isGodClassDao, splitDao, generateRepositories } from "./engine/detectors/dao-splitter";
+import { isHttpClientClass, detectHttpClient, generateRestTemplateService } from "./engine/detectors/http-client-detector";
+import { scanModels, generateEntities } from "./engine/detectors/model-to-entity";
+import { analyzeEnvelope, generateEnvelopeDtos } from "./engine/detectors/envelope-replacer";
+
 // --- Re-export types from shared (backward compatibility) ---
 export type {
   GeneratedFile, GenerationResult, GenerationStats,
@@ -57,11 +64,26 @@ export function generateSpringBootProject(ir: ProjectIR, reportContext?: Migrati
   const testPath = `src/test/java/${basePackage.replace(/\./g, "/")}`;
 
   // Group UseCases by domain
+  // v8.3: Exclude the Strategy facade class from service generation
+  const facadeClass = ir.handlerPattern?.facadeClass ?? "";
+  const filteredUseCases = ir.useCases.filter(uc => {
+    if (facadeClass && uc.className === facadeClass) {
+      warnings.push(`[v8.3] Excluded facade ${facadeClass} from service generation`);
+      return false;
+    }
+    return true;
+  });
+
   const domainMap = new Map<string, UseCaseIR[]>();
-  for (const uc of ir.useCases) {
+  for (const uc of filteredUseCases) {
     const domain = uc.domain || "general";
     if (!domainMap.has(domain)) domainMap.set(domain, []);
     domainMap.get(domain)!.push(uc);
+  }
+
+  // v8.3: If handler pattern detected, use domain-grouper for service naming
+  if (ir.handlerPattern?.detected) {
+    warnings.push(`[v8.3] Handler pattern active: ${domainMap.size} domain(s) detected`);
   }
 
   // Build DTO lookup
@@ -238,6 +260,50 @@ public class BusinessRuleException extends RuntimeException {
     } else {
       // No source file — generate stubs from inferred usage
       files.push(generateInjectedServiceStub(basePackage, basePath, svcType, "", usedMethods));
+    }
+  }
+
+  // ─── v8.3: Handler Pattern — additional generators ───
+  if (ir.handlerPattern?.detected) {
+    const rawFiles = (ir as any)._rawFiles ?? [];
+
+    // v8.3 STEP 3: DAO Splitter — detect God-class DAOs and split into repositories
+    for (const f of rawFiles) {
+      const fClassName = f.path?.split("/").pop()?.replace(".java", "") ?? "";
+      if (isGodClassDao(f.content ?? "", fClassName)) {
+        const splitResult = splitDao(f.content, fClassName);
+        const repoFiles = generateRepositories(splitResult, basePackage, basePath);
+        files.push(...repoFiles);
+        warnings.push(`[v8.3] DAO split: ${fClassName} → ${splitResult.repositories.length} repositories (${splitResult.totalMethods} methods)`);
+      }
+    }
+
+    // v8.3 STEP 4: HTTP Client — detect legacy HTTP clients and generate RestTemplate services
+    for (const f of rawFiles) {
+      const fClassName = f.path?.split("/").pop()?.replace(".java", "") ?? "";
+      if (isHttpClientClass(f.content ?? "", fClassName)) {
+        const detection = detectHttpClient(f.content, fClassName);
+        const restFile = generateRestTemplateService(detection, basePackage, basePath);
+        files.push(restFile);
+        warnings.push(`[v8.3] HTTP client: ${fClassName} → ${detection.methods.length} methods migrated to RestTemplate`);
+      }
+    }
+
+    // v8.3 STEP 5: Model → Entity — scan all packages for entities
+    const modelScan = scanModels(rawFiles.map((f: any) => ({ path: f.path ?? "", content: f.content ?? "" })));
+    if (modelScan.entities.length > 0) {
+      const entityFiles = generateEntities(modelScan, basePackage, basePath);
+      files.push(...entityFiles);
+      warnings.push(`[v8.3] Models: ${modelScan.entities.length} entities, ${modelScan.dtos.length} DTOs, ${modelScan.enums.length} enums detected`);
+    }
+
+    // v8.3 STEP 6: Envelope → DTO — analyze handlers for Envelope patterns
+    for (const handler of ir.handlerPattern.handlers) {
+      const analysis = analyzeEnvelope(handler.className, handler.sourceCode);
+      if (analysis.inputFields.length > 0 || analysis.outputFields.length > 0) {
+        const dtoFiles = generateEnvelopeDtos(analysis, basePackage, basePath);
+        files.push(...dtoFiles);
+      }
     }
   }
 

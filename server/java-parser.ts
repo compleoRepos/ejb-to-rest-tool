@@ -8,6 +8,9 @@
  * @author Hamza NORDINE
  */
 
+import { detectHandlerPattern, getMethodNameForHandler, getDomainForHandler } from "./engine/detectors/handler-pattern-detector";
+import type { HandlerPatternDetection } from "./engine/detectors/handler-pattern-detector";
+
 // ─── IR Types ───────────────────────────────────────────────────────────────
 
 export interface ProjectIR {
@@ -37,6 +40,8 @@ export interface ProjectIR {
   batchJobs: BatchJobIR[];
   /** Raw Java files for secondary scanning (JNDI in batch/EJB2x files not classified as UseCases) */
   _rawFiles?: { path: string; content: string }[];
+  /** v8.3: Handler pattern detection result (null if not detected) */
+  handlerPattern?: import("./engine/detectors/handler-pattern-detector").HandlerPatternDetection | null;
 }
 
 export interface MavenDependency {
@@ -66,6 +71,8 @@ export interface UseCaseIR {
   restPath: string;
   /** FIX E v7.3: All legacy method parameters (not just voInType which is only the first) */
   methodParameters?: { name: string; type: string }[];
+  /** v8.3: Flag indicating this UseCase was derived from a Strategy/Handler pattern */
+  isFromHandlerPattern?: boolean;
 }
 
 export interface InjectedService {
@@ -278,6 +285,61 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
   const directEjbPaths = new Set(directEjbFiles.map(f => f.path));
   const standardUseCaseFiles = useCaseFiles.filter(f => !directEjbPaths.has(f.path));
 
+  // ─── v8.3: Detect Strategy/Handler pattern ───
+  const handlerDetection = detectHandlerPattern(files);
+  let handlerUseCases: UseCaseIR[] = [];
+  const handlerFacadeClass = handlerDetection?.facadeClass ?? "";
+
+  if (handlerDetection && handlerDetection.detected) {
+    warnings.push(`[v8.3] Handler pattern detected: ${handlerDetection.handlers.length} handlers via ${handlerDetection.interfaceClass}`);
+    handlerUseCases = handlerDetection.handlers.map(handler => {
+      const methodName = getMethodNameForHandler(handler.className);
+      const domain = getDomainForHandler(handler.className);
+      const ucClassName = `${handler.className}_${methodName}`;
+
+      // Extract parameters from handle() method signature
+      const handleSig = handler.sourceCode.match(
+        /(?:public)\s+(\w[\w<>,\s\[\]]*?)\s+(?:handle|execute|process)\s*\(([^)]*)\)/
+      );
+      const returnType = handleSig ? handleSig[1].trim() : "Object";
+      const paramsStr = handleSig ? handleSig[2] : "";
+      const methodParameters = paramsStr
+        .split(",")
+        .map(p => p.trim())
+        .filter(Boolean)
+        .map(p => {
+          const cleaned = p.replace(/@\w+(?:\([^)]*\))?\s*/g, "").trim();
+          const parts = cleaned.split(/\s+/);
+          return { name: parts[parts.length - 1], type: parts.slice(0, -1).join(" ") };
+        });
+
+      const voInType = methodParameters.length > 0 ? methodParameters[0].type : "Void";
+      const voOutType = returnType === "void" ? "Void" : returnType;
+
+      return {
+        className: ucClassName,
+        packageName: handler.packageName,
+        domain,
+        bianDomain: "",
+        bianAction: "",
+        voInType,
+        voOutType,
+        useCaseDescription: `${methodName} — extrait du handler ${handler.className}`,
+        javadoc: "",
+        injectedServices: [],
+        transactional: null,
+        exceptionsCaught: [],
+        exceptionsThrown: [],
+        sourceFile: handler.sourceFile,
+        rawSource: handler.sourceCode,
+        httpMethod: determineHttpMethod(methodName, ""),
+        restPath: generateRestPath(domain, methodName),
+        methodParameters,
+        isFromHandlerPattern: true,
+      };
+    });
+  }
+
   const useCases = [
     ...standardUseCaseFiles.map(f => {
       const uc = parseUseCase(f, dtoMap, bianMappings, typeRegistry);
@@ -291,7 +353,13 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
       return uc;
     }),
     ...directEjbUseCases,
-  ];
+    ...handlerUseCases,
+  ].filter(uc => {
+    // v8.3: Exclure la façade Strategy des useCases
+    if (handlerFacadeClass && uc.className.startsWith(handlerFacadeClass + "_")) return false;
+    if (handlerFacadeClass && uc.className === handlerFacadeClass) return false;
+    return true;
+  });
 
   // Compute domains
   const domains = [...new Set(useCases.map(uc => uc.domain))].filter(Boolean);
@@ -334,6 +402,7 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
     stats,
     warnings,
     _rawFiles: javaFiles.map(f => ({ path: f.path, content: f.content })),
+    handlerPattern: handlerDetection,
   };
 }
 
