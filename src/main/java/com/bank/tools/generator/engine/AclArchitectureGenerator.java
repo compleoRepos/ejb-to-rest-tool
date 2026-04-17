@@ -462,7 +462,26 @@ public class AclArchitectureGenerator {
         Path file = dir.resolve(ep.requestDtoName + ".java");
 
         DtoInfo ejbDto = findDto(analysis, ep.ejbInputDtoName);
-        List<RestField> fields = deriveRestFields(ejbDto, true);
+        List<RestField> fields = deriveRestFields(ejbDto, true, analysis);
+
+        // ActionHandler sans DTO EJB input : utiliser les envelopeFields comme source de champs
+        boolean isActionHandler = ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler();
+        if (isActionHandler && (ejbDto == null) && ep.useCaseInfo.getEnvelopeFields() != null
+                && !ep.useCaseInfo.getEnvelopeFields().isEmpty()) {
+            fields.clear();
+            Set<String> knownDtoNames = analysis.getDtos().stream()
+                    .map(DtoInfo::getClassName).collect(Collectors.toSet());
+            for (UseCaseInfo.EnvelopeFieldInfo envField : ep.useCaseInfo.getEnvelopeFields()) {
+                String restType = cleanType(envField.getJavaType());
+                // Si le type est un DTO connu, l'importer depuis la couche infrastructure
+                if (knownDtoNames.contains(restType)) {
+                    // Garder le type complexe tel quel — il sera importé depuis ejb/types
+                } else if ("Object".equals(restType) && !"Object".equals(envField.getJavaType())) {
+                    continue; // Exclure les types framework resolus en Object
+                }
+                fields.add(new RestField(envField.getFieldName(), restType, false));
+            }
+        }
 
         // Detecter si on a besoin d'imports speciaux
         boolean hasNotBlank = fields.stream().anyMatch(f -> f.required && "String".equals(f.type));
@@ -487,6 +506,14 @@ public class AclArchitectureGenerator {
         boolean hasValidIBAN = fields.stream().anyMatch(f -> f.customValidators.stream().anyMatch(v -> v.contains("ValidIBAN")));
         if (hasValidRIB) sb.append("import ").append(PKG_API_DTO_VALIDATION).append(".ValidRIB;\n");
         if (hasValidIBAN) sb.append("import ").append(PKG_API_DTO_VALIDATION).append(".ValidIBAN;\n");
+        // Import des types EJB complexes utilises dans les champs (ex: Beneficiaire)
+        Set<String> knownDtoNamesForImport = analysis.getDtos().stream()
+                .map(DtoInfo::getClassName).collect(Collectors.toSet());
+        for (RestField f : fields) {
+            if (knownDtoNamesForImport.contains(f.type)) {
+                sb.append("import ").append(PKG_INFRA_EJB_TYPES).append(".").append(f.type).append(";\n");
+            }
+        }
         sb.append("\n");
 
         sb.append("/**\n");
@@ -540,7 +567,7 @@ public class AclArchitectureGenerator {
         Path file = dir.resolve(ep.responseDtoName + ".java");
 
         DtoInfo ejbDto = findDto(analysis, ep.ejbOutputDtoName);
-        List<RestField> fields = deriveRestFields(ejbDto, false);
+        List<RestField> fields = deriveRestFields(ejbDto, false, analysis);
 
         boolean hasBigDecimal = fields.stream().anyMatch(f -> "BigDecimal".equals(f.type));
         boolean hasEnum = fields.stream().anyMatch(f -> isEnumType(f.type, analysis));
@@ -862,7 +889,7 @@ public class AclArchitectureGenerator {
 
             sb.append("/**\n");
             sb.append(" * Copie du DTO EJB ").append(dto.getClassName()).append(" dans la couche infrastructure.\n");
-            sb.append(" * Aucun import ma.eai.* — type autonome.\n");
+            sb.append(" * Aucun import ma.eai.* \u2014 type autonome.\n");
             sb.append(" */\n");
             sb.append("public class ").append(dto.getClassName()).append(" implements ValueObject {\n\n");
             sb.append("    private static final long serialVersionUID = 1L;\n\n");
@@ -872,6 +899,10 @@ public class AclArchitectureGenerator {
                 if (field.isStatic()) continue;
 
                 String type = cleanType(field.getType());
+                // Si le type nettoy\u00e9 n'est ni standard, ni un DTO connu, ni un enum connu \u2192 Object
+                if (!isKnownType(type, analysis)) {
+                    type = "Object";
+                }
                 sb.append("    private ").append(type).append(" ").append(field.getName()).append(";\n");
             }
             sb.append("\n");
@@ -881,6 +912,9 @@ public class AclArchitectureGenerator {
                 if (field.isStatic()) continue;
 
                 String type = cleanType(field.getType());
+                if (!isKnownType(type, analysis)) {
+                    type = "Object";
+                }
                 String cap = capitalize(field.getName());
                 String getter = ("boolean".equals(type) ? "is" : "get") + cap;
                 sb.append("    public ").append(type).append(" ").append(getter).append("() { return ").append(field.getName()).append("; }\n");
@@ -947,9 +981,12 @@ public class AclArchitectureGenerator {
                         if ("serialVersionUID".equals(field.getName()) || field.isStatic()) continue;
                         if (LEGACY_FIELDS.contains(field.getName())) continue;
                         if (isFrameworkType(field.getType())) continue;
+                        String rType = cleanType(field.getType());
+                        if ("Object".equals(rType) && !"Object".equals(field.getType()) && !"java.lang.Object".equals(field.getType())) continue;
+                        if (!isKnownType(rType, analysis)) continue;
                         String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
                         String getter = ("boolean".equals(field.getType()) ? "is" : "get") + capitalize(restName);
-                        sb.append("        payload.put(\"").append(field.getName()).append("\", request.").append(getter).append("());\n");
+                        sb.append("        payload.put(\"").append(field.getName()).append("\", request.").append(getter).append("());");
                     }
                 } else if (ep.useCaseInfo.getEnvelopeFields() != null && !ep.useCaseInfo.getEnvelopeFields().isEmpty()) {
                     for (UseCaseInfo.EnvelopeFieldInfo envField : ep.useCaseInfo.getEnvelopeFields()) {
@@ -981,9 +1018,14 @@ public class AclArchitectureGenerator {
                         if ("serialVersionUID".equals(field.getName()) || field.isStatic()) continue;
                         if (LEGACY_FIELDS.contains(field.getName())) continue;
                         if (isFrameworkType(field.getType())) continue;
+                        String castType = cleanType(field.getType());
+                        // Exclure les champs dont le type original a ete resolu en Object
+                        // (types framework/generiques comme Entete, T) car ils n'existent pas dans le RestDTO
+                        if ("Object".equals(castType) && !"Object".equals(field.getType()) && !"java.lang.Object".equals(field.getType())) continue;
+                        // Exclure les types inconnus (Emetteur, Canal, etc.) qui ne sont pas dans les DTOs detectes
+                        if (!isKnownType(castType, analysis)) continue;
                         String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
                         String setter = "set" + capitalize(restName);
-                        String castType = cleanType(field.getType());
                         sb.append("        if (data.containsKey(\"").append(field.getName()).append("\")) response.").append(setter).append("((").append(castType).append(") data.get(\"").append(field.getName()).append("\")); \n");
                     }
                 } else {
@@ -1014,6 +1056,8 @@ public class AclArchitectureGenerator {
                     // Enum conversion : RestEnum → String ou vice versa
                     String restType = cleanType(field.getType());
                     if (isFrameworkType(field.getType())) continue;
+                    // Exclure les champs dont le type original a ete resolu en Object
+                    if ("Object".equals(restType) && !"Object".equals(field.getType()) && !"java.lang.Object".equals(field.getType())) continue;
 
                     sb.append("        voIn.").append(ejbSetter).append("(request.").append(restGetter).append("());\n");
                 }
@@ -1034,6 +1078,9 @@ public class AclArchitectureGenerator {
                     if (isFrameworkType(field.getType())) continue;
                     // Correction: exclure les champs @XmlTransient du Mapper
                     if (field.isHasXmlTransient()) continue;
+                    String restType2 = cleanType(field.getType());
+                    // Exclure les champs dont le type original a ete resolu en Object
+                    if ("Object".equals(restType2) && !"Object".equals(field.getType()) && !"java.lang.Object".equals(field.getType())) continue;
 
                     String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
                     String restSetter = "set" + capitalize(restName);
@@ -2129,7 +2176,7 @@ public class AclArchitectureGenerator {
         return base + suffix;
     }
 
-    private List<RestField> deriveRestFields(DtoInfo ejbDto, boolean isRequest) {
+    private List<RestField> deriveRestFields(DtoInfo ejbDto, boolean isRequest, ProjectAnalysisResult analysis) {
         List<RestField> fields = new ArrayList<>();
         if (ejbDto == null) {
             if (isRequest) {
@@ -2151,6 +2198,8 @@ public class AclArchitectureGenerator {
             // Exclure les champs dont le type est non-standard (framework, generique brut)
             // car ils ne sont pas utilisables dans un RestDTO
             if ("Object".equals(restType) && !"Object".equals(field.getType()) && !"java.lang.Object".equals(field.getType())) continue;
+            // Exclure les types inconnus (ex: Emetteur, Canal) qui ne sont pas des DTOs detectes
+            if (!isKnownType(restType, analysis)) continue;
             boolean required = field.isRequired() && isRequest;
 
             // Correction 4: @ValidRIB/@ValidIBAN → préserver les validateurs custom
@@ -2186,8 +2235,39 @@ public class AclArchitectureGenerator {
         if (type.length() == 1 && Character.isUpperCase(type.charAt(0))) return "Object";
         // Types generiques avec bounds (? extends X) → Object
         if (type.startsWith("?") || type.contains("<?")) return "Object";
-        return type.replace("java.lang.", "").replace("java.util.", "");
+        // Nettoyer les prefixes java.lang / java.util
+        String cleaned = type.replace("java.lang.", "").replace("java.util.", "");
+        // Gerer les tableaux : extraire le type de base pour verification
+        String baseType = cleaned.replace("[]", "");
+        if (baseType.contains("<")) baseType = baseType.substring(0, baseType.indexOf('<'));
+        return cleaned;
     }
+
+    /**
+     * Verifie si un type est connu (primitif, standard Java, DTO detecte, ou enum).
+     * Les types inconnus seront remplaces par Object dans les EJB types.
+     */
+    private boolean isKnownType(String type, ProjectAnalysisResult analysis) {
+        if (type == null) return true;
+        String stripped = type.replace("[]", "");
+        final String base = stripped.contains("<") ? stripped.substring(0, stripped.indexOf('<')) : stripped;
+        // Primitifs et types Java standard
+        if (STANDARD_TYPES.contains(base)) return true;
+        // DTOs detectes
+        if (analysis != null && analysis.getDtos().stream().anyMatch(d -> d.getClassName().equals(base))) return true;
+        // Enums detectes
+        if (analysis != null && analysis.getDetectedEnums() != null
+                && analysis.getDetectedEnums().stream().anyMatch(e -> e.getName().equals(base))) return true;
+        return false;
+    }
+
+    private static final Set<String> STANDARD_TYPES = Set.of(
+            "String", "int", "long", "boolean", "double", "float", "byte", "short", "char",
+            "Integer", "Long", "Boolean", "Double", "Float", "Byte", "Short", "Character",
+            "BigDecimal", "BigInteger", "Date", "LocalDate", "LocalDateTime", "Instant",
+            "UUID", "Object", "Map", "List", "Set", "Collection", "HashMap", "ArrayList",
+            "LinkedHashMap", "TreeMap", "HashSet", "TreeSet", "LinkedList"
+    );
 
     private boolean isFrameworkType(String type) {
         if (type == null) return false;
