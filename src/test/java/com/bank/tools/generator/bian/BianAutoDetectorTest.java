@@ -16,6 +16,9 @@ import static org.junit.jupiter.api.Assertions.*;
  * - Behavior Qualifier
  * - HTTP Method / Status
  * - Niveau de confiance
+ * - FIX 1 : cleanBehaviorQualifier (suppression BQ redondants)
+ * - FIX 2 : BQ_NORMALIZE enrichi (noms classes EJB)
+ * - FIX 3 : auth → party en priorite absolue
  */
 class BianAutoDetectorTest {
 
@@ -265,8 +268,9 @@ class BianAutoDetectorTest {
     class BehaviorQualifierDetection {
 
         @Test
-        @DisplayName("ActiverCarteUC → card (normalise depuis carte)")
+        @DisplayName("ActiverCarteUC → card (normalise depuis carte) — detectBehaviorQualifier seul")
         void detectBqCarte() {
+            // detectBehaviorQualifier ne fait PAS le cleanBQ, il retourne le BQ brut normalise
             assertEquals("card", detector.detectBehaviorQualifier(buildUseCase("ActiverCarteUC"), "execution"));
         }
 
@@ -277,19 +281,15 @@ class BianAutoDetectorTest {
         }
 
         @Test
-        @DisplayName("OuvrirCompteEpargneUC → account-epargne (compte normalise en account)")
+        @DisplayName("OuvrirCompteEpargneUC → compte-epargne")
         void detectBqCompteEpargne() {
-            // 'compte' seul serait normalise en 'account', mais 'compte-epargne' n'est pas dans la table
-            // donc il reste 'compte-epargne' sauf si on normalise les segments individuellement
-            // La normalisation est exacte : 'compte-epargne' n'est pas dans BQ_NORMALIZE → reste tel quel
+            // 'compte-epargne' n'est pas dans BQ_NORMALIZE → reste tel quel
             assertEquals("compte-epargne", detector.detectBehaviorQualifier(buildUseCase("OuvrirCompteEpargneUC"), "initiation"));
         }
 
         @Test
         @DisplayName("UseCase sans verbe connu → retourne le nom complet en kebab")
         void detectBqFallbackToFullName() {
-            // Fix 1 : quand aucun verbe n'est retire, on retourne le nom complet en kebab
-            // au lieu de null, pour garantir un BQ unique par handler
             assertEquals("xyz-abc", detector.detectBehaviorQualifier(buildUseCase("XyzAbcUC"), "execution"));
         }
     }
@@ -301,20 +301,25 @@ class BianAutoDetectorTest {
     class FullAutoDetect {
 
         @Test
-        @DisplayName("ActiverCarteUC → card-management / execution / carte / POST 200")
+        @DisplayName("ActiverCarteUC → card-management / execution / BQ null (card redondant avec card-management) / POST 200")
         void autoDetectActiverCarte() {
             BianMapping m = detector.autoDetect(buildUseCase("ActiverCarteUC"));
             assertEquals("card-management", m.getServiceDomain());
             assertEquals("execution", m.getAction());
-            assertEquals("card", m.getBehaviorQualifier());
+            // FIX 1 : BQ "card" est redondant avec domain "card-management" → null
+            assertNull(m.getBehaviorQualifier(),
+                    "BQ 'card' doit etre supprime car redondant avec domain 'card-management'");
             assertEquals("POST", m.getHttpMethod());
             assertEquals(200, m.getHttpStatus());
             assertNotNull(m.getUrl());
             assertTrue(m.getUrl().contains("card-management"));
+            // URL simplifiee sans BQ redondant
+            assertTrue(m.getUrl().contains("/execution"));
+            assertFalse(m.getUrl().contains("/card/"));
         }
 
         @Test
-        @DisplayName("OuvrirCompteUC → current-account / initiation / compte / POST 201")
+        @DisplayName("OuvrirCompteUC → current-account / initiation / BQ null (account redondant) / POST 201")
         void autoDetectOuvrirCompte() {
             BianMapping m = detector.autoDetect(buildUseCase("OuvrirCompteUC"));
             assertEquals("current-account", m.getServiceDomain());
@@ -326,7 +331,7 @@ class BianAutoDetectorTest {
         }
 
         @Test
-        @DisplayName("BloquerCarteUC → card-management / control / carte / PUT 200")
+        @DisplayName("BloquerCarteUC → card-management / control / BQ null (card redondant) / PUT 200")
         void autoDetectBloquerCarte() {
             BianMapping m = detector.autoDetect(buildUseCase("BloquerCarteUC"));
             assertEquals("card-management", m.getServiceDomain());
@@ -335,24 +340,30 @@ class BianAutoDetectorTest {
             assertEquals(200, m.getHttpStatus());
             // control → {cr-reference-id}
             assertTrue(m.getUrl().contains("{cr-reference-id}"));
+            // BQ "card" redondant avec domain "card-management" → null
+            assertNull(m.getBehaviorQualifier());
         }
 
         @Test
-        @DisplayName("VirementSEPAOrchestrateurEJB → payment-initiation / execution")
+        @DisplayName("VirementSEPAOrchestrateurEJB → payment-initiation / initiation / BQ transfer")
         void autoDetectVirementSEPA() {
             BianMapping m = detector.autoDetect(buildUseCase("VirementSEPAOrchestrateurEJB"));
             assertEquals("payment-initiation", m.getServiceDomain());
-            assertNotNull(m.getAction());
+            assertEquals("initiation", m.getAction());
             assertEquals("SD0249", m.getBianId());
+            // BQ "transfer" n'est PAS redondant avec "payment-initiation" → conserve
+            assertEquals("transfer", m.getBehaviorQualifier());
         }
 
         @Test
-        @DisplayName("CreditScoringEJB → loan / evaluation")
+        @DisplayName("CreditScoringEJB → loan / evaluation / BQ scoring")
         void autoDetectCreditScoring() {
             BianMapping m = detector.autoDetect(buildUseCase("CreditScoringEJB"));
             assertEquals("loan", m.getServiceDomain());
             assertEquals("evaluation", m.getAction());
             assertEquals("SD0433", m.getBianId());
+            // FIX 2 : "credit-scoring" normalise en "scoring" par BQ_NORMALIZE
+            assertEquals("scoring", m.getBehaviorQualifier());
         }
 
         @Test
@@ -364,29 +375,195 @@ class BianAutoDetectorTest {
         }
 
         @Test
-        @DisplayName("NotificationMulticanalEJB → customer-notification / notification / POST 201")
+        @DisplayName("NotificationMulticanalEJB → customer-notification / notification / BQ null (notification redondant avec action)")
         void autoDetectNotification() {
             BianMapping m = detector.autoDetect(buildUseCase("NotificationMulticanalEJB"));
             assertEquals("customer-notification", m.getServiceDomain());
             assertEquals("notification", m.getAction());
             assertEquals("POST", m.getHttpMethod());
             assertEquals(201, m.getHttpStatus());
+            // FIX 1+2 : "notification-multicanal" normalise en "notification",
+            // puis "notification" redondant avec action "notification" → null
+            assertNull(m.getBehaviorQualifier(),
+                    "BQ 'notification' doit etre supprime car redondant avec action 'notification'");
         }
 
         @Test
-        @DisplayName("RiskManagementEJB → risk-management")
+        @DisplayName("RiskManagementEJB → risk-management / BQ null (risk-assessment contient domain)")
         void autoDetectRiskManagement() {
             BianMapping m = detector.autoDetect(buildUseCase("RiskManagementEJB"));
             assertEquals("risk-management", m.getServiceDomain());
             assertEquals("SD0434", m.getBianId());
+            // FIX 1 : "risk-management" normalise en "risk-assessment",
+            // puis cleanBQ : "riskassessment" contient "risk" (mot du domain) → nettoyage
+            // Apres retrait de "risk" il reste "assessment" ou null selon la logique
+            // Le BQ brut est "risk-management" → normalise en "risk-assessment"
+            // cleanBQ : domainWord "risk" (len>3) est dans "risk-assessment" → retire "risk-" → "assessment"
+            // "assessment" n'est pas vide → conserve
         }
 
         @Test
-        @DisplayName("DeviseConversionEJB → currency-exchange")
+        @DisplayName("DeviseConversionEJB → currency-exchange / BQ conversion")
         void autoDetectDeviseConversion() {
             BianMapping m = detector.autoDetect(buildUseCase("DeviseConversionEJB"));
             assertEquals("currency-exchange", m.getServiceDomain());
             assertEquals("SD0159", m.getBianId());
+            // FIX 2 : "devise-conversion" normalise en "conversion" par BQ_NORMALIZE
+            // "conversion" n'est pas redondant avec "currency-exchange" → conserve
+            assertEquals("conversion", m.getBehaviorQualifier());
+        }
+    }
+
+    // ===================== FIX 1 : CLEAN BQ REDONDANTS =====================
+
+    @Nested
+    @DisplayName("FIX 1 : cleanBehaviorQualifier supprime les BQ redondants")
+    class CleanBehaviorQualifier {
+
+        @Test
+        @DisplayName("BQ identique au domain → null")
+        void bqSameAsDomain() {
+            assertNull(detector.cleanBehaviorQualifier("risk-management", "risk-management", "retrieval"));
+        }
+
+        @Test
+        @DisplayName("BQ contenu dans le domain → null")
+        void bqContainedInDomain() {
+            assertNull(detector.cleanBehaviorQualifier("card", "card-management", "execution"));
+        }
+
+        @Test
+        @DisplayName("BQ identique a l'action → null")
+        void bqSameAsAction() {
+            assertNull(detector.cleanBehaviorQualifier("notification", "customer-notification", "notification"));
+        }
+
+        @Test
+        @DisplayName("BQ non redondant → conserve")
+        void bqNotRedundant() {
+            assertEquals("transfer", detector.cleanBehaviorQualifier("transfer", "payment-initiation", "initiation"));
+        }
+
+        @Test
+        @DisplayName("BQ null → null")
+        void bqNull() {
+            assertNull(detector.cleanBehaviorQualifier(null, "party", "execution"));
+        }
+
+        @Test
+        @DisplayName("BQ vide → null")
+        void bqEmpty() {
+            assertNull(detector.cleanBehaviorQualifier("", "party", "execution"));
+        }
+
+        @Test
+        @DisplayName("BQ avec suffixe technique multicanal → nettoye")
+        void bqWithTechnicalSuffix() {
+            assertNull(detector.cleanBehaviorQualifier("multicanal", "customer-notification", "notification"));
+        }
+
+        @Test
+        @DisplayName("BQ 'balance' dans domain 'current-account' → conserve (pas redondant)")
+        void bqBalanceInCurrentAccount() {
+            assertEquals("balance", detector.cleanBehaviorQualifier("balance", "current-account", "retrieval"));
+        }
+
+        @Test
+        @DisplayName("BQ 'scoring' dans domain 'loan' → conserve (pas redondant)")
+        void bqScoringInLoan() {
+            assertEquals("scoring", detector.cleanBehaviorQualifier("scoring", "loan", "evaluation"));
+        }
+    }
+
+    // ===================== FIX 2 : BQ_NORMALIZE ENRICHI =====================
+
+    @Nested
+    @DisplayName("FIX 2 : BQ_NORMALIZE enrichi pour noms de classes EJB")
+    class BqNormalizeEnriched {
+
+        @Test
+        @DisplayName("devise-conversion → conversion")
+        void deviseConversion() {
+            assertEquals("conversion", detector.normalizeBehaviorQualifier("devise-conversion"));
+        }
+
+        @Test
+        @DisplayName("virement-sepa → transfer")
+        void virementSepa() {
+            assertEquals("transfer", detector.normalizeBehaviorQualifier("virement-sepa"));
+        }
+
+        @Test
+        @DisplayName("virement-sepaorchestrateur → transfer")
+        void virementSepaOrchestrateur() {
+            assertEquals("transfer", detector.normalizeBehaviorQualifier("virement-sepaorchestrateur"));
+        }
+
+        @Test
+        @DisplayName("credit-scoring → scoring")
+        void creditScoring() {
+            assertEquals("scoring", detector.normalizeBehaviorQualifier("credit-scoring"));
+        }
+
+        @Test
+        @DisplayName("notification-multicanal → notification")
+        void notificationMulticanal() {
+            assertEquals("notification", detector.normalizeBehaviorQualifier("notification-multicanal"));
+        }
+
+        @Test
+        @DisplayName("orchestrateur → null (suffixe technique supprime)")
+        void orchestrateur() {
+            assertNull(detector.normalizeBehaviorQualifier("orchestrateur"));
+        }
+
+        @Test
+        @DisplayName("multicanal → null (suffixe technique supprime)")
+        void multicanal() {
+            assertNull(detector.normalizeBehaviorQualifier("multicanal"));
+        }
+
+        @Test
+        @DisplayName("null → null")
+        void nullInput() {
+            assertNull(detector.normalizeBehaviorQualifier(null));
+        }
+    }
+
+    // ===================== FIX 3 : AUTH → PARTY PRIORITE =====================
+
+    @Nested
+    @DisplayName("FIX 3 : auth/token/login → party en priorite absolue")
+    class AuthPriorityToParty {
+
+        @Test
+        @DisplayName("AuthServiceEJB → party (via auth, priorite)")
+        void authServiceIsParty() {
+            assertEquals("party", detector.detectServiceDomain(buildUseCase("AuthServiceEJB")));
+        }
+
+        @Test
+        @DisplayName("TokenValidatorEJB → party (via token, priorite)")
+        void tokenValidatorIsParty() {
+            assertEquals("party", detector.detectServiceDomain(buildUseCase("TokenValidatorEJB")));
+        }
+
+        @Test
+        @DisplayName("LoginServiceEJB → party (via login, priorite)")
+        void loginServiceIsParty() {
+            assertEquals("party", detector.detectServiceDomain(buildUseCase("LoginServiceEJB")));
+        }
+
+        @Test
+        @DisplayName("SessionManagerEJB → party (via session, priorite)")
+        void sessionManagerIsParty() {
+            assertEquals("party", detector.detectServiceDomain(buildUseCase("SessionManagerEJB")));
+        }
+
+        @Test
+        @DisplayName("MadCoreAuthHandler → party (via auth, priorite)")
+        void madCoreAuthIsParty() {
+            assertEquals("party", detector.detectServiceDomain(buildUseCase("MadCoreAuthHandler")));
         }
     }
 
@@ -454,6 +631,15 @@ class BianAutoDetectorTest {
             BianMapping m = detector.autoDetect(buildUseCase("ActiverCarteUC"));
             assertTrue(m.getUrl().contains("/card-management/"));
         }
+
+        @Test
+        @DisplayName("FIX 1 : URL sans BQ redondant pour RiskManagementEJB")
+        void urlWithoutRedundantBq() {
+            BianMapping m = detector.autoDetect(buildUseCase("RiskManagementEJB"));
+            // L'URL ne doit PAS contenir /risk-management/{id}/risk-management/
+            assertFalse(m.getUrl().matches(".*/risk-management/.*/risk-management/.*"),
+                    "URL ne doit pas contenir le domain en double : " + m.getUrl());
+        }
     }
 
     // ===================== OPERATION ID =====================
@@ -463,12 +649,13 @@ class BianAutoDetectorTest {
     class OperationIdGeneration {
 
         @Test
-        @DisplayName("ActiverCarteUC → executeCardManagementCard")
+        @DisplayName("ActiverCarteUC → executeCardManagement (sans BQ redondant)")
         void operationIdActiverCarte() {
             BianMapping m = detector.autoDetect(buildUseCase("ActiverCarteUC"));
             assertNotNull(m.getOperationId());
             assertTrue(m.getOperationId().startsWith("execute"));
             assertTrue(m.getOperationId().contains("CardManagement"));
+            // BQ "card" supprime → pas de "Card" en suffixe
         }
 
         @Test

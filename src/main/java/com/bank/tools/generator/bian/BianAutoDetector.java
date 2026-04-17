@@ -194,16 +194,75 @@ public class BianAutoDetector {
         BQ_NORMALIZE.put("reception", "reception");
         BQ_NORMALIZE.put("activer-carte", "card-activation");
         BQ_NORMALIZE.put("client-data", "customer-data");
+
+        // Noms de classes EJB → noms REST (FIX 2)
+        BQ_NORMALIZE.put("devise-conversion", "conversion");
+        BQ_NORMALIZE.put("virement-sepa", "transfer");
+        BQ_NORMALIZE.put("virement-sepaorchestrateur", "transfer");
+        BQ_NORMALIZE.put("credit-scoring", "scoring");
+        BQ_NORMALIZE.put("notification-multicanal", "notification");
+        BQ_NORMALIZE.put("risk-management", "risk-assessment");
+
+        // Suffixes techniques → suppression (null = supprimer le BQ)
+        BQ_NORMALIZE.put("orchestrateur", null);
+        BQ_NORMALIZE.put("multicanal", null);
     }
 
     /**
      * Normalise un BQ brut en nom REST anglais standard.
      * Remplace les abreviations BOA, le jargon interne et le francais.
+     * Retourne null si le BQ doit etre supprime (suffixe technique).
      */
     public String normalizeBehaviorQualifier(String rawBq) {
         if (rawBq == null) return null;
-        String normalized = BQ_NORMALIZE.get(rawBq.toLowerCase());
-        return normalized != null ? normalized : rawBq;
+        String key = rawBq.toLowerCase();
+        if (BQ_NORMALIZE.containsKey(key)) {
+            return BQ_NORMALIZE.get(key);  // peut retourner null = suppression
+        }
+        return rawBq;
+    }
+
+    /**
+     * Supprime les BQ redondants avec le Service Domain ou l'action. (FIX 1)
+     * Exemples :
+     *   risk-management dans domain risk-management → null
+     *   notification dans action notification → null
+     *   scoring dans domain loan → conserve (pas redondant)
+     *
+     * IMPORTANT : ne s'applique PAS aux handlers ActionHandler car leurs BQ
+     * sont essentiels pour distinguer les endpoints dans un meme controller.
+     */
+    public String cleanBehaviorQualifier(String bq, String serviceDomain, String action) {
+        if (bq == null || bq.isEmpty()) return null;
+
+        String bqLower = bq.toLowerCase().replace("-", "");
+        String domainLower = serviceDomain.toLowerCase().replace("-", "");
+
+        // 1. BQ identique ou contenu dans le Service Domain → supprimer
+        //    "risk-management" dans domain "risk-management" → null
+        if (domainLower.contains(bqLower) || bqLower.contains(domainLower)) {
+            return null;
+        }
+
+        // 2. BQ contient le nom du Service Domain → retirer la partie domain
+        for (String domainWord : serviceDomain.split("-")) {
+            if (domainWord.length() > 3 && bqLower.contains(domainWord.toLowerCase())) {
+                bq = bq.replaceAll("(?i)" + domainWord + "-?", "").trim();
+                if (bq.isEmpty() || bq.equals("-")) return null;
+            }
+        }
+
+        // 3. BQ identique à l'action → supprimer
+        //    "notification" quand action = "notification" → null
+        if (bq.toLowerCase().replace("-", "").equals(action.replace("-", ""))) {
+            return null;
+        }
+
+        // 4. BQ contient des suffixes techniques → nettoyer
+        bq = bq.replaceAll("(?i)-?(multicanal|orchestrateur|orchestrator|ejb|bean|impl|service)", "");
+        if (bq.isEmpty() || bq.equals("-")) return null;
+
+        return bq;
     }
 
     // ===================== VERBES POUR EXTRACTION BQ =====================
@@ -248,8 +307,19 @@ public class BianAutoDetector {
         mapping.setAction(action);
 
         // 3. Behavior Qualifier
-        String bq = detectBehaviorQualifier(useCase, action);
-        mapping.setBehaviorQualifier(bq);
+        String bqRaw = detectBehaviorQualifier(useCase, action);
+        String bqNormalized = normalizeBehaviorQualifier(bqRaw);
+
+        // FIX 1 : Nettoyer les BQ redondants UNIQUEMENT pour les EJB classiques (BaseUseCase).
+        // Les handlers ActionHandler conservent leur BQ car il est essentiel
+        // pour distinguer les 13+ endpoints dans un meme controller.
+        boolean isActionHandler = useCase.getEjbPattern() != null
+            && useCase.getEjbPattern() == UseCaseInfo.EjbPattern.ACTION_HANDLER;
+        if (!isActionHandler) {
+            bqNormalized = cleanBehaviorQualifier(bqNormalized, serviceDomain, action);
+        }
+
+        mapping.setBehaviorQualifier(bqNormalized);
 
         // 4. HTTP Method (derive de l'action)
         String httpMethod = switch (action) {
@@ -294,10 +364,43 @@ public class BianAutoDetector {
     /**
      * Detecte le Service Domain BIAN par scoring multi-criteres.
      * Analyse : nom UseCase + package + noms VoIn/VoOut.
+     *
+     * FIX 3 : Regle de priorite absolue — auth/token/login → TOUJOURS party.
+     * L'authentification est toujours un concept 'party' dans BIAN.
      */
     public String detectServiceDomain(UseCaseInfo useCase) {
         // 1. Concatener : nom UseCase + package + noms VoIn/VoOut
         String haystack = buildHaystack(useCase);
+
+        // FIX 3 : REGLE DE PRIORITE — auth/token/login → TOUJOURS party
+        // Cette regle est AVANT le scoring pour eviter que 'auth' soit capte
+        // par un autre domain comme channel-activity-analysis.
+        if (haystack.contains("auth") || haystack.contains("token")
+            || haystack.contains("login") || haystack.contains("session")
+            || haystack.contains("jwt") || haystack.contains("otp")) {
+            // Verifier qu'il ne s'agit pas d'un autre contexte dominant
+            // (ex: "AuthorizePayment" devrait rester payment-initiation)
+            // On ne force party QUE si aucun autre domain n'a un score >= 2
+            int bestOtherScore = 0;
+            String bestOtherDomain = null;
+            for (var entry : DOMAIN_KEYWORDS.entrySet()) {
+                String domain = entry.getValue();
+                if ("party".equals(domain)) continue;  // skip party dans le scoring
+                int score = 0;
+                for (String keyword : entry.getKey()) {
+                    if (haystack.contains(keyword)) score++;
+                }
+                if (score > bestOtherScore) {
+                    bestOtherScore = score;
+                    bestOtherDomain = domain;
+                }
+            }
+            // Si aucun autre domain n'a un score fort (>= 2), c'est party
+            if (bestOtherScore < 2) {
+                return "party";
+            }
+            // Sinon, on laisse le scoring normal decider
+        }
 
         // 2. Scorer chaque domain par nombre de keywords matches
         String bestDomain = null;
