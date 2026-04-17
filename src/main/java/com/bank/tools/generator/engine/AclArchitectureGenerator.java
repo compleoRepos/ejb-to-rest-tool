@@ -749,6 +749,32 @@ public class AclArchitectureGenerator {
                 "}\n");
         log.info("[ACL] EJB Type genere : Envelope");
 
+        // Generer SynchroneService.java si le pattern est detecte
+        if (analysis.isSynchroneServiceDetected()) {
+            Files.writeString(dir.resolve("SynchroneService.java"),
+                    "package " + PKG_INFRA_EJB_TYPES + ";\n\n" +
+                    "/**\n" +
+                    " * Interface SynchroneService du framework EAI BOA.\n" +
+                    " * Le service distant implemente cette interface et expose process(Envelope).\n" +
+                    " */\n" +
+                    "public interface SynchroneService {\n" +
+                    "    Envelope process(Envelope envelopeIn) throws Exception;\n" +
+                    "}\n");
+            log.info("[ACL] EJB Type genere : SynchroneService");
+
+            // Generer ActionHandler.java
+            Files.writeString(dir.resolve("ActionHandler.java"),
+                    "package " + PKG_INFRA_EJB_TYPES + ";\n\n" +
+                    "/**\n" +
+                    " * Interface ActionHandler du framework EAI BOA.\n" +
+                    " * Chaque handler gere une action specifique via handle(Envelope).\n" +
+                    " */\n" +
+                    "public interface ActionHandler {\n" +
+                    "    Envelope handle(Envelope envIn) throws Throwable;\n" +
+                    "}\n");
+            log.info("[ACL] EJB Type genere : ActionHandler");
+        }
+
         for (DtoInfo dto : analysis.getDtos()) {
             Path file = dir.resolve(dto.getClassName() + ".java");
 
@@ -814,8 +840,13 @@ public class AclArchitectureGenerator {
         Set<String> imports = new TreeSet<>();
         if (ep.requestDtoName != null) imports.add("import " + PKG_API_DTO_REQUEST + "." + ep.requestDtoName + ";");
         if (ep.responseDtoName != null) imports.add("import " + PKG_API_DTO_RESPONSE + "." + ep.responseDtoName + ";");
-        if (ep.ejbInputDtoName != null) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
-        if (ep.ejbOutputDtoName != null) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
+        boolean isActionHandlerMapper = ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler();
+        if (!isActionHandlerMapper) {
+            if (ep.ejbInputDtoName != null) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
+            if (ep.ejbOutputDtoName != null) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
+        } else {
+            imports.add("import " + PKG_INFRA_EJB_TYPES + ".Envelope;");
+        }
         imports.add("import org.springframework.stereotype.Component;");
         for (String imp : imports) sb.append(imp).append("\n");
         sb.append("\n");
@@ -823,8 +854,75 @@ public class AclArchitectureGenerator {
         sb.append("@Component\n");
         sb.append("public class ").append(mapperName).append(" {\n\n");
 
-        // toEjb : Request → VoIn
-        if (ep.requestDtoName != null && ep.ejbInputDtoName != null) {
+        boolean isActionHandler = ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler();
+
+        if (isActionHandler) {
+            // ===== PATTERN ACTION_HANDLER : toEnvelopePayload + fromEnvelopePayload =====
+
+            // toEnvelopePayload : Request → Map<String, Object> pour Envelope.payload
+            if (ep.requestDtoName != null) {
+                sb.append("    /**\n");
+                sb.append("     * Convertit le RestDTO Request en payload Map pour l'Envelope EAI.\n");
+                sb.append("     */\n");
+                sb.append("    public java.util.Map<String, Object> toEnvelopePayload(").append(ep.requestDtoName).append(" request) {\n");
+                sb.append("        java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();\n");
+
+                DtoInfo reqDto = findDto(analysis, ep.ejbInputDtoName);
+                if (reqDto != null) {
+                    for (DtoInfo.FieldInfo field : reqDto.getFields()) {
+                        if ("serialVersionUID".equals(field.getName()) || field.isStatic()) continue;
+                        if (LEGACY_FIELDS.contains(field.getName())) continue;
+                        if (isFrameworkType(field.getType())) continue;
+                        String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
+                        String getter = ("boolean".equals(field.getType()) ? "is" : "get") + capitalize(restName);
+                        sb.append("        payload.put(\"").append(field.getName()).append("\", request.").append(getter).append("());\n");
+                    }
+                } else if (ep.useCaseInfo.getEnvelopeFields() != null && !ep.useCaseInfo.getEnvelopeFields().isEmpty()) {
+                    for (UseCaseInfo.EnvelopeFieldInfo envField : ep.useCaseInfo.getEnvelopeFields()) {
+                        String getter = "get" + capitalize(envField.getFieldName());
+                        sb.append("        payload.put(\"").append(envField.getFieldName()).append("\", request.").append(getter).append("());\n");
+                    }
+                } else {
+                    sb.append("        // TODO: mapper les champs du request vers le payload Envelope\n");
+                    sb.append("        payload.put(\"data\", request);\n");
+                }
+                sb.append("        return payload;\n");
+                sb.append("    }\n\n");
+            }
+
+            // fromEnvelopePayload : Envelope → Response
+            if (ep.responseDtoName != null) {
+                sb.append("    /**\n");
+                sb.append("     * Convertit l'Envelope de reponse EAI en RestDTO Response.\n");
+                sb.append("     */\n");
+                sb.append("    @SuppressWarnings(\"unchecked\")\n");
+                sb.append("    public ").append(ep.responseDtoName).append(" fromEnvelopePayload(Envelope envOut) {\n");
+                sb.append("        ").append(ep.responseDtoName).append(" response = new ").append(ep.responseDtoName).append("();\n");
+                sb.append("        if (envOut == null || envOut.getPayload() == null) return response;\n");
+                sb.append("        java.util.Map<String, Object> data = (java.util.Map<String, Object>) envOut.getPayload();\n");
+
+                DtoInfo respDto = findDto(analysis, ep.ejbOutputDtoName);
+                if (respDto != null) {
+                    for (DtoInfo.FieldInfo field : respDto.getFields()) {
+                        if ("serialVersionUID".equals(field.getName()) || field.isStatic()) continue;
+                        if (LEGACY_FIELDS.contains(field.getName())) continue;
+                        if (isFrameworkType(field.getType())) continue;
+                        String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
+                        String setter = "set" + capitalize(restName);
+                        String castType = cleanType(field.getType());
+                        sb.append("        if (data.containsKey(\"").append(field.getName()).append("\")) response.").append(setter).append("((").append(castType).append(") data.get(\"").append(field.getName()).append("\")); \n");
+                    }
+                } else {
+                    sb.append("        // TODO: mapper les champs du payload Envelope vers la response\n");
+                }
+                sb.append("        return response;\n");
+                sb.append("    }\n\n");
+            }
+
+        }
+
+        // toEjb : Request → VoIn (pattern classique)
+        if (!isActionHandler && ep.requestDtoName != null && ep.ejbInputDtoName != null) {
             sb.append("    public ").append(ep.ejbInputDtoName).append(" toEjb(").append(ep.requestDtoName).append(" request) {\n");
             sb.append("        ").append(ep.ejbInputDtoName).append(" voIn = new ").append(ep.ejbInputDtoName).append("();\n");
 
@@ -850,8 +948,8 @@ public class AclArchitectureGenerator {
             sb.append("    }\n\n");
         }
 
-        // toRest : VoOut → Response
-        if (ep.responseDtoName != null && ep.ejbOutputDtoName != null) {
+        // toRest : VoOut → Response (pattern classique)
+        if (!isActionHandler && ep.responseDtoName != null && ep.ejbOutputDtoName != null) {
             sb.append("    public ").append(ep.responseDtoName).append(" toRest(").append(ep.ejbOutputDtoName).append(" voOut) {\n");
             sb.append("        ").append(ep.responseDtoName).append(" response = new ").append(ep.responseDtoName).append("();\n");
 
@@ -951,6 +1049,13 @@ public class AclArchitectureGenerator {
         }
         imports.add("import " + PKG_INFRA_EJB_TYPES + ".BaseUseCase;");
         imports.add("import " + PKG_INFRA_EJB_TYPES + ".ValueObject;");
+        // Ajouter les imports SynchroneService/Envelope si au moins un endpoint est ACTION_HANDLER
+        boolean hasActionHandler = group.endpoints.stream()
+                .anyMatch(ep -> ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler());
+        if (hasActionHandler) {
+            imports.add("import " + PKG_INFRA_EJB_TYPES + ".SynchroneService;");
+            imports.add("import " + PKG_INFRA_EJB_TYPES + ".Envelope;");
+        }
         imports.add("import " + PKG_DOMAIN_SERVICE + "." + group.serviceInterfaceName + ";");
         imports.add("import " + PKG_INFRA_EJB_EXCEPTION + ".ExceptionTranslator;");
         imports.add("import org.slf4j.Logger;");
@@ -1042,7 +1147,10 @@ public class AclArchitectureGenerator {
             String returnType = ep.responseDtoName != null ? ep.responseDtoName : "void";
             boolean hasReturn = ep.responseDtoName != null;
             String mapperField = toLowerCamel(deriveMapperName(ep));
-            String jndiName = "java:global/bank/" + ep.useCaseName;
+            boolean isActionHandler = ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler();
+            String jndiName = isActionHandler && ep.useCaseInfo.getParentServiceJndiName() != null
+                    ? ep.useCaseInfo.getParentServiceJndiName()
+                    : "java:global/bank/" + ep.useCaseName;
 
             // Resilience4j annotations
             String fallbackName = ep.methodName + "Fallback";
@@ -1062,40 +1170,69 @@ public class AclArchitectureGenerator {
             sb.append("        log.info(\"[EJB-CALL] ").append(ep.useCaseName).append("\");\n");
             sb.append("        try {\n");
 
-            // Mapper Request -> VoIn
-            if (ep.requestDtoName != null && ep.ejbInputDtoName != null) {
-                sb.append("            ").append(ep.ejbInputDtoName).append(" voIn = ").append(mapperField).append(".toEjb(request);\n");
-            }
+            if (isActionHandler) {
+                // ===== PATTERN ACTION_HANDLER : lookup SynchroneService + Envelope =====
+                String actionName = ep.useCaseInfo.getActionName() != null ? ep.useCaseInfo.getActionName() : ep.useCaseName;
+                String parentService = ep.useCaseInfo.getParentServiceClassName() != null ? ep.useCaseInfo.getParentServiceClassName() : "MadServices";
 
-            // JNDI lookup via cache
-            sb.append("            javax.naming.InitialContext ctx = getOrCreateContext();\n");
-            sb.append("            log.debug(\"[EJB-LOOKUP] ").append(jndiName).append(" (cache)\");\n");
-            sb.append("            BaseUseCase useCase = (BaseUseCase) ctx.lookup(\"").append(jndiName).append("\");\n");
-
-            // Execute avec cast type
-            sb.append("            long start = System.currentTimeMillis();\n");
-            if (hasReturn && ep.ejbOutputDtoName != null) {
-                sb.append("            ValueObject result = useCase.execute(");
-                if (ep.ejbInputDtoName != null) {
-                    sb.append("voIn");
-                } else {
-                    sb.append("null");
+                sb.append("            // Construire l'Envelope avec l'action \"" + actionName + "\"\n");
+                sb.append("            Envelope envIn = new Envelope();\n");
+                sb.append("            envIn.setAction(\"" + actionName + "\");\n");
+                sb.append("            envIn.setService(\"" + parentService + "\");\n");
+                if (ep.requestDtoName != null) {
+                    sb.append("            envIn.setPayload(").append(mapperField).append(".toEnvelopePayload(request));\n");
                 }
-                sb.append(");\n");
+
+                sb.append("            javax.naming.InitialContext ctx = getOrCreateContext();\n");
+                sb.append("            log.debug(\"[EJB-LOOKUP] ").append(jndiName).append(" (SynchroneService cache)\");\n");
+                sb.append("            SynchroneService service = (SynchroneService) ctx.lookup(\"").append(jndiName).append("\");\n");
+
+                sb.append("            long start = System.currentTimeMillis();\n");
+                sb.append("            Envelope envOut = service.process(envIn);\n");
                 sb.append("            log.info(\"[EJB-EXECUTE] ").append(ep.useCaseName).append(" en {}ms\", System.currentTimeMillis() - start);\n");
-                sb.append("            ").append(ep.ejbOutputDtoName).append(" voOut = (").append(ep.ejbOutputDtoName).append(") result;\n");
-                sb.append("            log.debug(\"[EJB-RESPONSE] Reponse EJB recue pour ").append(ep.useCaseName).append("\");\n");
-                sb.append("            return ").append(mapperField).append(".toRest(voOut);\n");
+
+                if (hasReturn) {
+                    sb.append("            return ").append(mapperField).append(".fromEnvelopePayload(envOut);\n");
+                }
+
             } else {
-                sb.append("            useCase.execute(");
-                if (ep.ejbInputDtoName != null) {
-                    sb.append("voIn");
-                } else {
-                    sb.append("null");
+                // ===== PATTERN CLASSIQUE : BaseUseCase.execute(VoIn) =====
+
+                // Mapper Request -> VoIn
+                if (ep.requestDtoName != null && ep.ejbInputDtoName != null) {
+                    sb.append("            ").append(ep.ejbInputDtoName).append(" voIn = ").append(mapperField).append(".toEjb(request);\n");
                 }
-                sb.append(");\n");
-                sb.append("            log.info(\"[EJB-EXECUTE] ").append(ep.useCaseName).append(" en {}ms\", System.currentTimeMillis() - start);\n");
-                sb.append("            log.debug(\"[EJB-RESPONSE] Appel EJB termine pour ").append(ep.useCaseName).append("\");\n");
+
+                // JNDI lookup via cache
+                sb.append("            javax.naming.InitialContext ctx = getOrCreateContext();\n");
+                sb.append("            log.debug(\"[EJB-LOOKUP] ").append(jndiName).append(" (cache)\");\n");
+                sb.append("            BaseUseCase useCase = (BaseUseCase) ctx.lookup(\"").append(jndiName).append("\");\n");
+
+                // Execute avec cast type
+                sb.append("            long start = System.currentTimeMillis();\n");
+                if (hasReturn && ep.ejbOutputDtoName != null) {
+                    sb.append("            ValueObject result = useCase.execute(");
+                    if (ep.ejbInputDtoName != null) {
+                        sb.append("voIn");
+                    } else {
+                        sb.append("null");
+                    }
+                    sb.append(");\n");
+                    sb.append("            log.info(\"[EJB-EXECUTE] ").append(ep.useCaseName).append(" en {}ms\", System.currentTimeMillis() - start);\n");
+                    sb.append("            ").append(ep.ejbOutputDtoName).append(" voOut = (").append(ep.ejbOutputDtoName).append(") result;\n");
+                    sb.append("            log.debug(\"[EJB-RESPONSE] Reponse EJB recue pour ").append(ep.useCaseName).append("\");\n");
+                    sb.append("            return ").append(mapperField).append(".toRest(voOut);\n");
+                } else {
+                    sb.append("            useCase.execute(");
+                    if (ep.ejbInputDtoName != null) {
+                        sb.append("voIn");
+                    } else {
+                        sb.append("null");
+                    }
+                    sb.append(");\n");
+                    sb.append("            log.info(\"[EJB-EXECUTE] ").append(ep.useCaseName).append(" en {}ms\", System.currentTimeMillis() - start);\n");
+                    sb.append("            log.debug(\"[EJB-RESPONSE] Appel EJB termine pour ").append(ep.useCaseName).append("\");\n");
+                }
             }
 
             sb.append("        } catch (javax.naming.CommunicationException | javax.naming.ServiceUnavailableException e) {\n");

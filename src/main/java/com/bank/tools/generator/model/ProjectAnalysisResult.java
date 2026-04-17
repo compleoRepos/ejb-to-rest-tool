@@ -68,6 +68,23 @@ public class ProjectAnalysisResult {
     /** Annotations custom bancaires detectees dans le projet source */
     private List<DetectedAnnotation> detectedCustomAnnotations = new ArrayList<>();
 
+    // ==================== SYNCHRONE SERVICE / ACTION HANDLER ====================
+
+    /** Indique si un pattern SynchroneService a ete detecte */
+    private boolean synchroneServiceDetected;
+
+    /** Nom de la classe SynchroneService (ex: MadServices) */
+    private String synchroneServiceClassName;
+
+    /** JNDI name du SynchroneService */
+    private String synchroneServiceJndiName;
+
+    /** Noms des actions detectees dans l'enum (ex: AJOUTBENEF, ANNULERMAD, ...) */
+    private List<String> detectedActionNames = new ArrayList<>();
+
+    /** Classes Model detectees comme sub-DTOs */
+    private List<String> detectedModelClasses = new ArrayList<>();
+
     // ==================== BOA/EAI FRAMEWORK SUPPORT ====================
 
     /** Parent POM framework (groupId:artifactId:version) */
@@ -292,6 +309,23 @@ public class ProjectAnalysisResult {
     public void setDetectedCustomAnnotations(List<DetectedAnnotation> detectedCustomAnnotations) { this.detectedCustomAnnotations = detectedCustomAnnotations; }
     public void addCustomAnnotation(DetectedAnnotation annotation) { this.detectedCustomAnnotations.add(annotation); }
     public void addCustomAnnotations(List<DetectedAnnotation> annotations) { this.detectedCustomAnnotations.addAll(annotations); }
+
+    // ==================== SYNCHRONE SERVICE GETTERS/SETTERS ====================
+
+    public boolean isSynchroneServiceDetected() { return synchroneServiceDetected; }
+    public void setSynchroneServiceDetected(boolean synchroneServiceDetected) { this.synchroneServiceDetected = synchroneServiceDetected; }
+
+    public String getSynchroneServiceClassName() { return synchroneServiceClassName; }
+    public void setSynchroneServiceClassName(String synchroneServiceClassName) { this.synchroneServiceClassName = synchroneServiceClassName; }
+
+    public String getSynchroneServiceJndiName() { return synchroneServiceJndiName; }
+    public void setSynchroneServiceJndiName(String synchroneServiceJndiName) { this.synchroneServiceJndiName = synchroneServiceJndiName; }
+
+    public List<String> getDetectedActionNames() { return detectedActionNames; }
+    public void setDetectedActionNames(List<String> detectedActionNames) { this.detectedActionNames = detectedActionNames; }
+
+    public List<String> getDetectedModelClasses() { return detectedModelClasses; }
+    public void setDetectedModelClasses(List<String> detectedModelClasses) { this.detectedModelClasses = detectedModelClasses; }
 
     // ==================== BOA/EAI GETTERS/SETTERS ====================
 

@@ -252,8 +252,8 @@ public class BianMappingResolver {
      * Nettoie le nom du UseCase : retire les suffixes UC, Impl, Service, Bean, etc.
      */
     private String cleanUseCaseName(String name) {
-        return name.replaceAll("(UC|Impl|Service|Bean|Remote|Local|EJB)$", "")
-                   .replaceAll("(UC|Impl|Service|Bean|Remote|Local|EJB)$", ""); // double pass
+        return name.replaceAll("(UC|Impl|Service|Bean|Remote|Local|EJB|Handler)$", "")
+                   .replaceAll("(UC|Impl|Service|Bean|Remote|Local|EJB|Handler)$", ""); // double pass
     }
 
     /**

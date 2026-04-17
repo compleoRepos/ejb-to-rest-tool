@@ -41,7 +41,8 @@ public class UseCaseInfo {
         REMOTE_INTERFACE("Interface @Remote"),
         LOCAL_INTERFACE("Interface @Local"),
         GENERIC_SERVICE("Service generique (methodes publiques)"),
-        DAO_REPOSITORY("DAO/Repository (CRUD)");
+        DAO_REPOSITORY("DAO/Repository (CRUD)"),
+        ACTION_HANDLER("ActionHandler via SynchroneService (handle(Envelope))");
         private final String label;
         EjbPattern(String label) { this.label = label; }
         public String getLabel() { return label; }
@@ -91,6 +92,18 @@ public class UseCaseInfo {
 
     /** G12: Indique si l'EJB est un sous-aspect d'une entite parente */
     private String parentEntityName;
+
+    /** ACTION_HANDLER: Nom de l'action dans l'enum MadServiceAction (ex: AJOUTBENEF) */
+    private String actionName;
+
+    /** ACTION_HANDLER: Nom de la classe SynchroneService parente (ex: MadServices) */
+    private String parentServiceClassName;
+
+    /** ACTION_HANDLER: JNDI name du SynchroneService parent */
+    private String parentServiceJndiName;
+
+    /** ACTION_HANDLER: Champs extraits des appels Envelope (getNodeAsString, etc.) */
+    private List<EnvelopeFieldInfo> envelopeFields = new ArrayList<>();
 
     /** Interfaces implementees par l'EJB */
     private List<String> implementedInterfaces = new ArrayList<>();
@@ -208,6 +221,22 @@ public class UseCaseInfo {
     public String getRemoteInterfaceName() { return remoteInterfaceName; }
     public void setRemoteInterfaceName(String remoteInterfaceName) { this.remoteInterfaceName = remoteInterfaceName; }
 
+    public String getActionName() { return actionName; }
+    public void setActionName(String actionName) { this.actionName = actionName; }
+
+    public String getParentServiceClassName() { return parentServiceClassName; }
+    public void setParentServiceClassName(String parentServiceClassName) { this.parentServiceClassName = parentServiceClassName; }
+
+    public String getParentServiceJndiName() { return parentServiceJndiName; }
+    public void setParentServiceJndiName(String parentServiceJndiName) { this.parentServiceJndiName = parentServiceJndiName; }
+
+    public List<EnvelopeFieldInfo> getEnvelopeFields() { return envelopeFields; }
+    public void setEnvelopeFields(List<EnvelopeFieldInfo> envelopeFields) { this.envelopeFields = envelopeFields; }
+
+    public boolean isActionHandlerPattern() {
+        return ejbPattern == EjbPattern.ACTION_HANDLER;
+    }
+
     // ==================== UTILITY METHODS ====================
 
     public boolean hasXmlSupport() {
@@ -218,6 +247,10 @@ public class UseCaseInfo {
 
     public boolean isBaseUseCasePattern() {
         return ejbPattern == EjbPattern.BASE_USE_CASE;
+    }
+
+    public boolean isActionHandler() {
+        return ejbPattern == EjbPattern.ACTION_HANDLER;
     }
 
     public boolean isMessageDriven() {
@@ -304,6 +337,31 @@ public class UseCaseInfo {
 
         @Override
         public String toString() { return returnType + " " + name + "(...)"; }
+    }
+
+    /**
+     * Represente un champ extrait des appels Envelope (getNodeAsString, getNodeAsInt, etc.)
+     * dans un ActionHandler.
+     */
+    public static class EnvelopeFieldInfo {
+        private String fieldName;
+        private String javaType;
+
+        public EnvelopeFieldInfo() {}
+
+        public EnvelopeFieldInfo(String fieldName, String javaType) {
+            this.fieldName = fieldName;
+            this.javaType = javaType;
+        }
+
+        public String getFieldName() { return fieldName; }
+        public void setFieldName(String fieldName) { this.fieldName = fieldName; }
+
+        public String getJavaType() { return javaType; }
+        public void setJavaType(String javaType) { this.javaType = javaType; }
+
+        @Override
+        public String toString() { return javaType + " " + fieldName; }
     }
 
     /**

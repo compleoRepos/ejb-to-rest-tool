@@ -441,6 +441,9 @@ public class EjbProjectParser {
             }
         }
 
+        // Phase 2b : Detecter le pattern SynchroneService + ActionHandler
+        detectSynchroneServicePattern(compilationUnits, classIndex, result, dtoClassNames);
+
         // Phase 3 : Extraire les DTOs complets
         Map<String, DtoInfo> dtoMap = new LinkedHashMap<>();
 
@@ -513,6 +516,343 @@ public class EjbProjectParser {
         log.info("Analyse terminee. EJBs : {}, DTOs : {}, Entites JPA : {}",
                 result.getUseCases().size(), result.getDtos().size(), result.getJpaEntityCount());
         return result;
+    }
+
+    // ==================== SYNCHRONE SERVICE / ACTION HANDLER DETECTION ====================
+
+    /**
+     * Detecte le pattern SynchroneService + ActionHandler :
+     * 1. Trouve la classe @Stateless @Remote(SynchroneService.class) avec process(Envelope)
+     * 2. Trouve l'ActionHandlerFactory et l'enum des actions
+     * 3. Trouve chaque handler concret implementant ActionHandler
+     * 4. Cree un UseCaseInfo par handler (pas par service)
+     */
+    private void detectSynchroneServicePattern(
+            Map<String, CompilationUnit> compilationUnits,
+            Map<String, ClassOrInterfaceDeclaration> classIndex,
+            ProjectAnalysisResult result,
+            Set<String> dtoClassNames) {
+
+        // Etape 1 : Trouver la classe SynchroneService
+        ClassOrInterfaceDeclaration synchroneServiceClass = null;
+        CompilationUnit synchroneServiceCu = null;
+        String synchroneServiceJndi = null;
+
+        for (Map.Entry<String, CompilationUnit> entry : compilationUnits.entrySet()) {
+            CompilationUnit cu = entry.getValue();
+            for (ClassOrInterfaceDeclaration cls : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                if (cls.isInterface()) continue;
+                boolean implementsSynchroneService = cls.getImplementedTypes().stream()
+                        .anyMatch(t -> t.getNameAsString().equals("SynchroneService"));
+                if (!implementsSynchroneService) continue;
+                boolean hasProcessMethod = cls.getMethods().stream()
+                        .anyMatch(m -> m.getNameAsString().equals("process") || m.getNameAsString().equals("Traitement"));
+                if (hasProcessMethod) {
+                    synchroneServiceClass = cls;
+                    synchroneServiceCu = cu;
+                    synchroneServiceJndi = "java:global/bank/" + cls.getNameAsString();
+                    log.info("[SYNCHRONE-SERVICE] Detecte : {} (JNDI: {})", cls.getNameAsString(), synchroneServiceJndi);
+                    break;
+                }
+            }
+            if (synchroneServiceClass != null) break;
+        }
+
+        if (synchroneServiceClass == null) return;
+
+        result.setSynchroneServiceDetected(true);
+        result.setSynchroneServiceClassName(synchroneServiceClass.getNameAsString());
+        result.setSynchroneServiceJndiName(synchroneServiceJndi);
+
+        // Etape 2 : Trouver l'enum des actions (MadServiceAction ou similaire)
+        Map<String, String> actionToHandlerMap = new LinkedHashMap<>();
+        List<String> actionNames = new ArrayList<>();
+
+        // Chercher l'ActionHandlerFactory pour le mapping action → handler
+        for (Map.Entry<String, CompilationUnit> entry : compilationUnits.entrySet()) {
+            CompilationUnit cu = entry.getValue();
+            for (ClassOrInterfaceDeclaration cls : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                if (cls.getNameAsString().contains("Factory") || cls.getNameAsString().contains("Dispatcher")) {
+                    // Chercher les put(Enum.VALUE, HandlerClass::new) ou switch/case
+                    String source = cls.toString();
+                    // Pattern: HANDLERS.put(EnumType.VALUE, HandlerClass::new)
+                    Pattern putPattern = Pattern.compile(
+                            "(?:put|case)\\s*\\(?\\s*(?:\\w+\\.)?([A-Z_]+)\\s*[,)]\\s*(?:new\\s+)?(\\w+Handler)(?:::new)?");
+                    Matcher putMatcher = putPattern.matcher(source);
+                    while (putMatcher.find()) {
+                        String actionEnum = putMatcher.group(1);
+                        String handlerName = putMatcher.group(2);
+                        actionToHandlerMap.put(handlerName, actionEnum);
+                        actionNames.add(actionEnum);
+                        log.info("[SYNCHRONE-SERVICE] Mapping: {} → {}", actionEnum, handlerName);
+                    }
+                }
+            }
+        }
+
+        // Fallback : chercher l'enum directement si pas de Factory trouvee
+        if (actionToHandlerMap.isEmpty()) {
+            for (Map.Entry<String, CompilationUnit> entry : compilationUnits.entrySet()) {
+                for (EnumDeclaration enumDecl : entry.getValue().findAll(EnumDeclaration.class)) {
+                    if (enumDecl.getNameAsString().contains("Action") || enumDecl.getNameAsString().contains("SERVICE")) {
+                        for (EnumConstantDeclaration constant : enumDecl.getEntries()) {
+                            actionNames.add(constant.getNameAsString());
+                        }
+                    }
+                }
+            }
+        }
+
+        result.setDetectedActionNames(actionNames);
+
+        // Etape 3 : Trouver tous les handlers qui implementent ActionHandler
+        for (Map.Entry<String, CompilationUnit> entry : compilationUnits.entrySet()) {
+            CompilationUnit cu = entry.getValue();
+            for (ClassOrInterfaceDeclaration cls : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                if (cls.isInterface()) continue;
+                boolean implementsActionHandler = cls.getImplementedTypes().stream()
+                        .anyMatch(t -> t.getNameAsString().equals("ActionHandler"));
+                if (!implementsActionHandler) continue;
+
+                String handlerName = cls.getNameAsString();
+                log.info("[SYNCHRONE-SERVICE] Handler detecte : {}", handlerName);
+
+                // Creer un UseCaseInfo pour ce handler
+                UseCaseInfo uc = new UseCaseInfo();
+                uc.setClassName(handlerName);
+                uc.setEjbType(UseCaseInfo.EjbType.STATELESS);
+                uc.setEjbPattern(UseCaseInfo.EjbPattern.ACTION_HANDLER);
+                uc.setStateless(true);
+                uc.setHasExecuteMethod(false);
+
+                String packageName = cu.getPackageDeclaration()
+                        .map(pd -> pd.getNameAsString()).orElse("");
+                uc.setPackageName(packageName);
+                uc.setFullyQualifiedName(packageName.isEmpty() ? handlerName : packageName + "." + handlerName);
+
+                // Interfaces implementees
+                cls.getImplementedTypes().forEach(t -> uc.getImplementedInterfaces().add(t.getNameAsString()));
+                uc.setImplementedInterface("ActionHandler");
+
+                // ACTION_HANDLER specifique
+                uc.setParentServiceClassName(synchroneServiceClass.getNameAsString());
+                uc.setParentServiceJndiName(synchroneServiceJndi);
+                String actionEnum = actionToHandlerMap.getOrDefault(handlerName, handlerName.replace("Handler", "").toUpperCase());
+                uc.setActionName(actionEnum);
+
+                // Extraire les champs Envelope depuis le code du handler
+                List<UseCaseInfo.EnvelopeFieldInfo> envelopeFields = extractEnvelopeFields(cls);
+                uc.setEnvelopeFields(envelopeFields);
+
+                // Chercher les DTOs associes dans les packages Request/Response
+                associateHandlerDtos(cu, cls, uc, compilationUnits, dtoClassNames);
+
+                // G6 : Determiner HTTP method/status depuis le nom du handler
+                String className = uc.getClassName();
+                if (containsAny(className, CREATION_KEYWORDS)) {
+                    uc.setHttpMethod("POST");
+                    uc.setHttpStatusCode(201);
+                } else if (containsAny(className, DELETION_KEYWORDS)) {
+                    uc.setHttpMethod("DELETE");
+                    uc.setHttpStatusCode(204);
+                } else if (containsAny(className, CONSULTATION_KEYWORDS)) {
+                    uc.setHttpMethod("GET");
+                    uc.setHttpStatusCode(200);
+                } else if (containsAny(className, UPDATE_KEYWORDS)) {
+                    uc.setHttpMethod("PUT");
+                    uc.setHttpStatusCode(200);
+                } else {
+                    uc.setHttpMethod("POST");
+                    uc.setHttpStatusCode(200);
+                }
+
+                // Noms generes
+                String baseName = deriveHandlerBaseName(handlerName);
+                uc.setRestEndpoint("/api/" + toKebabCase(baseName));
+                uc.setControllerName(baseName + "Controller");
+                uc.setServiceAdapterName(baseName + "ServiceAdapter");
+                uc.setJndiName(synchroneServiceJndi); // JNDI du service parent
+
+                // G10 : Collecter les annotations source
+                cls.getAnnotations().forEach(ann -> uc.getSourceAnnotations().add(ann.getNameAsString()));
+
+                // G11 : Javadoc + Swagger
+                cls.getJavadocComment().ifPresent(jd -> uc.setJavadoc(jd.getContent().trim()));
+                uc.setSwaggerSummary(generateSwaggerSummary(handlerName));
+
+                // G14 : Base package
+                if (result.getSourceBasePackage() == null && !packageName.isEmpty()) {
+                    String[] parts = packageName.split("\\.");
+                    if (parts.length >= 3) {
+                        result.setSourceBasePackage(parts[0] + "." + parts[1] + "." + parts[2]);
+                    }
+                }
+
+                result.addUseCase(uc);
+                log.info("[SYNCHRONE-SERVICE] UseCase cree : {} (action={}, httpMethod={}, dto_in={}, dto_out={})",
+                        handlerName, actionEnum, uc.getHttpMethod(),
+                        uc.getInputDtoClassName(), uc.getOutputDtoClassName());
+
+                if (uc.getInputDtoClassName() != null) dtoClassNames.add(uc.getInputDtoClassName());
+                if (uc.getOutputDtoClassName() != null) dtoClassNames.add(uc.getOutputDtoClassName());
+            }
+        }
+
+        // Etape 4 : Detecter les classes Model comme sub-DTOs
+        detectModelClasses(compilationUnits, result, dtoClassNames);
+
+        if (!result.getUseCases().isEmpty()) {
+            result.addConversion("SynchroneService " + synchroneServiceClass.getNameAsString() +
+                    " → " + result.getUseCases().stream()
+                    .filter(uc -> uc.getEjbPattern() == UseCaseInfo.EjbPattern.ACTION_HANDLER)
+                    .count() + " endpoints REST (1 par ActionHandler)");
+            result.addAttentionPoint("Pattern SynchroneService detecte : les handlers partagent le meme JNDI (" +
+                    synchroneServiceJndi + "). Le JndiAdapter doit construire un Envelope avec l'action appropriee.");
+        }
+    }
+
+    /**
+     * Extrait les champs utilises via Envelope dans un handler.
+     * Detecte les appels getNodeAsString("field"), getNodeAsInt("field"), etc.
+     */
+    private List<UseCaseInfo.EnvelopeFieldInfo> extractEnvelopeFields(ClassOrInterfaceDeclaration handler) {
+        List<UseCaseInfo.EnvelopeFieldInfo> fields = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        String source = handler.toString();
+
+        Pattern p = Pattern.compile("getNodeAs(String|Int|Long|Boolean|Double)\\(\"([^\"]+)\"\\)");
+        Matcher m = p.matcher(source);
+        while (m.find()) {
+            String fieldName = m.group(2);
+            // Enlever le prefix "flux/" si present
+            if (fieldName.contains("/")) {
+                fieldName = fieldName.substring(fieldName.lastIndexOf('/') + 1);
+            }
+            if (seen.add(fieldName)) {
+                String javaType = switch (m.group(1)) {
+                    case "String" -> "String";
+                    case "Int" -> "Integer";
+                    case "Long" -> "Long";
+                    case "Boolean" -> "Boolean";
+                    case "Double" -> "Double";
+                    default -> "String";
+                };
+                fields.add(new UseCaseInfo.EnvelopeFieldInfo(fieldName, javaType));
+            }
+        }
+        return fields;
+    }
+
+    /**
+     * Associe les DTOs Request/Response existants a un handler.
+     * Cherche dans les packages madCore/DTO/Request et madCore/DTO/Response.
+     */
+    private void associateHandlerDtos(CompilationUnit handlerCu, ClassOrInterfaceDeclaration handler,
+                                       UseCaseInfo uc,
+                                       Map<String, CompilationUnit> compilationUnits,
+                                       Set<String> dtoClassNames) {
+        String handlerSource = handler.toString();
+
+        // Chercher les types utilises dans le handler (variables locales, casts, imports)
+        Set<String> usedTypes = new HashSet<>();
+
+        // Via les imports du CU
+        handlerCu.getImports().forEach(imp -> {
+            String importName = imp.getNameAsString();
+            String simpleName = importName.substring(importName.lastIndexOf('.') + 1);
+            if (importName.contains("DTO") || importName.contains("Request") ||
+                importName.contains("Response") || importName.contains("Model")) {
+                usedTypes.add(simpleName);
+            }
+        });
+
+        // Via les declarations de variables dans le handler
+        handler.findAll(VariableDeclarator.class).forEach(var -> {
+            String typeName = var.getTypeAsString();
+            if (!typeName.equals("Envelope") && !typeName.equals("String") &&
+                !typeName.equals("int") && !typeName.equals("long") &&
+                !typeName.equals("boolean") && !typeName.equals("double") &&
+                !typeName.equals("DataSource") && !typeName.equals("Connection") &&
+                !typeName.equals("SessionContext") && !typeName.equals("Date") &&
+                !typeName.equals("DateFormat") && !typeName.equals("SimpleDateFormat") &&
+                Character.isUpperCase(typeName.charAt(0))) {
+                usedTypes.add(typeName);
+            }
+        });
+
+        // Chercher dans tous les CU les classes DTO Request/Response qui matchent
+        for (Map.Entry<String, CompilationUnit> entry : compilationUnits.entrySet()) {
+            CompilationUnit cu = entry.getValue();
+            String pkg = cu.getPackageDeclaration().map(pd -> pd.getNameAsString()).orElse("");
+            for (ClassOrInterfaceDeclaration cls : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                String className = cls.getNameAsString();
+                if (usedTypes.contains(className)) {
+                    if (pkg.contains("Request") || className.endsWith("Request")) {
+                        uc.setInputDtoClassName(className);
+                        uc.setInputDtoPackage(pkg);
+                        dtoClassNames.add(className);
+                    } else if (pkg.contains("Response") || className.endsWith("Response")) {
+                        uc.setOutputDtoClassName(className);
+                        uc.setOutputDtoPackage(pkg);
+                        dtoClassNames.add(className);
+                    }
+                }
+            }
+        }
+
+        // Si pas de DTO trouve, deriver des noms depuis le handler
+        if (uc.getInputDtoClassName() == null) {
+            String baseName = deriveHandlerBaseName(uc.getClassName());
+            uc.setInputDtoClassName(baseName + "Request");
+        }
+        if (uc.getOutputDtoClassName() == null) {
+            String baseName = deriveHandlerBaseName(uc.getClassName());
+            uc.setOutputDtoClassName(baseName + "Response");
+        }
+    }
+
+    /**
+     * Detecte les classes dans les packages Model/ comme sub-DTOs.
+     */
+    private void detectModelClasses(Map<String, CompilationUnit> compilationUnits,
+                                     ProjectAnalysisResult result,
+                                     Set<String> dtoClassNames) {
+        for (Map.Entry<String, CompilationUnit> entry : compilationUnits.entrySet()) {
+            CompilationUnit cu = entry.getValue();
+            String pkg = cu.getPackageDeclaration().map(pd -> pd.getNameAsString()).orElse("");
+
+            // Detecter les classes dans un package Model ou model
+            if (pkg.toLowerCase().contains(".model") || pkg.toLowerCase().contains(".models")) {
+                for (ClassOrInterfaceDeclaration cls : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                    if (cls.isInterface()) continue;
+                    String className = cls.getNameAsString();
+                    // Exclure les handlers, services, exceptions, enums
+                    if (className.endsWith("Handler") || className.endsWith("Service") ||
+                        className.endsWith("Exception") || className.endsWith("Factory")) continue;
+                    String parentClass = cls.getExtendedTypes().stream()
+                            .findFirst().map(t -> t.getNameAsString()).orElse("");
+                    if (parentClass.endsWith("Exception")) continue;
+
+                    result.getDetectedModelClasses().add(className);
+                    dtoClassNames.add(className);
+                    log.info("[SYNCHRONE-SERVICE] Model sub-DTO detecte : {}", className);
+                }
+            }
+        }
+    }
+
+    /**
+     * Derive un nom de base depuis un nom de handler.
+     * Ex: AddBeneficiariHandler → AddBeneficiari
+     *     GetBeneficiariesHandler → GetBeneficiaries
+     *     TraitementMadHandler → TraitementMad
+     */
+    private String deriveHandlerBaseName(String handlerName) {
+        String base = handlerName;
+        if (base.endsWith("Handler")) {
+            base = base.substring(0, base.length() - "Handler".length());
+        }
+        return ensurePascalCase(base);
     }
 
     // ==================== G4 : EJB TYPE DETECTION ====================

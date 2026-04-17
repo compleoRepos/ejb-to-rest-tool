@@ -45,13 +45,17 @@ public class BianAutoDetector {
         DOMAIN_KEYWORDS.put(List.of("epargne", "savings", "placement", "depot", "terme",
             "capitalisation"), "savings-account");
 
-        // Virement / Paiement
+        // Virement / Paiement / MAD (Mise A Disposition)
         DOMAIN_KEYWORDS.put(List.of("virement", "transfer", "payment", "paiement", "sepa",
-            "swift", "prelevement", "batch", "remise", "impaye"), "payment-initiation");
+            "swift", "prelevement", "batch", "remise", "impaye",
+            "mad", "miseadisposition", "disposition", "traitement", "montant",
+            "annuler", "emission", "transaction"), "payment-initiation");
 
-        // Client / Tiers
+        // Client / Tiers / Beneficiaire
         DOMAIN_KEYWORDS.put(List.of("client", "party", "customer", "charger", "tiers",
-            "prospect", "kyc", "sascc", "cin", "personne"), "party");
+            "prospect", "kyc", "sascc", "cin", "personne",
+            "beneficiaire", "beneficiari", "benef", "beneficiaries",
+            "telephone", "auth", "eligibilite", "eligibility"), "party");
 
         // Credit / Pret
         DOMAIN_KEYWORDS.put(List.of("credit", "loan", "pret", "simuler", "scoring",
@@ -93,7 +97,8 @@ public class BianAutoDetector {
         ACTION_VERBS.put("initiation", List.of(
             "ouvrir", "creer", "create", "add", "register", "open",
             "souscrire", "initier", "demander", "enregistrer", "inscrire",
-            "virement", "virer", "transferer", "transfer"
+            "virement", "virer", "transferer", "transfer",
+            "ajout", "ajouter", "emission"
         ));
 
         // EVALUATION — Calculer/simuler sans modifier (POST, pas de {cr-ref-id}, 200)
@@ -112,27 +117,31 @@ public class BianAutoDetector {
         ACTION_VERBS.put("retrieval", List.of(
             "consulter", "charger", "chercher", "rechercher", "lister",
             "get", "find", "fetch", "load", "read", "search", "list",
-            "afficher", "visualiser", "recuperer", "extraire", "generer"
+            "afficher", "visualiser", "recuperer", "extraire", "generer",
+            "hist", "historique", "isbenef", "eligibilite"
         ));
 
         // CONTROL — Verifier/controler/bloquer (PUT, {cr-ref-id}, 200)
         ACTION_VERBS.put("control", List.of(
             "bloquer", "block", "verifier", "verify", "check", "controler",
             "valider", "validate", "approuver", "approve", "rejeter", "reject",
-            "suspendre", "suspend", "geler", "freeze", "opposition"
+            "suspendre", "suspend", "geler", "freeze", "opposition",
+            "control", "controlmontant"
         ));
 
         // UPDATE — Modifier une ressource existante (PUT, {cr-ref-id}, 200)
         ACTION_VERBS.put("update", List.of(
             "modifier", "update", "edit", "change", "mettre", "maj",
-            "corriger", "rectifier", "ajuster", "renouveler", "prolonger"
+            "corriger", "rectifier", "ajuster", "renouveler", "prolonger",
+            "modif", "modifiertel", "modifbenef"
         ));
 
         // TERMINATION — Fermer/cloturer (PUT, {cr-ref-id}, 200)
         ACTION_VERBS.put("termination", List.of(
             "cloturer", "close", "fermer", "terminer", "terminate",
             "resilier", "annuler", "cancel", "revoquer", "supprimer",
-            "desactiver", "deactivate", "archiver"
+            "desactiver", "deactivate", "archiver",
+            "supf", "supprimerbenef"
         ));
 
         // EXECUTION — Executer une operation metier (POST, {cr-ref-id}, 200)
@@ -140,7 +149,8 @@ public class BianAutoDetector {
         ACTION_VERBS.put("execution", List.of(
             "executer", "execute", "traiter", "process", "run", "perform",
             "activer", "activate", "receptionner", "effectuer",
-            "debiter", "crediter", "payer"
+            "debiter", "crediter", "payer",
+            "traitement", "madcore", "auth"
         ));
     }
 
@@ -289,7 +299,7 @@ public class BianAutoDetector {
      */
     public String detectBehaviorQualifier(UseCaseInfo useCase, String action) {
         String name = useCase.getClassName()
-            .replaceAll("(UC|UseCase|Bean|Impl|Service|EJB)$", "");
+            .replaceAll("(UC|UseCase|Bean|Impl|Service|EJB|Handler)$", "");
 
         // Retirer les verbes connus du debut
         String bq = name;
@@ -426,8 +436,8 @@ public class BianAutoDetector {
     }
 
     private String cleanName(String name) {
-        return name.replaceAll("(UC|UseCase|Bean|Impl|Service|EJB)$", "")
-                   .replaceAll("(UC|UseCase|Bean|Impl|Service|EJB)$", "")
+        return name.replaceAll("(UC|UseCase|Bean|Impl|Service|EJB|Handler)$", "")
+                   .replaceAll("(UC|UseCase|Bean|Impl|Service|EJB|Handler)$", "")
                    .toLowerCase();
     }
 
