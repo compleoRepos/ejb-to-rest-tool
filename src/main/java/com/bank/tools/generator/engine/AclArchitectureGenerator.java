@@ -2148,6 +2148,9 @@ public class AclArchitectureGenerator {
 
             String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
             String restType = cleanType(field.getType());
+            // Exclure les champs dont le type est non-standard (framework, generique brut)
+            // car ils ne sont pas utilisables dans un RestDTO
+            if ("Object".equals(restType) && !"Object".equals(field.getType()) && !"java.lang.Object".equals(field.getType())) continue;
             boolean required = field.isRequired() && isRequest;
 
             // Correction 4: @ValidRIB/@ValidIBAN → préserver les validateurs custom
@@ -2179,12 +2182,19 @@ public class AclArchitectureGenerator {
     private String cleanType(String type) {
         if (type == null) return "String";
         if (isFrameworkType(type)) return "Object";
+        // Types generiques bruts (T, E, V, etc.) → Object
+        if (type.length() == 1 && Character.isUpperCase(type.charAt(0))) return "Object";
+        // Types generiques avec bounds (? extends X) → Object
+        if (type.startsWith("?") || type.contains("<?")) return "Object";
         return type.replace("java.lang.", "").replace("java.util.", "");
     }
 
     private boolean isFrameworkType(String type) {
         if (type == null) return false;
-        return FRAMEWORK_TYPES.contains(type) || type.startsWith("ma.eai.") || type.contains("Envelope");
+        return FRAMEWORK_TYPES.contains(type) || type.startsWith("ma.eai.") || type.contains("Envelope")
+                || type.equals("Entete") || type.startsWith("Entete<")
+                || type.equals("Header") || type.equals("Context")
+                || type.equals("ServiceContext") || type.equals("EaiContext");
     }
 
     private String capitalize(String s) {
