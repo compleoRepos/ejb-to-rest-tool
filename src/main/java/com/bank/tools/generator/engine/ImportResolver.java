@@ -299,12 +299,19 @@ public class ImportResolver {
             String importPackage = fqn.substring(0, fqn.lastIndexOf('.'));
             if (importPackage.equals(filePackage)) continue;
 
-            // Verifier si deja importe
+            // Verifier si deja importe (meme FQN)
             if (existingImports.contains(fqn)) continue;
 
             // Verifier si un import wildcard couvre ce type
             if (existingImports.stream().anyMatch(imp -> imp.endsWith(".*") &&
                     fqn.startsWith(imp.substring(0, imp.length() - 1)))) continue;
+
+            // Verifier si le meme type simple est deja importe d'un autre package
+            // (ex: GenericResponse existe dans dto.response ET ejb.types — ne pas creer de conflit)
+            final String simpleType = type;
+            boolean alreadyImportedFromOtherPackage = existingImports.stream()
+                    .anyMatch(imp -> imp.endsWith("." + simpleType));
+            if (alreadyImportedFromOtherPackage) continue;
 
             newImports.add("import " + fqn + ";");
         }

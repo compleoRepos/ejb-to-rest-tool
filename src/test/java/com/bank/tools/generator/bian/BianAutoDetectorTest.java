@@ -283,9 +283,11 @@ class BianAutoDetectorTest {
         }
 
         @Test
-        @DisplayName("UseCase sans verbe → null")
-        void detectBqNull() {
-            assertNull(detector.detectBehaviorQualifier(buildUseCase("XyzAbcUC"), "execution"));
+        @DisplayName("UseCase sans verbe connu → retourne le nom complet en kebab")
+        void detectBqFallbackToFullName() {
+            // Fix 1 : quand aucun verbe n'est retire, on retourne le nom complet en kebab
+            // au lieu de null, pour garantir un BQ unique par handler
+            assertEquals("xyz-abc", detector.detectBehaviorQualifier(buildUseCase("XyzAbcUC"), "execution"));
         }
     }
 

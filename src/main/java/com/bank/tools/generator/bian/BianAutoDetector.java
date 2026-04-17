@@ -48,14 +48,15 @@ public class BianAutoDetector {
         // Virement / Paiement / MAD (Mise A Disposition)
         DOMAIN_KEYWORDS.put(List.of("virement", "transfer", "payment", "paiement", "sepa",
             "swift", "prelevement", "batch", "remise", "impaye",
-            "mad", "miseadisposition", "disposition", "traitement", "montant",
+            "miseadisposition", "disposition", "madattente", "traitement", "montant",
             "annuler", "emission", "transaction"), "payment-initiation");
 
-        // Client / Tiers / Beneficiaire
+        // Client / Tiers / Beneficiaire / Authentification
         DOMAIN_KEYWORDS.put(List.of("client", "party", "customer", "charger", "tiers",
             "prospect", "kyc", "sascc", "cin", "personne",
             "beneficiaire", "beneficiari", "benef", "beneficiaries",
-            "telephone", "auth", "eligibilite", "eligibility"), "party");
+            "telephone", "eligibilite", "eligibility",
+            "auth", "token", "authentif", "login", "session", "madcore"), "party");
 
         // Credit / Pret
         DOMAIN_KEYWORDS.put(List.of("credit", "loan", "pret", "simuler", "scoring",
@@ -93,12 +94,25 @@ public class BianAutoDetector {
 
     private static final Map<String, List<String>> ACTION_VERBS = new LinkedHashMap<>();
     static {
+        // ORDRE IMPORTANT : les actions les plus specifiques d'abord.
+        // retrieval AVANT initiation car "get", "is", "list" sont des prefixes courts.
+
+        // RETRIEVAL — Consulter/lire sans modifier (POST avec body, {cr-ref-id}, 200)
+        ACTION_VERBS.put("retrieval", List.of(
+            "consulter", "charger", "chercher", "rechercher", "lister",
+            "get", "find", "fetch", "load", "read", "search", "list",
+            "afficher", "visualiser", "recuperer", "extraire", "generer",
+            "hist", "historique", "isbenef", "eligibilite",
+            "is", "existe"  // IsBenefEnregistrer = verification/consultation
+        ));
+
         // INITIATION — Creer une nouvelle ressource (POST, pas de {cr-ref-id}, 201)
         ACTION_VERBS.put("initiation", List.of(
             "ouvrir", "creer", "create", "add", "register", "open",
             "souscrire", "initier", "demander", "enregistrer", "inscrire",
             "virement", "virer", "transferer", "transfer",
-            "ajout", "ajouter", "emission"
+            "ajout", "ajouter", "emission", "emettre", "emit",
+            "traitement"  // TraitementMad = creation d'une mise a disposition
         ));
 
         // EVALUATION — Calculer/simuler sans modifier (POST, pas de {cr-ref-id}, 200)
@@ -113,17 +127,9 @@ public class BianAutoDetector {
             "diffuser", "publier", "communiquer", "sms", "email", "multicanal"
         ));
 
-        // RETRIEVAL — Consulter/lire sans modifier (POST avec body, {cr-ref-id}, 200)
-        ACTION_VERBS.put("retrieval", List.of(
-            "consulter", "charger", "chercher", "rechercher", "lister",
-            "get", "find", "fetch", "load", "read", "search", "list",
-            "afficher", "visualiser", "recuperer", "extraire", "generer",
-            "hist", "historique", "isbenef", "eligibilite"
-        ));
-
         // CONTROL — Verifier/controler/bloquer (PUT, {cr-ref-id}, 200)
         ACTION_VERBS.put("control", List.of(
-            "bloquer", "block", "verifier", "verify", "check", "controler",
+            "bloquer", "block", "controler",
             "valider", "validate", "approuver", "approve", "rejeter", "reject",
             "suspendre", "suspend", "geler", "freeze", "opposition",
             "control", "controlmontant"
@@ -150,18 +156,25 @@ public class BianAutoDetector {
             "executer", "execute", "traiter", "process", "run", "perform",
             "activer", "activate", "receptionner", "effectuer",
             "debiter", "crediter", "payer",
-            "traitement", "madcore", "auth"
+            "madcore"
         ));
     }
 
     // ===================== VERBES POUR EXTRACTION BQ =====================
 
     private static final String[] ALL_VERBS = {
-        "Activer", "Bloquer", "Consulter", "Charger", "Ouvrir", "Cloturer",
-        "Simuler", "Envoyer", "Generer", "Modifier", "Receptionner", "Creer", "Verifier",
-        "Executer", "Traiter", "Valider", "Approuver", "Rejeter", "Maj", "Scorer", "Notifier",
-        "Virer", "Payer", "Debiter", "Crediter", "Convertir", "Filtrer", "Controler",
-        "Calculer", "Evaluer", "Estimer", "Archiver", "Supprimer"
+        // Prefixes longs d'abord (pour eviter que "Consult" matche avant "Consultation")
+        "Consultation", "Annulation", "Emission", "Modification",
+        "Suppression", "Verification", "Activation", "MadCore",
+        // Verbes courts
+        "Add", "Ajouter", "Ajout", "Annuler", "Consulter", "Charger",
+        "Control", "Controler", "Get", "Is", "List", "Modif", "Modifier",
+        "Supf", "Supprimer", "Traitement", "Traiter", "Auth", "Authentifier",
+        "Emit", "Emettre", "Activer", "Bloquer", "Ouvrir", "Cloturer",
+        "Simuler", "Envoyer", "Generer", "Receptionner", "Creer", "Verifier",
+        "Executer", "Valider", "Approuver", "Rejeter", "Maj", "Scorer", "Notifier",
+        "Virer", "Payer", "Debiter", "Crediter", "Convertir", "Filtrer",
+        "Calculer", "Evaluer", "Estimer", "Archiver"
     };
 
     // ===================== AUTO-DETECTION PRINCIPALE =====================
@@ -299,7 +312,7 @@ public class BianAutoDetector {
      */
     public String detectBehaviorQualifier(UseCaseInfo useCase, String action) {
         String name = useCase.getClassName()
-            .replaceAll("(UC|UseCase|Bean|Impl|Service|EJB|Handler)$", "");
+            .replaceAll("(Handler|UC|UseCase|Bean|Impl|Service|EJB)$", "");
 
         // Retirer les verbes connus du debut
         String bq = name;
@@ -310,9 +323,9 @@ public class BianAutoDetector {
             }
         }
 
+        // Si le BQ est vide apres le retrait du verbe, utiliser le nom complet en kebab
         if (bq.isEmpty() || bq.equals(name)) {
-            // Aucun verbe retire — essayer de retirer le Service Domain du nom
-            return null;
+            bq = name;
         }
 
         // Convertir en kebab-case

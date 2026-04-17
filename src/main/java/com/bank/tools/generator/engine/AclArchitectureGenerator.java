@@ -342,7 +342,63 @@ public class AclArchitectureGenerator {
                     uc.getClassName(), group.controllerName, ep.methodName, mapping.getAction());
         }
 
+        // ===== FIX 2 : Deduplication des routes =====
+        // Verifier les doublons de route dans chaque controller
+        for (BianControllerGroup group : groupMap.values()) {
+            deduplicateRoutes(group);
+        }
+
         return new ArrayList<>(groupMap.values());
+    }
+
+    /**
+     * Detecte et resout les conflits de route dans un controller.
+     * Si deux endpoints ont la meme methode HTTP + URL relative,
+     * on force un BQ unique base sur le nom du handler.
+     */
+    private void deduplicateRoutes(BianControllerGroup group) {
+        // Construire les URLs pour chaque endpoint
+        for (BianEndpoint ep : group.endpoints) {
+            if (ep.bianMapping.getUrl() == null) {
+                ep.bianMapping.buildUrl("/api/v1");
+            }
+        }
+
+        // Grouper par cle de route : HTTP_METHOD + URL relative
+        Map<String, List<BianEndpoint>> routeMap = new LinkedHashMap<>();
+        for (BianEndpoint ep : group.endpoints) {
+            String httpMethod = ep.bianMapping.getHttpMethod() != null
+                    ? ep.bianMapping.getHttpMethod().toUpperCase() : "POST";
+            String relUrl = ep.bianMapping.getUrl();
+            if (relUrl != null && relUrl.startsWith("/" + group.serviceDomain)) {
+                relUrl = relUrl.substring(("/" + group.serviceDomain).length());
+            }
+            String routeKey = httpMethod + ":" + relUrl;
+            routeMap.computeIfAbsent(routeKey, k -> new ArrayList<>()).add(ep);
+        }
+
+        // Resoudre les conflits
+        for (var entry : routeMap.entrySet()) {
+            if (entry.getValue().size() > 1) {
+                log.warn("[ACL] Conflit de route detecte : {} — {} endpoints",
+                        entry.getKey(), entry.getValue().size());
+                for (BianEndpoint ep : entry.getValue()) {
+                    // Forcer un BQ unique base sur le nom du handler
+                    String handlerName = ep.useCaseName
+                            .replaceAll("(Handler|UC|UseCase|Bean|Impl|Service|EJB)$", "");
+                    String uniqueBq = handlerName.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
+                    ep.bianMapping.setBehaviorQualifier(uniqueBq);
+                    // Invalider le cache URL pour forcer le recalcul
+                    ep.bianMapping.setUrl(null);
+                    ep.bianMapping.setOperationId(null);
+                    ep.bianMapping.buildUrl("/api/v1");
+                    // Recalculer le nom de methode
+                    ep.methodName = deriveMethodName(ep.bianMapping);
+                    log.info("[ACL] Route corrigee : {} → {}",
+                            ep.useCaseName, ep.bianMapping.getUrl());
+                }
+            }
+        }
     }
 
     private String deriveMethodName(BianMapping mapping) {
@@ -1043,12 +1099,21 @@ public class AclArchitectureGenerator {
         for (BianEndpoint ep : group.endpoints) {
             if (ep.requestDtoName != null) imports.add("import " + PKG_API_DTO_REQUEST + "." + ep.requestDtoName + ";");
             if (ep.responseDtoName != null) imports.add("import " + PKG_API_DTO_RESPONSE + "." + ep.responseDtoName + ";");
-            if (ep.ejbInputDtoName != null) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
-            if (ep.ejbOutputDtoName != null) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
+            // Pour ACTION_HANDLER, les types EJB sont remplaces par Envelope — ne pas importer les types EJB individuels
+            boolean isActionHandlerEp = ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler();
+            if (!isActionHandlerEp) {
+                if (ep.ejbInputDtoName != null) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
+                if (ep.ejbOutputDtoName != null) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
+            }
             imports.add("import " + PKG_INFRA_EJB_MAPPER + "." + deriveMapperName(ep) + ";");
         }
-        imports.add("import " + PKG_INFRA_EJB_TYPES + ".BaseUseCase;");
-        imports.add("import " + PKG_INFRA_EJB_TYPES + ".ValueObject;");
+        // BaseUseCase/ValueObject seulement si au moins un endpoint n'est PAS ACTION_HANDLER
+        boolean hasBaseUseCase = group.endpoints.stream()
+                .anyMatch(ep -> ep.useCaseInfo == null || !ep.useCaseInfo.isActionHandler());
+        if (hasBaseUseCase) {
+            imports.add("import " + PKG_INFRA_EJB_TYPES + ".BaseUseCase;");
+            imports.add("import " + PKG_INFRA_EJB_TYPES + ".ValueObject;");
+        }
         // Ajouter les imports SynchroneService/Envelope si au moins un endpoint est ACTION_HANDLER
         boolean hasActionHandler = group.endpoints.stream()
                 .anyMatch(ep -> ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler());
