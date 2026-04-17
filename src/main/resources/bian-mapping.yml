@@ -196,6 +196,21 @@ bian:
         service-domain: "party-credit-risk"
         bian-id: "SD0255"
 
+      # --- Channel Activity Analysis (SD0072) --- services middleware/API gateway
+      - keywords: ["mad", "madservice", "madcore", "middleware", "gateway", "dispatcher", "router", "proxy"]
+        service-domain: "channel-activity-analysis"
+        bian-id: "SD0072"
+
+      # --- Customer Offer (SD0120) ---
+      - keywords: ["offre", "offer", "souscription", "eligibilite", "eligibility", "canal"]
+        service-domain: "customer-offer"
+        bian-id: "SD0120"
+
+      # --- Authentication (SD0023) ---
+      - keywords: ["auth", "authentication", "jwt", "token", "login", "session"]
+        service-domain: "party-authentication"
+        bian-id: "SD0023"
+
     keywords-to-action:
       - keywords: ["ouvrir", "creer", "create", "open", "initier"]
         action: "initiation"

@@ -718,6 +718,37 @@ public class AclArchitectureGenerator {
                 "}\n");
         log.info("[ACL] EJB Type genere : ValueObject");
 
+        // Generer Envelope.java — type framework EAI utilise comme VoIn/VoOut generique
+        // dans certains projets (ex: MadServices). Sans ce fichier, l'import dans le
+        // JndiAdapter provoque une erreur de compilation.
+        Files.writeString(dir.resolve("Envelope.java"),
+                "package " + PKG_INFRA_EJB_TYPES + ";\n\n" +
+                "import java.io.Serializable;\n\n" +
+                "/**\n" +
+                " * Type framework EAI generique utilise comme conteneur ValueObject.\n" +
+                " * Genere automatiquement pour les projets qui utilisent Envelope comme VoIn/VoOut.\n" +
+                " */\n" +
+                "public class Envelope implements ValueObject {\n\n" +
+                "    private static final long serialVersionUID = 1L;\n\n" +
+                "    private String action;\n" +
+                "    private String service;\n" +
+                "    private Object payload;\n" +
+                "    private java.util.Map<String, Object> headers = new java.util.HashMap<>();\n" +
+                "    private java.util.Map<String, Object> properties = new java.util.HashMap<>();\n\n" +
+                "    public Envelope() {}\n\n" +
+                "    public String getAction() { return action; }\n" +
+                "    public void setAction(String action) { this.action = action; }\n\n" +
+                "    public String getService() { return service; }\n" +
+                "    public void setService(String service) { this.service = service; }\n\n" +
+                "    public Object getPayload() { return payload; }\n" +
+                "    public void setPayload(Object payload) { this.payload = payload; }\n\n" +
+                "    public java.util.Map<String, Object> getHeaders() { return headers; }\n" +
+                "    public void setHeaders(java.util.Map<String, Object> headers) { this.headers = headers; }\n\n" +
+                "    public java.util.Map<String, Object> getProperties() { return properties; }\n" +
+                "    public void setProperties(java.util.Map<String, Object> properties) { this.properties = properties; }\n" +
+                "}\n");
+        log.info("[ACL] EJB Type genere : Envelope");
+
         for (DtoInfo dto : analysis.getDtos()) {
             Path file = dir.resolve(dto.getClassName() + ".java");
 
@@ -1822,6 +1853,17 @@ public class AclArchitectureGenerator {
 
         // Cas speciaux : types primitifs ou void — pas de DTO
         if ("void".equals(ejbDtoName) || "Void".equals(ejbDtoName)) return null;
+
+        // Cas Envelope et types framework generiques — utiliser le Service Domain BIAN
+        // pour generer un nom significatif au lieu de "EnvelopeRequest"/"EnvelopeResponse"
+        if (FRAMEWORK_TYPES.contains(ejbDtoName) || "Envelope".equals(ejbDtoName)
+                || "Object".equals(ejbDtoName) || "Serializable".equals(ejbDtoName)) {
+            String base = toPascalCase(mapping.getServiceDomain());
+            String bq = mapping.getBehaviorQualifier();
+            if (bq != null && !bq.isEmpty()) base += toPascalCase(bq);
+            return base + suffix;
+        }
+
         if ("String".equals(ejbDtoName) || "string".equals(ejbDtoName)) {
             // Generer un nom significatif depuis le mapping BIAN
             String base = toPascalCase(mapping.getServiceDomain());
