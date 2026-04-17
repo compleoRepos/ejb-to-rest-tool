@@ -252,6 +252,13 @@ public class EjbProjectParser {
                 // G4 : Detecter les EJBs (tous types)
                 UseCaseInfo.EjbType ejbType = detectEjbType(classDecl);
                 if (ejbType != null) {
+                    // FIX : Ignorer les dispatchers UCStrategie — ce ne sont pas des UseCases
+                    // Pattern BOA : le bean principal extends UCStrategie et route vers les vrais UseCases
+                    if (isDispatcherBean(classDecl)) {
+                        log.info("[PARSER] Dispatcher ignore (pas un UseCase) : {}", classDecl.getNameAsString());
+                        continue;
+                    }
+
                     // G4 : MessageDriven → transformer en composant event-driven Spring
                     if (ejbType == UseCaseInfo.EjbType.MESSAGE_DRIVEN) {
                         UseCaseInfo mdbInfo = extractMdbInfo(cu, classDecl);
@@ -1712,6 +1719,53 @@ public class EjbProjectParser {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * Determine si une classe est un dispatcher UCStrategie (pas un UseCase metier).
+     * Pattern BOA : le bean principal extends UCStrategie et route vers les vrais UseCases
+     * via super.process(). Ce n'est pas une operation metier.
+     *
+     * Criteres de detection :
+     * 1. extends UCStrategie ou AbstractStrategie
+     * 2. @Stateless + implements SynchroneService SANS implements BaseUseCase + process() passthrough
+     * 3. Nom de classe commencant par minuscule et finissant par "Bean" (convention BOA)
+     */
+    private boolean isDispatcherBean(ClassOrInterfaceDeclaration classDecl) {
+        String className = classDecl.getNameAsString();
+
+        // 1. extends UCStrategie / AbstractStrategie
+        String parentClass = classDecl.getExtendedTypes().stream()
+                .findFirst().map(t -> t.getNameAsString()).orElse("");
+        if ("UCStrategie".equals(parentClass) || "AbstractStrategie".equals(parentClass)) {
+            return true;
+        }
+
+        // 2. @Stateless + implements SynchroneService SANS implements BaseUseCase
+        //    et dont la methode process()/Traitement() ne fait que super.process()
+        if (hasAnnotation(classDecl, "Stateless") || hasAnnotation(classDecl, "UseCase")) {
+            boolean implementsSynchroneService = classDecl.getImplementedTypes().stream()
+                    .anyMatch(t -> t.getNameAsString().equals("SynchroneService"));
+            boolean implementsBaseUseCase = classDecl.getImplementedTypes().stream()
+                    .anyMatch(t -> t.getNameAsString().equals("BaseUseCase"));
+
+            if (implementsSynchroneService && !implementsBaseUseCase) {
+                boolean isPassthrough = classDecl.getMethods().stream()
+                        .filter(m -> "process".equals(m.getNameAsString()) || "Traitement".equals(m.getNameAsString()))
+                        .anyMatch(m -> m.getBody().isPresent()
+                                && m.getBody().get().toString().contains("super.process"));
+                if (isPassthrough) {
+                    return true;
+                }
+            }
+        }
+
+        // 3. Nom de classe commencant par minuscule et finissant par "Bean" (convention BOA)
+        if (Character.isLowerCase(className.charAt(0)) && className.endsWith("Bean")) {
+            return true;
+        }
+
+        return false;
     }
 
     private List<Path> findJavaFiles(Path rootPath) {
