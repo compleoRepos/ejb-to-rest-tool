@@ -130,3 +130,9 @@ DASHBOARD.md
 # Temp check scripts
 scripts/check-fixtures.mjs
 .github/workflows/
+
+# Test projects (large legacy codebases)
+test-projects/
+
+# Generated reports
+reports/

@@ -202,6 +202,9 @@ function generateServiceMethodBody(
   // ─── v5.10.2: Detect direct EJB method name from className pattern ───
   // Direct EJB UseCases have className = "CompteEJB_consulterSolde" → methodName = "consulterSolde"
   const directEjbMethodName = uc.className.includes("_") ? uc.className.split("_").slice(1).join("_") : null;
+  // v8.8: For handler-pattern UseCases, the real method is handle()/process()/execute(),
+  // not the derived method name (e.g., "ajouterBeneficiari").
+  const isHandler = !!(uc as any).isFromHandlerPattern;
 
   // ─── v5.3.1: AST pipeline — parse, build symbol table, transform ───
   let astUsed = false;
@@ -209,11 +212,18 @@ function generateServiceMethodBody(
     if (uc.rawSource && uc.rawSource.length > 50) {
       const classAST = astParser.parse(uc.rawSource);
       // v5.10.2: For direct EJB, search for the actual method name first, then fallback to execute()
-      const executeMethod = classAST.methods.find(m =>
+      // v8.8: For handler-pattern, also search for handle()/process() as the entry method
+      let executeMethod = classAST.methods.find(m =>
         (directEjbMethodName ? m.name === directEjbMethodName : m.name === "execute") && !m.isPrivate
       ) ?? classAST.methods.find(m =>
         m.name === "execute" && !m.isPrivate
       );
+      // v8.8: Handler fallback — if no method found yet, try handle/process/doAction
+      if (!executeMethod && isHandler) {
+        executeMethod = classAST.methods.find(m =>
+          /^(handle|process|doAction)$/.test(m.name) && !m.isPrivate
+        );
+      }
 
       if (executeMethod && executeMethod.body && executeMethod.body.length > 15) {
         astSymbolTable.buildFromMethod(executeMethod, classAST, /VoIn$/, /VoOut$/);
@@ -289,9 +299,16 @@ function generateServiceMethodBody(
 
   // ─── v5.3 legacy fallback: regex-based extraction ───
   // v5.10.2: For direct EJB, try extracting the specific method body first
-  const executeBody = directEjbMethodName
+  // v8.8: For handler-pattern, also try handle()/process() as fallback
+  let executeBody = directEjbMethodName
     ? extractMethodBody(uc.rawSource, directEjbMethodName) ?? extractExecuteBody(uc.rawSource)
     : extractExecuteBody(uc.rawSource);
+  // v8.8: Handler fallback — try handle/process/doAction if nothing found yet
+  if (!executeBody && isHandler) {
+    executeBody = extractMethodBody(uc.rawSource, "handle")
+      ?? extractMethodBody(uc.rawSource, "process")
+      ?? extractMethodBody(uc.rawSource, "doAction");
+  }
 
   if (executeBody) {
     const transformer = new BusinessLogicTransformer();

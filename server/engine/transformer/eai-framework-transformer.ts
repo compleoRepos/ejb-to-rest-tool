@@ -37,6 +37,18 @@ const LOGGING_REPLACEMENTS: [RegExp, string][] = [
 // ═══ STEP 4 : FwkRollbackException + SessionContext ═══
 
 const FRAMEWORK_REPLACEMENTS: [RegExp, string][] = [
+  // extends FwkRollbackException → extends RuntimeException
+  [/extends\s+FwkRollbackException/g, "extends RuntimeException"],
+
+  // throws FwkRollbackException → (supprimé, RuntimeException est unchecked)
+  [/\s*throws\s+FwkRollbackException/g, ""],
+
+  // catch (FwkRollbackException e) → catch (RuntimeException e)
+  [/catch\s*\(\s*FwkRollbackException\s+(\w+)\s*\)/g, "catch (RuntimeException $1)"],
+
+  // new FwkRollbackException(...) → new RuntimeException(...)
+  [/new\s+FwkRollbackException\(/g, "new RuntimeException("],
+
   // @Transactional(rollbackFor = FwkRollbackException.class) → @Transactional
   [/\(rollbackFor\s*=\s*FwkRollbackException\.class\)/g, ""],
 

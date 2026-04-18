@@ -415,7 +415,9 @@ export class BusinessLogicTransformer {
         `${resolvedCtx.responseDtoClass} $1 =`
       );
     }
-    if (resolvedCtx.voInClass) {
+    // v8.8: Skip voIn variable declaration replacement when voInClass === voOutClass
+    // to prevent overwriting the voOut replacement (e.g., Envelope varName = → Void varName =)
+    if (resolvedCtx.voInClass && resolvedCtx.voInClass !== resolvedCtx.voOutClass) {
       result = result.replace(
         new RegExp(`\\b${this.escapeRegex(resolvedCtx.voInClass)}\\s+(\\w+)\\s*=`, 'g'),
         `${resolvedCtx.requestDtoClass} $1 =`
@@ -428,7 +430,9 @@ export class BusinessLogicTransformer {
         resolvedCtx.responseDtoClass
       );
     }
-    if (resolvedCtx.voInClass) {
+    // v8.8: Skip voIn global replacement when voInClass === voOutClass
+    // to prevent overwriting the voOut replacement (e.g., Envelope→Envelope then Envelope→Void)
+    if (resolvedCtx.voInClass && resolvedCtx.voInClass !== resolvedCtx.voOutClass) {
       result = result.replace(
         new RegExp(`\\b${this.escapeRegex(resolvedCtx.voInClass)}\\b`, 'g'),
         resolvedCtx.requestDtoClass
