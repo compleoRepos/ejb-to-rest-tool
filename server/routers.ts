@@ -294,6 +294,68 @@ const sharingRouter = router({
 });
 
 // ============================================================
+// Validation Router (v8.7)
+// ============================================================
+
+const validationRouter = router({
+  /** Lancer la validation sur les projets sélectionnés */
+  run: protectedProcedure
+    .input(z.object({
+      projects: z.string().default("ALL"),
+      maxBuildRetries: z.number().default(3),
+      stopOnFirstFail: z.boolean().default(false),
+      compareWithLast: z.boolean().default(true),
+    }))
+    .mutation(async ({ input }) => {
+      const { initializeRegistry } = await import("./engine/validation/init-registry");
+      const { ValidationRunner, generateMarkdownReport } = await import("./engine/validation/ValidationRunner");
+      const registry = initializeRegistry();
+      const runner = new ValidationRunner(registry);
+      const report = await runner.runValidation({
+        projects: input.projects,
+        maxBuildRetries: input.maxBuildRetries,
+        stopOnFirstFail: input.stopOnFirstFail,
+        compareWithLast: input.compareWithLast,
+      });
+      registry.save();
+      return {
+        report,
+        markdown: generateMarkdownReport(report),
+      };
+    }),
+
+  /** Récupérer les stats du registre */
+  registryStats: protectedProcedure.query(async () => {
+    const { initializeRegistry } = await import("./engine/validation/init-registry");
+    const registry = initializeRegistry();
+    return {
+      stats: registry.stats(),
+      projects: registry.getAll().map(p => ({
+        id: p.id,
+        name: p.name,
+        type: p.type,
+        testedPatterns: p.testedPatterns,
+        lastScore: p.lastResult?.score ?? null,
+        lastDate: p.lastResult?.date ?? null,
+      })),
+    };
+  }),
+
+  /** Générer les projets synthétiques */
+  generateSynthetic: protectedProcedure.mutation(async () => {
+    const { initializeRegistry } = await import("./engine/validation/init-registry");
+    const { generateTestProjects } = await import("./engine/validation/ProjectGenerator");
+    const registry = initializeRegistry();
+    const { projects, filesWritten } = generateTestProjects("./data/generated-projects");
+    for (const project of projects) {
+      registry.register(project);
+    }
+    registry.save();
+    return { projectsGenerated: projects.length, filesWritten };
+  }),
+});
+
+// ============================================================
 // Main App Router
 // ============================================================
 
@@ -313,6 +375,7 @@ export const appRouter = router({
   comments: commentsRouter,
   git: gitRouter,
   sharing: sharingRouter,
+  validation: validationRouter,
 });
 
 export type AppRouter = typeof appRouter;
