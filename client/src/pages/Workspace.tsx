@@ -1,7 +1,8 @@
 /**
- * Workspace v5.6 — Page de gestion des workspaces multi-modules.
+ * Workspace v6.0 — Page de gestion des workspaces multi-modules.
  * Permet de créer des workspaces, y ajouter des projets Compleo analysés,
- * visualiser les liens cross-module et générer un ZIP multi-module.
+ * visualiser les liens cross-module, détecter les redondances et
+ * proposer des mutualisations de services.
  * @author Hamza NORDINE
  */
 import { useState, useEffect, useCallback } from "react";
@@ -12,9 +13,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Trash2, Download, Loader2, ArrowLeft,
   Network, Package, CheckCircle2, AlertTriangle,
-  FolderOpen, Link2, Unlink, RefreshCw, Layers,
+  FolderOpen, Link2, Unlink, RefreshCw, Layers, Brain,
 } from "lucide-react";
 import { Link as RouterLink } from "wouter";
+import WorkspaceInsights from "@/components/WorkspaceInsights";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -75,6 +77,7 @@ export default function WorkspacePage() {
   const [availableSessions, setAvailableSessions] = useState<AvailableSession[]>([]);
   const [addingProject, setAddingProject] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [activeTab, setActiveTab] = useState<"modules" | "intelligence">("modules");
 
   // ─── Load workspaces ────────────────────────────────────────────────────
 
@@ -244,7 +247,7 @@ export default function WorkspacePage() {
             <h1 className="text-lg font-bold">Workspaces Multi-Modules</h1>
           </div>
           <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
-            v5.6.0
+            v6.0.0
           </Badge>
         </div>
       </div>
@@ -390,6 +393,39 @@ export default function WorkspacePage() {
                     </div>
                   </div>
 
+                  {/* Tab navigation */}
+                  <div className="flex gap-2 mb-4">
+                    <Button
+                      variant={activeTab === "modules" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setActiveTab("modules")}
+                      className={activeTab === "modules"
+                        ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                        : "text-[oklch(0.6_0.01_250)] border-[oklch(0.25_0.01_250)] hover:bg-[oklch(0.2_0.01_250)]"
+                      }
+                    >
+                      <Layers className="w-3.5 h-3.5 mr-1" /> Modules
+                    </Button>
+                    <Button
+                      variant={activeTab === "intelligence" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setActiveTab("intelligence")}
+                      className={activeTab === "intelligence"
+                        ? "bg-purple-600 hover:bg-purple-700 text-white"
+                        : "text-[oklch(0.6_0.01_250)] border-[oklch(0.25_0.01_250)] hover:bg-[oklch(0.2_0.01_250)]"
+                      }
+                    >
+                      <Brain className="w-3.5 h-3.5 mr-1" /> Intelligence
+                    </Button>
+                  </div>
+
+                  {activeTab === "intelligence" ? (
+                    <WorkspaceInsights
+                      workspaceId={selectedWs.id}
+                      workspaceName={selectedWs.name}
+                    />
+                  ) : (
+                  <>
                   {/* Modules list */}
                   <div className="rounded-lg border border-[oklch(0.22_0.01_250)] bg-[oklch(0.16_0.01_250)] p-4 mb-4">
                     <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
@@ -538,6 +574,8 @@ export default function WorkspacePage() {
                         })}
                       </div>
                     </div>
+                  )}
+                  </>
                   )}
                 </motion.div>
               ) : (

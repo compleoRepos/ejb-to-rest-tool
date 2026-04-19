@@ -22,12 +22,15 @@ import {
 import { sessionStore } from "./session-store";
 import { CrossModuleResolver } from "./engine/CrossModuleResolver";
 import type { WorkspaceProject } from "./engine/CrossModuleResolver";
+import { WorkspaceIntelligenceEngine } from "./engine/workspace";
 import type { ProjectIR } from "./java-parser";
+
 import { generateSpringBootProject } from "./spring-generator";
 import { storagePut } from "./storage";
 
 const router = Router();
 const resolver = new CrossModuleResolver();
+const intelligenceEngine = new WorkspaceIntelligenceEngine();
 
 // ─── POST /api/workspace — Create workspace ────────────────────────────────
 
@@ -302,6 +305,60 @@ router.post("/:id/add-project", async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error("[Workspace] Add project error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /api/workspace/:id/insights — Workspace Intelligence Analysis ─────
+
+router.get("/:id/insights", async (req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database unavailable" });
+
+    const [ws] = await db
+      .select()
+      .from(workspaces)
+      .where(eq(workspaces.id, req.params.id));
+    if (!ws) return res.status(404).json({ error: "Workspace not found" });
+
+    // Collect all projects with their IRs
+    const sessions = await db
+      .select()
+      .from(workspaceSessions)
+      .where(eq(workspaceSessions.workspaceId, ws.id));
+
+    const projects: Array<{ sessionId: string; projectName: string; ir: ProjectIR }> = [];
+    for (const wsSess of sessions) {
+      const session = sessionStore.get(wsSess.sessionId);
+      if (session?.ir) {
+        projects.push({
+          sessionId: wsSess.sessionId,
+          projectName: session.projectName,
+          ir: session.ir,
+        });
+      }
+    }
+
+    if (projects.length === 0) {
+      return res.json({
+        workspaceId: ws.id,
+        workspaceName: ws.name,
+        message: "Aucun projet analysé dans le workspace. Ajoutez des projets avec /add-project.",
+        insight: intelligenceEngine.analyze(ws.id, []),
+      });
+    }
+
+    // Run full intelligence analysis
+    const insight = intelligenceEngine.analyze(ws.id, projects);
+
+    return res.json({
+      workspaceId: ws.id,
+      workspaceName: ws.name,
+      insight,
+    });
+  } catch (err: any) {
+    console.error("[Workspace] Insights error:", err);
     return res.status(500).json({ error: err.message });
   }
 });
