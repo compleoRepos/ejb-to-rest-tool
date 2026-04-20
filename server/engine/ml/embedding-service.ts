@@ -45,13 +45,71 @@ interface IndexedPair {
 
 /**
  * Tokenize Java code into meaningful tokens for TF-IDF matching.
+ * Enhanced v8.1: preserves Java annotations as composite tokens,
+ * extracts camelCase sub-tokens, and boosts discriminating keywords.
  */
 function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
+  const tokens: string[] = [];
+  const lower = text.toLowerCase();
+
+  // 1. Extract Java annotations as composite tokens (e.g., @stateless, @webservice, @messagedriven)
+  const annotations = lower.match(/@[a-z][a-z0-9_]*/g) || [];
+  for (const ann of annotations) {
+    tokens.push(ann); // e.g., "@stateless"
+    // Also add without @ for cross-matching
+    tokens.push(ann.slice(1)); // e.g., "stateless"
+  }
+
+  // 2. Extract Java keywords and identifiers
+  const words = lower
     .replace(/[^a-z0-9_@.]/g, " ")
     .split(/\s+/)
     .filter(t => t.length > 2);
+  tokens.push(...words);
+
+  // 3. Split camelCase identifiers into sub-tokens
+  for (const w of words) {
+    if (w.includes(".")) {
+      // Split qualified names: javax.jms.queue → javax, jms, queue
+      tokens.push(...w.split(".").filter(p => p.length > 2));
+    }
+    // Split camelCase: messagedriven → message, driven
+    const camelParts = w.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().split(" ");
+    if (camelParts.length > 1) {
+      tokens.push(...camelParts.filter(p => p.length > 2));
+    }
+  }
+
+  // 4. Add discriminating bigrams for key EJB patterns
+  const bigramPatterns: Record<string, string[]> = {
+    "@stateless":       ["ejb_stateless", "session_bean"],
+    "@messagedriven":   ["jms_mdb", "message_listener", "jms_queue"],
+    "@webservice":      ["soap_service", "wsdl_endpoint"],
+    "@webmethod":       ["soap_method", "soap_operation"],
+    "@webservlet":      ["http_servlet", "servlet_endpoint"],
+    "@schedule":        ["ejb_timer", "timer_service"],
+    "@interceptor":     ["ejb_interceptor", "around_invoke"],
+    "datasource":       ["jdbc_access", "database_connection"],
+    "preparedstatement":["jdbc_query", "sql_statement"],
+    "resultset":        ["jdbc_result", "sql_query"],
+    "messagelistener":  ["jms_listener", "message_consumer"],
+    "httpservlet":      ["servlet_http", "dopost_doget"],
+    "soapbinding":      ["soap_binding", "soap_style"],
+    "actionforward":    ["struts_action", "struts_forward"],
+    "actionmapping":    ["struts_mapping", "struts_config"],
+    "entitymanager":    ["jpa_persistence", "hibernate_session"],
+    "@persistencecontext": ["jpa_context", "entity_manager"],
+    "timerservice":     ["ejb_timer", "scheduled_task"],
+    "invocationcontext":["ejb_interceptor", "method_intercept"],
+  };
+
+  for (const [pattern, bigrams] of Object.entries(bigramPatterns)) {
+    if (lower.includes(pattern)) {
+      tokens.push(...bigrams);
+    }
+  }
+
+  return tokens;
 }
 
 /**
