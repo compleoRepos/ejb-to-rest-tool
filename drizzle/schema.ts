@@ -263,7 +263,7 @@ export type InsertWorkspace = typeof workspaces.$inferInsert;
 export const workspaceSessions = mysqlTable("workspace_sessions", {
   id: varchar("id", { length: 36 }).primaryKey(),
   workspaceId: varchar("workspace_id", { length: 36 }).notNull(),
-  sessionId: varchar("session_id", { length: 36 }).notNull(),
+  sessionId: varchar("session_id", { length: 128 }).notNull(),
   projectName: varchar("project_name", { length: 255 }),
   artifactId: varchar("artifact_id", { length: 255 }),
   addedAt: timestamp("added_at").defaultNow().notNull(),
@@ -282,9 +282,9 @@ export type InsertWorkspaceSession = typeof workspaceSessions.$inferInsert;
 export const crossModuleLinks = mysqlTable("cross_module_links", {
   id: varchar("id", { length: 36 }).primaryKey(),
   workspaceId: varchar("workspace_id", { length: 36 }).notNull(),
-  sourceSessionId: varchar("source_session_id", { length: 36 }).notNull(),
+  sourceSessionId: varchar("source_session_id", { length: 128 }).notNull(),
   sourceClass: varchar("source_class", { length: 255 }).notNull(),
-  targetSessionId: varchar("target_session_id", { length: 36 }),
+  targetSessionId: varchar("target_session_id", { length: 128 }),
   targetClass: varchar("target_class", { length: 255 }).notNull(),
   jndiPath: text("jndi_path"),
   status: mysqlEnum("status", [
