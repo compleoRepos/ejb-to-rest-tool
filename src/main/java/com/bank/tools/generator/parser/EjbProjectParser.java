@@ -23,6 +23,8 @@ import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.nodeTypes.NodeWithAnnotations;
 import com.github.javaparser.ast.expr.*;
 import com.github.javaparser.ast.stmt.ReturnStmt;
+import com.github.javaparser.ast.stmt.SwitchEntry;
+import com.github.javaparser.ast.stmt.SwitchStmt;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -488,6 +490,11 @@ public class EjbProjectParser implements ProjectParser {
             }
         }
 
+        // Phase 3b : Resolution transitive des types imbriques
+        // Pour chaque DTO deja detecte, si un champ reference un type non-standard
+        // qui existe dans les sources mais n'est pas encore dans dtoMap, on le parse.
+        resolveTransitiveDtoTypes(dtoMap, compilationUnits);
+
         result.setDtos(new ArrayList<>(dtoMap.values()));
 
         // Phase 4 : Enrichir les UseCases avec les informations JAXB des DTO
@@ -721,17 +728,314 @@ public class EjbProjectParser implements ProjectParser {
             }
         }
 
+        // Etape 3b : Fallback — si aucun ActionHandler externe n'a ete trouve,
+        // detecter les actions inline via switch/case dans la methode process()
+        boolean hasExternalHandlers = result.getUseCases().stream()
+                .anyMatch(uc -> uc.getEjbPattern() == UseCaseInfo.EjbPattern.ACTION_HANDLER);
+        if (!hasExternalHandlers && synchroneServiceClass != null) {
+            int ucCountBefore = result.getUseCases().size();
+            detectInlineActions(synchroneServiceClass, synchroneServiceCu, synchroneServiceJndi,
+                    result, dtoClassNames, compilationUnits);
+            // Si des inline actions ont ete detectees, supprimer le parent SynchroneService
+            // car il ne represente pas un UseCase a part entiere — seules les branches case comptent
+            boolean hasInlineActions = result.getUseCases().size() > ucCountBefore;
+            if (hasInlineActions) {
+                String parentName = synchroneServiceClass.getNameAsString();
+                result.getUseCases().removeIf(uc ->
+                        uc.getClassName().equals(parentName)
+                        && uc.getEjbPattern() != UseCaseInfo.EjbPattern.INLINE_ACTION);
+                log.info("[PARSER] Parent SynchroneService {} supprime — remplace par {} inline actions",
+                        parentName, result.getUseCases().size());
+            }
+        }
+
         // Etape 4 : Detecter les classes Model comme sub-DTOs
         detectModelClasses(compilationUnits, result, dtoClassNames);
 
-        if (!result.getUseCases().isEmpty()) {
+        long actionCount = result.getUseCases().stream()
+                .filter(uc -> uc.getEjbPattern() == UseCaseInfo.EjbPattern.ACTION_HANDLER
+                        || uc.getEjbPattern() == UseCaseInfo.EjbPattern.INLINE_ACTION)
+                .count();
+        if (actionCount > 0) {
+            String patternLabel = result.getUseCases().stream()
+                    .anyMatch(uc -> uc.isInlineAction()) ? "Inline switch/case" : "ActionHandler";
             result.addConversion("SynchroneService " + synchroneServiceClass.getNameAsString() +
-                    " → " + result.getUseCases().stream()
-                    .filter(uc -> uc.getEjbPattern() == UseCaseInfo.EjbPattern.ACTION_HANDLER)
-                    .count() + " endpoints REST (1 par ActionHandler)");
-            result.addAttentionPoint("Pattern SynchroneService detecte : les handlers partagent le meme JNDI (" +
+                    " → " + actionCount + " endpoints REST (1 par " + patternLabel + ")");
+            result.addAttentionPoint("Pattern SynchroneService detecte : les actions partagent le meme JNDI (" +
                     synchroneServiceJndi + "). Le JndiAdapter doit construire un Envelope avec l'action appropriee.");
         }
+    }
+
+    /**
+     * Detecte les actions inline dans un SynchroneService qui utilise un switch/case
+     * dans sa methode process() au lieu de deleguer a des ActionHandler externes.
+     * Chaque branche case produit un UseCaseInfo avec pattern INLINE_ACTION.
+     */
+    private void detectInlineActions(
+            ClassOrInterfaceDeclaration serviceClass,
+            CompilationUnit serviceCu,
+            String jndiName,
+            ProjectAnalysisResult result,
+            Set<String> dtoClassNames,
+            Map<String, CompilationUnit> compilationUnits) {
+
+        // Trouver la methode process() ou Traitement()
+        MethodDeclaration processMethod = serviceClass.getMethods().stream()
+                .filter(m -> "process".equals(m.getNameAsString()) || "Traitement".equals(m.getNameAsString()))
+                .findFirst().orElse(null);
+        if (processMethod == null || processMethod.getBody().isEmpty()) return;
+
+        // Trouver tous les switch dans process()
+        List<SwitchStmt> switches = processMethod.getBody().get().findAll(SwitchStmt.class);
+        if (switches.isEmpty()) return;
+
+        String serviceClassName = serviceClass.getNameAsString();
+        String packageName = serviceCu.getPackageDeclaration()
+                .map(pd -> pd.getNameAsString()).orElse("");
+
+        // Construire le mapping enum-value -> action-string depuis la methode getAction()
+        Map<String, String> enumToStringAction = new LinkedHashMap<>();
+        serviceClass.getMethods().stream()
+                .filter(m -> m.getNameAsString().toLowerCase().contains("action"))
+                .findFirst()
+                .ifPresent(getActionMethod -> {
+                    List<SwitchStmt> actionSwitches = getActionMethod.getBody()
+                            .map(body -> body.findAll(SwitchStmt.class)).orElse(Collections.emptyList());
+                    for (SwitchStmt sw : actionSwitches) {
+                        for (SwitchEntry entry : sw.getEntries()) {
+                            if (entry.getLabels().isEmpty()) continue; // default
+                            String caseLabel = entry.getLabels().get(0).toString().replace("\"", "");
+                            // Find the enum value assigned in this case
+                            String enumVal = extractEnumAssignment(entry);
+                            if (enumVal != null) {
+                                enumToStringAction.put(enumVal, caseLabel);
+                            }
+                        }
+                    }
+                });
+
+        // Parcourir le switch principal dans process()
+        for (SwitchStmt sw : switches) {
+            for (SwitchEntry entry : sw.getEntries()) {
+                if (entry.getLabels().isEmpty()) continue; // skip default
+                String caseLabel = entry.getLabels().get(0).toString();
+                // caseLabel is like "ENRG_COMMANDE" (enum constant name)
+
+                log.info("[INLINE-ACTION] Detecte case: {} dans {}", caseLabel, serviceClassName);
+
+                // Extraire les champs Envelope de cette branche
+                List<UseCaseInfo.EnvelopeFieldInfo> branchFields = extractEnvelopeFieldsFromSwitchEntry(entry);
+
+                // Ajouter aussi les champs lus AVANT le switch (partages par toutes les branches)
+                String processSource = processMethod.getBody().get().toString();
+                List<UseCaseInfo.EnvelopeFieldInfo> sharedFields = extractSharedEnvelopeFields(processMethod, sw);
+
+                // Fusionner shared + branch (sans doublons)
+                Set<String> seenFields = new HashSet<>();
+                List<UseCaseInfo.EnvelopeFieldInfo> allFields = new ArrayList<>();
+                for (UseCaseInfo.EnvelopeFieldInfo f : sharedFields) {
+                    if (seenFields.add(f.getFieldName())) allFields.add(f);
+                }
+                for (UseCaseInfo.EnvelopeFieldInfo f : branchFields) {
+                    if (seenFields.add(f.getFieldName())) allFields.add(f);
+                }
+
+                // Determiner le nom de l'action string (pour le JNDI adapter)
+                // Fallback: convertir ENRG_COMMANDE -> enrgCommande
+                String fallbackAction = caseLabel.toLowerCase();
+                if (fallbackAction.contains("_")) {
+                    StringBuilder camel = new StringBuilder();
+                    String[] parts = fallbackAction.split("_");
+                    camel.append(parts[0]);
+                    for (int i = 1; i < parts.length; i++) {
+                        if (!parts[i].isEmpty()) {
+                            camel.append(Character.toUpperCase(parts[i].charAt(0)));
+                            if (parts[i].length() > 1) camel.append(parts[i].substring(1));
+                        }
+                    }
+                    fallbackAction = camel.toString();
+                }
+                String actionString = enumToStringAction.getOrDefault(caseLabel, fallbackAction);
+
+                // Creer le UseCaseInfo
+                UseCaseInfo uc = new UseCaseInfo();
+                uc.setClassName(serviceClassName + "_" + caseLabel);
+                uc.setEjbType(UseCaseInfo.EjbType.STATELESS);
+                uc.setEjbPattern(UseCaseInfo.EjbPattern.INLINE_ACTION);
+                uc.setStateless(true);
+                uc.setHasExecuteMethod(false);
+                uc.setPackageName(packageName);
+                uc.setFullyQualifiedName(packageName.isEmpty()
+                        ? serviceClassName + "." + caseLabel
+                        : packageName + "." + serviceClassName + "." + caseLabel);
+
+                uc.setParentServiceClassName(serviceClassName);
+                uc.setParentServiceJndiName(jndiName);
+                uc.setJndiName(jndiName);
+                uc.setActionName(actionString);
+                uc.setEnvelopeFields(allFields);
+
+                // Interfaces
+                serviceClass.getImplementedTypes().forEach(t -> uc.getImplementedInterfaces().add(t.getNameAsString()));
+                uc.setImplementedInterface("SynchroneService");
+
+                // G6 : HTTP method
+                String actionLower = caseLabel.toLowerCase();
+                if (actionLower.contains("enrg") || actionLower.contains("create") || actionLower.contains("add")
+                        || actionLower.contains("command") || actionLower.contains("commande")) {
+                    uc.setHttpMethod("POST");
+                    uc.setHttpStatusCode(201);
+                } else if (actionLower.contains("suivi") || actionLower.contains("get")
+                        || actionLower.contains("consult") || actionLower.contains("search") || actionLower.contains("list")) {
+                    uc.setHttpMethod("GET");
+                    uc.setHttpStatusCode(200);
+                } else if (actionLower.contains("history") || actionLower.contains("histo")) {
+                    uc.setHttpMethod("GET");
+                    uc.setHttpStatusCode(200);
+                } else if (actionLower.contains("delete") || actionLower.contains("suppr")) {
+                    uc.setHttpMethod("DELETE");
+                    uc.setHttpStatusCode(204);
+                } else if (actionLower.contains("update") || actionLower.contains("modif")) {
+                    uc.setHttpMethod("PUT");
+                    uc.setHttpStatusCode(200);
+                } else {
+                    uc.setHttpMethod("POST");
+                    uc.setHttpStatusCode(200);
+                }
+
+                // Noms generes
+                String baseName = deriveInlineActionBaseName(caseLabel, serviceClassName);
+                uc.setRestEndpoint("/api/" + CodeGenUtils.toKebabCase(baseName));
+                uc.setControllerName(baseName + "Controller");
+                uc.setServiceAdapterName(baseName + "ServiceAdapter");
+
+                // G10 : Annotations
+                serviceClass.getAnnotations().forEach(ann -> uc.getSourceAnnotations().add(ann.getNameAsString()));
+
+                // G11 : Swagger
+                uc.setSwaggerSummary(generateSwaggerSummary(baseName));
+
+                // G14 : Base package
+                if (result.getSourceBasePackage() == null && !packageName.isEmpty()) {
+                    String[] parts = packageName.split("\\.");
+                    if (parts.length >= 3) {
+                        result.setSourceBasePackage(parts[0] + "." + parts[1] + "." + parts[2]);
+                    }
+                }
+
+                result.addUseCase(uc);
+                log.info("[INLINE-ACTION] UseCase cree : {} (action={}, httpMethod={}, fields={})",
+                        uc.getClassName(), actionString, uc.getHttpMethod(), allFields.size());
+            }
+        }
+    }
+
+    /**
+     * Derive un nom de base PascalCase a partir du nom d'action enum inline.
+     * Ex: ENRG_COMMANDE -> EnrgCommande, SUIVI_COMMANDE -> SuiviCommande
+     */
+    private String deriveInlineActionBaseName(String enumName, String serviceClassName) {
+        // Convertir ENRG_COMMANDE -> EnrgCommande
+        StringBuilder sb = new StringBuilder();
+        for (String part : enumName.toLowerCase().split("_")) {
+            if (!part.isEmpty()) {
+                sb.append(Character.toUpperCase(part.charAt(0)));
+                if (part.length() > 1) sb.append(part.substring(1));
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Extrait l'assignation d'enum depuis une branche case du switch getAction().
+     * Ex: case "enrgCommande": action = Action.ENRG_COMMANDE; -> "ENRG_COMMANDE"
+     */
+    private String extractEnumAssignment(SwitchEntry entry) {
+        String source = entry.toString();
+        Pattern p = Pattern.compile("\\w+\\.([A-Z_]+)\\s*;");
+        Matcher m = p.matcher(source);
+        if (m.find()) return m.group(1);
+        return null;
+    }
+
+    /**
+     * Extrait les champs Envelope d'une branche case specifique du switch.
+     */
+    private List<UseCaseInfo.EnvelopeFieldInfo> extractEnvelopeFieldsFromSwitchEntry(SwitchEntry entry) {
+        List<UseCaseInfo.EnvelopeFieldInfo> fields = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        String source = entry.toString();
+
+        Pattern p = Pattern.compile("getNodeAs(String|Int|Long|Boolean|Double)\\(\"([^\"]+)\"\\)");
+        Matcher m = p.matcher(source);
+        while (m.find()) {
+            String fieldName = m.group(2);
+            if (fieldName.contains("/")) {
+                fieldName = fieldName.substring(fieldName.lastIndexOf('/') + 1);
+            }
+            // Skip structural fields like "action"
+            if ("action".equalsIgnoreCase(fieldName)) continue;
+            if (seen.add(fieldName)) {
+                String javaType = switch (m.group(1)) {
+                    case "String" -> "String";
+                    case "Int" -> "Integer";
+                    case "Long" -> "Long";
+                    case "Boolean" -> "Boolean";
+                    case "Double" -> "Double";
+                    default -> "String";
+                };
+                fields.add(new UseCaseInfo.EnvelopeFieldInfo(fieldName, javaType));
+            }
+        }
+
+        // Detect Boolean.parseBoolean(getNodeAsString("...")) pattern
+        Pattern boolParse = Pattern.compile("Boolean\\.parseBoolean\\(\\w+\\.getNodeAsString\\(\"([^\"]+)\"\\)\\)");
+        Matcher bm = boolParse.matcher(source);
+        while (bm.find()) {
+            String fieldName = bm.group(1);
+            if (fieldName.contains("/")) fieldName = fieldName.substring(fieldName.lastIndexOf('/') + 1);
+            if (seen.add(fieldName)) {
+                fields.add(new UseCaseInfo.EnvelopeFieldInfo(fieldName, "Boolean"));
+            }
+        }
+
+        return fields;
+    }
+
+    /**
+     * Extrait les champs Envelope lus AVANT le switch dans process() (partages par toutes les branches).
+     */
+    private List<UseCaseInfo.EnvelopeFieldInfo> extractSharedEnvelopeFields(
+            MethodDeclaration processMethod, SwitchStmt switchStmt) {
+        List<UseCaseInfo.EnvelopeFieldInfo> fields = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+
+        // Get the source text before the switch statement
+        String fullSource = processMethod.getBody().get().toString();
+        String switchSource = switchStmt.toString();
+        int switchIdx = fullSource.indexOf(switchSource);
+        if (switchIdx <= 0) return fields;
+        String beforeSwitch = fullSource.substring(0, switchIdx);
+
+        Pattern p = Pattern.compile("getNodeAs(String|Int|Long|Boolean|Double)\\(\"([^\"]+)\"\\)");
+        Matcher m = p.matcher(beforeSwitch);
+        while (m.find()) {
+            String fieldName = m.group(2);
+            if (fieldName.contains("/")) fieldName = fieldName.substring(fieldName.lastIndexOf('/') + 1);
+            if ("action".equalsIgnoreCase(fieldName)) continue;
+            if (seen.add(fieldName)) {
+                String javaType = switch (m.group(1)) {
+                    case "String" -> "String";
+                    case "Int" -> "Integer";
+                    case "Long" -> "Long";
+                    case "Boolean" -> "Boolean";
+                    case "Double" -> "Double";
+                    default -> "String";
+                };
+                fields.add(new UseCaseInfo.EnvelopeFieldInfo(fieldName, javaType));
+            }
+        }
+        return fields;
     }
 
     /**
@@ -1497,6 +1801,7 @@ public class EjbProjectParser implements ProjectParser {
     // ==================== DTO DETECTION HELPERS ====================
 
     private String detectInputDto(MethodDeclaration method) {
+        // Phase 1 : chercher les types classiques VoIn/VOIn/Input/Request
         List<CastExpr> casts = method.findAll(CastExpr.class);
         for (CastExpr cast : casts) {
             String typeName = cast.getType().asString();
@@ -1513,6 +1818,18 @@ public class EjbProjectParser implements ProjectParser {
                 return typeName;
             }
         }
+
+        // Phase 2 : fallback — chercher les types VO/Vo castes depuis le parametre 'in'
+        // Pattern courant : SomeVO xxx = (SomeVO) in;
+        for (CastExpr cast : casts) {
+            String typeName = cast.getType().asString();
+            if ((typeName.endsWith("VO") || typeName.endsWith("Vo")) &&
+                cast.getExpression().isNameExpr() &&
+                "in".equals(cast.getExpression().asNameExpr().getNameAsString())) {
+                return typeName;
+            }
+        }
+
         return null;
     }
 
@@ -1542,7 +1859,116 @@ public class EjbProjectParser implements ProjectParser {
                 if (matcher.find()) return matcher.group(1);
             }
         }
+
+        // Phase 2 : fallback — chercher les types se terminant par "Out" (ex: SearchVoRdOut)
+        // assignes a une variable nommee "out" ou "result"
+        for (VariableDeclarator var : variables) {
+            String typeName = var.getTypeAsString();
+            String varName = var.getNameAsString();
+            if (typeName.endsWith("Out") && ("out".equals(varName) || "result".equals(varName))) {
+                return typeName;
+            }
+        }
+
         return null;
+    }
+
+    // ==================== TRANSITIVE DTO RESOLUTION ====================
+
+    private static final Set<String> STANDARD_JAVA_TYPES = Set.of(
+            "String", "int", "long", "boolean", "double", "float", "byte", "short", "char",
+            "Integer", "Long", "Boolean", "Double", "Float", "Byte", "Short", "Character",
+            "BigDecimal", "BigInteger", "Date", "LocalDate", "LocalDateTime", "Instant",
+            "UUID", "Object", "Map", "List", "Set", "Collection", "HashMap", "ArrayList",
+            "LinkedHashMap", "TreeMap", "HashSet", "TreeSet", "LinkedList",
+            "Serializable", "Comparable", "Cloneable", "Enum", "Class", "Number",
+            "Void", "void", "Calendar", "GregorianCalendar", "TimeZone", "Locale",
+            "InputStream", "OutputStream", "Reader", "Writer", "File", "Path",
+            "Exception", "RuntimeException", "Throwable", "Error"
+    );
+
+    /**
+     * Resolution transitive : pour chaque DTO deja detecte, si un champ reference un type
+     * non-standard qui existe dans les sources mais n'est pas encore dans dtoMap, on le parse.
+     * Iteratif jusqu'a stabilisation (max 5 passes pour eviter les boucles infinies).
+     */
+    private void resolveTransitiveDtoTypes(Map<String, DtoInfo> dtoMap,
+                                           Map<String, CompilationUnit> compilationUnits) {
+        // Construire un index className -> CompilationUnit pour lookup rapide
+        Map<String, CompilationUnit> classIndex = new HashMap<>();
+        for (Map.Entry<String, CompilationUnit> entry : compilationUnits.entrySet()) {
+            for (ClassOrInterfaceDeclaration cls : entry.getValue().findAll(ClassOrInterfaceDeclaration.class)) {
+                classIndex.put(cls.getNameAsString(), entry.getValue());
+            }
+        }
+
+        Set<String> knownClassNames = new HashSet<>();
+        for (DtoInfo dto : dtoMap.values()) knownClassNames.add(dto.getClassName());
+
+        for (int pass = 0; pass < 5; pass++) {
+            Set<String> newTypes = new LinkedHashSet<>();
+
+            for (DtoInfo dto : new ArrayList<>(dtoMap.values())) {
+                for (DtoInfo.FieldInfo field : dto.getFields()) {
+                    String rawType = field.getType();
+                    if (rawType == null) continue;
+                    // Extraire le(s) type(s) de base (gerer List<X>, Map<K,V>, X[])
+                    for (String baseType : extractBaseTypes(rawType)) {
+                        if (STANDARD_JAVA_TYPES.contains(baseType)) continue;
+                        if (knownClassNames.contains(baseType)) continue;
+                        if (classIndex.containsKey(baseType)) {
+                            newTypes.add(baseType);
+                        }
+                    }
+                }
+            }
+
+            if (newTypes.isEmpty()) break;
+
+            for (String typeName : newTypes) {
+                CompilationUnit cu = classIndex.get(typeName);
+                if (cu == null) continue;
+                for (ClassOrInterfaceDeclaration cls : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                    if (cls.getNameAsString().equals(typeName)) {
+                        DtoInfo dtoInfo = extractDtoInfo(cu, cls);
+                        if (dtoInfo != null && !dtoMap.containsKey(dtoInfo.getFullyQualifiedName())) {
+                            dtoMap.put(dtoInfo.getFullyQualifiedName(), dtoInfo);
+                            knownClassNames.add(dtoInfo.getClassName());
+                            log.info("[TRANSITIVE] DTO imbriqué detecte : {}", dtoInfo.getClassName());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Extraire les types de base depuis un type potentiellement generique.
+     * Ex: "List<Doc>" -> ["Doc"], "Map<String, TypeAoRd>" -> ["TypeAoRd"], "Doc[]" -> ["Doc"]
+     */
+    private List<String> extractBaseTypes(String type) {
+        List<String> result = new ArrayList<>();
+        // Retirer les tableaux
+        String clean = type.replace("[]", "");
+        // Extraire les types generiques
+        if (clean.contains("<")) {
+            String inner = clean.substring(clean.indexOf('<') + 1, clean.lastIndexOf('>'));
+            // Gerer les types separes par virgule (Map<K,V>)
+            for (String part : inner.split(",")) {
+                String trimmed = part.trim();
+                // Recursion pour les generiques imbriques
+                if (trimmed.contains("<")) {
+                    result.addAll(extractBaseTypes(trimmed));
+                } else {
+                    result.add(trimmed);
+                }
+            }
+            // Ajouter aussi le type conteneur
+            result.add(clean.substring(0, clean.indexOf('<')));
+        } else {
+            result.add(clean);
+        }
+        return result;
     }
 
     // ==================== UTILITY METHODS ====================

@@ -44,6 +44,7 @@ public class UseCaseInfo {
         GENERIC_SERVICE("Service generique (methodes publiques)"),
         DAO_REPOSITORY("DAO/Repository (CRUD)"),
         ACTION_HANDLER("ActionHandler via SynchroneService (handle(Envelope))"),
+        INLINE_ACTION("Action inline via switch/case dans SynchroneService"),
         MULTI_METHOD_SERVICE("Service multi-methodes");
         private final String label;
         EjbPattern(String label) { this.label = label; }
@@ -253,6 +254,10 @@ public class UseCaseInfo {
 
     public boolean isActionHandler() {
         return ejbPattern == EjbPattern.ACTION_HANDLER;
+    }
+
+    public boolean isInlineAction() {
+        return ejbPattern == EjbPattern.INLINE_ACTION;
     }
 
     public boolean isMessageDriven() {

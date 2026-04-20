@@ -435,6 +435,7 @@ public class ImpactAnalysisReport {
             case DAO_REPOSITORY -> 1;
             case MULTI_METHOD_SERVICE -> 2;
             case ACTION_HANDLER -> 3;
+            case INLINE_ACTION -> 3;
         };
     }
 

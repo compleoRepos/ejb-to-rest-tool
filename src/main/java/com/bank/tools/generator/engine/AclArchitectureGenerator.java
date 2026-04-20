@@ -46,6 +46,10 @@ public class AclArchitectureGenerator {
     private String PKG_CONFIG;
     private String PKG_API_DTO_VALIDATION;
 
+    // Tracking des types de champs des Response DTOs generes (pour eviter les type mismatch dans les mappers)
+    // Cle = responseDtoName, Valeur = Map<fieldName, cleanedFieldType>
+    private final java.util.Map<String, java.util.Map<String, String>> responseDtoFieldTypes = new java.util.HashMap<>();
+
     // =====================================================================
     // CONSTANTES
     // =====================================================================
@@ -464,8 +468,8 @@ public class AclArchitectureGenerator {
         DtoInfo ejbDto = findDto(analysis, ep.ejbInputDtoName);
         List<RestField> fields = deriveRestFields(ejbDto, true, analysis);
 
-        // ActionHandler sans DTO EJB input : utiliser les envelopeFields comme source de champs
-        boolean isActionHandler = ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler();
+        // ActionHandler / InlineAction sans DTO EJB input : utiliser les envelopeFields comme source de champs
+        boolean isActionHandler = ep.useCaseInfo != null && (ep.useCaseInfo.isActionHandler() || ep.useCaseInfo.isInlineAction());
         if (isActionHandler && (ejbDto == null) && ep.useCaseInfo.getEnvelopeFields() != null
                 && !ep.useCaseInfo.getEnvelopeFields().isEmpty()) {
             fields.clear();
@@ -566,6 +570,13 @@ public class AclArchitectureGenerator {
         Path dir = resolvePackagePath(srcMain, PKG_API_DTO_RESPONSE);
         Path file = dir.resolve(ep.responseDtoName + ".java");
 
+        // Eviter d'ecraser un Response DTO deja genere par un autre UC
+        // (cas ou deux UCs partagent le meme nom de Response DTO mais ont des VoOut differents)
+        if (Files.exists(file)) {
+            log.info("[ACL] RestDTO Response deja existant, skip : {}", ep.responseDtoName);
+            return;
+        }
+
         DtoInfo ejbDto = findDto(analysis, ep.ejbOutputDtoName);
         List<RestField> fields = deriveRestFields(ejbDto, false, analysis);
 
@@ -620,6 +631,14 @@ public class AclArchitectureGenerator {
         sb.append("}\n");
 
         Files.writeString(file, sb.toString());
+
+        // Tracker les types de champs du Response DTO genere
+        java.util.Map<String, String> fieldTypeMap = new java.util.HashMap<>();
+        for (RestField f : fields) {
+            fieldTypeMap.put(f.name, cleanType(f.type));
+        }
+        responseDtoFieldTypes.put(ep.responseDtoName, fieldTypeMap);
+
         log.info("[ACL] RestDTO Response genere : {}", ep.responseDtoName);
     }
 
@@ -962,7 +981,7 @@ public class AclArchitectureGenerator {
         Set<String> imports = new TreeSet<>();
         if (ep.requestDtoName != null) imports.add("import " + PKG_API_DTO_REQUEST + "." + ep.requestDtoName + ";");
         if (ep.responseDtoName != null) imports.add("import " + PKG_API_DTO_RESPONSE + "." + ep.responseDtoName + ";");
-        boolean isActionHandlerMapper = ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler();
+        boolean isActionHandlerMapper = ep.useCaseInfo != null && (ep.useCaseInfo.isActionHandler() || ep.useCaseInfo.isInlineAction());
         if (!isActionHandlerMapper) {
             if (ep.ejbInputDtoName != null && !isNonImportableEjbType(ep.ejbInputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
             if (ep.ejbOutputDtoName != null && !isNonImportableEjbType(ep.ejbOutputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
@@ -976,10 +995,10 @@ public class AclArchitectureGenerator {
         sb.append("@Component\n");
         sb.append("public class ").append(mapperName).append(" {\n\n");
 
-        boolean isActionHandler = ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler();
+        boolean isActionHandler = ep.useCaseInfo != null && (ep.useCaseInfo.isActionHandler() || ep.useCaseInfo.isInlineAction());
 
         if (isActionHandler) {
-            // ===== PATTERN ACTION_HANDLER : toEnvelopePayload + fromEnvelopePayload =====
+            // ===== PATTERN ACTION_HANDLER / INLINE_ACTION : toEnvelopePayload + fromEnvelopePayload =====
 
             // toEnvelopePayload : Request → Map<String, Object> pour Envelope.payload
             if (ep.requestDtoName != null) {
@@ -1088,6 +1107,9 @@ public class AclArchitectureGenerator {
             sb.append("    public ").append(ep.responseDtoName).append(" toRest(").append(ep.ejbOutputDtoName).append(" voOut) {\n");
             sb.append("        ").append(ep.responseDtoName).append(" response = new ").append(ep.responseDtoName).append("();\n");
 
+            // Charger les types de champs du Response DTO genere (pour verifier la compatibilite)
+            java.util.Map<String, String> respFieldTypes = responseDtoFieldTypes.getOrDefault(ep.responseDtoName, java.util.Collections.emptyMap());
+
             if (ejbOut != null) {
                 for (DtoInfo.FieldInfo field : ejbOut.getFields()) {
                     if ("serialVersionUID".equals(field.getName()) || field.isStatic()) continue;
@@ -1100,6 +1122,16 @@ public class AclArchitectureGenerator {
                     if ("Object".equals(restType2) && !"Object".equals(field.getType()) && !"java.lang.Object".equals(field.getType())) continue;
 
                     String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
+                    // Verifier la compatibilite de type avec le Response DTO
+                    // (evite les erreurs de compilation quand deux UCs partagent le meme Response DTO)
+                    if (!respFieldTypes.isEmpty() && respFieldTypes.containsKey(restName)) {
+                        String respType = respFieldTypes.get(restName);
+                        if (!respType.equals(restType2)) {
+                            sb.append("        // Champ ").append(restName).append(" ignore : type incompatible (").append(restType2).append(" vs ").append(respType).append(")\n");
+                            continue;
+                        }
+                    }
+
                     String restSetter = "set" + capitalize(restName);
                     String ejbGetter = ("boolean".equals(field.getType()) ? "is" : "get") + capitalize(field.getName());
 
@@ -1182,7 +1214,7 @@ public class AclArchitectureGenerator {
             if (ep.requestDtoName != null) imports.add("import " + PKG_API_DTO_REQUEST + "." + ep.requestDtoName + ";");
             if (ep.responseDtoName != null) imports.add("import " + PKG_API_DTO_RESPONSE + "." + ep.responseDtoName + ";");
             // Pour ACTION_HANDLER, les types EJB sont remplaces par Envelope — ne pas importer les types EJB individuels
-            boolean isActionHandlerEp = ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler();
+            boolean isActionHandlerEp = ep.useCaseInfo != null && (ep.useCaseInfo.isActionHandler() || ep.useCaseInfo.isInlineAction());
             if (!isActionHandlerEp) {
             if (ep.ejbInputDtoName != null && !isNonImportableEjbType(ep.ejbInputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
             if (ep.ejbOutputDtoName != null && !isNonImportableEjbType(ep.ejbOutputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
@@ -1191,14 +1223,14 @@ public class AclArchitectureGenerator {
         }
         // BaseUseCase/ValueObject seulement si au moins un endpoint n'est PAS ACTION_HANDLER
         boolean hasBaseUseCase = group.endpoints.stream()
-                .anyMatch(ep -> ep.useCaseInfo == null || !ep.useCaseInfo.isActionHandler());
+                .anyMatch(ep -> ep.useCaseInfo == null || (!ep.useCaseInfo.isActionHandler() && !ep.useCaseInfo.isInlineAction()));
         if (hasBaseUseCase) {
             imports.add("import " + PKG_INFRA_EJB_TYPES + ".BaseUseCase;");
             imports.add("import " + PKG_INFRA_EJB_TYPES + ".ValueObject;");
         }
         // Ajouter les imports SynchroneService/Envelope si au moins un endpoint est ACTION_HANDLER
         boolean hasActionHandler = group.endpoints.stream()
-                .anyMatch(ep -> ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler());
+                .anyMatch(ep -> ep.useCaseInfo != null && (ep.useCaseInfo.isActionHandler() || ep.useCaseInfo.isInlineAction()));
         if (hasActionHandler) {
             imports.add("import " + PKG_INFRA_EJB_TYPES + ".SynchroneService;");
             imports.add("import " + PKG_INFRA_EJB_TYPES + ".Envelope;");
@@ -1294,7 +1326,7 @@ public class AclArchitectureGenerator {
             String returnType = ep.responseDtoName != null ? ep.responseDtoName : "void";
             boolean hasReturn = ep.responseDtoName != null;
             String mapperField = toLowerCamel(deriveMapperName(ep));
-            boolean isActionHandler = ep.useCaseInfo != null && ep.useCaseInfo.isActionHandler();
+            boolean isActionHandler = ep.useCaseInfo != null && (ep.useCaseInfo.isActionHandler() || ep.useCaseInfo.isInlineAction());
             String jndiName = isActionHandler && ep.useCaseInfo.getParentServiceJndiName() != null
                     ? ep.useCaseInfo.getParentServiceJndiName()
                     : "java:global/bank/" + ep.useCaseName;
@@ -1534,8 +1566,14 @@ public class AclArchitectureGenerator {
                                 String restResName = FIELD_RENAME.getOrDefault(f.getName(), f.getName());
                                 String getter = ("boolean".equals(f.getType()) ? "is" : "get") + capitalize(restReqName);
                                 String setter = "set" + capitalize(restResName);
-                                sb.append("        if (request.").append(getter).append("() != null) ");
-                                sb.append("response.").append(setter).append("(request.").append(getter).append("());\n");
+                                // Les types primitifs (int, long, boolean, double, float, short, byte, char) ne peuvent pas être comparés à null
+                                boolean isPrimitive = Set.of("int", "long", "boolean", "double", "float", "short", "byte", "char").contains(f.getType());
+                                if (isPrimitive) {
+                                    sb.append("        response.").append(setter).append("(request.").append(getter).append("());\n");
+                                } else {
+                                    sb.append("        if (request.").append(getter).append("() != null) ");
+                                    sb.append("response.").append(setter).append("(request.").append(getter).append("());\n");
+                                }
                             }
                         }
                     }
@@ -2191,8 +2229,8 @@ public class AclArchitectureGenerator {
             return base + suffix;
         }
 
-        // Retirer VoIn/VoOut/Vo
-        String base = ejbDtoName.replaceAll("(VoIn|VoOut|Vo)$", "");
+        // Retirer VoIn/VoOut/Vo/VO et variantes (ex: VoRdOut, VoListOut)
+        String base = ejbDtoName.replaceAll("(VoIn|VOIn|Vo[A-Z][a-zA-Z]*Out|VoOut|VOOut|VO|Vo)$", "");
         // Retirer UC/UseCase
         base = base.replaceAll("(UC|UseCase)$", "");
 

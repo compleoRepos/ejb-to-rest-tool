@@ -69,7 +69,11 @@ public class BianAutoDetector {
 
         // Document
         DOMAIN_KEYWORDS.put(List.of("document", "releve", "attestation", "generer", "pdf",
-            "edition", "impression", "courrier", "archivage"), "document-management");
+            "edition", "impression", "courrier", "archivage",
+            // Avis opere / GED / consultation documentaire
+            "avis", "opere", "ged", "docubase", "edoc",
+            "fichier", "scan", "numerisation",
+            "repdemat", "view", "search"), "document-management");
 
         // Change / Devise
         DOMAIN_KEYWORDS.put(List.of("devise", "change", "currency", "exchange", "forex",
@@ -84,6 +88,10 @@ public class BianAutoDetector {
         DOMAIN_KEYWORDS.put(List.of("risk", "risque", "var", "stress", "exposition",
             "limite", "contrepartie", "marche", "operationnel",
             "liquidite", "concentration"), "risk-management");
+
+        // Commande de chequier / Payment Order
+        DOMAIN_KEYWORDS.put(List.of("chequier", "chequebook", "commande", "command",
+            "vignette", "carnet", "cheque"), "payment-order");
 
         // Produit
         DOMAIN_KEYWORDS.put(List.of("produit", "product", "catalogue", "tarif", "offre",
@@ -100,10 +108,11 @@ public class BianAutoDetector {
         // RETRIEVAL — Consulter/lire sans modifier (POST avec body, {cr-ref-id}, 200)
         ACTION_VERBS.put("retrieval", List.of(
             "consulter", "charger", "chercher", "rechercher", "lister",
-            "get", "find", "fetch", "load", "read", "search", "list",
+            "get", "find", "fetch", "load", "read", "search", "list", "view",
             "afficher", "visualiser", "recuperer", "extraire", "generer",
             "hist", "historique", "isbenef", "eligibilite",
-            "is", "existe"  // IsBenefEnregistrer = verification/consultation
+            "is", "existe",  // IsBenefEnregistrer = verification/consultation
+            "suivi"  // SuiviCommande = consultation de suivi
         ));
 
         // INITIATION — Creer une nouvelle ressource (POST, pas de {cr-ref-id}, 201)
@@ -112,7 +121,8 @@ public class BianAutoDetector {
             "souscrire", "initier", "demander", "enregistrer", "inscrire",
             "virement", "virer", "transferer", "transfer",
             "ajout", "ajouter", "emission", "emettre", "emit",
-            "traitement"  // TraitementMad = creation d'une mise a disposition
+            "traitement",  // TraitementMad = creation d'une mise a disposition
+            "enrg", "commande"  // EnrgCommande = creation d'une commande de chequier
         ));
 
         // EVALUATION — Calculer/simuler sans modifier (POST, pas de {cr-ref-id}, 200)
@@ -203,6 +213,24 @@ public class BianAutoDetector {
         BQ_NORMALIZE.put("notification-multicanal", "notification");
         BQ_NORMALIZE.put("risk-management", "risk-assessment");
 
+        // Avis opere / GED — noms de classes EJB → BQ REST distincts
+        BQ_NORMALIZE.put("avis-opere-get-list-index", "list-index");
+        BQ_NORMALIZE.put("avis-opere-get-list-type-document", "type-list");
+        BQ_NORMALIZE.put("search-avis-opere", "search");
+        BQ_NORMALIZE.put("view-avis-opere", "view");
+        BQ_NORMALIZE.put("view-releve-seule-page", "single-page");
+
+        // Commander chequier / Payment Order
+        BQ_NORMALIZE.put("enrg-commande", "order");
+        BQ_NORMALIZE.put("suivi-commande", "tracking");
+        BQ_NORMALIZE.put("history-cmd", "history");
+        BQ_NORMALIZE.put("commande", "order");
+        BQ_NORMALIZE.put("chequier", "chequebook");
+        // Inline actions : le BQ brut inclut le nom complet de la classe parent
+        BQ_NORMALIZE.put("command-chequier-enrg-commande", "order");
+        BQ_NORMALIZE.put("command-chequier-suivi-commande", "tracking");
+        BQ_NORMALIZE.put("command-chequier-history-cmd", "history");
+
         // Suffixes techniques → suppression (null = supprimer le BQ)
         BQ_NORMALIZE.put("orchestrateur", null);
         BQ_NORMALIZE.put("multicanal", null);
@@ -247,8 +275,10 @@ public class BianAutoDetector {
         // 2. BQ contient le nom du Service Domain → retirer la partie domain
         for (String domainWord : serviceDomain.split("-")) {
             if (domainWord.length() > 3 && bqLower.contains(domainWord.toLowerCase())) {
-                bq = bq.replaceAll("(?i)" + domainWord + "-?", "").trim();
-                if (bq.isEmpty() || bq.equals("-")) return null;
+                bq = bq.replaceAll("(?i)-?" + domainWord + "-?", "").trim();
+                // Nettoyer les tirets orphelins en debut/fin
+                bq = bq.replaceAll("^-+|-+$", "").trim();
+                if (bq.isEmpty()) return null;
             }
         }
 
@@ -314,7 +344,8 @@ public class BianAutoDetector {
         // Les handlers ActionHandler conservent leur BQ car il est essentiel
         // pour distinguer les 13+ endpoints dans un meme controller.
         boolean isActionHandler = useCase.getEjbPattern() != null
-            && useCase.getEjbPattern() == UseCaseInfo.EjbPattern.ACTION_HANDLER;
+            && (useCase.getEjbPattern() == UseCaseInfo.EjbPattern.ACTION_HANDLER
+                || useCase.getEjbPattern() == UseCaseInfo.EjbPattern.INLINE_ACTION);
         if (!isActionHandler) {
             bqNormalized = cleanBehaviorQualifier(bqNormalized, serviceDomain, action);
         }
@@ -480,8 +511,8 @@ public class BianAutoDetector {
             bq = name;
         }
 
-        // Convertir en kebab-case
-        String rawBq = bq.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
+        // Convertir en kebab-case (underscores → tirets pour les inline actions)
+        String rawBq = bq.replaceAll("([a-z])([A-Z])", "$1-$2").replace('_', '-').toLowerCase();
 
         // Normaliser : jargon BOA → noms REST anglais
         return normalizeBehaviorQualifier(rawBq);
@@ -503,6 +534,7 @@ public class BianAutoDetector {
             case "regulatory-compliance" -> "SD0289";
             case "risk-management" -> "SD0434";
             case "product-directory" -> "SD0313";
+            case "payment-order" -> "SD0250";
             default -> null;
         };
     }
@@ -599,7 +631,14 @@ public class BianAutoDetector {
         if (useCase.getClassName() != null) sb.append(useCase.getClassName()).append(" ");
         if (useCase.getPackageName() != null) sb.append(useCase.getPackageName()).append(" ");
         if (useCase.getInputDtoClassName() != null) sb.append(useCase.getInputDtoClassName()).append(" ");
-        if (useCase.getOutputDtoClassName() != null) sb.append(useCase.getOutputDtoClassName());
+        if (useCase.getOutputDtoClassName() != null) sb.append(useCase.getOutputDtoClassName()).append(" ");
+        // Pour INLINE_ACTION : ajouter le nom de l'action et les noms des champs Envelope
+        if (useCase.getActionName() != null) sb.append(useCase.getActionName()).append(" ");
+        if (useCase.getEnvelopeFields() != null) {
+            for (UseCaseInfo.EnvelopeFieldInfo f : useCase.getEnvelopeFields()) {
+                sb.append(f.getFieldName()).append(" ");
+            }
+        }
         return sb.toString().toLowerCase();
     }
 
