@@ -45,15 +45,23 @@ interface RedundancyMatch {
   explanation: string;
 }
 
+interface AffectedProject {
+  sessionId: string;
+  projectName: string;
+  affectedClasses: string[];
+}
+
 interface MutualizationRecommendation {
   id: string;
   type: string;
   priority: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
   title: string;
   description: string;
-  affectedProjects: string[];
+  affectedProjects: AffectedProject[];
   actionItems: string[];
-  estimatedEffort: string;
+  effortReductionPercent: number;
+  estimatedLinesSaved: number;
+  riskLevel: "LOW" | "MEDIUM" | "HIGH";
 }
 
 interface ResolvedLink {
@@ -654,10 +662,10 @@ export default function WorkspaceInsights({ workspaceId, workspaceName }: Worksp
                         <span className="text-[10px] text-[oklch(0.5_0.01_250)]">Projets:</span>
                         {rec.affectedProjects.map(p => (
                           <Badge
-                            key={p}
+                            key={p.sessionId}
                             className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[10px]"
                           >
-                            {p}
+                            {p.projectName}
                           </Badge>
                         ))}
                       </div>
@@ -672,10 +680,13 @@ export default function WorkspaceInsights({ workspaceId, workspaceName }: Worksp
                         ))}
                       </div>
 
-                      <div className="mt-2 pt-2 border-t border-[oklch(0.2_0.01_250)]">
+                      <div className="mt-2 pt-2 border-t border-[oklch(0.2_0.01_250)] flex items-center justify-between">
                         <span className="text-[10px] text-[oklch(0.45_0.01_250)]">
-                          Effort estimé: {rec.estimatedEffort}
+                          Réduction effort: {rec.effortReductionPercent}% · ~{rec.estimatedLinesSaved} lignes économisées
                         </span>
+                        <Badge className={`text-[10px] ${rec.riskLevel === 'LOW' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : rec.riskLevel === 'MEDIUM' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                          Risque {rec.riskLevel}
+                        </Badge>
                       </div>
                     </div>
                   ))}
