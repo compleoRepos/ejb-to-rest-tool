@@ -2100,7 +2100,112 @@ public class AclArchitectureGenerator {
                 management.endpoint.health.show-details=never
                 """);
 
-        log.info("[ACL] Profils Spring generes (jndi, mock, http, dev, prod)");
+        // Profil WebSphere Liberty
+        Files.writeString(resourcesDir.resolve("application-liberty.properties"), """
+                # =====================================================================
+                # Profil WebSphere Liberty
+                # =====================================================================
+                # Activer avec : --spring.profiles.active=liberty,jndi
+                # Ou via jvm.options : -Dspring.profiles.active=liberty,jndi
+                
+                # Desactiver le serveur embarque (Liberty fournit le conteneur de servlets)
+                server.port=-1
+                
+                # JNDI — Liberty utilise le namespace par defaut
+                ejb.jndi.factory=com.ibm.websphere.naming.WsnInitialContextFactory
+                ejb.jndi.provider.url=corbaloc:iiop:localhost:2809
+                
+                # Logging — Deleguer a Liberty (messages.log / trace.log)
+                logging.level.root=INFO
+                logging.level.com.bank.api=INFO
+                
+                # Actuator
+                management.endpoints.web.exposure.include=health,info,metrics
+                management.endpoint.health.show-details=always
+                
+                # Swagger — Desactiver en production Liberty
+                springdoc.swagger-ui.enabled=${SWAGGER_ENABLED:false}
+                springdoc.api-docs.enabled=${SWAGGER_ENABLED:false}
+                """);
+
+        // Generer les fichiers de configuration Liberty (server.xml, jvm.options, bootstrap.properties)
+        generateLibertyServerConfig(srcMain);
+
+        log.info("[ACL] Profils Spring generes (jndi, mock, http, dev, prod, liberty)");
+    }
+
+    /**
+     * Genere les fichiers de configuration WebSphere Liberty :
+     * - src/main/liberty/config/server.xml
+     * - src/main/liberty/config/jvm.options
+     * - src/main/liberty/config/bootstrap.properties
+     */
+    private void generateLibertyServerConfig(Path srcMain) throws IOException {
+        String srcMainStr = srcMain.toString().replace("\\\\", "/");
+        int javaIdx = srcMainStr.indexOf("src/main/java");
+        Path libertyDir;
+        if (javaIdx >= 0) {
+            libertyDir = Path.of(srcMainStr.substring(0, javaIdx), "src/main/liberty/config");
+        } else {
+            libertyDir = srcMain.getParent().resolve("liberty/config");
+        }
+        Files.createDirectories(libertyDir);
+
+        Files.writeString(libertyDir.resolve("server.xml"), """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <server description="Generated REST API on Liberty">
+                    <featureManager>
+                        <feature>springBoot-3.0</feature>
+                        <feature>servlet-6.0</feature>
+                        <feature>jndi-1.0</feature>
+                        <feature>transportSecurity-1.0</feature>
+                        <feature>mpHealth-4.0</feature>
+                        <feature>mpMetrics-5.0</feature>
+                        <feature>jsonp-2.1</feature>
+                        <feature>jsonb-3.0</feature>
+                    </featureManager>
+                
+                    <httpEndpoint id="defaultHttpEndpoint"
+                                  host="*"
+                                  httpPort="${http.port:9080}"
+                                  httpsPort="${https.port:9443}" />
+                
+                    <springBootApplication id="generated-rest-api"
+                                           location="generated-rest-api-1.0.0-SNAPSHOT.war"
+                                           name="generated-rest-api">
+                        <classloader delegation="parentLast" />
+                    </springBootApplication>
+                
+                    <jndiEntry jndiName="ejb/jndi/provider/url"
+                               value="${env.EJB_JNDI_URL}" />
+                    <jndiEntry jndiName="ejb/jndi/factory"
+                               value="${env.EJB_JNDI_FACTORY}" />
+                
+                    <logging consoleLogLevel="INFO"
+                             traceSpecification="com.bank.api.*=info"
+                             maxFileSize="50"
+                             maxFiles="10" />
+                </server>
+                """);
+
+        Files.writeString(libertyDir.resolve("jvm.options"), """
+                -Xms512m
+                -Xmx1024m
+                -XX:+UseG1GC
+                -XX:MaxGCPauseMillis=200
+                -Dfile.encoding=UTF-8
+                -Dspring.profiles.active=liberty,jndi
+                -Duser.timezone=Africa/Casablanca
+                """);
+
+        Files.writeString(libertyDir.resolve("bootstrap.properties"), """
+                http.port=9080
+                https.port=9443
+                env.EJB_JNDI_URL=corbaloc:iiop:localhost:2809
+                env.EJB_JNDI_FACTORY=com.ibm.websphere.naming.WsnInitialContextFactory
+                """);
+
+        log.info("[ACL] Configuration WebSphere Liberty generee (server.xml, jvm.options, bootstrap.properties)");
     }
 
     // =====================================================================

@@ -11,7 +11,8 @@ import java.nio.file.Path;
 
 /**
  * Génère les fichiers de configuration Spring Boot du projet REST :
- * Application, Properties, SecurityConfig, CorsConfig, EjbLookupConfig.
+ * Application, Properties, SecurityConfig, CorsConfig, EjbLookupConfig,
+ * et le profil de déploiement WebSphere Liberty.
  */
 @Component
 public class ConfigGenerator {
@@ -21,6 +22,7 @@ public class ConfigGenerator {
 
     public void generateAll(Path srcMain, Path resourcesDir, boolean hasXml) throws IOException {
         generateApplicationClass(srcMain);
+        generateServletInitializer(srcMain);
         generateApplicationProperties(resourcesDir);
         generateSecurityConfig(srcMain);
         generateCorsConfig(srcMain);
@@ -28,6 +30,7 @@ public class ConfigGenerator {
             generateContentNegotiationConfig(srcMain);
         }
         generateProfiles(resourcesDir);
+        generateLibertyConfig(srcMain, resourcesDir);
     }
 
     private void generateApplicationClass(Path srcMain) throws IOException {
@@ -47,6 +50,38 @@ public class ConfigGenerator {
                 }
                 """.formatted(PKG);
         Files.writeString(srcMain.resolve("Application.java"), code);
+    }
+
+    /**
+     * Génère le ServletInitializer pour le déploiement WAR (WebSphere Liberty).
+     * Nécessaire pour que Spring Boot démarre dans un conteneur de servlets externe.
+     */
+    private void generateServletInitializer(Path srcMain) throws IOException {
+        String code = """
+                package %s;
+                
+                import org.springframework.boot.builder.SpringApplicationBuilder;
+                import org.springframework.boot.web.servlet.support.SpringBootServletInitializer;
+                
+                /**
+                 * Initializer pour le deploiement WAR sur WebSphere Liberty.
+                 * Cette classe permet a Spring Boot de demarrer dans un conteneur de servlets externe
+                 * au lieu d'utiliser le serveur embarque (Tomcat).
+                 *
+                 * Utilisation :
+                 *   mvn clean package -Pliberty
+                 *   Deployer le WAR genere dans le dossier dropins/ de Liberty.
+                 */
+                public class ServletInitializer extends SpringBootServletInitializer {
+                
+                    @Override
+                    protected SpringApplicationBuilder configure(SpringApplicationBuilder application) {
+                        return application.sources(Application.class);
+                    }
+                }
+                """.formatted(PKG);
+        Files.writeString(srcMain.resolve("ServletInitializer.java"), code);
+        log.info("ServletInitializer généré (déploiement WAR Liberty)");
     }
 
     private void generateApplicationProperties(Path resourcesDir) throws IOException {
@@ -201,5 +236,190 @@ public class ConfigGenerator {
                 """);
 
         log.info("Profils Spring générés (jndi, mock, http, test-e2e)");
+    }
+
+    // =====================================================================
+    // WEBSPHERE LIBERTY — Profil de déploiement
+    // =====================================================================
+
+    /**
+     * Génère les fichiers de configuration pour le déploiement sur WebSphere Liberty :
+     * - application-liberty.properties (profil Spring)
+     * - src/main/liberty/config/server.xml (configuration Liberty)
+     * - src/main/liberty/config/jvm.options (options JVM)
+     * - src/main/liberty/config/bootstrap.properties (bootstrap Liberty)
+     */
+    private void generateLibertyConfig(Path srcMain, Path resourcesDir) throws IOException {
+
+        // 1. Profil Spring application-liberty.properties
+        Files.writeString(resourcesDir.resolve("application-liberty.properties"), """
+                # =====================================================================
+                # Profil WebSphere Liberty
+                # =====================================================================
+                # Activer avec : --spring.profiles.active=liberty,jndi
+                # Ou via la variable d'environnement : SPRING_PROFILES_ACTIVE=liberty,jndi
+                
+                # Desactiver le serveur embarque (Liberty fournit le conteneur de servlets)
+                server.port=-1
+                
+                # JNDI — Liberty utilise le namespace par defaut (pas de remote)
+                ejb.jndi.factory=com.ibm.websphere.naming.WsnInitialContextFactory
+                ejb.jndi.provider.url=corbaloc:iiop:localhost:2809
+                
+                # Logging — Deleguer a Liberty (messages.log / trace.log)
+                logging.level.root=INFO
+                logging.level.com.bank.api=INFO
+                
+                # Actuator — Exposer health pour le monitoring Liberty
+                management.endpoints.web.exposure.include=health,info,metrics
+                management.endpoint.health.show-details=always
+                
+                # Swagger — Desactiver en production Liberty (utiliser API Discovery feature)
+                springdoc.swagger-ui.enabled=${SWAGGER_ENABLED:false}
+                springdoc.api-docs.enabled=${SWAGGER_ENABLED:false}
+                """);
+
+        // 2. Créer le répertoire Liberty config
+        //    Convention Maven : src/main/liberty/config/
+        Path libertyConfigDir = srcMain.resolve("../../../../liberty/config").normalize();
+        // Résolution : srcMain = .../src/main/java/com/bank/api
+        //   -> ../../../../ = .../src/main/
+        //   -> liberty/config = .../src/main/liberty/config/
+        // Recalculer proprement
+        Path srcMainRoot = srcMain;
+        // Remonter jusqu'à src/main/java puis aller à src/main/liberty/config
+        String srcMainStr = srcMain.toString().replace("\\", "/");
+        int javaIdx = srcMainStr.indexOf("src/main/java");
+        Path libertyDir;
+        if (javaIdx >= 0) {
+            libertyDir = Path.of(srcMainStr.substring(0, javaIdx), "src/main/liberty/config");
+        } else {
+            libertyDir = srcMain.getParent().resolve("liberty/config");
+        }
+        Files.createDirectories(libertyDir);
+
+        // 3. server.xml — Configuration Liberty
+        Files.writeString(libertyDir.resolve("server.xml"), """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <!--
+                    WebSphere Liberty — Configuration du serveur
+                    Generee automatiquement par Compleo DDF.
+                    
+                    Deploiement :
+                      1. mvn clean package -Pliberty
+                      2. Copier target/*.war dans ${server.config.dir}/dropins/
+                      3. Ou utiliser : mvn liberty:run -Pliberty
+                -->
+                <server description="Generated REST API on Liberty">
+                
+                    <!-- ==================== Features ==================== -->
+                    <featureManager>
+                        <!-- Spring Boot 3.x sur Liberty -->
+                        <feature>springBoot-3.0</feature>
+                        <!-- Servlets Jakarta EE 10 -->
+                        <feature>servlet-6.0</feature>
+                        <!-- JNDI pour le lookup EJB -->
+                        <feature>jndi-1.0</feature>
+                        <!-- Transport SSL/TLS -->
+                        <feature>transportSecurity-1.0</feature>
+                        <!-- Health Check (MicroProfile) -->
+                        <feature>mpHealth-4.0</feature>
+                        <!-- Metriques (MicroProfile) -->
+                        <feature>mpMetrics-5.0</feature>
+                        <!-- JSON support -->
+                        <feature>jsonp-2.1</feature>
+                        <feature>jsonb-3.0</feature>
+                    </featureManager>
+                
+                    <!-- ==================== HTTP Endpoints ==================== -->
+                    <httpEndpoint id="defaultHttpEndpoint"
+                                  host="*"
+                                  httpPort="${http.port:9080}"
+                                  httpsPort="${https.port:9443}" />
+                
+                    <!-- ==================== Application ==================== -->
+                    <springBootApplication id="generated-rest-api"
+                                           location="generated-rest-api-1.0.0-SNAPSHOT.war"
+                                           name="generated-rest-api">
+                        <!-- Context root de l'API -->
+                        <classloader delegation="parentLast" />
+                    </springBootApplication>
+                
+                    <!-- ==================== JNDI — Connexion au serveur EJB ==================== -->
+                    <!--
+                        Configurer les proprietes JNDI pour le lookup EJB distant.
+                        Adapter provider.url selon votre environnement :
+                        - WebSphere Traditional : corbaloc:iiop:hostname:2809
+                        - WildFly/JBoss : remote+http://hostname:8080
+                    -->
+                    <jndiEntry jndiName="ejb/jndi/provider/url"
+                               value="${env.EJB_JNDI_URL}" />
+                    <jndiEntry jndiName="ejb/jndi/factory"
+                               value="${env.EJB_JNDI_FACTORY}" />
+                
+                    <!-- ==================== Logging ==================== -->
+                    <logging consoleLogLevel="INFO"
+                             traceSpecification="com.bank.api.*=info"
+                             maxFileSize="50"
+                             maxFiles="10" />
+                
+                    <!-- ==================== SSL (optionnel) ==================== -->
+                    <!--
+                    <keyStore id="defaultKeyStore"
+                              location="${server.config.dir}/resources/security/key.p12"
+                              password="${keystore.password}" />
+                    <ssl id="defaultSSLConfig"
+                         keyStoreRef="defaultKeyStore"
+                         sslProtocol="TLSv1.3" />
+                    -->
+                
+                </server>
+                """);
+
+        // 4. jvm.options — Options JVM pour Liberty
+        Files.writeString(libertyDir.resolve("jvm.options"), """
+                # =====================================================================
+                # JVM Options pour WebSphere Liberty
+                # =====================================================================
+                
+                # Memoire heap (ajuster selon la charge)
+                -Xms512m
+                -Xmx1024m
+                
+                # Garbage Collector (G1GC recommande pour les API REST)
+                -XX:+UseG1GC
+                -XX:MaxGCPauseMillis=200
+                
+                # Encoding UTF-8
+                -Dfile.encoding=UTF-8
+                -Dclient.encoding.override=UTF-8
+                
+                # Profil Spring actif (liberty + jndi)
+                -Dspring.profiles.active=liberty,jndi
+                
+                # Timezone
+                -Duser.timezone=Africa/Casablanca
+                
+                # Desactiver le serveur embarque Spring Boot (Liberty fournit le conteneur)
+                -Dspring.main.web-application-type=none
+                """);
+
+        // 5. bootstrap.properties — Propriétés de bootstrap Liberty
+        Files.writeString(libertyDir.resolve("bootstrap.properties"), """
+                # =====================================================================
+                # Bootstrap Properties pour WebSphere Liberty
+                # =====================================================================
+                
+                # Ports HTTP/HTTPS
+                http.port=9080
+                https.port=9443
+                
+                # Variables d'environnement JNDI (valeurs par defaut)
+                # Surcharger via les variables d'environnement du serveur
+                env.EJB_JNDI_URL=corbaloc:iiop:localhost:2809
+                env.EJB_JNDI_FACTORY=com.ibm.websphere.naming.WsnInitialContextFactory
+                """);
+
+        log.info("Configuration WebSphere Liberty générée (server.xml, jvm.options, bootstrap.properties, application-liberty.properties)");
     }
 }

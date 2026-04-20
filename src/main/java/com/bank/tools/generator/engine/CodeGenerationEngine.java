@@ -167,7 +167,9 @@ public class CodeGenerationEngine {
         // Generer les fichiers de base
         generatePomXml(projectRoot, projectHasXml, projectHasValidation, analysisResult);
         generateApplicationClass(srcMain);
+        generateServletInitializer(srcMain);
         generateApplicationProperties(resourcesDir);
+        generateLibertyProfile(srcMain, resourcesDir);
         generateJndiHealthIndicator(srcMain);
 
         if (!aclActive) {
@@ -486,6 +488,48 @@ public class CodeGenerationEngine {
                         </plugins>
                     </build>
                 
+                    <!-- Profil WebSphere Liberty (mvn clean package -Pliberty) -->
+                    <profiles>
+                        <profile>
+                            <id>liberty</id>
+                            <packaging>war</packaging>
+                            <dependencies>
+                                <dependency>
+                                    <groupId>org.springframework.boot</groupId>
+                                    <artifactId>spring-boot-starter-tomcat</artifactId>
+                                    <scope>provided</scope>
+                                </dependency>
+                            </dependencies>
+                            <build>
+                                <plugins>
+                                    <plugin>
+                                        <groupId>io.openliberty.tools</groupId>
+                                        <artifactId>liberty-maven-plugin</artifactId>
+                                        <version>3.10</version>
+                                        <configuration>
+                                            <serverName>defaultServer</serverName>
+                                            <configDirectory>src/main/liberty/config</configDirectory>
+                                            <runtimeArtifact>
+                                                <groupId>io.openliberty</groupId>
+                                                <artifactId>openliberty-runtime</artifactId>
+                                                <version>24.0.0.1</version>
+                                                <type>zip</type>
+                                            </runtimeArtifact>
+                                        </configuration>
+                                    </plugin>
+                                    <plugin>
+                                        <groupId>org.apache.maven.plugins</groupId>
+                                        <artifactId>maven-war-plugin</artifactId>
+                                        <version>3.4.0</version>
+                                        <configuration>
+                                            <failOnMissingWebXml>false</failOnMissingWebXml>
+                                        </configuration>
+                                    </plugin>
+                                </plugins>
+                            </build>
+                        </profile>
+                    </profiles>
+                
                 </project>
                 """.formatted(parentBlock, javaVersion, deps.toString());
 
@@ -512,6 +556,110 @@ public class CodeGenerationEngine {
                 """.formatted(BASE_PACKAGE);
 
         Files.writeString(srcMain.resolve("Application.java"), code);
+    }
+
+    /**
+     * Genere le ServletInitializer pour le deploiement WAR sur WebSphere Liberty.
+     */
+    private void generateServletInitializer(Path srcMain) throws IOException {
+        String code = """
+                package %s;
+                
+                import org.springframework.boot.builder.SpringApplicationBuilder;
+                import org.springframework.boot.web.servlet.support.SpringBootServletInitializer;
+                
+                /**
+                 * Initializer pour le deploiement WAR sur WebSphere Liberty.
+                 * Permet a Spring Boot de demarrer dans un conteneur de servlets externe.
+                 * Utilisation : mvn clean package -Pliberty
+                 */
+                public class ServletInitializer extends SpringBootServletInitializer {
+                    @Override
+                    protected SpringApplicationBuilder configure(SpringApplicationBuilder application) {
+                        return application.sources(Application.class);
+                    }
+                }
+                """.formatted(BASE_PACKAGE);
+        Files.writeString(srcMain.resolve("ServletInitializer.java"), code);
+        log.info("ServletInitializer genere (deploiement WAR Liberty)");
+    }
+
+    /**
+     * Genere le profil Spring Liberty et les fichiers de configuration Liberty
+     * (server.xml, jvm.options, bootstrap.properties).
+     */
+    private void generateLibertyProfile(Path srcMain, Path resourcesDir) throws IOException {
+        // application-liberty.properties
+        Files.writeString(resourcesDir.resolve("application-liberty.properties"), """
+                # Profil WebSphere Liberty
+                # Activer avec : --spring.profiles.active=liberty,jndi
+                server.port=-1
+                ejb.jndi.factory=com.ibm.websphere.naming.WsnInitialContextFactory
+                ejb.jndi.provider.url=corbaloc:iiop:localhost:2809
+                logging.level.root=INFO
+                logging.level.com.bank.api=INFO
+                management.endpoints.web.exposure.include=health,info,metrics
+                management.endpoint.health.show-details=always
+                springdoc.swagger-ui.enabled=${SWAGGER_ENABLED:false}
+                springdoc.api-docs.enabled=${SWAGGER_ENABLED:false}
+                """);
+
+        // Liberty config directory
+        String srcMainStr = srcMain.toString().replace("\\\\", "/");
+        int javaIdx = srcMainStr.indexOf("src/main/java");
+        Path libertyDir;
+        if (javaIdx >= 0) {
+            libertyDir = Path.of(srcMainStr.substring(0, javaIdx), "src/main/liberty/config");
+        } else {
+            libertyDir = srcMain.getParent().resolve("liberty/config");
+        }
+        Files.createDirectories(libertyDir);
+
+        Files.writeString(libertyDir.resolve("server.xml"), """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <server description="Generated REST API on Liberty">
+                    <featureManager>
+                        <feature>springBoot-3.0</feature>
+                        <feature>servlet-6.0</feature>
+                        <feature>jndi-1.0</feature>
+                        <feature>transportSecurity-1.0</feature>
+                        <feature>mpHealth-4.0</feature>
+                        <feature>mpMetrics-5.0</feature>
+                        <feature>jsonp-2.1</feature>
+                        <feature>jsonb-3.0</feature>
+                    </featureManager>
+                    <httpEndpoint id="defaultHttpEndpoint" host="*"
+                                  httpPort="${http.port:9080}" httpsPort="${https.port:9443}" />
+                    <springBootApplication id="generated-rest-api"
+                                           location="generated-rest-api-1.0.0-SNAPSHOT.war"
+                                           name="generated-rest-api">
+                        <classloader delegation="parentLast" />
+                    </springBootApplication>
+                    <jndiEntry jndiName="ejb/jndi/provider/url" value="${env.EJB_JNDI_URL}" />
+                    <jndiEntry jndiName="ejb/jndi/factory" value="${env.EJB_JNDI_FACTORY}" />
+                    <logging consoleLogLevel="INFO" traceSpecification="com.bank.api.*=info"
+                             maxFileSize="50" maxFiles="10" />
+                </server>
+                """);
+
+        Files.writeString(libertyDir.resolve("jvm.options"), """
+                -Xms512m
+                -Xmx1024m
+                -XX:+UseG1GC
+                -XX:MaxGCPauseMillis=200
+                -Dfile.encoding=UTF-8
+                -Dspring.profiles.active=liberty,jndi
+                -Duser.timezone=Africa/Casablanca
+                """);
+
+        Files.writeString(libertyDir.resolve("bootstrap.properties"), """
+                http.port=9080
+                https.port=9443
+                env.EJB_JNDI_URL=corbaloc:iiop:localhost:2809
+                env.EJB_JNDI_FACTORY=com.ibm.websphere.naming.WsnInitialContextFactory
+                """);
+
+        log.info("Profil Liberty genere (application-liberty.properties, server.xml, jvm.options, bootstrap.properties)");
     }
 
     // ===================== APPLICATION PROPERTIES =====================

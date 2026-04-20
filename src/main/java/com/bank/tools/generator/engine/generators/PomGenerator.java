@@ -14,6 +14,10 @@ import java.nio.file.Path;
 /**
  * Génère le fichier pom.xml du projet REST.
  * Extrait de CodeGenerationEngine pour respecter SRP.
+ *
+ * Inclut un profil Maven 'liberty' pour le déploiement sur WebSphere Liberty :
+ *   mvn clean package -Pliberty  → produit un WAR déployable sur Liberty
+ *   mvn liberty:run -Pliberty    → démarre Liberty en local avec le WAR
  */
 @Component
 public class PomGenerator {
@@ -89,6 +93,8 @@ public class PomGenerator {
                 
                     <properties>
                         <java.version>%s</java.version>
+                        <liberty.var.http.port>9080</liberty.var.http.port>
+                        <liberty.var.https.port>9443</liberty.var.https.port>
                     </properties>
                 
                     <dependencies>
@@ -103,11 +109,77 @@ public class PomGenerator {
                             </plugin>
                         </plugins>
                     </build>
+                
+                    <!-- ==================== PROFILS DE DEPLOIEMENT ==================== -->
+                    <profiles>
+                
+                        <!-- Profil WebSphere Liberty -->
+                        <!--
+                            Utilisation :
+                              mvn clean package -Pliberty    : Produit un WAR deployable
+                              mvn liberty:run -Pliberty      : Demarre Liberty en local
+                              mvn liberty:dev -Pliberty      : Mode developpement (hot reload)
+                
+                            Le WAR genere se deploie dans :
+                              ${server.config.dir}/dropins/generated-rest-api-1.0.0-SNAPSHOT.war
+                
+                            Prerequis :
+                              - Java 21+ (ou la version detectee du projet source)
+                              - Liberty 23.0.0.12+ (pour springBoot-3.0 feature)
+                        -->
+                        <profile>
+                            <id>liberty</id>
+                            <packaging>war</packaging>
+                            <dependencies>
+                                <!-- Exclure Tomcat embarque (Liberty fournit le conteneur) -->
+                                <dependency>
+                                    <groupId>org.springframework.boot</groupId>
+                                    <artifactId>spring-boot-starter-tomcat</artifactId>
+                                    <scope>provided</scope>
+                                </dependency>
+                            </dependencies>
+                            <build>
+                                <plugins>
+                                    <!-- Liberty Maven Plugin -->
+                                    <plugin>
+                                        <groupId>io.openliberty.tools</groupId>
+                                        <artifactId>liberty-maven-plugin</artifactId>
+                                        <version>3.10</version>
+                                        <configuration>
+                                            <serverName>defaultServer</serverName>
+                                            <configDirectory>src/main/liberty/config</configDirectory>
+                                            <runtimeArtifact>
+                                                <groupId>io.openliberty</groupId>
+                                                <artifactId>openliberty-runtime</artifactId>
+                                                <version>24.0.0.1</version>
+                                                <type>zip</type>
+                                            </runtimeArtifact>
+                                            <bootstrapProperties>
+                                                <http.port>${liberty.var.http.port}</http.port>
+                                                <https.port>${liberty.var.https.port}</https.port>
+                                            </bootstrapProperties>
+                                        </configuration>
+                                    </plugin>
+                                    <!-- Maven WAR Plugin -->
+                                    <plugin>
+                                        <groupId>org.apache.maven.plugins</groupId>
+                                        <artifactId>maven-war-plugin</artifactId>
+                                        <version>3.4.0</version>
+                                        <configuration>
+                                            <failOnMissingWebXml>false</failOnMissingWebXml>
+                                        </configuration>
+                                    </plugin>
+                                </plugins>
+                            </build>
+                        </profile>
+                
+                    </profiles>
+                
                 </project>
                 """.formatted(javaVersion, deps.toString());
 
         Files.writeString(projectRoot.resolve("pom.xml"), pom);
-        log.info("pom.xml généré (XML: {}, Validation: {})", hasXml, hasValidation);
+        log.info("pom.xml généré (XML: {}, Validation: {}, profil Liberty: oui)", hasXml, hasValidation);
     }
 
     private String dep(String groupId, String artifactId, String version) {
