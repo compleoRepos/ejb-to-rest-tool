@@ -24,6 +24,7 @@
 import type { ServiceCandidate, ParsedModule } from "../microservices/microservice-splitter";
 import type { QualityReport, QualityCheck } from "../quality-scorer";
 import { validateMLOutput as externalValidateML } from "./validateMLOutput";
+import { llmGenerate, type LLMAdapterConfig } from "./llm-adapter";
 
 // ── Configuration ────────────────────────────────────────────────
 
@@ -488,40 +489,29 @@ RÈGLES STRICTES:
 - Ton: confiant, professionnel, honnête. Max 600 mots.`;
   }
 
-  // ── Ollama API call ──────────────────────────────────────────
+  // ── LLM API call (Manus invokeLLM + Ollama fallback) ────────
 
   private async ollamaGenerate(
     prompt: string,
     options: { temperature: number; num_predict: number }
   ): Promise<string> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const adapterConfig: LLMAdapterConfig = {
+      ollamaUrl: this.config.ollamaUrl,
+      model:     this.config.model,
+      timeoutMs: this.timeoutMs,
+    };
 
-    try {
-      const res = await fetch(`${this.config.ollamaUrl}/api/generate`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          model:   this.config.model,
-          prompt,
-          stream:  false,
-          options: {
-            temperature: options.temperature,
-            num_predict: options.num_predict,
-          },
-        }),
-        signal: controller.signal,
-      });
+    const result = await llmGenerate(
+      prompt,
+      { temperature: options.temperature, maxTokens: options.num_predict },
+      adapterConfig,
+    );
 
-      if (!res.ok) {
-        throw new Error(`Ollama generate failed: ${res.status}`);
-      }
-
-      const data = await res.json() as { response: string };
-      return data.response;
-    } finally {
-      clearTimeout(timeout);
+    if (!result) {
+      throw new Error("LLM indisponible (Manus + Ollama)");
     }
+
+    return result;
   }
 
   // ── Helpers ──────────────────────────────────────────────────

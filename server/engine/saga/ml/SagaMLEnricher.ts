@@ -70,12 +70,22 @@ export class SagaMLEnricher {
   }
 
   /**
-   * Vérifie si Ollama est disponible.
+   * Vérifie si le LLM est disponible (Manus invokeLLM ou Ollama).
    * Résultat mis en cache pour la durée de vie de l'instance.
    */
   async isAvailable(): Promise<boolean> {
     if (this._available !== null) return this._available;
 
+    // 1. Try Manus invokeLLM
+    try {
+      const { isLLMAvailable } = await import("../../ml/llm-adapter");
+      if (await isLLMAvailable()) {
+        this._available = true;
+        return true;
+      }
+    } catch { /* Manus not available */ }
+
+    // 2. Fallback: try Ollama
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 3_000);
@@ -248,35 +258,16 @@ export class SagaMLEnricher {
   }
 
   /**
-   * Appel Ollama via l'API /api/generate.
+   * Appel LLM via l'adaptateur unifié (Manus + Ollama fallback).
    */
   private async callOllama(prompt: string): Promise<string | null> {
     try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), this.timeout);
-
-      const res = await fetch(`${this.ollamaUrl}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: this.model,
-          prompt,
-          stream: false,
-          options: {
-            temperature: 0.1,
-            num_predict: 1200,
-            stop: ["```", "// END"],
-          },
-        }),
-        signal: ctrl.signal,
-      });
-
-      clearTimeout(timer);
-
-      if (!res.ok) return null;
-
-      const data = (await res.json()) as { response: string };
-      return data.response || null;
+      const { llmGenerate } = await import("../../ml/llm-adapter");
+      return await llmGenerate(
+        prompt,
+        { temperature: 0.1, maxTokens: 1200, stop: ["```", "// END"] },
+        { ollamaUrl: this.ollamaUrl, model: this.model, timeoutMs: this.timeout },
+      );
     } catch {
       return null;
     }

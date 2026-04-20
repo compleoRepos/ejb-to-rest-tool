@@ -1,24 +1,18 @@
 /**
- * GenerationService — Compleo v7.3 ML Layer
+ * GenerationService — Compleo v8.0 ML Layer
  *
- * Utilise un LLM local (Ollama) pour améliorer le code Spring Boot
- * généré par le moteur de règles. Le LLM reçoit :
- *   - Le code EJB source
- *   - Le code rule-based généré
- *   - La signature EJB source complète (v7.3)
- *   - Des exemples similaires (RAG via EmbeddingService)
+ * Utilise un LLM (Manus invokeLLM ou Ollama fallback) pour améliorer
+ * le code Spring Boot généré par le moteur de règles.
  *
- * v7.3: EJBSignature remplace methodName/voInType/voOutType.
- *       Le prompt inclut la signature EJB source comme référence
- *       authoritative, et la validation vérifie les paramètres
- *       et le type retour.
+ * v8.0: Migration vers llm-adapter unifié.
+ *       Manus invokeLLM en priorité, Ollama en fallback.
  *
- * Dépendance externe (optionnelle, via fetch) :
- *   - Ollama : http://localhost:11434 (modèle qwen2.5-coder:1.5b)
+ * @author Hamza NORDINE
  */
 
 import type { MigrationPair } from "./embedding-service";
 import type { EJBSignature } from "./ml-enhancer";
+import { llmGenerateCode, type LLMAdapterConfig } from "./llm-adapter";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -46,8 +40,7 @@ export class GenerationService {
   /**
    * Improve a rule-based service method using the LLM.
    *
-   * v7.3: Accepts EJBSignature instead of individual voInType/voOutType.
-   * Falls back to rule-based code if Ollama is unavailable.
+   * v8.0: Uses llm-adapter (Manus first, Ollama fallback).
    */
   async improveServiceMethod(
     ejbCode:         string,
@@ -61,47 +54,41 @@ export class GenerationService {
     );
 
     try {
-      const res = await fetch(`${this.ollamaUrl}/api/generate`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          model:   this.model,
-          prompt,
-          stream:  false,
-          options: {
-            temperature: 0.1,
-            num_predict: 800,
-            stop:        ["```", "// END_METHOD"],
-          },
-        }),
-      });
+      const adapterConfig: LLMAdapterConfig = {
+        ollamaUrl: this.ollamaUrl,
+        model:     this.model,
+        timeoutMs: 60_000,
+      };
 
-      if (!res.ok) {
-        throw new Error(`Ollama generate failed: ${res.status}`);
+      const code = await llmGenerateCode(
+        prompt,
+        { temperature: 0.1, maxTokens: 800, stop: ["```", "// END_METHOD"] },
+        adapterConfig,
+      );
+
+      if (!code) {
+        return {
+          code:       ruleBasedCode,
+          confidence: 0.5,
+          source:     "rules",
+          warnings:   ["LLM indisponible — code rule-based conservé"],
+        };
       }
 
-      const data    = await res.json() as { response: string };
-      const code    = this.extractCode(data.response);
-      const checked = this.validate(code, signature);
-
-      return checked;
+      return this.validate(code, signature);
 
     } catch (e) {
-      // Ollama indisponible → retourner le code rule-based
       return {
         code:       ruleBasedCode,
         confidence: 0.5,
         source:     "rules",
-        warnings:   [`Ollama indisponible: ${e}`],
+        warnings:   [`LLM indisponible: ${e}`],
       };
     }
   }
 
   /**
    * Build the prompt for the LLM with RAG examples and EJB signature.
-   *
-   * v7.3: The signature section tells the LLM exactly what the
-   * Spring Boot method MUST have (name, params, return type).
    */
   buildPrompt(
     ejbCode:         string,
@@ -110,7 +97,6 @@ export class GenerationService {
     signature:       EJBSignature
   ): string {
 
-    // Section signature — dit explicitement au LLM ce qui est attendu
     const paramsStr = signature.params.length > 0
       ? signature.params.map(p => `${p.type} ${p.name}`).join(", ")
       : "aucun";
@@ -191,10 +177,6 @@ Génère la méthode Spring Boot corrigée :
 
   /**
    * Validate the generated code against the EJB signature.
-   *
-   * v7.3: Checks each parameter and the return type against
-   * the authoritative EJB signature. If confidence drops below 0.5,
-   * generates a fallback stub from the signature.
    */
   validate(
     code:      string,
@@ -258,8 +240,7 @@ Génère la méthode Spring Boot corrigée :
 
   /**
    * Build a correct stub from the EJB signature when ML output
-   * fails validation. Ensures the method has the right name,
-   * parameters, and return type.
+   * fails validation.
    */
   private buildFallbackCode(signature: EJBSignature): string {
     const springReturn = inferSpringReturnType(signature.returnType);
@@ -278,18 +259,12 @@ Génère la méthode Spring Boot corrigée :
 
 // ── Utility ─────────────────────────────────────────────────────
 
-/**
- * Infer the Spring Boot return type from the EJB return type.
- * Maps common Java EE types to Spring equivalents.
- */
 function inferSpringReturnType(ejbReturnType: string): string {
   if (!ejbReturnType || ejbReturnType === "void" || ejbReturnType === "Void") {
     return "void";
   }
   if (ejbReturnType === "Object") {
-    // Object is never acceptable — will be flagged by validation
     return "Object";
   }
-  // Keep the type as-is for standard Java types
   return ejbReturnType;
 }

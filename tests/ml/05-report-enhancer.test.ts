@@ -11,9 +11,18 @@
  *
  * Les tests avec Ollama réel sont skippés si OLLAMA_URL n'est pas défini.
  */
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import { ReportEnhancer, type ReportContext } from "../../server/engine/ml/report-enhancer";
 import { buildMockContext } from "../helpers/mock-context";
+
+// Mock llm-adapter to force fallback mode in tests (no real LLM calls)
+vi.mock("../../server/engine/ml/llm-adapter", () => ({
+  isLLMAvailable: vi.fn().mockResolvedValue(false),
+  llmGenerate: vi.fn().mockResolvedValue(null),
+  llmGenerateCode: vi.fn().mockResolvedValue(null),
+  llmGenerateJSON: vi.fn().mockResolvedValue(null),
+  resetAvailabilityCache: vi.fn(),
+}));
 
 // Skip si Ollama non disponible
 const skipIfNoOllama = process.env.OLLAMA_URL ? it : it.skip;

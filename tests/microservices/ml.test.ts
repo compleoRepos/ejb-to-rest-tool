@@ -12,6 +12,15 @@ import { GenerationService, type MLGenerationResult } from "../../server/engine/
 import { MLEnhancer, type MLConfig, type EJBSignature } from "../../server/engine/ml/ml-enhancer";
 import type { MigrationPair } from "../../server/engine/ml/embedding-service";
 
+// Mock llm-adapter to force fallback mode in tests (no real LLM calls)
+vi.mock("../../server/engine/ml/llm-adapter", () => ({
+  isLLMAvailable: vi.fn().mockResolvedValue(false),
+  llmGenerate: vi.fn().mockResolvedValue(null),
+  llmGenerateCode: vi.fn().mockResolvedValue(null),
+  llmGenerateJSON: vi.fn().mockResolvedValue(null),
+  resetAvailabilityCache: vi.fn(),
+}));
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
 function makeSig(overrides: Partial<EJBSignature> = {}): EJBSignature {
@@ -297,12 +306,13 @@ describe("MLEnhancer", () => {
     });
   });
 
-  describe("initialize() — error handling", () => {
-    it("should disable ML on init failure", async () => {
+  describe("initialize() — in-memory fallback", () => {
+    it("should enable ML with in-memory embedding when ChromaDB is absent", async () => {
       const enhancer = new MLEnhancer(baseConfig);
-      // ChromaDB is not running, so init should fail and disable ML
+      // v8.0: EmbeddingService now falls back to in-memory mode instead of throwing
+      // So MLEnhancer stays enabled even without ChromaDB
       await enhancer.initialize();
-      expect(enhancer.enabled).toBe(false);
+      expect(enhancer.enabled).toBe(true);
     });
   });
 

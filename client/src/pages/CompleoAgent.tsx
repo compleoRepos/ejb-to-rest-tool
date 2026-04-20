@@ -674,7 +674,7 @@ export default function CompleoAgentPage() {
                       className="data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
                     />
                     <Zap className="w-4 h-4 text-amber-400" />
-                    <span className="text-sm group-hover:text-foreground transition-colors">Amélioration ML (Ollama + ChromaDB requis)</span>
+                    <span className="text-sm group-hover:text-foreground transition-colors">Amélioration ML (IA intégrée)</span>
                   </label>
                 )}
                 <label className="flex items-center gap-3 cursor-pointer group">
@@ -684,7 +684,7 @@ export default function CompleoAgentPage() {
                     className="data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
                   />
                   <Star className="w-4 h-4 text-amber-400" />
-                  <span className="text-sm group-hover:text-foreground transition-colors">Rapports IA enrichis (Ollama requis)</span>
+                  <span className="text-sm group-hover:text-foreground transition-colors">Rapports IA enrichis (IA intégrée)</span>
                 </label>
                 {enableMicroservices && (
                   <label className="flex items-center gap-3 cursor-pointer ml-6 group">

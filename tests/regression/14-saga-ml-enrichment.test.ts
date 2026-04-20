@@ -12,13 +12,22 @@
  * @author Hamza NORDINE
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { generateFallbackEnrichment } from "../../server/engine/saga/ml/fallback";
 import { validateSagaMLOutput } from "../../server/engine/saga/ml/validateSagaMLOutput";
 import { parseMLResponse, type StepContext, type MLStepEnrichment } from "../../server/engine/saga/ml/prompts";
 import { generateSagaWithML, generateAllSagasWithML } from "../../server/engine/saga/saga-generator";
 import { SagaMLEnricher } from "../../server/engine/saga/ml/SagaMLEnricher";
 import type { SagaCandidate, EjbDependency } from "../../server/engine/saga/saga-detector";
+
+// Mock llm-adapter to force fallback mode in tests
+vi.mock("../../server/engine/ml/llm-adapter", () => ({
+  isLLMAvailable: vi.fn().mockResolvedValue(false),
+  llmGenerate: vi.fn().mockResolvedValue(null),
+  llmGenerateCode: vi.fn().mockResolvedValue(null),
+  llmGenerateJSON: vi.fn().mockResolvedValue(null),
+  resetAvailabilityCache: vi.fn(),
+}));
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 

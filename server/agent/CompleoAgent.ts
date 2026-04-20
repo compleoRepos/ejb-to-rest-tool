@@ -901,7 +901,7 @@ export class CompleoAgent {
         } else {
           yield this.event("LOG", {
             level: "warn",
-            message: "ML non disponible (Ollama/ChromaDB non accessibles) — génération rule-based uniquement",
+            message: "ML non disponible — génération rule-based uniquement",
             phase: "MICROSERVICES",
           });
         }
@@ -1010,7 +1010,7 @@ export class CompleoAgent {
       // ML-Enhanced Saga Generation
       yield this.event("LOG", {
         level: "info",
-        message: "Enrichissement ML des Sagas en cours (Ollama qwen2.5)...",
+        message: "Enrichissement ML des Sagas en cours (IA intégrée)...",
         phase: "MICROSERVICES",
       });
 
@@ -1033,7 +1033,7 @@ export class CompleoAgent {
         } else {
           yield this.event("LOG", {
             level: "warn",
-            message: "Ollama non disponible — fallback rule-based pour les Sagas",
+            message: "LLM non disponible — fallback rule-based pour les Sagas",
             phase: "MICROSERVICES",
           });
           sagaResults = generateAllSagas(candidates, basePackage);
@@ -1146,15 +1146,21 @@ export class CompleoAgent {
     try {
       const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
 
-      // Quick health check — fail fast if Ollama is unreachable (3s timeout)
-      try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 3_000);
-        const hc = await fetch(`${ollamaUrl}/api/version`, { signal: ctrl.signal });
-        clearTimeout(timer);
-        if (!hc.ok) throw new Error(`Ollama returned ${hc.status}`);
-      } catch (_hcErr) {
-        throw new Error("Ollama non accessible — enrichissement IA ignoré (rapports originaux conservés)");
+      // v8.0: LLM availability check (Manus invokeLLM or Ollama)
+      const { isLLMAvailable } = await import("../engine/ml/llm-adapter");
+      const llmReady = await isLLMAvailable();
+
+      if (!llmReady) {
+        // Fallback: try Ollama
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 3_000);
+          const hc = await fetch(`${ollamaUrl}/api/version`, { signal: ctrl.signal });
+          clearTimeout(timer);
+          if (!hc.ok) throw new Error(`Ollama returned ${hc.status}`);
+        } catch (_hcErr) {
+          throw new Error("LLM non accessible (Manus + Ollama) — enrichissement IA ignoré");
+        }
       }
 
       const enhancerConfig: ReportEnhancerConfig = {
