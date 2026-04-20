@@ -523,6 +523,10 @@ public class EjbProjectParser implements ProjectParser {
             result.addConversion("Annotations JAXB preservees + support Jackson XML");
         }
 
+        // Phase 5b : FIX DEFAUT-4 — Extraire les codes erreur metier inline
+        // Detecte : throw new *Exception("CODE", "MESSAGE") et setCodeRetour("CODE")
+        extractBusinessErrors(compilationUnits, result);
+
         // Phase BIAN : Resoudre le mapping BIAN pour chaque UseCase
         if (bianMappingResolver != null) {
             log.info("[BIAN] Resolution du mapping BIAN pour {} UseCases", result.getUseCases().size());
@@ -2252,6 +2256,73 @@ public class EjbProjectParser implements ProjectParser {
 
     private String getJndiPrefix() {
         return "java:global/bank/";
+    }
+
+    // ==================== FIX DEFAUT-4 : EXTRACTION DES BUSINESS ERRORS ====================
+
+    /**
+     * Extrait les codes erreur metier inline depuis le code source.
+     * Patterns detectes :
+     * - throw new FwkRollbackException("CODE", "MESSAGE")
+     * - throw new *Exception("CODE", "MESSAGE")
+     * - setCodeRetour("CODE")
+     * - setMessageRetour("MESSAGE")
+     */
+    private void extractBusinessErrors(Map<String, CompilationUnit> compilationUnits,
+                                        ProjectAnalysisResult result) {
+        Set<String> seenCodes = new java.util.HashSet<>();
+
+        for (Map.Entry<String, CompilationUnit> entry : compilationUnits.entrySet()) {
+            CompilationUnit cu = entry.getValue();
+            String source = cu.toString();
+
+            for (ClassOrInterfaceDeclaration classDecl : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                String className = classDecl.getNameAsString();
+                String classSource = classDecl.toString();
+
+                // Pattern 1 : throw new *Exception("CODE", "MESSAGE")
+                java.util.regex.Pattern throwPattern = java.util.regex.Pattern.compile(
+                        "throw\\s+new\\s+(\\w*Exception)\\s*\\(\\s*\"([^\"]+)\"\\s*,\\s*\"([^\"]+)\"\\s*\\)");
+                java.util.regex.Matcher throwMatcher = throwPattern.matcher(classSource);
+                while (throwMatcher.find()) {
+                    String exceptionType = throwMatcher.group(1);
+                    String errorCode = throwMatcher.group(2);
+                    String errorMessage = throwMatcher.group(3);
+                    String key = errorCode + ":" + className;
+                    if (seenCodes.add(key)) {
+                        result.addBusinessError(new ProjectAnalysisResult.BusinessErrorInfo(
+                                errorCode, errorMessage, className, exceptionType));
+                        log.info("[PARSER] Business error detecte : code={}, msg={}, dans {}",
+                                errorCode, errorMessage, className);
+                    }
+                }
+
+                // Pattern 2 : setCodeRetour("CODE")
+                java.util.regex.Pattern codeRetourPattern = java.util.regex.Pattern.compile(
+                        "setCodeRetour\\s*\\(\\s*\"([^\"]+)\"\\s*\\)");
+                java.util.regex.Matcher codeRetourMatcher = codeRetourPattern.matcher(classSource);
+                while (codeRetourMatcher.find()) {
+                    String errorCode = codeRetourMatcher.group(1);
+                    // Chercher le setMessageRetour correspondant
+                    String errorMessage = "Erreur metier " + errorCode;
+                    java.util.regex.Pattern msgPattern = java.util.regex.Pattern.compile(
+                            "setMessageRetour\\s*\\(\\s*\"([^\"]+)\"\\s*\\)");
+                    java.util.regex.Matcher msgMatcher = msgPattern.matcher(classSource);
+                    if (msgMatcher.find()) {
+                        errorMessage = msgMatcher.group(1);
+                    }
+                    String key = errorCode + ":" + className;
+                    if (seenCodes.add(key)) {
+                        result.addBusinessError(new ProjectAnalysisResult.BusinessErrorInfo(
+                                errorCode, errorMessage, className, "BusinessException"));
+                        log.info("[PARSER] Business error (setCodeRetour) : code={}, msg={}, dans {}",
+                                errorCode, errorMessage, className);
+                    }
+                }
+            }
+        }
+
+        log.info("[PARSER] Total business errors detectes : {}", result.getBusinessErrors().size());
     }
 
 }

@@ -68,6 +68,9 @@ public class ProjectAnalysisResult {
     /** Annotations custom bancaires detectees dans le projet source */
     private List<DetectedAnnotation> detectedCustomAnnotations = new ArrayList<>();
 
+    /** Codes erreur metier detectes dans le code source (throw new *Exception("CODE", "MSG")) */
+    private List<BusinessErrorInfo> businessErrors = new ArrayList<>();
+
     // ==================== SYNCHRONE SERVICE / ACTION HANDLER ====================
 
     /** Indique si un pattern SynchroneService a ete detecte */
@@ -175,6 +178,35 @@ public class ProjectAnalysisResult {
         public void setErrorCode(String errorCode) { this.errorCode = errorCode; }
         public String getSourceCode() { return sourceCode; }
         public void setSourceCode(String sourceCode) { this.sourceCode = sourceCode; }
+    }
+
+    /**
+     * Information sur un code erreur metier detecte dans le code source.
+     * Extrait depuis les patterns : throw new *Exception("CODE", "MESSAGE")
+     * ou setCodeRetour("CODE") / setMessageRetour("MESSAGE").
+     */
+    public static class BusinessErrorInfo {
+        private String errorCode;
+        private String errorMessage;
+        private String sourceClassName;
+        private String exceptionType;
+
+        public BusinessErrorInfo() {}
+        public BusinessErrorInfo(String errorCode, String errorMessage, String sourceClassName, String exceptionType) {
+            this.errorCode = errorCode;
+            this.errorMessage = errorMessage;
+            this.sourceClassName = sourceClassName;
+            this.exceptionType = exceptionType;
+        }
+
+        public String getErrorCode() { return errorCode; }
+        public void setErrorCode(String errorCode) { this.errorCode = errorCode; }
+        public String getErrorMessage() { return errorMessage; }
+        public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
+        public String getSourceClassName() { return sourceClassName; }
+        public void setSourceClassName(String sourceClassName) { this.sourceClassName = sourceClassName; }
+        public String getExceptionType() { return exceptionType; }
+        public void setExceptionType(String exceptionType) { this.exceptionType = exceptionType; }
     }
 
     /**
@@ -304,6 +336,9 @@ public class ProjectAnalysisResult {
     public void addException(ExceptionInfo exceptionInfo) { this.detectedExceptions.add(exceptionInfo); }
     public void addValidator(ValidatorInfo validatorInfo) { this.detectedValidators.add(validatorInfo); }
     public void addRemoteInterface(RemoteInterfaceInfo remoteInterfaceInfo) { this.detectedRemoteInterfaces.add(remoteInterfaceInfo); }
+    public List<BusinessErrorInfo> getBusinessErrors() { return businessErrors; }
+    public void setBusinessErrors(List<BusinessErrorInfo> businessErrors) { this.businessErrors = businessErrors; }
+    public void addBusinessError(BusinessErrorInfo error) { this.businessErrors.add(error); }
 
     public List<DetectedAnnotation> getDetectedCustomAnnotations() { return detectedCustomAnnotations; }
     public void setDetectedCustomAnnotations(List<DetectedAnnotation> detectedCustomAnnotations) { this.detectedCustomAnnotations = detectedCustomAnnotations; }

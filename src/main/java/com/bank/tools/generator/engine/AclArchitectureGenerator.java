@@ -338,6 +338,25 @@ public class AclArchitectureGenerator {
             ep.requestDtoName = deriveRestDtoName(ep.ejbInputDtoName, "Request", mapping);
             ep.responseDtoName = deriveRestDtoName(ep.ejbOutputDtoName, "Response", mapping);
 
+            // FIX DEFAUT-1 : Pour les INLINE_ACTION / ACTION_HANDLER sans DTO EJB,
+            // deriver les noms de RestDTOs depuis le mapping BIAN + envelopeFields
+            boolean isActionOrInline = uc.isActionHandler() || uc.isInlineAction();
+            if (isActionOrInline && ep.requestDtoName == null
+                    && uc.getEnvelopeFields() != null && !uc.getEnvelopeFields().isEmpty()) {
+                String base = toPascalCase(mapping.getServiceDomain());
+                String bq = mapping.getBehaviorQualifier();
+                if (bq != null && !bq.isEmpty()) base += toPascalCase(bq);
+                ep.requestDtoName = base + "Request";
+                log.info("[ACL] FIX-1: RequestDTO derive depuis BIAN pour {} → {}", uc.getClassName(), ep.requestDtoName);
+            }
+            if (isActionOrInline && ep.responseDtoName == null) {
+                String base = toPascalCase(mapping.getServiceDomain());
+                String bq = mapping.getBehaviorQualifier();
+                if (bq != null && !bq.isEmpty()) base += toPascalCase(bq);
+                ep.responseDtoName = base + "Response";
+                log.info("[ACL] FIX-1: ResponseDTO derive depuis BIAN pour {} → {}", uc.getClassName(), ep.responseDtoName);
+            }
+
             // BIAN : tous les endpoints ont un body (meme retrieval = POST avec VoIn)
             // Pas de suppression du requestDtoName
 
@@ -510,13 +529,22 @@ public class AclArchitectureGenerator {
         boolean hasValidIBAN = fields.stream().anyMatch(f -> f.customValidators.stream().anyMatch(v -> v.contains("ValidIBAN")));
         if (hasValidRIB) sb.append("import ").append(PKG_API_DTO_VALIDATION).append(".ValidRIB;\n");
         if (hasValidIBAN) sb.append("import ").append(PKG_API_DTO_VALIDATION).append(".ValidIBAN;\n");
-        // Import des types EJB complexes utilises dans les champs (ex: Beneficiaire)
+        // FIX DEFAUT-2 : Ne PAS importer les types EJB depuis infrastructure dans les DTOs API.
+        // Les champs dont le type est un DTO EJB complexe sont remplaces par un sous-objet
+        // Map<String, Object> pour eviter le couplage couche API → couche Infrastructure.
         Set<String> knownDtoNamesForImport = analysis.getDtos().stream()
                 .map(DtoInfo::getClassName).collect(Collectors.toSet());
+        boolean hasMapField = false;
         for (RestField f : fields) {
             if (knownDtoNamesForImport.contains(f.type)) {
-                sb.append("import ").append(PKG_INFRA_EJB_TYPES).append(".").append(f.type).append(";\n");
+                // Remplacer le type EJB par Map<String, Object> dans le RestDTO
+                f.type = "java.util.Map<String, Object>";
+                hasMapField = true;
+                log.info("[ACL] FIX-2: Champ {} type EJB remplace par Map<String, Object> dans {}", f.name, ep.requestDtoName);
             }
+        }
+        if (hasMapField) {
+            sb.append("import java.util.Map;\n");
         }
         sb.append("\n");
 
@@ -588,6 +616,16 @@ public class AclArchitectureGenerator {
             fields.add(new RestField("message", "String", false));
             fields.add(new RestField("data", "java.util.Map<String, Object>", false));
             addedDefaults = true;
+        }
+
+        // FIX DEFAUT-2 : Remplacer les types EJB complexes par Map<String, Object>
+        Set<String> knownDtoNamesResp = analysis.getDtos().stream()
+                .map(DtoInfo::getClassName).collect(Collectors.toSet());
+        for (RestField f : fields) {
+            if (knownDtoNamesResp.contains(f.type)) {
+                f.type = "java.util.Map<String, Object>";
+                log.info("[ACL] FIX-2: Champ {} type EJB remplace par Map<String, Object> dans {}", f.name, ep.responseDtoName);
+            }
         }
 
         boolean hasBigDecimal = fields.stream().anyMatch(f -> "BigDecimal".equals(f.type));
@@ -746,6 +784,50 @@ public class AclArchitectureGenerator {
                 sb.append("}\n");
                 Files.writeString(dir.resolve(restExName + ".java"), sb.toString());
                 log.info("[ACL] Exception Domain generee : {} (HTTP {})", restExName, httpStatus);
+            }
+        }
+
+        // FIX DEFAUT-4 : Generer des exceptions specifiques pour chaque code erreur metier detecte
+        if (analysis.getBusinessErrors() != null && !analysis.getBusinessErrors().isEmpty()) {
+            Set<String> generatedErrorCodes = new HashSet<>();
+            for (ProjectAnalysisResult.BusinessErrorInfo error : analysis.getBusinessErrors()) {
+                String errorCode = error.getErrorCode();
+                if (generatedErrorCodes.add(errorCode)) {
+                    // Deriver un nom d'exception depuis le code erreur
+                    String exName = "BusinessError" + errorCode.replaceAll("[^a-zA-Z0-9]", "") + "Exception";
+                    String code = "BUSINESS_ERROR_" + errorCode;
+
+                    sb = new StringBuilder();
+                    sb.append("package ").append(PKG_DOMAIN_EXCEPTION).append(";\n\n");
+                    sb.append("/**\n");
+                    sb.append(" * Exception metier pour le code erreur ").append(errorCode).append(".\n");
+                    sb.append(" * Message original : ").append(error.getErrorMessage()).append("\n");
+                    sb.append(" * Detecte dans : ").append(error.getSourceClassName()).append("\n");
+                    sb.append(" * Type EJB original : ").append(error.getExceptionType()).append("\n");
+                    sb.append(" */\n");
+                    sb.append("public class ").append(exName).append(" extends ApiException {\n\n");
+                    sb.append("    public static final String ERROR_CODE = \"").append(errorCode).append("\";\n");
+                    sb.append("    public static final String DEFAULT_MESSAGE = \"").append(
+                            error.getErrorMessage().replace("\"", "\\\"")
+                    ).append("\";\n\n");
+                    sb.append("    public ").append(exName).append("() {\n");
+                    sb.append("        super(\"").append(code).append("\", DEFAULT_MESSAGE, 422);\n");
+                    sb.append("    }\n\n");
+                    sb.append("    public ").append(exName).append("(String message) {\n");
+                    sb.append("        super(\"").append(code).append("\", message, 422);\n");
+                    sb.append("    }\n\n");
+                    sb.append("    public ").append(exName).append("(String message, Throwable cause) {\n");
+                    sb.append("        super(\"").append(code).append("\", message, 422, cause);\n");
+                    sb.append("    }\n");
+                    sb.append("}\n");
+
+                    Path exFile = dir.resolve(exName + ".java");
+                    if (!Files.exists(exFile)) {
+                        Files.writeString(exFile, sb.toString());
+                        log.info("[ACL] Exception metier generee : {} (code={}, msg={})",
+                                exName, errorCode, error.getErrorMessage());
+                    }
+                }
             }
         }
 
@@ -1149,7 +1231,23 @@ public class AclArchitectureGenerator {
     }
 
     private String deriveMapperName(BianEndpoint ep) {
-        String base = ep.useCaseName.replaceAll("(UC|UseCase)$", "");
+        // FIX DEFAUT-3 : Utiliser un nom metier propre derive du mapping BIAN
+        // au lieu du nom technique EJB (ex: CommandChequier_ENRG_COMMANDE → OrderMapper)
+        if (ep.bianMapping != null) {
+            String bq = ep.bianMapping.getBehaviorQualifier();
+            String action = ep.bianMapping.getAction();
+            if (bq != null && !bq.isEmpty()) {
+                return toPascalCase(bq) + "Mapper";
+            }
+            if (action != null && !action.isEmpty()) {
+                String sd = ep.bianMapping.getServiceDomain();
+                return toPascalCase(sd) + capitalize(actionToVerb(action)) + "Mapper";
+            }
+        }
+        // Fallback : nettoyer le nom technique (supprimer underscores, suffixes)
+        String base = ep.useCaseName
+                .replaceAll("(UC|UseCase|Handler|Bean|Impl|Service|EJB)$", "")
+                .replaceAll("_", "");
         return base + "Mapper";
     }
 
