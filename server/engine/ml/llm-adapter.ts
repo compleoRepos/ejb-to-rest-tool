@@ -194,3 +194,4 @@ export async function llmGenerateJSON<T = unknown>(
     return null;
   }
 }
+// v8.0 LLM migration complete
