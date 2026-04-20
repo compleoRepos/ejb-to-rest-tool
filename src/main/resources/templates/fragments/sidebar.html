@@ -25,6 +25,9 @@
         <a th:href="@{/configuration}" class="sidebar-link" th:classappend="${activePage == 'configuration' ? 'active' : ''}">
             <i class="fas fa-cogs"></i><span>Configuration</span>
         </a>
+        <a th:href="@{/bian-mapping}" class="sidebar-link" th:classappend="${activePage == 'bian-mapping' ? 'active' : ''}">
+            <i class="fas fa-sitemap"></i><span>Mapping BIAN</span>
+        </a>
 
         <div class="sidebar-section">Transformation</div>
         <a th:href="@{/generation}" class="sidebar-link" th:classappend="${activePage == 'generation' ? 'active' : ''}">

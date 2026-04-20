@@ -192,6 +192,8 @@ public class GeneratorController {
     @GetMapping("/generation")
     public String generationPage(Model model, HttpSession session) {
         populateCommon(model, session);
+        Boolean bianMappingValidated = (Boolean) session.getAttribute("bianMappingValidated");
+        model.addAttribute("bianMappingValidated", bianMappingValidated != null && bianMappingValidated);
         return "generation";
     }
 

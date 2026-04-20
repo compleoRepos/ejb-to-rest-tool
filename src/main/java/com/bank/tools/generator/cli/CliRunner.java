@@ -2,8 +2,10 @@ package com.bank.tools.generator.cli;
 
 import com.bank.tools.generator.ai.EnhancementReport;
 import com.bank.tools.generator.ai.SmartCodeEnhancer;
+import com.bank.tools.generator.bian.BianMapping;
 import com.bank.tools.generator.engine.CodeGenerationEngine;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
+import com.bank.tools.generator.model.UseCaseInfo;
 import com.bank.tools.generator.parser.EjbProjectParser;
 import com.bank.tools.generator.report.ReportPdfGenerator;
 import org.slf4j.Logger;
@@ -15,6 +17,9 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -23,14 +28,15 @@ import java.util.zip.ZipInputStream;
  * Active par le flag --cli sur la ligne de commande.
  *
  * Usage :
- *   java -jar ejb-to-rest-tool.jar --cli --input /path/to/ejb.zip --output /path/to/output [--bian] [--pdf]
+ *   java -jar ejb-to-rest-tool.jar --cli --input /path/to/ejb.zip --output /path/to/output [--bian] [--bian-mapping mapping.yaml] [--pdf]
  *
  * Options :
- *   --cli          Active le mode ligne de commande (obligatoire)
- *   --input PATH   Chemin vers le ZIP du projet EJB source (obligatoire)
- *   --output PATH  Repertoire de sortie (defaut : ./output)
- *   --bian         Active le mode BIAN
- *   --pdf          Genere un rapport PDF
+ *   --cli                  Active le mode ligne de commande (obligatoire)
+ *   --input PATH           Chemin vers le ZIP du projet EJB source (obligatoire)
+ *   --output PATH          Repertoire de sortie (defaut : ./output)
+ *   --bian                 Active le mode BIAN
+ *   --bian-mapping PATH    Fichier YAML de mapping BIAN (optionnel, implique --bian)
+ *   --pdf                  Genere un rapport PDF
  */
 @Component
 @ConditionalOnProperty(name = "cli.enabled", havingValue = "true", matchIfMissing = false)
@@ -59,6 +65,7 @@ public class CliRunner implements CommandLineRunner {
         String outputPath = "./output";
         boolean bianMode = false;
         boolean generatePdf = false;
+        String bianMappingPath = null;
 
         // Parse arguments
         for (int i = 0; i < args.length; i++) {
@@ -70,6 +77,12 @@ public class CliRunner implements CommandLineRunner {
                     if (i + 1 < args.length) outputPath = args[++i];
                 }
                 case "--bian" -> bianMode = true;
+                case "--bian-mapping" -> {
+                    if (i + 1 < args.length) {
+                        bianMappingPath = args[++i];
+                        bianMode = true; // --bian-mapping implies --bian
+                    }
+                }
                 case "--pdf" -> generatePdf = true;
                 case "--cli" -> { /* already handled by Spring property */ }
                 default -> log.warn("[CLI] Argument inconnu : {}", args[i]);
@@ -77,11 +90,12 @@ public class CliRunner implements CommandLineRunner {
         }
 
         if (inputPath == null) {
-            log.error("Usage: java -jar ejb-to-rest-tool.jar --cli --input <path.zip> [--output <dir>] [--bian] [--pdf]");
-            log.error("  --input   Chemin vers le ZIP du projet EJB source (obligatoire)");
-            log.error("  --output  Repertoire de sortie (defaut: ./output)");
-            log.error("  --bian    Active le mode BIAN");
-            log.error("  --pdf     Genere un rapport PDF");
+            log.error("Usage: java -jar ejb-to-rest-tool.jar --cli --input <path.zip> [--output <dir>] [--bian] [--bian-mapping <file.yaml>] [--pdf]");
+            log.error("  --input          Chemin vers le ZIP du projet EJB source (obligatoire)");
+            log.error("  --output         Repertoire de sortie (defaut: ./output)");
+            log.error("  --bian           Active le mode BIAN");
+            log.error("  --bian-mapping   Fichier YAML de mapping BIAN (implique --bian)");
+            log.error("  --pdf            Genere un rapport PDF");
             System.exit(1);
             return;
         }
@@ -100,6 +114,7 @@ public class CliRunner implements CommandLineRunner {
         log.info("Input  : {}", inputFile.toAbsolutePath());
         log.info("Output : {}", outputDir.toAbsolutePath());
         log.info("BIAN   : {}", bianMode);
+        log.info("BIAN Mapping : {}", bianMappingPath != null ? bianMappingPath : "(auto-detect)");
         log.info("PDF    : {}", generatePdf);
 
         // Etape 1 : Extraction du ZIP
@@ -115,6 +130,18 @@ public class CliRunner implements CommandLineRunner {
                 analysis.getUseCases().size(),
                 analysis.getDtos().size(),
                 analysis.getDetectedExceptions().size());
+
+        // Etape 2b : Appliquer le mapping BIAN depuis fichier YAML si fourni
+        if (bianMappingPath != null) {
+            Path mappingFile = Path.of(bianMappingPath);
+            if (!Files.exists(mappingFile)) {
+                log.error("[CLI] ERREUR : Fichier de mapping BIAN introuvable : {}", bianMappingPath);
+                System.exit(1);
+                return;
+            }
+            log.info("[CLI] Application du mapping BIAN depuis : {}", mappingFile.toAbsolutePath());
+            applyBianMappingFromYaml(analysis, mappingFile);
+        }
 
         // Etape 3 : Generation
         log.info("[CLI] Etape 3/5 : Generation du projet Spring Boot...");
@@ -144,6 +171,86 @@ public class CliRunner implements CommandLineRunner {
 
         // Quitter proprement
         System.exit(0);
+    }
+
+    /**
+     * Applique un mapping BIAN depuis un fichier YAML aux UseCases de l'analyse.
+     * Format YAML attendu (simple, sans dependance SnakeYAML) :
+     * <pre>
+     * mappings:
+     *   - useCase: MaClasse
+     *     serviceDomain: current-account
+     *     behaviorQualifier: balance
+     *     action: retrieval
+     *     httpMethod: GET
+     *     endpoint: /current-account/{cr-reference-id}/balance/retrieval
+     *     controllerName: CurrentAccountController
+     * </pre>
+     */
+    private void applyBianMappingFromYaml(ProjectAnalysisResult analysis, Path yamlFile) throws IOException {
+        List<String> lines = Files.readAllLines(yamlFile);
+        Map<String, Map<String, String>> mappings = parseSimpleYaml(lines);
+
+        int applied = 0;
+        for (UseCaseInfo uc : analysis.getUseCases()) {
+            Map<String, String> entry = mappings.get(uc.getClassName());
+            if (entry != null) {
+                String sd = entry.getOrDefault("serviceDomain", "");
+                String action = entry.getOrDefault("action", "");
+                String bq = entry.getOrDefault("behaviorQualifier", "");
+
+                BianMapping mapping = new BianMapping(sd, action, bq);
+                mapping.setUseCaseName(uc.getClassName());
+                mapping.setHttpMethod(entry.getOrDefault("httpMethod", "GET"));
+                mapping.setUrl(entry.getOrDefault("endpoint", ""));
+                mapping.setControllerName(entry.getOrDefault("controllerName", ""));
+                mapping.setExplicit(true);
+
+                uc.setBianMapping(mapping);
+                if (mapping.getUrl() != null && !mapping.getUrl().isEmpty()) {
+                    uc.setRestEndpoint(mapping.getUrl());
+                }
+                if (mapping.getHttpMethod() != null) {
+                    uc.setHttpMethod(mapping.getHttpMethod());
+                }
+                applied++;
+                log.info("[CLI] Mapping BIAN applique : {} -> {} / {} / {}",
+                        uc.getClassName(), sd, bq, action);
+            }
+        }
+        log.info("[CLI] {} mapping(s) BIAN applique(s) depuis le fichier YAML", applied);
+    }
+
+    /**
+     * Parse simple YAML mapping file without external dependencies.
+     * Returns a map of useCase name -> field map.
+     */
+    private Map<String, Map<String, String>> parseSimpleYaml(List<String> lines) {
+        Map<String, Map<String, String>> result = new LinkedHashMap<>();
+        Map<String, String> current = null;
+
+        Pattern fieldPattern = Pattern.compile("^\\s+(\\w+):\\s*(.+)$");
+
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("#") || trimmed.isEmpty() || trimmed.equals("mappings:")) {
+                continue;
+            }
+            if (trimmed.startsWith("- useCase:")) {
+                current = new LinkedHashMap<>();
+                String useCase = trimmed.substring("- useCase:".length()).trim();
+                current.put("useCase", useCase);
+                result.put(useCase, current);
+                continue;
+            }
+            if (current != null) {
+                Matcher m = fieldPattern.matcher(line);
+                if (m.matches()) {
+                    current.put(m.group(1), m.group(2).trim());
+                }
+            }
+        }
+        return result;
     }
 
     /**

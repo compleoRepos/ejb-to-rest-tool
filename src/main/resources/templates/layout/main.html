@@ -41,6 +41,10 @@
                    th:classappend="${activePage == 'configuration' ? 'active bg-primary' : ''}">
                     <i class="fas fa-cogs me-2"></i> Configuration
                 </a>
+                <a th:href="@{/bian-mapping}" class="list-group-item list-group-item-action bg-dark text-white border-0"
+                   th:classappend="${activePage == 'bian-mapping' ? 'active bg-primary' : ''}">
+                    <i class="fas fa-sitemap me-2"></i> Mapping BIAN
+                </a>
                 <a th:href="@{/generation}" class="list-group-item list-group-item-action bg-dark text-white border-0"
                    th:classappend="${activePage == 'generation' ? 'active bg-primary' : ''}">
                     <i class="fas fa-rocket me-2"></i> Transformation

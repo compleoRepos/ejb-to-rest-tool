@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapping BIAN - Compleo</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        .mapping-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+        .mapping-table th { background: #f1f5f9; color: #334155; font-weight: 600; padding: 0.75rem 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0; white-space: nowrap; }
+        .mapping-table td { padding: 0.5rem; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+        .mapping-table tr:hover { background: #f8fafc; }
+        .mapping-table tr.excluded-row { opacity: 0.5; background: #fef2f2; }
+        .mapping-table select, .mapping-table input[type="text"] { width: 100%; padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.8rem; background: #fff; }
+        .mapping-table select:focus, .mapping-table input[type="text"]:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+        .mapping-table input[readonly] { background: #f1f5f9; color: #64748b; border-color: #e2e8f0; cursor: default; }
+        .mapping-table input[type="checkbox"] { width: 18px; height: 18px; accent-color: #dc2626; cursor: pointer; }
+        .badge-auto { background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 600; }
+        .badge-modified { background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 600; }
+        .badge-excluded { background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 600; }
+        .endpoint-preview { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #059669; background: #ecfdf5; padding: 4px 8px; border-radius: 4px; display: inline-block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .http-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 700; font-family: monospace; }
+        .http-GET { background: #dbeafe; color: #1d4ed8; }
+        .http-POST { background: #d1fae5; color: #065f46; }
+        .http-PUT { background: #fef3c7; color: #92400e; }
+        .http-DELETE { background: #fee2e2; color: #991b1b; }
+        .http-PATCH { background: #ede9fe; color: #5b21b6; }
+        .action-bar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+        .stats-bar { display: flex; gap: 1.5rem; margin-bottom: 1rem; }
+        .stat-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: #475569; }
+        .stat-item strong { color: #1e293b; }
+        .bian-info-box { background: #f0f4ff; border-left: 4px solid #4f46e5; padding: 1rem 1.25rem; border-radius: 0 8px 8px 0; margin-bottom: 1.5rem; }
+        .bian-info-box p { margin: 0; font-size: 0.9rem; color: #374151; }
+        .bian-info-box .title { font-weight: 600; color: #4f46e5; margin-bottom: 0.25rem; }
+        .table-responsive { overflow-x: auto; }
+    </style>
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" th:replace="~{fragments/sidebar :: sidebar(activePage='bian-mapping')}"></aside>
+    <main class="main-content">
+        <header class="page-header">
+            <div class="page-header-left">
+                <h1 class="page-title"><i class="fas fa-sitemap" style="color:#4f46e5;"></i> Mapping BIAN</h1>
+                <p class="page-subtitle">Visualiser, editer et valider le mapping UseCase vers Service Domain / BQ / Action</p>
+            </div>
+            <div class="page-header-right" th:if="${mappingForm != null}">
+                <a th:href="@{/api/bian-mapping/export-yaml}" class="btn btn-outline" target="_blank" id="exportYamlBtn">
+                    <i class="fas fa-file-export"></i> Exporter YAML
+                </a>
+            </div>
+        </header>
+
+        <div class="page-alerts">
+            <div th:if="${success}" class="alert alert-success"><i class="fas fa-check-circle"></i> <span th:text="${success}"></span></div>
+            <div th:if="${error}" class="alert alert-error"><i class="fas fa-exclamation-circle"></i> <span th:utext="${error}"></span></div>
+            <div th:if="${warning}" class="alert alert-warning"><i class="fas fa-exclamation-triangle"></i> <span th:text="${warning}"></span></div>
+        </div>
+
+        <div class="page-body">
+            <!-- Empty state -->
+            <div class="card" th:if="${analysisResult == null}">
+                <div class="card-body">
+                    <div class="empty-state">
+                        <i class="fas fa-sitemap"></i>
+                        <h3>Analyse requise</h3>
+                        <p>Veuillez d'abord importer et analyser un projet EJB pour configurer le mapping BIAN.</p>
+                        <a th:href="@{/analysis}" class="btn btn-primary"><i class="fas fa-search-plus"></i> Aller a l'analyse</a>
+                    </div>
+                </div>
+            </div>
+
+            <div th:if="${analysisResult != null and mappingForm != null}">
+                <!-- Info box -->
+                <div class="bian-info-box">
+                    <p class="title"><i class="fas fa-info-circle"></i> Mapping BIAN interactif</p>
+                    <p>Le tableau ci-dessous est pre-rempli par l'auto-detection. Vous pouvez modifier chaque champ, exclure des use cases, puis valider le mapping avant de lancer la generation REST conforme BIAN.</p>
+                </div>
+
+                <!-- Stats -->
+                <div class="stats-bar" id="statsBar">
+                    <div class="stat-item">
+                        <i class="fas fa-cubes" style="color:#2563eb;"></i>
+                        <span>Total : <strong th:text="${mappingForm.entries.size()}">0</strong></span>
+                    </div>
+                    <div class="stat-item">
+                        <i class="fas fa-robot" style="color:#16a34a;"></i>
+                        <span>Auto-detectes : <strong id="countAuto">0</strong></span>
+                    </div>
+                    <div class="stat-item">
+                        <i class="fas fa-pen" style="color:#d97706;"></i>
+                        <span>Modifies : <strong id="countModified">0</strong></span>
+                    </div>
+                    <div class="stat-item">
+                        <i class="fas fa-ban" style="color:#dc2626;"></i>
+                        <span>Exclus : <strong id="countExcluded">0</strong></span>
+                    </div>
+                </div>
+
+                <!-- Form -->
+                <form th:action="@{/bian-mapping/validate}" method="post" id="mappingForm" th:object="${mappingForm}">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title"><i class="fas fa-table"></i> Tableau de mapping</h2>
+                        </div>
+                        <div class="card-body" style="padding:0;">
+                            <div class="table-responsive">
+                                <table class="mapping-table" id="mappingTable">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:30px;">#</th>
+                                            <th>UseCase</th>
+                                            <th>Service Domain</th>
+                                            <th>Behavior Qualifier</th>
+                                            <th>Action</th>
+                                            <th>HTTP</th>
+                                            <th>Endpoint (genere)</th>
+                                            <th>Controller</th>
+                                            <th style="width:60px;">Exclu</th>
+                                            <th style="width:70px;">Statut</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr th:each="entry, stat : ${mappingForm.entries}"
+                                            th:id="'row-' + ${stat.index}"
+                                            th:classappend="${entry.excluded ? 'excluded-row' : ''}"
+                                            th:attr="data-index=${stat.index}">
+                                            <td th:text="${stat.index + 1}">1</td>
+                                            <td>
+                                                <strong th:text="${entry.useCaseName}" style="font-size:0.8rem;"></strong>
+                                                <input type="hidden" th:field="*{entries[__${stat.index}__].useCaseName}">
+                                                <input type="hidden" th:field="*{entries[__${stat.index}__].ejbClassName}">
+                                                <input type="hidden" th:field="*{entries[__${stat.index}__].packageName}">
+                                                <input type="hidden" th:field="*{entries[__${stat.index}__].inputDto}">
+                                                <input type="hidden" th:field="*{entries[__${stat.index}__].outputDto}">
+                                                <input type="hidden" th:field="*{entries[__${stat.index}__].bianId}">
+                                                <input type="hidden" th:field="*{entries[__${stat.index}__].serviceDomainTitle}">
+                                                <input type="hidden" th:field="*{entries[__${stat.index}__].summary}">
+                                                <input type="hidden" th:field="*{entries[__${stat.index}__].autoDetected}" th:id="'autoDetected-' + ${stat.index}">
+                                                <input type="hidden" th:field="*{entries[__${stat.index}__].confidence}">
+                                            </td>
+                                            <td>
+                                                <select th:field="*{entries[__${stat.index}__].serviceDomain}"
+                                                        onchange="onFieldChange(this)" class="sd-select">
+                                                    <option value="">-- Choisir --</option>
+                                                    <option th:each="sd : ${serviceDomains}" th:value="${sd}" th:text="${sd}" th:selected="${sd == entry.serviceDomain}"></option>
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <input type="text" th:field="*{entries[__${stat.index}__].behaviorQualifier}"
+                                                       onchange="onFieldChange(this)" oninput="onFieldChange(this)"
+                                                       placeholder="ex: balance, payment">
+                                            </td>
+                                            <td>
+                                                <select th:field="*{entries[__${stat.index}__].action}"
+                                                        onchange="onFieldChange(this)" class="action-select">
+                                                    <option value="">-- Choisir --</option>
+                                                    <option th:each="act : ${actions}" th:value="${act}" th:text="${act}" th:selected="${act == entry.action}"></option>
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <select th:field="*{entries[__${stat.index}__].httpMethod}"
+                                                        onchange="onFieldChange(this)" class="http-select">
+                                                    <option th:each="m : ${httpMethods}" th:value="${m}" th:text="${m}" th:selected="${m == entry.httpMethod}"></option>
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <input type="text" th:field="*{entries[__${stat.index}__].generatedUrl}"
+                                                       readonly class="endpoint-field"
+                                                       th:id="'endpoint-' + ${stat.index}">
+                                            </td>
+                                            <td>
+                                                <input type="text" th:field="*{entries[__${stat.index}__].controllerName}"
+                                                       readonly class="controller-field"
+                                                       th:id="'controller-' + ${stat.index}"
+                                                       style="font-size:0.75rem;">
+                                            </td>
+                                            <td style="text-align:center;">
+                                                <input type="checkbox" th:field="*{entries[__${stat.index}__].excluded}"
+                                                       onchange="onExcludeChange(this)">
+                                            </td>
+                                            <td style="text-align:center;" th:id="'status-' + ${stat.index}">
+                                                <span class="badge-auto" th:if="${entry.autoDetected and !entry.excluded}">Auto</span>
+                                                <span class="badge-modified" th:if="${!entry.autoDetected and !entry.excluded}">Modifie</span>
+                                                <span class="badge-excluded" th:if="${entry.excluded}">Exclu</span>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="card" style="margin-top:1rem;">
+                        <div class="card-body">
+                            <div class="action-bar">
+                                <button type="submit" class="btn btn-success btn-lg" id="validateBtn">
+                                    <i class="fas fa-check-circle"></i> Valider le mapping
+                                </button>
+                                <button type="button" class="btn btn-outline" onclick="resetMapping()">
+                                    <i class="fas fa-undo"></i> Reinitialiser
+                                </button>
+                                <button type="button" class="btn btn-outline" onclick="autoDetectAll()">
+                                    <i class="fas fa-magic"></i> Re-detecter tout
+                                </button>
+                                <div style="flex:1;"></div>
+                                <span class="text-muted" style="font-size:0.8rem;">
+                                    <i class="fas fa-lightbulb" style="color:#d97706;"></i>
+                                    Modifiez les champs puis cliquez sur "Valider" pour continuer vers la generation.
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+
+                <!-- Validation warnings card -->
+                <div class="card" style="margin-top:1rem; display:none;" id="validationWarnings">
+                    <div class="card-header">
+                        <h2 class="card-title" style="color:#dc2626;"><i class="fas fa-exclamation-triangle"></i> Avertissements</h2>
+                    </div>
+                    <div class="card-body">
+                        <ul id="warningList" style="margin:0; padding-left:1.5rem; color:#dc2626; font-size:0.875rem;"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script th:src="@{/js/app.js}"></script>
+<script>
+    // ============================================================
+    // BIAN Mapping Dashboard - Client-side logic
+    // ============================================================
+
+    /**
+     * Recalcule l'endpoint BIAN a partir des champs SD, BQ, Action.
+     * Pattern : /{service-domain}/{cr-reference-id}/{behavior-qualifier}/{action}
+     */
+    function recalcEndpoint(row) {
+        const idx = row.getAttribute('data-index');
+        const sd = row.querySelector('.sd-select').value;
+        const bq = row.querySelector('input[name$=".behaviorQualifier"]').value;
+        const action = row.querySelector('.action-select').value;
+
+        if (!sd || !bq || !action) return;
+
+        // Build BIAN URL
+        const sdSlug = sd; // already kebab-case
+        const bqSlug = bq.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const endpoint = '/' + sdSlug + '/{cr-reference-id}/' + bqSlug + '/' + action;
+
+        const endpointField = document.getElementById('endpoint-' + idx);
+        if (endpointField) endpointField.value = endpoint;
+
+        // Recalc controller name
+        const controllerName = toPascalCase(sd) + 'Controller';
+        const controllerField = document.getElementById('controller-' + idx);
+        if (controllerField) controllerField.value = controllerName;
+    }
+
+    function toPascalCase(kebab) {
+        return kebab.split('-').map(function(w) {
+            return w.charAt(0).toUpperCase() + w.slice(1);
+        }).join('');
+    }
+
+    /**
+     * Appele quand un champ editable change.
+     */
+    function onFieldChange(el) {
+        const row = el.closest('tr');
+        recalcEndpoint(row);
+        markAsModified(row);
+        updateStats();
+        checkDuplicates();
+    }
+
+    function markAsModified(row) {
+        const idx = row.getAttribute('data-index');
+        const autoField = document.getElementById('autoDetected-' + idx);
+        if (autoField) autoField.value = 'false';
+
+        const statusCell = document.getElementById('status-' + idx);
+        if (statusCell) {
+            const isExcluded = row.querySelector('input[type="checkbox"][name$=".excluded"]').checked;
+            if (isExcluded) {
+                statusCell.innerHTML = '<span class="badge-excluded">Exclu</span>';
+            } else {
+                statusCell.innerHTML = '<span class="badge-modified">Modifie</span>';
+            }
+        }
+    }
+
+    function onExcludeChange(el) {
+        const row = el.closest('tr');
+        if (el.checked) {
+            row.classList.add('excluded-row');
+        } else {
+            row.classList.remove('excluded-row');
+        }
+        const idx = row.getAttribute('data-index');
+        const statusCell = document.getElementById('status-' + idx);
+        if (statusCell) {
+            if (el.checked) {
+                statusCell.innerHTML = '<span class="badge-excluded">Exclu</span>';
+            } else {
+                const autoField = document.getElementById('autoDetected-' + idx);
+                if (autoField && autoField.value === 'true') {
+                    statusCell.innerHTML = '<span class="badge-auto">Auto</span>';
+                } else {
+                    statusCell.innerHTML = '<span class="badge-modified">Modifie</span>';
+                }
+            }
+        }
+        updateStats();
+        checkDuplicates();
+    }
+
+    function updateStats() {
+        const rows = document.querySelectorAll('#mappingTable tbody tr');
+        let auto = 0, modified = 0, excluded = 0;
+        rows.forEach(function(row) {
+            const idx = row.getAttribute('data-index');
+            const isExcluded = row.querySelector('input[type="checkbox"][name$=".excluded"]').checked;
+            const autoField = document.getElementById('autoDetected-' + idx);
+            if (isExcluded) {
+                excluded++;
+            } else if (autoField && autoField.value === 'true') {
+                auto++;
+            } else {
+                modified++;
+            }
+        });
+        document.getElementById('countAuto').textContent = auto;
+        document.getElementById('countModified').textContent = modified;
+        document.getElementById('countExcluded').textContent = excluded;
+    }
+
+    /**
+     * Verifie les doublons d'endpoints.
+     */
+    function checkDuplicates() {
+        const rows = document.querySelectorAll('#mappingTable tbody tr');
+        const endpoints = {};
+        const warnings = [];
+
+        rows.forEach(function(row) {
+            const isExcluded = row.querySelector('input[type="checkbox"][name$=".excluded"]').checked;
+            if (isExcluded) return;
+
+            const idx = row.getAttribute('data-index');
+            const httpSelect = row.querySelector('.http-select');
+            const endpointField = document.getElementById('endpoint-' + idx);
+            if (!httpSelect || !endpointField) return;
+
+            const key = httpSelect.value + ' ' + endpointField.value;
+            if (!endpoints[key]) endpoints[key] = [];
+            endpoints[key].push(row.querySelector('strong').textContent);
+        });
+
+        for (var key in endpoints) {
+            if (endpoints[key].length > 1) {
+                warnings.push('Endpoint en doublon <strong>' + key + '</strong> : ' + endpoints[key].join(', '));
+            }
+        }
+
+        const warningCard = document.getElementById('validationWarnings');
+        const warningList = document.getElementById('warningList');
+        if (warnings.length > 0) {
+            warningList.innerHTML = warnings.map(function(w) { return '<li>' + w + '</li>'; }).join('');
+            warningCard.style.display = 'block';
+        } else {
+            warningCard.style.display = 'none';
+        }
+    }
+
+    function resetMapping() {
+        if (confirm('Reinitialiser le mapping ? L\'auto-detection sera relancee.')) {
+            var form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/bian-mapping/reset';
+            document.body.appendChild(form);
+            form.submit();
+        }
+    }
+
+    function autoDetectAll() {
+        if (confirm('Re-lancer l\'auto-detection pour tous les use cases ?')) {
+            resetMapping();
+        }
+    }
+
+    // Init on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        updateStats();
+        checkDuplicates();
+    });
+</script>
+</body>
+</html>

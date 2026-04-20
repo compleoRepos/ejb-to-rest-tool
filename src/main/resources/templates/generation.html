@@ -100,6 +100,18 @@
                     </div>
                 </div>
 
+                <!-- BIAN Mapping Validated Banner -->
+                <div class="card" th:if="${bianMappingValidated}" style="border-left:4px solid #16a34a;">
+                    <div class="card-body" style="display:flex; align-items:center; gap:1rem; padding:1rem 1.5rem;">
+                        <i class="fas fa-check-circle" style="color:#16a34a; font-size:1.5rem;"></i>
+                        <div>
+                            <strong style="color:#16a34a;">Mapping BIAN valide</strong>
+                            <p style="margin:0; font-size:0.875rem; color:#475569;">Le mapping BIAN a ete configure et valide. La generation utilisera ce mapping.</p>
+                        </div>
+                        <a th:href="@{/bian-mapping}" class="btn btn-outline" style="margin-left:auto;"><i class="fas fa-edit"></i> Modifier</a>
+                    </div>
+                </div>
+
                 <!-- BIAN Mode Option -->
                 <div class="card" id="bianCard" th:if="${!projectGenerated}">
                     <div class="card-header">
@@ -122,6 +134,12 @@
                                 <li><strong>Behavior Qualifiers</strong> : balances, payments, statements, etc.</li>
                                 <li>Un fichier <strong>BIAN_MAPPING.md</strong> sera genere avec le detail du mapping</li>
                             </ul>
+                            <div style="margin-top:0.75rem;" th:if="${!bianMappingValidated}">
+                                <a th:href="@{/bian-mapping}" class="btn btn-sm" style="background:#4f46e5; color:white; border:none; padding:0.4rem 1rem; border-radius:6px; font-size:0.85rem;">
+                                    <i class="fas fa-sitemap"></i> Configurer le mapping BIAN
+                                </a>
+                                <small style="color:#6b7280; margin-left:0.5rem;">Recommande : verifiez le mapping avant de generer</small>
+                            </div>
                         </div>
                     </div>
                 </div>
