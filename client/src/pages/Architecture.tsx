@@ -749,7 +749,7 @@ export default function ArchitecturePage({ projectId }: { projectId?: number }) 
             </TabsContent>
             {/* Explorer Tab (v5.8) */}
             <TabsContent value="explorer" className="flex-1 overflow-hidden">
-              <ArchitectureExplorer />
+              <ArchitectureExplorer analysisResult={analysisResult} sessionId={selectedSessionId} />
             </TabsContent>
           </Tabs>
         )}
