@@ -24,7 +24,7 @@ export default function MigrationSummaryTab({ data, sessionId }: { data: Analysi
   // Compute summary metrics
   const metrics = useMemo(() => {
     const totalClasses = data.microservices.reduce((sum, ms) => sum + ms.classCount, 0);
-    const totalEndpoints = data.microservices.reduce((sum, ms) => sum + ms.endpoints, 0);
+    const totalEndpoints = data.microservices.reduce((sum, ms) => sum + (typeof ms.endpoints === 'number' ? ms.endpoints : ms.endpoints.length), 0);
     const avgCohesion = data.microservices.length > 0
       ? data.microservices.reduce((sum, ms) => sum + ms.cohesion, 0) / data.microservices.length
       : 0;
@@ -121,7 +121,7 @@ export default function MigrationSummaryTab({ data, sessionId }: { data: Analysi
                     Coup: {Math.round(ms.coupling * 100)}%
                   </span>
                   <span style={{ fontSize: 9, color: C.textMuted }}>
-                    {ms.endpoints} EP
+                    {typeof ms.endpoints === 'number' ? ms.endpoints : ms.endpoints.length} EP
                   </span>
                 </div>
               </div>

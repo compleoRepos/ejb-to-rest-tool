@@ -34,45 +34,52 @@ interface ArchitectureAnalysisResult {
     totalEdges: number;
     connectedComponents: number;
     avgDegree: number;
+    maxDegree?: number;
+    cyclicDependencies?: string[][];
+    nodes?: Array<{
+      id: string; type: string; className?: string; packageName?: string;
+      role?: string; domain?: string; linesOfCode?: number; complexity?: number;
+      technologyType?: string; sourceFile?: string;
+      systemName?: string; externalType?: string; protocol?: string;
+    }>;
+    edges?: Array<{
+      id: string; source: string; target: string; type: string; weight: number; label: string;
+    }>;
+    nodeMetrics?: Array<{
+      nodeId: string; inDegree: number; outDegree: number; betweenness: number; cohesion: number;
+    }>;
   };
   domains: Array<{
-    domainId: string;
-    classCount: number;
-    cohesion: number;
-    coupling: number;
+    domainId: string; classes?: string[]; classCount: number;
+    cohesion: number; coupling: number; warnings?: string[];
   }>;
   architecture: {
-    entryPoints: number;
-    exitPoints: number;
-    criticalFlows: number;
-    highRiskFlows: number;
-    modules: number;
+    entryPoints: number; exitPoints: number; criticalFlows: number;
+    highRiskFlows: number; modules: number;
+    avgModuleCohesion?: number; avgModuleCoupling?: number;
   };
   microservices: Array<{
-    id: string;
-    name: string;
-    boundedContext: string;
+    id: string; name: string; description?: string; boundedContext: string;
     classes: string[];
+    classDetails?: Array<{ nodeId: string; className: string; role: string; domain: string }>;
     classCount: number;
-    endpoints: number;
-    cohesion: number;
-    coupling: number;
+    endpoints: Array<{ method: string; path: string; description: string; sourceClass: string; protocol: string }> | number;
+    endpointCount?: number;
+    cohesion: number; coupling: number; complexity?: number; linesOfCode?: number;
     dependencies: Array<{
-      targetServiceId: string;
-      targetServiceName: string;
-      type: string;
+      targetServiceId: string; targetServiceName: string; type: string;
+      protocol?: string; description?: string;
     }>;
+    databases?: string[]; queues?: string[];
+    springBootConfig?: { artifactId: string; port: number; profiles: string[]; dependencies: string[] } | null;
   }>;
   sharedLibrary: {
-    name: string;
-    classCount: number;
+    name: string; description?: string; classes?: string[]; classCount: number;
   };
-  apiGateway: {
-    routes: Array<{
-      path: string;
-      targetService: string;
-      method: string;
-    }>;
+  apiGateway: { routes: Array<{ path: string; targetService: string; method: string }> };
+  extractionSummary?: {
+    totalMicroservices: number; totalClasses: number; totalEndpoints: number;
+    totalDependencies: number; avgCohesion: number; avgCoupling: number; sharedClassCount: number;
   };
   warnings: string[];
   visualizations: {
@@ -81,26 +88,18 @@ interface ArchitectureAnalysisResult {
     svgMicroservices: string | null;
     svgOverview: string | null;
   };
-  entryPoints: Array<{
-    nodeId: string;
-    className: string;
-    type: string;
-    protocol: string;
-  }>;
-  exitPoints: Array<{
-    nodeId: string;
-    className: string;
-    type: string;
-    target: string;
-  }>;
+  entryPoints: Array<{ nodeId: string; className: string; type: string; protocol: string; description?: string }>;
+  exitPoints: Array<{ nodeId: string; className: string; type: string; target: string; targetSystem?: string; protocol?: string }>;
   criticalFlows: Array<{
-    id: string;
-    name: string;
-    depth: number;
-    riskLevel: string;
-    riskFactors: string[];
-    transactional: boolean;
-    pathLength: number;
+    id: string; name: string; depth: number; riskLevel: string;
+    riskFactors: string[]; transactional: boolean;
+    path?: string[]; pathLength: number;
+    entryPoint?: any; exitPoints?: any[];
+  }>;
+  functionalModules?: Array<{
+    id: string; name: string; description: string; domains: string[];
+    classes: string[]; entryPoints: any[]; exitPoints: any[];
+    internalEdges: number; externalEdges: number; cohesion: number; coupling: number;
   }>;
 }
 
@@ -580,7 +579,7 @@ export default function ArchitecturePage({ projectId }: { projectId?: number }) 
                             <div className="text-[9px] text-muted-foreground">Classes</div>
                           </div>
                           <div className="bg-secondary/30 rounded p-2 text-center">
-                            <div className="text-lg font-bold font-mono">{ms.endpoints}</div>
+                            <div className="text-lg font-bold font-mono">{typeof ms.endpoints === 'number' ? ms.endpoints : ms.endpoints.length}</div>
                             <div className="text-[9px] text-muted-foreground">Endpoints</div>
                           </div>
                         </div>

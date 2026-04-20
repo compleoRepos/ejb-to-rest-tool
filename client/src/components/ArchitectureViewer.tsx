@@ -79,17 +79,27 @@ interface CytoscapeData {
 interface MicroserviceData {
   id: string;
   name: string;
+  description?: string;
   boundedContext: string;
   classes: string[];
+  classDetails?: Array<{ nodeId: string; className: string; role: string; domain: string }>;
   classCount: number;
-  endpoints: number;
+  endpoints: Array<{ method: string; path: string; description: string; sourceClass: string; protocol: string }> | number;
+  endpointCount?: number;
   cohesion: number;
   coupling: number;
+  complexity?: number;
+  linesOfCode?: number;
   dependencies: Array<{
     targetServiceId: string;
     targetServiceName: string;
     type: string;
+    protocol?: string;
+    description?: string;
   }>;
+  databases?: string[];
+  queues?: string[];
+  springBootConfig?: { artifactId: string; port: number; profiles: string[]; dependencies: string[] } | null;
 }
 
 interface ArchitectureViewerProps {
@@ -1186,7 +1196,7 @@ export function ArchitectureViewer({
                       <span className="text-sm font-medium truncate">{svc.name}</span>
                     </div>
                     <div className="text-xs text-muted-foreground space-y-0.5">
-                      <div>{svc.classCount} classes | {svc.endpoints} endpoints</div>
+                      <div>{svc.classCount} classes | {typeof svc.endpoints === 'number' ? svc.endpoints : svc.endpoints.length} endpoints</div>
                       <div>
                         Cohésion: {(svc.cohesion * 100).toFixed(0)}% | Couplage:{" "}
                         {(svc.coupling * 100).toFixed(0)}%

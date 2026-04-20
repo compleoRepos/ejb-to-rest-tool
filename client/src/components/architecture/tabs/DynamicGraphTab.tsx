@@ -236,7 +236,7 @@ export default function DynamicGraphTab({ data }: { data: AnalysisData }) {
         classCount: m.classCount,
         domain: m.boundedContext,
         color: DOMAIN_COLORS[m.boundedContext] || DOMAIN_COLORS.UNKNOWN,
-        endpoints: m.endpoints,
+        endpoints: typeof m.endpoints === 'number' ? m.endpoints : m.endpoints.length,
         cohesion: m.cohesion,
         coupling: m.coupling,
       };

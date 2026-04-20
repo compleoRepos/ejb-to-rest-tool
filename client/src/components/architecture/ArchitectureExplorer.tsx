@@ -1,19 +1,25 @@
 /**
- * ArchitectureExplorer v6.0 — Panneau dynamique alimenté par les données d'analyse.
- * Remplace les données hardcodées par les props analysisResult + sessionId.
- * 4 onglets : Dépendances, Graphe de relations, Impact, Résumé migration.
+ * ArchitectureExplorer v7.0 — Panneau d'exploration riche alimenté par les données d'analyse.
+ * 6 onglets : Inventaire, Dépendances, Graphe, Flux critiques, Impact, Résumé migration.
+ * Types enrichis avec graph.nodes, graph.edges, classDetails, endpoints, etc.
+ *
+ * @author Hamza NORDINE
  */
 import { useState } from "react";
+import ClassInventoryTab from "./tabs/ClassInventoryTab";
 import DependencyTableTab from "./tabs/DependencyTableTab";
 import DynamicGraphTab from "./tabs/DynamicGraphTab";
+import CriticalFlowsTab from "./tabs/CriticalFlowsTab";
 import DynamicImpactTab from "./tabs/DynamicImpactTab";
 import MigrationSummaryTab from "./tabs/MigrationSummaryTab";
 
 const TABS = [
-  { id: "dependencies", label: "Dépendances", icon: "📋", shortcut: "F1" },
-  { id: "graph", label: "Graphe de relations", icon: "🕸️", shortcut: "F2" },
-  { id: "impact", label: "Impact Analysis", icon: "🎯", shortcut: "F3" },
-  { id: "migration", label: "Résumé migration", icon: "🔄", shortcut: "F4" },
+  { id: "inventory", label: "Inventaire classes", icon: "📦", shortcut: "F1" },
+  { id: "dependencies", label: "Dépendances", icon: "📋", shortcut: "F2" },
+  { id: "graph", label: "Graphe de relations", icon: "🕸️", shortcut: "F3" },
+  { id: "flows", label: "Flux critiques", icon: "⚡", shortcut: "F4" },
+  { id: "impact", label: "Impact Analysis", icon: "🎯", shortcut: "F5" },
+  { id: "migration", label: "Résumé migration", icon: "🔄", shortcut: "F6" },
 ];
 
 const C = {
@@ -25,24 +31,182 @@ const C = {
   cyan: "#22d3ee",
 };
 
+// ─── Enriched types matching the backend response ──────────────────────────
+
+export interface GraphNode {
+  id: string;
+  type: string;
+  className?: string;
+  packageName?: string;
+  role?: string;
+  domain?: string;
+  linesOfCode?: number;
+  complexity?: number;
+  technologyType?: string;
+  sourceFile?: string;
+  systemName?: string;
+  externalType?: string;
+  protocol?: string;
+}
+
+export interface GraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+  weight: number;
+  label: string;
+}
+
+export interface NodeMetric {
+  nodeId: string;
+  inDegree: number;
+  outDegree: number;
+  betweenness: number;
+  cohesion: number;
+}
+
+export interface ClassDetail {
+  nodeId: string;
+  className: string;
+  role: string;
+  domain: string;
+}
+
+export interface MicroserviceEndpoint {
+  method: string;
+  path: string;
+  description: string;
+  sourceClass: string;
+  protocol: string;
+}
+
+export interface MicroserviceDep {
+  targetServiceId: string;
+  targetServiceName: string;
+  type: string;
+  protocol?: string;
+  description?: string;
+}
+
+export interface EntryPoint {
+  nodeId: string;
+  className: string;
+  type: string;
+  protocol: string;
+  description?: string;
+}
+
+export interface ExitPoint {
+  nodeId: string;
+  className: string;
+  type: string;
+  target: string;
+  targetSystem?: string;
+  protocol?: string;
+}
+
+export interface CriticalFlow {
+  id: string;
+  name: string;
+  depth: number;
+  riskLevel: string;
+  riskFactors: string[];
+  transactional: boolean;
+  path?: string[];
+  pathLength: number;
+  entryPoint?: any;
+  exitPoints?: any[];
+}
+
+export interface FunctionalModule {
+  id: string;
+  name: string;
+  description: string;
+  domains: string[];
+  classes: string[];
+  entryPoints: EntryPoint[];
+  exitPoints: ExitPoint[];
+  internalEdges: number;
+  externalEdges: number;
+  cohesion: number;
+  coupling: number;
+}
+
 export interface AnalysisData {
-  graph: { totalNodes: number; totalEdges: number; connectedComponents: number; avgDegree: number };
-  domains: Array<{ domainId: string; classCount: number; cohesion: number; coupling: number }>;
-  architecture: { entryPoints: number; exitPoints: number; criticalFlows: number; highRiskFlows: number; modules: number };
+  graph: {
+    totalNodes: number;
+    totalEdges: number;
+    connectedComponents: number;
+    avgDegree: number;
+    maxDegree?: number;
+    cyclicDependencies?: string[][];
+    nodes?: GraphNode[];
+    edges?: GraphEdge[];
+    nodeMetrics?: NodeMetric[];
+  };
+  domains: Array<{
+    domainId: string;
+    classes?: string[];
+    classCount: number;
+    cohesion: number;
+    coupling: number;
+    warnings?: string[];
+  }>;
+  architecture: {
+    entryPoints: number;
+    exitPoints: number;
+    criticalFlows: number;
+    highRiskFlows: number;
+    modules: number;
+    avgModuleCohesion?: number;
+    avgModuleCoupling?: number;
+  };
   microservices: Array<{
-    id: string; name: string; boundedContext: string; classes: string[];
-    classCount: number; endpoints: number; cohesion: number; coupling: number;
-    dependencies: Array<{ targetServiceId: string; targetServiceName: string; type: string }>;
+    id: string;
+    name: string;
+    description?: string;
+    boundedContext: string;
+    classes: string[];
+    classDetails?: ClassDetail[];
+    classCount: number;
+    endpoints: MicroserviceEndpoint[] | number;
+    endpointCount?: number;
+    dependencies: MicroserviceDep[];
+    databases?: string[];
+    queues?: string[];
+    cohesion: number;
+    coupling: number;
+    complexity?: number;
+    linesOfCode?: number;
+    springBootConfig?: {
+      artifactId: string;
+      port: number;
+      profiles: string[];
+      dependencies: string[];
+    } | null;
   }>;
-  sharedLibrary: { name: string; classCount: number };
+  sharedLibrary: {
+    name: string;
+    description?: string;
+    classes?: string[];
+    classCount: number;
+  };
   apiGateway: { routes: Array<{ path: string; targetService: string; method: string }> };
+  extractionSummary?: {
+    totalMicroservices: number;
+    totalClasses: number;
+    totalEndpoints: number;
+    totalDependencies: number;
+    avgCohesion: number;
+    avgCoupling: number;
+    sharedClassCount: number;
+  };
   warnings: string[];
-  entryPoints: Array<{ nodeId: string; className: string; type: string; protocol: string }>;
-  exitPoints: Array<{ nodeId: string; className: string; type: string; target: string }>;
-  criticalFlows: Array<{
-    id: string; name: string; depth: number; riskLevel: string;
-    riskFactors: string[]; transactional: boolean; pathLength: number;
-  }>;
+  entryPoints: EntryPoint[];
+  exitPoints: ExitPoint[];
+  criticalFlows: CriticalFlow[];
+  functionalModules?: FunctionalModule[];
 }
 
 interface Props {
@@ -51,7 +215,7 @@ interface Props {
 }
 
 export default function ArchitectureExplorer({ analysisResult, sessionId }: Props) {
-  const [activeTab, setActiveTab] = useState("dependencies");
+  const [activeTab, setActiveTab] = useState("inventory");
 
   if (!analysisResult) {
     return (
@@ -84,6 +248,7 @@ export default function ArchitectureExplorer({ analysisResult, sessionId }: Prop
         display: "flex", gap: 2, padding: "8px 12px 0",
         borderBottom: `1px solid ${C.border}`,
         background: C.darkPanel,
+        overflowX: "auto",
       }}>
         {TABS.map(tab => {
           const isActive = activeTab === tab.id;
@@ -93,7 +258,7 @@ export default function ArchitectureExplorer({ analysisResult, sessionId }: Prop
               onClick={() => setActiveTab(tab.id)}
               style={{
                 display: "flex", alignItems: "center", gap: 6,
-                padding: "8px 16px", borderRadius: "6px 6px 0 0",
+                padding: "8px 14px", borderRadius: "6px 6px 0 0",
                 border: "none", cursor: "pointer",
                 fontFamily: "'JetBrains Mono', monospace",
                 fontSize: 11, fontWeight: isActive ? 700 : 400,
@@ -101,6 +266,8 @@ export default function ArchitectureExplorer({ analysisResult, sessionId }: Prop
                 background: isActive ? C.dark : "transparent",
                 borderBottom: isActive ? `2px solid ${C.cyan}` : "2px solid transparent",
                 transition: "all 0.15s ease",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
               }}
             >
               <span>{tab.icon}</span>
@@ -119,11 +286,17 @@ export default function ArchitectureExplorer({ analysisResult, sessionId }: Prop
 
       {/* Tab content */}
       <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
+        {activeTab === "inventory" && (
+          <ClassInventoryTab data={analysisResult} />
+        )}
         {activeTab === "dependencies" && (
           <DependencyTableTab data={analysisResult} />
         )}
         {activeTab === "graph" && (
           <DynamicGraphTab data={analysisResult} />
+        )}
+        {activeTab === "flows" && (
+          <CriticalFlowsTab data={analysisResult} />
         )}
         {activeTab === "impact" && (
           <DynamicImpactTab data={analysisResult} />

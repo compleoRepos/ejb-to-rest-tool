@@ -101,54 +101,123 @@ router.post("/analyze", async (req: Request, res: Response) => {
     return res.json({
       success: true,
       duration,
+      // ── Graph complet : nœuds, arêtes, métriques ──────────────────────
       graph: {
         totalNodes: graph.graphMetrics.totalNodes,
         totalEdges: graph.graphMetrics.totalEdges,
         connectedComponents: graph.graphMetrics.connectedComponents,
         avgDegree: graph.graphMetrics.avgDegree,
+        maxDegree: graph.graphMetrics.maxDegree,
+        cyclicDependencies: graph.graphMetrics.cyclicDependencies || [],
+        nodes: graph.nodes.map((n) => {
+          if (n.type === "CLASS") {
+            return {
+              id: n.id,
+              type: n.type,
+              className: n.className,
+              packageName: n.packageName,
+              role: n.role,
+              domain: n.domain,
+              linesOfCode: n.linesOfCode,
+              complexity: n.complexity,
+              technologyType: n.technologyType,
+              sourceFile: n.sourceFile,
+            };
+          } else if (n.type === "EXTERNAL") {
+            return {
+              id: n.id,
+              type: n.type,
+              systemName: n.systemName,
+              externalType: n.externalType,
+              protocol: n.protocol,
+            };
+          }
+          return { id: n.id, type: n.type };
+        }),
+        edges: graph.edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          type: e.type,
+          weight: e.weight,
+          label: e.label || "",
+        })),
+        nodeMetrics: graph.nodeMetrics.map((m) => ({
+          nodeId: m.nodeId,
+          inDegree: m.inDegree,
+          outDegree: m.outDegree,
+          betweenness: m.betweenness,
+          cohesion: m.cohesion,
+        })),
       },
+      // ── Domains complets ──────────────────────────────────────────────
       domains: domainMap.map((d) => ({
         domainId: d.domainId,
+        classes: d.classes,
         classCount: d.classes.length,
         cohesion: d.cohesion,
         coupling: d.couplage,
+        warnings: d.warnings || [],
       })),
+      // ── Architecture summary ──────────────────────────────────────────
       architecture: {
         entryPoints: archReport.entryPoints.length,
         exitPoints: archReport.exitPoints.length,
         criticalFlows: archReport.criticalFlows.length,
         highRiskFlows: archReport.summary.highRiskFlows,
         modules: archReport.functionalModules.length,
+        avgModuleCohesion: archReport.summary.avgModuleCohesion,
+        avgModuleCoupling: archReport.summary.avgModuleCoupling,
       },
+      // ── Microservices complets (classDetails, endpoints, databases, queues, config) ──
       microservices: extraction.microservices.map((ms) => ({
         id: ms.id,
         name: ms.name,
+        description: ms.description,
         boundedContext: ms.boundedContext,
         classes: ms.classes,
+        classDetails: ms.classDetails || [],
         classCount: ms.metrics.classCount,
-        endpoints: ms.endpoints.length,
-        cohesion: ms.metrics.cohesion,
-        coupling: ms.metrics.coupling,
+        endpoints: ms.endpoints || [],
+        endpointCount: ms.endpoints.length,
         dependencies: ms.dependencies.map((d) => ({
           targetServiceId: d.targetServiceId,
           targetServiceName: d.targetServiceName,
           type: d.type,
+          protocol: d.protocol || "",
+          description: d.description || "",
         })),
+        databases: ms.databases || [],
+        queues: ms.queues || [],
+        cohesion: ms.metrics.cohesion,
+        coupling: ms.metrics.coupling,
+        complexity: ms.metrics.complexity || 0,
+        linesOfCode: ms.metrics.linesOfCode || 0,
+        springBootConfig: ms.springBootConfig || null,
       })),
+      // ── Shared library complet ────────────────────────────────────────
       sharedLibrary: {
         name: extraction.sharedLibrary.name,
+        description: extraction.sharedLibrary.description || "",
+        classes: extraction.sharedLibrary.classes,
         classCount: extraction.sharedLibrary.classes.length,
       },
+      // ── API Gateway ───────────────────────────────────────────────────
       apiGateway: extraction.apiGateway,
+      // ── Extraction summary ────────────────────────────────────────────
+      extractionSummary: extraction.summary,
       warnings: extraction.warnings,
+      // ── Visualizations ────────────────────────────────────────────────
       visualizations: {
         cytoscapeData: cytoscapeViz ? JSON.parse(cytoscapeViz.content) : null,
         svgDependency: svgDependency?.content || null,
         svgMicroservices: svgMicroservices?.content || null,
         svgOverview: svgOverview?.content || null,
       },
+      // ── Entry/Exit points complets ────────────────────────────────────
       entryPoints: archReport.entryPoints,
       exitPoints: archReport.exitPoints,
+      // ── Critical flows complets (avec path) ───────────────────────────
       criticalFlows: archReport.criticalFlows.map((f) => ({
         id: f.id,
         name: f.name,
@@ -156,7 +225,24 @@ router.post("/analyze", async (req: Request, res: Response) => {
         riskLevel: f.riskLevel,
         riskFactors: f.riskFactors,
         transactional: f.transactional,
+        path: f.path,
         pathLength: f.path.length,
+        entryPoint: f.entryPoint,
+        exitPoints: f.exitPoints,
+      })),
+      // ── Functional modules complets ───────────────────────────────────
+      functionalModules: archReport.functionalModules.map((m) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        domains: m.domains,
+        classes: m.classes,
+        entryPoints: m.entryPoints,
+        exitPoints: m.exitPoints,
+        internalEdges: m.internalEdges,
+        externalEdges: m.externalEdges,
+        cohesion: m.cohesion,
+        coupling: m.coupling,
       })),
     });
   } catch (error: any) {
