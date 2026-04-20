@@ -318,7 +318,32 @@ export class GraphBuilder {
         }
       }
 
-      // 6e: @WebService / RestTemplate → SOAP_CALLS
+      // 6e-1: @Resource DataSource → DB_ACCESS (JNDI DataSource injection)
+      const dsResourcePattern = /@Resource\s*\([^)]*(?:name|lookup)\s*=\s*["']([^"']+)["'][^)]*\)[^;]*DataSource/g;
+      let dsResMatch;
+      while ((dsResMatch = dsResourcePattern.exec(raw)) !== null) {
+        const dsName = dsResMatch[1];
+        const dbId = `db:${dsName}`;
+        if (!nodeIds.has(dbId)) {
+          addNode({ id: dbId, type: "EXTERNAL", systemName: dsName, externalType: "DATABASE", protocol: "JDBC" } as ExternalNode);
+        }
+        addEdge(sourceId, dbId, "DB_ACCESS", dsName);
+      }
+      // Also detect: private DataSource xxx; with @Resource(name="...") on previous line
+      const dsResourcePattern2 = /@Resource\s*\([^)]*name\s*=\s*["']([^"']+)["']/g;
+      let dsResMatch2;
+      while ((dsResMatch2 = dsResourcePattern2.exec(raw)) !== null) {
+        const dsName = dsResMatch2[1];
+        if (dsName.includes("jdbc") || dsName.includes("DataSource") || dsName.includes("ds") || dsName.includes("xa")) {
+          const dbId = `db:${dsName}`;
+          if (!nodeIds.has(dbId)) {
+            addNode({ id: dbId, type: "EXTERNAL", systemName: dsName, externalType: "DATABASE", protocol: "JDBC" } as ExternalNode);
+          }
+          addEdge(sourceId, dbId, "DB_ACCESS", dsName);
+        }
+      }
+
+      // 6e-2: @WebService / RestTemplate / WebServiceTemplate → SOAP_CALLS
       if (raw.includes("@WebService") || raw.includes("RestTemplate") || raw.includes("WebServiceTemplate")) {
         const wsId = `ws:${uc.className}_ws`;
         if (!nodeIds.has(wsId)) {
@@ -331,6 +356,52 @@ export class GraphBuilder {
           } as ExternalNode);
         }
         addEdge(sourceId, wsId, "SOAP_CALLS");
+      }
+
+      // 6e-3: SOAP client calls via new XXXService() / getPort() / ServicePortType
+      const soapClientPattern = /new\s+(\w+Service)\s*\(/g;
+      let soapMatch;
+      const soapServicesSeen = new Set<string>();
+      while ((soapMatch = soapClientPattern.exec(raw)) !== null) {
+        const svcName = soapMatch[1];
+        if (svcName === uc.className || soapServicesSeen.has(svcName)) continue;
+        soapServicesSeen.add(svcName);
+        const wsId = `ws:${svcName}`;
+        if (!nodeIds.has(wsId)) {
+          addNode({ id: wsId, type: "EXTERNAL", systemName: svcName, externalType: "WEBSERVICE", protocol: "SOAP" } as ExternalNode);
+        }
+        addEdge(sourceId, wsId, "SOAP_CALLS", svcName);
+      }
+      // Also detect getPort() calls for SOAP
+      const getPortPattern = /getPort\s*\([^)]*?(\w+PortType)\.class/g;
+      let portMatch;
+      while ((portMatch = getPortPattern.exec(raw)) !== null) {
+        const portName = portMatch[1];
+        if (soapServicesSeen.has(portName)) continue;
+        soapServicesSeen.add(portName);
+        const wsId = `ws:${portName}`;
+        if (!nodeIds.has(wsId)) {
+          addNode({ id: wsId, type: "EXTERNAL", systemName: portName, externalType: "WEBSERVICE", protocol: "SOAP" } as ExternalNode);
+        }
+        addEdge(sourceId, wsId, "SOAP_CALLS", portName);
+      }
+
+      // 6e-4: Email/SMTP detection → EXTERNAL EMAIL
+      if (raw.includes("Mailer.send") || raw.includes("javax.mail") || raw.includes("jakarta.mail") || raw.includes("MimeMessage") || raw.includes("Transport.send")) {
+        const emailId = "ext:SMTP_EMAIL";
+        if (!nodeIds.has(emailId)) {
+          addNode({ id: emailId, type: "EXTERNAL", systemName: "SMTP Email", externalType: "WEBSERVICE", protocol: "SMTP" } as ExternalNode);
+        }
+        addEdge(sourceId, emailId, "SOAP_CALLS", "Email");
+      }
+
+      // 6e-5: Push notification detection
+      if (raw.includes("SendNotif") || raw.includes("pushNotif") || raw.includes("notification")) {
+        const pushId = "ext:PUSH_NOTIFICATION";
+        if (!nodeIds.has(pushId)) {
+          addNode({ id: pushId, type: "EXTERNAL", systemName: "Push Notification", externalType: "WEBSERVICE", protocol: "HTTP" } as ExternalNode);
+        }
+        addEdge(sourceId, pushId, "SOAP_CALLS", "Push");
       }
 
       // 6f: Shared DTOs → SHARES_DTO
@@ -359,18 +430,25 @@ export class GraphBuilder {
       }
     }
 
-    // ── Step 6bis: Scan ALL raw Java files for JNDI patterns (covers batch, EJB 2.x, etc.) ──
-    // This catches JNDI lookups in files not classified as UseCases (e.g., JSR-352 batch processors)
+    // ── Step 6bis: Scan ALL raw Java files for ALL dependency patterns ──
+    // Covers DAO, utility classes, services without rawSource, and any file not classified as UseCase
+    // Detects: JNDI lookups, SQL tables (DB_ACCESS), @Resource DataSource, SOAP clients, Email, Push, JMS
     const jndiPatternsGlobal: RegExp[] = [
       /lookup\s*\(\s*["']([^"']+)["']\s*\)/g,
       /@EJB\s*\(\s*(?:[^)]*?,\s*)?lookup\s*=\s*["']([^"']+)["']/g,
       /@EJB\s*\(\s*(?:[^)]*?,\s*)?beanName\s*=\s*["']([^"']+)["']/g,
       /@Resource\s*\(\s*(?:[^)]*?,\s*)?mappedName\s*=\s*["']([^"']+)["']/g,
     ];
+    // SQL table exclusion list (SQL keywords that look like table names)
+    const SQL_KEYWORDS = new Set([
+      "SELECT", "WHERE", "SET", "AND", "OR", "ON", "AS", "IS", "IN", "NOT", "NULL",
+      "VALUES", "ORDER", "GROUP", "HAVING", "LIMIT", "OFFSET", "EXISTS", "BETWEEN",
+      "LIKE", "CASE", "WHEN", "THEN", "ELSE", "END", "IF", "BEGIN", "DECLARE",
+      "INTO", "FROM", "DELETE", "INSERT", "UPDATE", "CREATE", "DROP", "ALTER",
+      "INDEX", "VIEW", "TRIGGER", "PROCEDURE", "FUNCTION", "RETURN", "CURSOR",
+    ]);
     // Track which files we already scanned in Step 6 (UseCases)
     const scannedFiles = new Set(ir.useCases.map(uc => uc.sourceFile));
-    // Scan baseClasses and remoteInterfaces rawSource if available
-    // Also scan any raw Java file content available via the IR's original files
     if ((ir as any)._rawFiles) {
       for (const file of (ir as any)._rawFiles) {
         if (scannedFiles.has(file.path)) continue;
@@ -398,20 +476,116 @@ export class GraphBuilder {
             sourceFile: file.path,
           } as ClassNode);
         }
+
+        // 6bis-a: JNDI lookups
         for (const pattern of jndiPatternsGlobal) {
           let m;
           while ((m = pattern.exec(raw)) !== null) {
             const jndiName = m[1];
             const extId = `jndi:${jndiName}`;
-            addNode({
-              id: extId,
-              type: "EXTERNAL",
-              systemName: jndiName,
-              externalType: "WEBSERVICE",
-              protocol: "JNDI",
-            } as ExternalNode);
+            addNode({ id: extId, type: "EXTERNAL", systemName: jndiName, externalType: "WEBSERVICE", protocol: "JNDI" } as ExternalNode);
             addEdge(sourceId, extId, "JNDI_LOOKUP", jndiName);
           }
+        }
+
+        // 6bis-b: SQL table access (FROM/INTO/UPDATE/JOIN/TABLE)
+        const tblPatternGlobal = /(?:FROM|INTO|UPDATE|JOIN|TABLE)\s+(?:`)?([A-Za-z][A-Za-z0-9_]+)(?:`)?/gi;
+        let tblMatchG;
+        while ((tblMatchG = tblPatternGlobal.exec(raw)) !== null) {
+          const tableName = tblMatchG[1];
+          if (tableName.length < 3 || SQL_KEYWORDS.has(tableName.toUpperCase())) continue;
+          const dbId = `db:${tableName}`;
+          if (!nodeIds.has(dbId)) {
+            addNode({ id: dbId, type: "EXTERNAL", systemName: tableName, externalType: "DATABASE", protocol: "JDBC" } as ExternalNode);
+          }
+          addEdge(sourceId, dbId, "DB_ACCESS", tableName);
+        }
+
+        // 6bis-c: @Resource DataSource (JNDI DataSource injection)
+        const dsPatternGlobal = /@Resource\s*\([^)]*name\s*=\s*["']([^"']+)["']/g;
+        let dsMatchG;
+        while ((dsMatchG = dsPatternGlobal.exec(raw)) !== null) {
+          const dsName = dsMatchG[1];
+          if (dsName.includes("jdbc") || dsName.includes("DataSource") || dsName.includes("ds") || dsName.includes("xa") || dsName.includes("DS")) {
+            const dbId = `db:${dsName}`;
+            if (!nodeIds.has(dbId)) {
+              addNode({ id: dbId, type: "EXTERNAL", systemName: dsName, externalType: "DATABASE", protocol: "JDBC" } as ExternalNode);
+            }
+            addEdge(sourceId, dbId, "DB_ACCESS", dsName);
+          }
+        }
+        // Also detect DataSource field with getConnection() call
+        if ((raw.includes("DataSource") || raw.includes("getConnection")) && (raw.includes("PreparedStatement") || raw.includes("executeQuery") || raw.includes("executeUpdate"))) {
+          const genericDbId = "db:DATABASE";
+          if (!nodeIds.has(genericDbId)) {
+            addNode({ id: genericDbId, type: "EXTERNAL", systemName: "Database", externalType: "DATABASE", protocol: "JDBC" } as ExternalNode);
+          }
+          addEdge(sourceId, genericDbId, "DB_ACCESS", "JDBC");
+        }
+
+        // 6bis-d: SOAP client calls (new XXXService() / getPort())
+        const soapPatternGlobal = /new\s+(\w+Service)\s*\(/g;
+        let soapMatchG;
+        while ((soapMatchG = soapPatternGlobal.exec(raw)) !== null) {
+          const svcName = soapMatchG[1];
+          if (svcName === className) continue;
+          const wsId = `ws:${svcName}`;
+          if (!nodeIds.has(wsId)) {
+            addNode({ id: wsId, type: "EXTERNAL", systemName: svcName, externalType: "WEBSERVICE", protocol: "SOAP" } as ExternalNode);
+          }
+          addEdge(sourceId, wsId, "SOAP_CALLS", svcName);
+        }
+        // getPort() SOAP calls
+        const portPatternGlobal = /getPort\s*\([^)]*?(\w+PortType)\.class/g;
+        let portMatchG;
+        while ((portMatchG = portPatternGlobal.exec(raw)) !== null) {
+          const portName = portMatchG[1];
+          const wsId = `ws:${portName}`;
+          if (!nodeIds.has(wsId)) {
+            addNode({ id: wsId, type: "EXTERNAL", systemName: portName, externalType: "WEBSERVICE", protocol: "SOAP" } as ExternalNode);
+          }
+          addEdge(sourceId, wsId, "SOAP_CALLS", portName);
+        }
+
+        // 6bis-e: Email/SMTP detection
+        if (raw.includes("Mailer.send") || raw.includes("javax.mail") || raw.includes("jakarta.mail") || raw.includes("MimeMessage") || raw.includes("Transport.send")) {
+          const emailId = "ext:SMTP_EMAIL";
+          if (!nodeIds.has(emailId)) {
+            addNode({ id: emailId, type: "EXTERNAL", systemName: "SMTP Email", externalType: "WEBSERVICE", protocol: "SMTP" } as ExternalNode);
+          }
+          addEdge(sourceId, emailId, "SOAP_CALLS", "Email");
+        }
+
+        // 6bis-f: Push notification detection
+        if (raw.includes("SendNotif") || raw.includes("pushNotif")) {
+          const pushId = "ext:PUSH_NOTIFICATION";
+          if (!nodeIds.has(pushId)) {
+            addNode({ id: pushId, type: "EXTERNAL", systemName: "Push Notification", externalType: "WEBSERVICE", protocol: "HTTP" } as ExternalNode);
+          }
+          addEdge(sourceId, pushId, "SOAP_CALLS", "Push");
+        }
+
+        // 6bis-g: JMS / MessageDriven
+        if (raw.includes("@MessageDriven") || raw.includes("MessageListener") || raw.includes("JMSProducer") || raw.includes("jms/")) {
+          const qPatternGlobal = /(?:destination|queue|topic|mappedName|name)\s*=\s*["']([^"']+)["']/gi;
+          let qMatchG;
+          while ((qMatchG = qPatternGlobal.exec(raw)) !== null) {
+            const qName = qMatchG[1];
+            if (!qName.includes("jms") && !qName.includes("queue") && !qName.includes("Queue") && !qName.includes("topic") && !qName.includes("Topic")) continue;
+            const qId = `queue:${qName}`;
+            if (!nodeIds.has(qId)) {
+              addNode({ id: qId, type: "EXTERNAL", systemName: qName, externalType: "QUEUE", protocol: "JMS" } as ExternalNode);
+            }
+            addEdge(sourceId, qId, "EMITS_EVENT", qName);
+          }
+        }
+
+        // 6bis-h: @EJB / @Inject dependency injection in non-UseCase files
+        const ejbInjectPattern = /@(?:EJB|Inject|Autowired)\s+(?:private\s+)?(\w+)\s+(\w+)/g;
+        let ejbInjectMatch;
+        while ((ejbInjectMatch = ejbInjectPattern.exec(raw)) !== null) {
+          const depType = ejbInjectMatch[1];
+          addDeferredEdge(sourceId, depType, "DEPENDS_ON", ejbInjectMatch[2]);
         }
       }
     }
