@@ -1,7 +1,9 @@
 /**
- * WorkspaceInsights v1.0 — Panneau d'intelligence du workspace.
+ * WorkspaceInsights v1.1 — Panneau d'intelligence du workspace.
  * Affiche les redondances détectées, les interconnexions cross-module
  * et les recommandations de mutualisation.
+ *
+ * v1.1: Fix types to match backend WorkspaceIntelligenceEngine output.
  *
  * @author Hamza NORDINE
  */
@@ -18,7 +20,7 @@ import {
   Network, Copy, Target, BarChart3,
 } from "lucide-react";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Types (aligned with backend WorkspaceIntelligenceEngine) ──────────────
 
 interface RedundancyMatch {
   id: string;
@@ -54,12 +56,33 @@ interface MutualizationRecommendation {
   estimatedEffort: string;
 }
 
+interface ResolvedLink {
+  jndiPath: string;
+  sourceSessionId: string;
+  sourceClass: string;
+  targetSessionId: string;
+  targetClass: string;
+  targetServiceClass: string;
+  status: string;
+}
+
+interface UnresolvedLink {
+  jndiPath: string;
+  sourceSessionId: string;
+  sourceClass: string;
+  targetModuleName: string;
+  targetClass: string;
+  status: string;
+}
+
 interface WorkspaceInsight {
   workspaceId: string;
+  lastAnalyzedAt: string;
   projectCount: number;
   projects: Array<{
     sessionId: string;
     projectName: string;
+    artifactId: string;
     useCaseCount: number;
     serviceCount: number;
     dtoCount: number;
@@ -76,40 +99,52 @@ interface WorkspaceInsight {
     byDomain: Record<string, RedundancyMatch[]>;
   };
   mutualization: {
+    timestamp: string;
+    totalProjects: number;
+    summary: {
+      totalRecommendations: number;
+      criticalCount: number;
+      highCount: number;
+      mediumCount: number;
+      lowCount: number;
+      totalEstimatedLinesSaved: number;
+      averageEffortReduction: number;
+    };
     recommendations: MutualizationRecommendation[];
     dependencyGraph: {
+      totalInterconnections: number;
       resolvedLinks: number;
       unresolvedLinks: number;
-      stronglyCoupledPairs: string[];
+      stronglyCoupledPairs: Array<{
+        projectA: string;
+        projectB: string;
+        linkCount: number;
+      }>;
     };
-    duplicateEntities: Array<{
-      baseName: string;
-      occurrences: Array<{ projectName: string; className: string }>;
-    }>;
   };
   crossModuleResolution: {
-    resolvedLinks: Array<{
-      sourceProject: string;
-      sourceClass: string;
-      targetProject: string;
-      targetClass: string;
-      jndiPath: string;
-    }>;
-    unresolvedLinks: Array<{
-      sourceProject: string;
-      sourceClass: string;
-      jndiPath: string;
-    }>;
+    totalLinks: number;
+    resolvedLinks: ResolvedLink[];
+    unresolvedLinks: UnresolvedLink[];
     resolutionRate: number;
   };
   healthScore: number;
   keyInsights: string[];
-  analyzedAt: string;
 }
 
 interface WorkspaceInsightsProps {
   workspaceId: string;
   workspaceName: string;
+}
+
+// ─── Helper: map sessionId to projectName ──────────────────────────────────
+
+function buildSessionNameMap(projects: WorkspaceInsight["projects"]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const p of projects) {
+    map.set(p.sessionId, p.projectName);
+  }
+  return map;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -138,7 +173,7 @@ export default function WorkspaceInsights({ workspaceId, workspaceName }: Worksp
         const data = await res.json();
         setInsight(data.insight);
       } else {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({ error: "Erreur serveur" }));
         toast.error(err.error || "Erreur lors de l'analyse");
       }
     } catch (err) {
@@ -263,6 +298,17 @@ export default function WorkspaceInsights({ workspaceId, workspaceName }: Worksp
     );
   }
 
+  // Build sessionId → projectName map for cross-module links display
+  const sessionNameMap = buildSessionNameMap(insight.projects);
+  const getProjectName = (sessionId: string) => sessionNameMap.get(sessionId) || sessionId;
+
+  const redundancyMatches = insight.redundancy?.matches || [];
+  const recommendations = insight.mutualization?.recommendations || [];
+  const resolvedLinks = insight.crossModuleResolution?.resolvedLinks || [];
+  const unresolvedLinks = insight.crossModuleResolution?.unresolvedLinks || [];
+  const keyInsights = insight.keyInsights || [];
+  const stronglyCoupled = insight.mutualization?.dependencyGraph?.stronglyCoupledPairs || [];
+
   return (
     <div className="space-y-4">
       {/* ─── Health Score & Overview ─────────────────────────────────────── */}
@@ -299,23 +345,23 @@ export default function WorkspaceInsights({ workspaceId, workspaceName }: Worksp
           <div className="rounded-md bg-[oklch(0.12_0.01_250)] border border-[oklch(0.2_0.01_250)] p-3 text-center">
             <Copy className="w-4 h-4 text-amber-400 mx-auto mb-1" />
             <p className="text-2xl font-bold text-amber-400">
-              {insight.redundancy.matches.length}
+              {redundancyMatches.length}
             </p>
             <p className="text-xs text-[oklch(0.5_0.01_250)]">Redondances</p>
           </div>
           <div className="rounded-md bg-[oklch(0.12_0.01_250)] border border-[oklch(0.2_0.01_250)] p-3 text-center">
             <GitMerge className="w-4 h-4 text-purple-400 mx-auto mb-1" />
             <p className="text-2xl font-bold text-purple-400">
-              {insight.mutualization.recommendations.length}
+              {recommendations.length}
             </p>
             <p className="text-xs text-[oklch(0.5_0.01_250)]">Recommandations</p>
           </div>
         </div>
 
         {/* Key Insights */}
-        {insight.keyInsights.length > 0 && (
+        {keyInsights.length > 0 && (
           <div className="space-y-1.5">
-            {insight.keyInsights.map((msg, i) => (
+            {keyInsights.map((msg, i) => (
               <div
                 key={i}
                 className="flex items-start gap-2 text-xs text-[oklch(0.65_0.01_250)] bg-[oklch(0.12_0.01_250)] rounded-md px-3 py-2"
@@ -386,13 +432,13 @@ export default function WorkspaceInsights({ workspaceId, workspaceName }: Worksp
       </div>
 
       {/* ─── Redundancies ───────────────────────────────────────────────── */}
-      {insight.redundancy.matches.length > 0 && (
+      {redundancyMatches.length > 0 && (
         <div className="rounded-lg border border-amber-500/20 bg-[oklch(0.16_0.01_250)] p-4">
           <SectionHeader
             id="redundancy"
             icon={<AlertTriangle className="w-4 h-4 text-amber-400" />}
             title="Redondances détectées"
-            count={insight.redundancy.matches.length}
+            count={redundancyMatches.length}
           />
           <AnimatePresence>
             {expandedSections.has("redundancy") && (
@@ -403,7 +449,7 @@ export default function WorkspaceInsights({ workspaceId, workspaceName }: Worksp
                 className="overflow-hidden"
               >
                 <div className="space-y-3 mt-2">
-                  {insight.redundancy.matches.map(match => (
+                  {redundancyMatches.map(match => (
                     <div
                       key={match.id}
                       className="p-3 rounded-md bg-[oklch(0.12_0.01_250)] border border-[oklch(0.2_0.01_250)]"
@@ -430,7 +476,7 @@ export default function WorkspaceInsights({ workspaceId, workspaceName }: Worksp
                         </div>
                       </div>
 
-                      {match.sharedMethods.length > 0 && (
+                      {match.sharedMethods && match.sharedMethods.length > 0 && (
                         <div className="flex flex-wrap gap-1 mb-1.5">
                           <span className="text-[10px] text-[oklch(0.5_0.01_250)]">Méthodes communes:</span>
                           {match.sharedMethods.map(m => (
@@ -455,17 +501,13 @@ export default function WorkspaceInsights({ workspaceId, workspaceName }: Worksp
       )}
 
       {/* ─── Cross-Module Links ─────────────────────────────────────────── */}
-      {(insight.crossModuleResolution.resolvedLinks.length > 0 ||
-        insight.crossModuleResolution.unresolvedLinks.length > 0) && (
+      {(resolvedLinks.length > 0 || unresolvedLinks.length > 0) && (
         <div className="rounded-lg border border-[oklch(0.22_0.01_250)] bg-[oklch(0.16_0.01_250)] p-4">
           <SectionHeader
             id="crossmodule"
             icon={<Network className="w-4 h-4 text-emerald-400" />}
             title="Interconnexions cross-module"
-            count={
-              insight.crossModuleResolution.resolvedLinks.length +
-              insight.crossModuleResolution.unresolvedLinks.length
-            }
+            count={resolvedLinks.length + unresolvedLinks.length}
           />
           <AnimatePresence>
             {expandedSections.has("crossmodule") && (
@@ -500,32 +542,70 @@ export default function WorkspaceInsights({ workspaceId, workspaceName }: Worksp
                 </div>
 
                 <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {insight.crossModuleResolution.resolvedLinks.map((link, i) => (
+                  {resolvedLinks.map((link, i) => (
                     <div
                       key={`r-${i}`}
                       className="flex items-center gap-1.5 text-xs p-2 rounded bg-[oklch(0.12_0.01_250)]"
                     >
                       <CheckCircle2 className="w-3 h-3 text-emerald-400 flex-shrink-0" />
-                      <span className="text-blue-400 font-mono">{link.sourceProject}</span>
+                      <span className="text-blue-400 font-mono">{getProjectName(link.sourceSessionId)}</span>
                       <span className="text-[oklch(0.4_0.01_250)]">/</span>
                       <span className="text-white font-mono truncate">{link.sourceClass}</span>
                       <ArrowRight className="w-3 h-3 text-[oklch(0.4_0.01_250)] flex-shrink-0" />
-                      <span className="text-emerald-400 font-mono">{link.targetProject}</span>
+                      <span className="text-emerald-400 font-mono">{getProjectName(link.targetSessionId)}</span>
                       <span className="text-[oklch(0.4_0.01_250)]">/</span>
                       <span className="text-white font-mono truncate">{link.targetClass}</span>
                     </div>
                   ))}
-                  {insight.crossModuleResolution.unresolvedLinks.map((link, i) => (
+                  {unresolvedLinks.map((link, i) => (
                     <div
                       key={`u-${i}`}
                       className="flex items-center gap-1.5 text-xs p-2 rounded bg-[oklch(0.12_0.01_250)]"
                     >
                       <AlertTriangle className="w-3 h-3 text-amber-400 flex-shrink-0" />
-                      <span className="text-blue-400 font-mono">{link.sourceProject}</span>
+                      <span className="text-blue-400 font-mono">{getProjectName(link.sourceSessionId)}</span>
                       <span className="text-[oklch(0.4_0.01_250)]">/</span>
                       <span className="text-white font-mono truncate">{link.sourceClass}</span>
                       <ArrowRight className="w-3 h-3 text-[oklch(0.4_0.01_250)] flex-shrink-0" />
-                      <span className="text-amber-400 font-mono truncate">{link.jndiPath}</span>
+                      <span className="text-amber-400 font-mono truncate">{link.targetModuleName || link.jndiPath}</span>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+
+      {/* ─── Strongly Coupled Pairs ─────────────────────────────────────── */}
+      {stronglyCoupled.length > 0 && (
+        <div className="rounded-lg border border-orange-500/20 bg-[oklch(0.16_0.01_250)] p-4">
+          <SectionHeader
+            id="coupling"
+            icon={<Layers className="w-4 h-4 text-orange-400" />}
+            title="Projets fortement couplés"
+            count={stronglyCoupled.length}
+          />
+          <AnimatePresence>
+            {expandedSections.has("coupling") && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="space-y-2 mt-2">
+                  {stronglyCoupled.map((pair, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2 p-2.5 rounded-md bg-[oklch(0.12_0.01_250)] border border-[oklch(0.2_0.01_250)]"
+                    >
+                      <span className="text-xs text-blue-400 font-mono">{pair.projectA}</span>
+                      <ArrowRight className="w-3 h-3 text-orange-400" />
+                      <span className="text-xs text-emerald-400 font-mono">{pair.projectB}</span>
+                      <Badge className="ml-auto bg-orange-500/10 text-orange-400 border-orange-500/20 text-[10px]">
+                        {pair.linkCount} liens
+                      </Badge>
                     </div>
                   ))}
                 </div>
@@ -536,13 +616,13 @@ export default function WorkspaceInsights({ workspaceId, workspaceName }: Worksp
       )}
 
       {/* ─── Mutualization Recommendations ──────────────────────────────── */}
-      {insight.mutualization.recommendations.length > 0 && (
+      {recommendations.length > 0 && (
         <div className="rounded-lg border border-purple-500/20 bg-[oklch(0.16_0.01_250)] p-4">
           <SectionHeader
             id="recommendations"
             icon={<TrendingUp className="w-4 h-4 text-purple-400" />}
             title="Recommandations de mutualisation"
-            count={insight.mutualization.recommendations.length}
+            count={recommendations.length}
           />
           <AnimatePresence>
             {expandedSections.has("recommendations") && (
@@ -553,7 +633,7 @@ export default function WorkspaceInsights({ workspaceId, workspaceName }: Worksp
                 className="overflow-hidden"
               >
                 <div className="space-y-3 mt-2">
-                  {insight.mutualization.recommendations.map(rec => (
+                  {recommendations.map(rec => (
                     <div
                       key={rec.id}
                       className="p-3 rounded-md bg-[oklch(0.12_0.01_250)] border border-[oklch(0.2_0.01_250)]"
@@ -606,56 +686,11 @@ export default function WorkspaceInsights({ workspaceId, workspaceName }: Worksp
         </div>
       )}
 
-      {/* ─── Duplicate Entities ──────────────────────────────────────────── */}
-      {insight.mutualization.duplicateEntities.length > 0 && (
-        <div className="rounded-lg border border-[oklch(0.22_0.01_250)] bg-[oklch(0.16_0.01_250)] p-4">
-          <SectionHeader
-            id="entities"
-            icon={<Layers className="w-4 h-4 text-orange-400" />}
-            title="Entités dupliquées"
-            count={insight.mutualization.duplicateEntities.length}
-          />
-          <AnimatePresence>
-            {expandedSections.has("entities") && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="overflow-hidden"
-              >
-                <div className="space-y-2 mt-2">
-                  {insight.mutualization.duplicateEntities.map(entity => (
-                    <div
-                      key={entity.baseName}
-                      className="p-2.5 rounded-md bg-[oklch(0.12_0.01_250)] border border-[oklch(0.2_0.01_250)]"
-                    >
-                      <p className="text-xs font-medium text-orange-400 mb-1.5">
-                        {entity.baseName}
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {entity.occurrences.map((occ, i) => (
-                          <Badge
-                            key={i}
-                            className="bg-[oklch(0.18_0.01_250)] text-[oklch(0.7_0.01_250)] border-[oklch(0.22_0.01_250)] text-[10px]"
-                          >
-                            {occ.projectName}: {occ.className}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      )}
-
       {/* ─── Footer ─────────────────────────────────────────────────────── */}
       <div className="text-center text-[10px] text-[oklch(0.4_0.01_250)] py-2">
-        Dernière analyse: {new Date(insight.analyzedAt).toLocaleString("fr-FR")}
+        Dernière analyse: {new Date(insight.lastAnalyzedAt).toLocaleString("fr-FR")}
         {" · "}
-        {insight.redundancy.totalUseCasesScanned} UseCases et {insight.redundancy.totalServicesScanned} Services analysés
+        {insight.redundancy?.totalUseCasesScanned || 0} UseCases et {insight.redundancy?.totalServicesScanned || 0} Services analysés
       </div>
     </div>
   );
