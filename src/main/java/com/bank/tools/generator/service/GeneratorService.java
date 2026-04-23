@@ -134,6 +134,16 @@ public class GeneratorService {
         Path outputDir = Path.of(appConfig.getOutputDir(), projectId);
         Files.createDirectories(outputDir);
 
+        // Nettoyer le repertoire generated-api avant regeneration pour eviter les fichiers orphelins
+        Path existingProject = outputDir.resolve("generated-api");
+        if (Files.exists(existingProject)) {
+            log.info("Nettoyage du repertoire existant : {}", existingProject);
+            try (var walk = Files.walk(existingProject)) {
+                walk.sorted(java.util.Comparator.reverseOrder())
+                    .forEach(p -> { try { Files.deleteIfExists(p); } catch (IOException ignored) {} });
+            }
+        }
+
         Path projectRoot = engine.generateProject(analysisResult, outputDir, bianMode);
         log.info("Etape 1/2 : Code de base genere dans {}", projectRoot);
 

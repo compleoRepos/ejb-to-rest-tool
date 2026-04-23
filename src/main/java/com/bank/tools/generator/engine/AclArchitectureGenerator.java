@@ -371,6 +371,22 @@ public class AclArchitectureGenerator {
             deduplicateRoutes(group);
         }
 
+        // ===== FIX 3 : Propager les noms de DTO derives dans les UseCaseInfo =====
+        // Le SmartCodeEnhancer utilise uc.getInputDtoClassName() / uc.getOutputDtoClassName()
+        // pour generer les tests. Il faut propager les noms derives dans BianEndpoint.
+        for (BianControllerGroup group : groupMap.values()) {
+            for (BianEndpoint ep : group.endpoints) {
+                if (ep.requestDtoName != null && ep.useCaseInfo.getInputDtoClassName() == null) {
+                    ep.useCaseInfo.setInputDtoClassName(ep.requestDtoName);
+                    log.info("[ACL] FIX-3: Propagation requestDtoName -> UseCaseInfo.inputDtoClassName: {}", ep.requestDtoName);
+                }
+                if (ep.responseDtoName != null && ep.useCaseInfo.getOutputDtoClassName() == null) {
+                    ep.useCaseInfo.setOutputDtoClassName(ep.responseDtoName);
+                    log.info("[ACL] FIX-3: Propagation responseDtoName -> UseCaseInfo.outputDtoClassName: {}", ep.responseDtoName);
+                }
+            }
+        }
+
         return new ArrayList<>(groupMap.values());
     }
 
@@ -2111,7 +2127,7 @@ public class AclArchitectureGenerator {
 
         Files.writeString(resourcesDir.resolve("application-dev.properties"), """
                 # Profil Developpement
-                spring.profiles.active=mock
+                # Utiliser spring.profiles.group.dev=mock dans application.properties
                 logging.level.com.bank.api=DEBUG
                 springdoc.swagger-ui.enabled=true
                 management.endpoints.web.exposure.include=health,info,metrics,circuitbreakers,retries,bulkheads
@@ -2119,7 +2135,7 @@ public class AclArchitectureGenerator {
 
         Files.writeString(resourcesDir.resolve("application-prod.properties"), """
                 # Profil Production
-                spring.profiles.active=jndi
+                # Utiliser spring.profiles.group.prod=jndi dans application.properties
                 logging.level.com.bank.api=WARN
                 springdoc.swagger-ui.enabled=false
                 management.endpoints.web.exposure.include=health,metrics
