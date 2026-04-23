@@ -368,6 +368,29 @@ public class EjbProjectParser implements ProjectParser {
                         if (useCaseInfo.getOutputDtoClassName() != null) {
                             dtoClassNames.add(useCaseInfo.getOutputDtoClassName());
                         }
+                        // FIX : Pour les services generiques (REMOTE_INTERFACE),
+                        // ajouter les types de retour et parametres des methodes publiques
+                        // comme DTOs candidats (ex: AccountInfo, TransactionInfo)
+                        if (useCaseInfo.getPublicMethods() != null) {
+                            for (UseCaseInfo.MethodInfo mi : useCaseInfo.getPublicMethods()) {
+                                String retType = mi.getReturnType();
+                                if (retType != null && !retType.equals("void") && !isPrimitiveOrWrapper(retType)) {
+                                    String innerType = extractGenericType(retType);
+                                    if (innerType != null) dtoClassNames.add(innerType);
+                                    else dtoClassNames.add(retType);
+                                }
+                                if (mi.getParameters() != null) {
+                                    for (UseCaseInfo.ParameterInfo pi : mi.getParameters()) {
+                                        String pType = pi.getType();
+                                        if (pType != null && !isPrimitiveOrWrapper(pType)) {
+                                            String innerPType = extractGenericType(pType);
+                                            if (innerPType != null) dtoClassNames.add(innerPType);
+                                            else dtoClassNames.add(pType);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     continue;
                 }
@@ -2323,6 +2346,32 @@ public class EjbProjectParser implements ProjectParser {
         }
 
         log.info("[PARSER] Total business errors detectes : {}", result.getBusinessErrors().size());
+    }
+
+    /**
+     * Verifie si un type est un type primitif, wrapper ou standard Java.
+     */
+    private boolean isPrimitiveOrWrapper(String type) {
+        if (type == null) return true;
+        return Set.of("void", "Void", "String", "Integer", "Long", "Double", "Float",
+                "Boolean", "Short", "Byte", "Character", "Number", "BigDecimal", "BigInteger",
+                "Object", "Date", "LocalDate", "LocalDateTime", "Instant", "Map", "List",
+                "Set", "Collection", "Serializable", "int", "long", "double", "float",
+                "boolean", "short", "byte", "char", "byte[]").contains(type);
+    }
+
+    /**
+     * Extrait le type generique interne d'un type parametre (ex: List<AccountInfo> -> AccountInfo).
+     * Retourne null si le type n'est pas parametre.
+     */
+    private String extractGenericType(String type) {
+        if (type == null) return null;
+        int start = type.indexOf('<');
+        int end = type.lastIndexOf('>');
+        if (start > 0 && end > start) {
+            return type.substring(start + 1, end).trim();
+        }
+        return null;
     }
 
 }

@@ -175,7 +175,7 @@ public class AclArchitectureGenerator {
         }
 
         // 6. Generer les EJB Types (couche Infrastructure)
-        generateEjbTypes(srcMain, analysis);
+        generateEjbTypes(srcMain, analysis, groups);
 
         // 7. Generer les Mappers (couche Infrastructure)
         for (BianControllerGroup group : groups) {
@@ -931,7 +931,8 @@ public class AclArchitectureGenerator {
     // COUCHE INFRASTRUCTURE : EJB Types
     // =====================================================================
 
-    private void generateEjbTypes(Path srcMain, ProjectAnalysisResult analysis) throws IOException {
+    private void generateEjbTypes(Path srcMain, ProjectAnalysisResult analysis,
+                                    List<BianControllerGroup> groups) throws IOException {
         Path dir = resolvePackagePath(srcMain, PKG_INFRA_EJB_TYPES);
 
         // Generer BaseUseCase.java
@@ -1009,6 +1010,11 @@ public class AclArchitectureGenerator {
 
         for (DtoInfo dto : analysis.getDtos()) {
             Path file = dir.resolve(dto.getClassName() + ".java");
+            // FIX : Ne pas ecraser les types framework deja generes (Envelope, BaseUseCase, etc.)
+            if (Files.exists(file)) {
+                log.info("[ACL] EJB Type deja genere (framework), skip : {}", dto.getClassName());
+                continue;
+            }
 
             StringBuilder sb = new StringBuilder();
             sb.append("package ").append(PKG_INFRA_EJB_TYPES).append(";\n\n");
@@ -1057,6 +1063,69 @@ public class AclArchitectureGenerator {
             Files.writeString(file, sb.toString());
             log.info("[ACL] EJB Type genere : {}", dto.getClassName());
         }
+
+        // FIX : Generer des stubs pour les types EJB references dans les endpoints
+        // mais absents de analysis.getDtos() (ex: AccountInfo, TransactionInfo)
+        Set<String> existingDtoNames = analysis.getDtos().stream()
+                .map(DtoInfo::getClassName)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> missingTypes = new java.util.LinkedHashSet<>();
+        for (BianControllerGroup group : groups) {
+            for (BianEndpoint ep : group.endpoints) {
+                if (ep.ejbInputDtoName != null && !isNonImportableEjbType(ep.ejbInputDtoName)
+                        && !isFrameworkType(ep.ejbInputDtoName)
+                        && !existingDtoNames.contains(ep.ejbInputDtoName)) {
+                    missingTypes.add(ep.ejbInputDtoName);
+                }
+                if (ep.ejbOutputDtoName != null && !isNonImportableEjbType(ep.ejbOutputDtoName)
+                        && !isFrameworkType(ep.ejbOutputDtoName)
+                        && !existingDtoNames.contains(ep.ejbOutputDtoName)) {
+                    missingTypes.add(ep.ejbOutputDtoName);
+                }
+            }
+        }
+        for (String typeName : missingTypes) {
+            Path typeFile = dir.resolve(typeName + ".java");
+            if (Files.exists(typeFile)) continue; // deja genere
+            // Chercher les champs dans les DTOs detectes par le parser
+            DtoInfo sourceDto = analysis.getDtos().stream()
+                    .filter(d -> d.getClassName().equals(typeName))
+                    .findFirst().orElse(null);
+            List<DtoInfo.FieldInfo> fields = (sourceDto != null) ? sourceDto.getFields()
+                    : new java.util.ArrayList<>();
+            StringBuilder stub = new StringBuilder();
+            stub.append("package ").append(PKG_INFRA_EJB_TYPES).append(";\n\n");
+            stub.append("import java.io.Serializable;\n");
+            boolean hasBD = fields.stream().anyMatch(f -> "BigDecimal".equals(f.getType()));
+            if (hasBD) stub.append("import java.math.BigDecimal;\n");
+            boolean hasList = fields.stream().anyMatch(f -> f.getType() != null && f.getType().contains("List"));
+            if (hasList) stub.append("import java.util.List;\n");
+            stub.append("\n");
+            stub.append("/**\n");
+            stub.append(" * Stub du type EJB ").append(typeName).append(" genere pour la couche infrastructure.\n");
+            stub.append(" */\n");
+            stub.append("public class ").append(typeName).append(" implements ValueObject {\n\n");
+            stub.append("    private static final long serialVersionUID = 1L;\n\n");
+            for (DtoInfo.FieldInfo f : fields) {
+                if ("serialVersionUID".equals(f.getName()) || f.isStatic()) continue;
+                String type = cleanType(f.getType());
+                if (!isKnownType(type, analysis)) type = "Object";
+                stub.append("    private ").append(type).append(" ").append(f.getName()).append(";\n");
+            }
+            stub.append("\n");
+            for (DtoInfo.FieldInfo f : fields) {
+                if ("serialVersionUID".equals(f.getName()) || f.isStatic()) continue;
+                String type = cleanType(f.getType());
+                if (!isKnownType(type, analysis)) type = "Object";
+                String cap = capitalize(f.getName());
+                String getter = ("boolean".equals(type) ? "is" : "get") + cap;
+                stub.append("    public ").append(type).append(" ").append(getter).append("() { return ").append(f.getName()).append("; }\n");
+                stub.append("    public void set").append(cap).append("(").append(type).append(" ").append(f.getName()).append(") { this.").append(f.getName()).append(" = ").append(f.getName()).append("; }\n\n");
+            }
+            stub.append("}\n");
+            Files.writeString(typeFile, stub.toString());
+            log.info("[ACL] EJB Type stub genere (manquant dans DTOs) : {}", typeName);
+        }
     }
 
     // =====================================================================
@@ -1072,6 +1141,15 @@ public class AclArchitectureGenerator {
         DtoInfo ejbIn = findDto(analysis, ep.ejbInputDtoName);
         DtoInfo ejbOut = findDto(analysis, ep.ejbOutputDtoName);
 
+        // FIX : Detecter les conflits de noms entre DTOs REST et types EJB
+        boolean inputNameConflict = ep.requestDtoName != null && ep.ejbInputDtoName != null
+                && ep.requestDtoName.equals(ep.ejbInputDtoName);
+        boolean outputNameConflict = ep.responseDtoName != null && ep.ejbOutputDtoName != null
+                && ep.responseDtoName.equals(ep.ejbOutputDtoName);
+        // Noms qualifies pour les types EJB en cas de conflit
+        String ejbInputRef = inputNameConflict ? PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName : ep.ejbInputDtoName;
+        String ejbOutputRef = outputNameConflict ? PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName : ep.ejbOutputDtoName;
+
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(PKG_INFRA_EJB_MAPPER).append(";\n\n");
 
@@ -1083,12 +1161,12 @@ public class AclArchitectureGenerator {
         DtoInfo ejbOutForActionHandler = isActionHandlerMapper ? findDto(analysis, ep.ejbOutputDtoName) : null;
         boolean hasTypedEjbOutput = isActionHandlerMapper && ejbOutForActionHandler != null;
         if (!isActionHandlerMapper) {
-            if (ep.ejbInputDtoName != null && !isNonImportableEjbType(ep.ejbInputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
-            if (ep.ejbOutputDtoName != null && !isNonImportableEjbType(ep.ejbOutputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
+            if (ep.ejbInputDtoName != null && !isNonImportableEjbType(ep.ejbInputDtoName) && !inputNameConflict) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
+            if (ep.ejbOutputDtoName != null && !isNonImportableEjbType(ep.ejbOutputDtoName) && !outputNameConflict) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
         } else {
             imports.add("import " + PKG_INFRA_EJB_TYPES + ".Envelope;");
             // FIX BUG-2 : Si le type EJB output est connu, l'importer pour le cast dans fromEnvelopePayload
-            if (hasTypedEjbOutput && !isNonImportableEjbType(ep.ejbOutputDtoName)) {
+            if (hasTypedEjbOutput && !isNonImportableEjbType(ep.ejbOutputDtoName) && !outputNameConflict) {
                 imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
             }
         }
@@ -1195,8 +1273,8 @@ public class AclArchitectureGenerator {
 
         // toEjb : Request → VoIn (pattern classique)
         if (!isActionHandler && ep.requestDtoName != null && ep.ejbInputDtoName != null) {
-            sb.append("    public ").append(ep.ejbInputDtoName).append(" toEjb(").append(ep.requestDtoName).append(" request) {\n");
-            sb.append("        ").append(ep.ejbInputDtoName).append(" voIn = new ").append(ep.ejbInputDtoName).append("();\n");
+            sb.append("    public ").append(ejbInputRef).append(" toEjb(").append(ep.requestDtoName).append(" request) {\n");
+            sb.append("        ").append(ejbInputRef).append(" voIn = new ").append(ejbInputRef).append("();\n");
 
             if (ejbIn != null) {
                 for (DtoInfo.FieldInfo field : ejbIn.getFields()) {
@@ -1224,7 +1302,7 @@ public class AclArchitectureGenerator {
 
         // toRest : VoOut → Response (pattern classique)
         if (!isActionHandler && ep.responseDtoName != null && ep.ejbOutputDtoName != null) {
-            sb.append("    public ").append(ep.responseDtoName).append(" toRest(").append(ep.ejbOutputDtoName).append(" voOut) {\n");
+            sb.append("    public ").append(ep.responseDtoName).append(" toRest(").append(ejbOutputRef).append(" voOut) {\n");
             sb.append("        ").append(ep.responseDtoName).append(" response = new ").append(ep.responseDtoName).append("();\n");
 
             // Charger les types de champs du Response DTO genere (pour verifier la compatibilite)
@@ -1348,6 +1426,19 @@ public class AclArchitectureGenerator {
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(PKG_INFRA_EJB_ADAPTER).append(";\n\n");
 
+        // FIX : Detecter les conflits de noms entre DTOs REST et types EJB pour le JndiAdapter
+        Set<String> conflictingEjbTypes = new java.util.HashSet<>();
+        for (BianEndpoint ep : group.endpoints) {
+            if (ep.requestDtoName != null && ep.ejbInputDtoName != null
+                    && ep.requestDtoName.equals(ep.ejbInputDtoName)) {
+                conflictingEjbTypes.add(ep.ejbInputDtoName);
+            }
+            if (ep.responseDtoName != null && ep.ejbOutputDtoName != null
+                    && ep.responseDtoName.equals(ep.ejbOutputDtoName)) {
+                conflictingEjbTypes.add(ep.ejbOutputDtoName);
+            }
+        }
+
         // Imports
         Set<String> imports = new TreeSet<>();
         for (BianEndpoint ep : group.endpoints) {
@@ -1356,8 +1447,8 @@ public class AclArchitectureGenerator {
             // Pour ACTION_HANDLER, les types EJB sont remplaces par Envelope — ne pas importer les types EJB individuels
             boolean isActionHandlerEp = ep.useCaseInfo != null && (ep.useCaseInfo.isActionHandler() || ep.useCaseInfo.isInlineAction());
             if (!isActionHandlerEp) {
-            if (ep.ejbInputDtoName != null && !isNonImportableEjbType(ep.ejbInputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
-            if (ep.ejbOutputDtoName != null && !isNonImportableEjbType(ep.ejbOutputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
+            if (ep.ejbInputDtoName != null && !isNonImportableEjbType(ep.ejbInputDtoName) && !conflictingEjbTypes.contains(ep.ejbInputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
+            if (ep.ejbOutputDtoName != null && !isNonImportableEjbType(ep.ejbOutputDtoName) && !conflictingEjbTypes.contains(ep.ejbOutputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
             }
             imports.add("import " + PKG_INFRA_EJB_MAPPER + "." + deriveMapperName(ep) + ";");
         }
@@ -1526,13 +1617,16 @@ public class AclArchitectureGenerator {
                         // On utilise un cast (ValueObject) car le runtime EJB accepte ce type
                         sb.append("            Object voIn = ").append(mapperField).append(".toEjb(request);\n");
                     } else {
-                        sb.append("            ").append(ep.ejbInputDtoName).append(" voIn = ").append(mapperField).append(".toEjb(request);\n");
+                        String ejbInRef = conflictingEjbTypes.contains(ep.ejbInputDtoName)
+                                ? PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName : ep.ejbInputDtoName;
+                        sb.append("            ").append(ejbInRef).append(" voIn = ").append(mapperField).append(".toEjb(request);\n");
                     }
                 }
 
                 // JNDI lookup via cache
                 sb.append("            javax.naming.InitialContext ctx = getOrCreateContext();\n");
-                sb.append("            log.debug(\"[EJB-LOOKUP] ").append(jndiName).append(" (cache)\");\n");
+                sb.append("            log.debug(\"[EJB-LOOKUP] ").append(jndiName).append(" (cache)\");");
+                sb.append("\n");
                 sb.append("            BaseUseCase useCase = (BaseUseCase) ctx.lookup(\"").append(jndiName).append("\");\n");
 
                 // Execute avec cast type
@@ -1550,7 +1644,9 @@ public class AclArchitectureGenerator {
                     }
                     sb.append(");\n");
                     sb.append("            log.info(\"[EJB-EXECUTE] ").append(ep.useCaseName).append(" en {}ms\", System.currentTimeMillis() - start);\n");
-                    sb.append("            ").append(ep.ejbOutputDtoName).append(" voOut = (").append(ep.ejbOutputDtoName).append(") result;\n");
+                    String ejbOutRef = conflictingEjbTypes.contains(ep.ejbOutputDtoName)
+                            ? PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName : ep.ejbOutputDtoName;
+                    sb.append("            ").append(ejbOutRef).append(" voOut = (").append(ejbOutRef).append(") result;\n");
                     sb.append("            log.debug(\"[EJB-RESPONSE] Reponse EJB recue pour ").append(ep.useCaseName).append("\");\n");
                     sb.append("            return ").append(mapperField).append(".toRest(voOut);\n");
                 } else {
