@@ -129,7 +129,9 @@ public class PomGenerator {
                         -->
                         <profile>
                             <id>liberty</id>
-                            <packaging>war</packaging>
+                            <properties>
+                                <packaging.type>war</packaging.type>
+                            </properties>
                             <dependencies>
                                 <!-- Exclure Tomcat embarque (Liberty fournit le conteneur) -->
                                 <dependency>

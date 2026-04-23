@@ -822,8 +822,8 @@ public class EjbProjectParser implements ProjectParser {
         for (SwitchStmt sw : switches) {
             for (SwitchEntry entry : sw.getEntries()) {
                 if (entry.getLabels().isEmpty()) continue; // skip default
-                String caseLabel = entry.getLabels().get(0).toString();
-                // caseLabel is like "ENRG_COMMANDE" (enum constant name)
+                String caseLabel = entry.getLabels().get(0).toString().replace("\"", "");
+                // caseLabel is like ENRG_COMMANDE (enum constant name) or enrgCommande (string literal)
 
                 log.info("[INLINE-ACTION] Detecte case: {} dans {}", caseLabel, serviceClassName);
 

@@ -492,7 +492,9 @@ public class CodeGenerationEngine {
                     <profiles>
                         <profile>
                             <id>liberty</id>
-                            <packaging>war</packaging>
+                            <properties>
+                                <packaging.type>war</packaging.type>
+                            </properties>
                             <dependencies>
                                 <dependency>
                                     <groupId>org.springframework.boot</groupId>

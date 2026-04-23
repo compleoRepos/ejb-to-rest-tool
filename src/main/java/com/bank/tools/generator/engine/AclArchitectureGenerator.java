@@ -1101,7 +1101,7 @@ public class AclArchitectureGenerator {
                         if (!isKnownType(rType, analysis)) continue;
                         String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
                         String getter = ("boolean".equals(field.getType()) ? "is" : "get") + capitalize(restName);
-                        sb.append("        payload.put(\"").append(field.getName()).append("\", request.").append(getter).append("());");
+                        sb.append("        payload.put(\"").append(field.getName()).append("\", request.").append(getter).append("());\n");
                     }
                 } else if (ep.useCaseInfo.getEnvelopeFields() != null && !ep.useCaseInfo.getEnvelopeFields().isEmpty()) {
                     for (UseCaseInfo.EnvelopeFieldInfo envField : ep.useCaseInfo.getEnvelopeFields()) {
