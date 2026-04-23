@@ -1064,11 +1064,17 @@ public class AclArchitectureGenerator {
         if (ep.requestDtoName != null) imports.add("import " + PKG_API_DTO_REQUEST + "." + ep.requestDtoName + ";");
         if (ep.responseDtoName != null) imports.add("import " + PKG_API_DTO_RESPONSE + "." + ep.responseDtoName + ";");
         boolean isActionHandlerMapper = ep.useCaseInfo != null && (ep.useCaseInfo.isActionHandler() || ep.useCaseInfo.isInlineAction());
+        DtoInfo ejbOutForActionHandler = isActionHandlerMapper ? findDto(analysis, ep.ejbOutputDtoName) : null;
+        boolean hasTypedEjbOutput = isActionHandlerMapper && ejbOutForActionHandler != null;
         if (!isActionHandlerMapper) {
             if (ep.ejbInputDtoName != null && !isNonImportableEjbType(ep.ejbInputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbInputDtoName + ";");
             if (ep.ejbOutputDtoName != null && !isNonImportableEjbType(ep.ejbOutputDtoName)) imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
         } else {
             imports.add("import " + PKG_INFRA_EJB_TYPES + ".Envelope;");
+            // FIX BUG-2 : Si le type EJB output est connu, l'importer pour le cast dans fromEnvelopePayload
+            if (hasTypedEjbOutput && !isNonImportableEjbType(ep.ejbOutputDtoName)) {
+                imports.add("import " + PKG_INFRA_EJB_TYPES + "." + ep.ejbOutputDtoName + ";");
+            }
         }
         imports.add("import org.springframework.stereotype.Component;");
         for (String imp : imports) sb.append(imp).append("\n");
@@ -1125,29 +1131,45 @@ public class AclArchitectureGenerator {
                 sb.append("    public ").append(ep.responseDtoName).append(" fromEnvelopePayload(Envelope envOut) {\n");
                 sb.append("        ").append(ep.responseDtoName).append(" response = new ").append(ep.responseDtoName).append("();\n");
                 sb.append("        if (envOut == null || envOut.getPayload() == null) return response;\n");
-                sb.append("        java.util.Map<String, Object> data = (java.util.Map<String, Object>) envOut.getPayload();\n");
 
-                DtoInfo respDto = findDto(analysis, ep.ejbOutputDtoName);
-                if (respDto != null) {
-                    for (DtoInfo.FieldInfo field : respDto.getFields()) {
+                if (hasTypedEjbOutput) {
+                    // FIX BUG-2 : Le payload est un objet EJB type, pas une Map
+                    sb.append("        ").append(ep.ejbOutputDtoName).append(" data = (").append(ep.ejbOutputDtoName).append(") envOut.getPayload();\n");
+                    for (DtoInfo.FieldInfo field : ejbOutForActionHandler.getFields()) {
                         if ("serialVersionUID".equals(field.getName()) || field.isStatic()) continue;
                         if (LEGACY_FIELDS.contains(field.getName())) continue;
                         if (isFrameworkType(field.getType())) continue;
                         String castType = cleanType(field.getType());
-                        // Exclure les champs dont le type original a ete resolu en Object
-                        // (types framework/generiques comme Entete, T) car ils n'existent pas dans le RestDTO
                         if ("Object".equals(castType) && !"Object".equals(field.getType()) && !"java.lang.Object".equals(field.getType())) continue;
-                        // Exclure les types inconnus (Emetteur, Canal, etc.) qui ne sont pas dans les DTOs detectes
                         if (!isKnownType(castType, analysis)) continue;
                         String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
                         String setter = "set" + capitalize(restName);
-                        sb.append("        if (data.containsKey(\"").append(field.getName()).append("\")) response.").append(setter).append("((").append(castType).append(") data.get(\"").append(field.getName()).append("\")); \n");
+                        String getter = ("boolean".equals(field.getType()) ? "is" : "get") + capitalize(field.getName());
+                        sb.append("        response.").append(setter).append("(data.").append(getter).append("());\n");
                     }
                 } else {
-                    // DTO EJB inconnu : extraire code/message du payload Envelope et passer le reste dans data
-                    sb.append("        if (data.containsKey(\"code\")) response.setCode((String) data.get(\"code\"));\n");
-                    sb.append("        if (data.containsKey(\"message\")) response.setMessage((String) data.get(\"message\"));\n");
-                    sb.append("        response.setData(data);\n");
+                    // Payload est une Map ou type inconnu
+                    sb.append("        java.util.Map<String, Object> data = (java.util.Map<String, Object>) envOut.getPayload();\n");
+
+                    DtoInfo respDto = findDto(analysis, ep.ejbOutputDtoName);
+                    if (respDto != null) {
+                        for (DtoInfo.FieldInfo field : respDto.getFields()) {
+                            if ("serialVersionUID".equals(field.getName()) || field.isStatic()) continue;
+                            if (LEGACY_FIELDS.contains(field.getName())) continue;
+                            if (isFrameworkType(field.getType())) continue;
+                            String castType = cleanType(field.getType());
+                            if ("Object".equals(castType) && !"Object".equals(field.getType()) && !"java.lang.Object".equals(field.getType())) continue;
+                            if (!isKnownType(castType, analysis)) continue;
+                            String restName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
+                            String setter = "set" + capitalize(restName);
+                            sb.append("        if (data.containsKey(\"").append(field.getName()).append("\")) response.").append(setter).append("((").append(castType).append(") data.get(\"").append(field.getName()).append("\")); \n");
+                        }
+                    } else {
+                        // DTO EJB inconnu : extraire code/message du payload Envelope et passer le reste dans data
+                        sb.append("        if (data.containsKey(\"code\")) response.setCode((String) data.get(\"code\"));\n");
+                        sb.append("        if (data.containsKey(\"message\")) response.setMessage((String) data.get(\"message\"));\n");
+                        sb.append("        response.setData(data);\n");
+                    }
                 }
                 sb.append("        return response;\n");
                 sb.append("    }\n\n");
@@ -1233,11 +1255,15 @@ public class AclArchitectureGenerator {
     private String deriveMapperName(BianEndpoint ep) {
         // FIX DEFAUT-3 : Utiliser un nom metier propre derive du mapping BIAN
         // au lieu du nom technique EJB (ex: CommandChequier_ENRG_COMMANDE → OrderMapper)
+        // FIX BUG-1 : Inclure le verbe d'action pour eviter les collisions quand
+        // plusieurs actions partagent le meme BQ (ex: AJOUTBENEF et SUPBENEF → BQ=beneficiary)
         if (ep.bianMapping != null) {
             String bq = ep.bianMapping.getBehaviorQualifier();
             String action = ep.bianMapping.getAction();
             if (bq != null && !bq.isEmpty()) {
-                return toPascalCase(bq) + "Mapper";
+                // Toujours prefixer avec le verbe d'action pour unicite
+                String verb = (action != null && !action.isEmpty()) ? capitalize(actionToVerb(action)) : "";
+                return verb + toPascalCase(bq) + "Mapper";
             }
             if (action != null && !action.isEmpty()) {
                 String sd = ep.bianMapping.getServiceDomain();
