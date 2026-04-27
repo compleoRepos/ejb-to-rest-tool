@@ -892,3 +892,4 @@ public class AvisOpereService {
     tags: ["EaiLog", "logging", "initLogTraceInfos", "SLF4J", "@Slf4j", "MDC", "Logback", "Spring Boot"],
   },
 ];
+// RAG v8.2 — Mon Apr 27 07:43:39 EDT 2026
