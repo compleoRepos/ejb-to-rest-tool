@@ -1,8 +1,11 @@
 package com.bank.tools.generator.parser;
 
 import com.bank.tools.generator.model.AdapterContractInfo;
+import com.bank.tools.generator.model.AdapterContractInfo.AuthConfig;
 import com.bank.tools.generator.model.AdapterContractInfo.EndpointInfo;
 import com.bank.tools.generator.model.AdapterContractInfo.FieldInfo;
+import com.bank.tools.generator.model.AdapterContractInfo.HeaderInfo;
+import com.bank.tools.generator.model.AdapterContractInfo.ParamInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -16,12 +19,18 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Parser de contrats JSON normalises d'Adapters WebSphere.
+ * Parser de contrats JSON normalises d'Adapters WebSphere ou de toute API REST.
  *
- * <p>Lit un fichier JSON decrivant le contrat d'un adapter WebSphere
- * et produit un {@link AdapterContractInfo} utilisable par le generateur.</p>
+ * <p>Lit un fichier JSON decrivant le contrat d'un adapter et produit un
+ * {@link AdapterContractInfo} utilisable par le generateur.</p>
  *
- * <p>Le format JSON attendu est documente dans {@link AdapterContractInfo}.</p>
+ * <p>Supporte :</p>
+ * <ul>
+ *   <li>Methodes HTTP : GET, POST, PUT, DELETE, PATCH</li>
+ *   <li>Path parameters, query parameters, headers personnalises</li>
+ *   <li>Pagination BIAN</li>
+ *   <li>Authentification : API Key, Bearer, OAuth2, Basic, mTLS</li>
+ * </ul>
  *
  * @see AdapterContractInfo
  */
@@ -67,6 +76,12 @@ public class AdapterContractParser {
         contract.setDescription(getTextOrDefault(root, "description", "Adapter " + adapterName));
         contract.setVersion(getTextOrDefault(root, "version", "1.0.0"));
 
+        // Authentification
+        JsonNode authNode = root.get("auth");
+        if (authNode != null && !authNode.isNull()) {
+            contract.setAuth(parseAuth(authNode));
+        }
+
         // Endpoints
         JsonNode endpointsNode = root.get("endpoints");
         if (endpointsNode == null || !endpointsNode.isArray() || endpointsNode.isEmpty()) {
@@ -79,8 +94,9 @@ public class AdapterContractParser {
         }
         contract.setEndpoints(endpoints);
 
-        log.info("[AdapterParser] Contrat parse : adapter={}, baseUrl={}, endpoints={}",
-                adapterName, baseUrl, endpoints.size());
+        log.info("[AdapterParser] Contrat parse : adapter={}, baseUrl={}, endpoints={}, auth={}",
+                adapterName, baseUrl, endpoints.size(),
+                contract.hasAuth() ? contract.getAuth().getType() : "none");
 
         return contract;
     }
@@ -113,9 +129,38 @@ public class AdapterContractParser {
                 }
                 if (ep.getMethod() == null || ep.getMethod().isBlank()) {
                     errors.add(prefix + ".method est obligatoire");
+                } else {
+                    String m = ep.getMethod().toUpperCase();
+                    if (!List.of("GET", "POST", "PUT", "DELETE", "PATCH").contains(m)) {
+                        errors.add(prefix + ".method doit etre GET, POST, PUT, DELETE ou PATCH");
+                    }
                 }
                 if (ep.getPath() == null || ep.getPath().isBlank()) {
                     errors.add(prefix + ".path est obligatoire");
+                }
+                // GET/DELETE ne doivent pas avoir de request_fields
+                if (ep.getMethod() != null && !ep.hasRequestBody() && ep.getRequestFields() != null && !ep.getRequestFields().isEmpty()) {
+                    errors.add(prefix + " : les methodes " + ep.getMethod() + " ne doivent pas avoir de request_fields (utiliser query_params)");
+                }
+            }
+        }
+
+        // Validation auth
+        if (contract.hasAuth()) {
+            AuthConfig auth = contract.getAuth();
+            if (auth.isApiKey()) {
+                if (auth.getApiKeyHeader() == null || auth.getApiKeyHeader().isBlank()) {
+                    errors.add("auth.api_key_header est obligatoire pour le type api_key");
+                }
+            }
+            if (auth.isOauth2()) {
+                if (auth.getOauth2TokenUrl() == null || auth.getOauth2TokenUrl().isBlank()) {
+                    errors.add("auth.oauth2_token_url est obligatoire pour le type oauth2");
+                }
+            }
+            if (auth.isMtls()) {
+                if (auth.getMtlsKeystorePath() == null || auth.getMtlsKeystorePath().isBlank()) {
+                    errors.add("auth.mtls_keystore_path est obligatoire pour le type mtls");
                 }
             }
         }
@@ -124,6 +169,37 @@ public class AdapterContractParser {
     }
 
     // ===================== PRIVATE HELPERS =====================
+
+    private AuthConfig parseAuth(JsonNode node) {
+        AuthConfig auth = new AuthConfig();
+        auth.setType(getTextOrDefault(node, "type", "none"));
+
+        // API Key
+        auth.setApiKeyHeader(getTextOrDefault(node, "api_key_header", "X-API-Key"));
+        auth.setApiKeyValue(getTextOrDefault(node, "api_key_value", "${ADAPTER_API_KEY}"));
+
+        // Bearer
+        auth.setBearerToken(getTextOrDefault(node, "bearer_token", "${ADAPTER_TOKEN}"));
+
+        // OAuth2
+        auth.setOauth2TokenUrl(getTextOrDefault(node, "oauth2_token_url", null));
+        auth.setOauth2ClientId(getTextOrDefault(node, "oauth2_client_id", "${OAUTH2_CLIENT_ID}"));
+        auth.setOauth2ClientSecret(getTextOrDefault(node, "oauth2_client_secret", "${OAUTH2_CLIENT_SECRET}"));
+        auth.setOauth2Scope(getTextOrDefault(node, "oauth2_scope", ""));
+
+        // Basic
+        auth.setBasicUsername(getTextOrDefault(node, "basic_username", "${ADAPTER_USERNAME}"));
+        auth.setBasicPassword(getTextOrDefault(node, "basic_password", "${ADAPTER_PASSWORD}"));
+
+        // mTLS
+        auth.setMtlsKeystorePath(getTextOrDefault(node, "mtls_keystore_path", null));
+        auth.setMtlsKeystorePassword(getTextOrDefault(node, "mtls_keystore_password", "${KEYSTORE_PASSWORD}"));
+        auth.setMtlsTruststorePath(getTextOrDefault(node, "mtls_truststore_path", null));
+        auth.setMtlsTruststorePassword(getTextOrDefault(node, "mtls_truststore_password", "${TRUSTSTORE_PASSWORD}"));
+
+        log.debug("[AdapterParser] Auth parse : type={}", auth.getType());
+        return auth;
+    }
 
     private EndpointInfo parseEndpoint(JsonNode node, String adapterName) throws IOException {
         EndpointInfo ep = new EndpointInfo();
@@ -134,10 +210,35 @@ public class AdapterContractParser {
         ep.setPath(getTextOrDefault(node, "path", "/" + adapterName.toLowerCase() + "/" + ep.getOperation()));
         ep.setSummary(getTextOrDefault(node, "summary", "Operation " + ep.getOperation()));
         ep.setIdempotent(getBoolOrDefault(node, "idempotent", false));
+        ep.setPaginated(getBoolOrDefault(node, "paginated", false));
         ep.setTimeoutSeconds(getIntOrDefault(node, "timeout_seconds", 30));
         ep.setMaxRetries(getIntOrDefault(node, "max_retries", 3));
 
-        // Request fields
+        // Path parameters
+        JsonNode pathParams = node.get("path_params");
+        if (pathParams != null && pathParams.isArray()) {
+            for (JsonNode paramNode : pathParams) {
+                ep.getPathParams().add(parseParam(paramNode, true));
+            }
+        }
+
+        // Query parameters
+        JsonNode queryParams = node.get("query_params");
+        if (queryParams != null && queryParams.isArray()) {
+            for (JsonNode paramNode : queryParams) {
+                ep.getQueryParams().add(parseParam(paramNode, false));
+            }
+        }
+
+        // Custom headers
+        JsonNode headers = node.get("headers");
+        if (headers != null && headers.isArray()) {
+            for (JsonNode headerNode : headers) {
+                ep.getHeaders().add(parseHeader(headerNode));
+            }
+        }
+
+        // Request fields (POST, PUT, PATCH only)
         JsonNode reqFields = node.get("request_fields");
         if (reqFields != null && reqFields.isArray()) {
             for (JsonNode fieldNode : reqFields) {
@@ -153,11 +254,30 @@ public class AdapterContractParser {
             }
         }
 
-        log.debug("[AdapterParser] Endpoint parse : {} {} {} (idempotent={}, timeout={}s, retries={})",
+        log.debug("[AdapterParser] Endpoint parse : {} {} {} (idempotent={}, paginated={}, timeout={}s, retries={}, pathParams={}, queryParams={}, headers={})",
                 ep.getMethod(), ep.getPath(), ep.getOperation(),
-                ep.isIdempotent(), ep.getTimeoutSeconds(), ep.getMaxRetries());
+                ep.isIdempotent(), ep.isPaginated(), ep.getTimeoutSeconds(), ep.getMaxRetries(),
+                ep.getPathParams().size(), ep.getQueryParams().size(), ep.getHeaders().size());
 
         return ep;
+    }
+
+    private ParamInfo parseParam(JsonNode node, boolean defaultRequired) {
+        ParamInfo param = new ParamInfo();
+        param.setName(getTextOrDefault(node, "name", "unknown"));
+        param.setType(getTextOrDefault(node, "type", "String"));
+        param.setRequired(getBoolOrDefault(node, "required", defaultRequired));
+        param.setDescription(getTextOrDefault(node, "description", ""));
+        param.setDefaultValue(getTextOrDefault(node, "default_value", null));
+        return param;
+    }
+
+    private HeaderInfo parseHeader(JsonNode node) {
+        HeaderInfo header = new HeaderInfo();
+        header.setName(getTextOrDefault(node, "name", "X-Custom"));
+        header.setValue(getTextOrDefault(node, "value", ""));
+        header.setDescription(getTextOrDefault(node, "description", ""));
+        return header;
     }
 
     private FieldInfo parseField(JsonNode node) {

@@ -5,6 +5,8 @@ import com.bank.tools.generator.bian.BianMapping;
 import com.bank.tools.generator.model.AdapterContractInfo;
 import com.bank.tools.generator.model.AdapterContractInfo.EndpointInfo;
 import com.bank.tools.generator.model.AdapterContractInfo.FieldInfo;
+import com.bank.tools.generator.model.AdapterContractInfo.HeaderInfo;
+import com.bank.tools.generator.model.AdapterContractInfo.ParamInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -59,6 +61,8 @@ public class AdapterWrapperGenerator {
     private String PKG_ACL_MAPPER;
     private String PKG_ACL_TRANSLATOR;
     private String PKG_CONFIG;
+    private String PKG_MONITORING;
+    private String PKG_OPENAPI;
 
     public AdapterWrapperGenerator(BianAutoDetector bianAutoDetector) {
         this.bianAutoDetector = bianAutoDetector;
@@ -166,7 +170,13 @@ public class AdapterWrapperGenerator {
         // 20. Generer les tests Pact Consumer
         generatePactConsumerTests(srcMain, contract, bianMapping);
 
-        // 21. Generer le README
+        // 21. Generer la configuration Monitoring (Micrometer + OpenTelemetry)
+        generateMonitoringConfig(srcMain, contract);
+
+        // 22. Generer la configuration OpenAPI/Swagger 3.0
+        generateOpenApiConfig(srcMain, contract, bianMapping);
+
+        // 23. Generer le README
         generateReadme(projectRoot, contract, bianMapping);
 
         log.info("[ADAPTER-WRAPPER] ========== FIN GENERATION WRAPPER BIAN ==========");
@@ -195,6 +205,8 @@ public class AdapterWrapperGenerator {
         PKG_ACL_MAPPER = PKG_BASE + ".acl.mapper";
         PKG_ACL_TRANSLATOR = PKG_BASE + ".acl.translator";
         PKG_CONFIG = PKG_BASE + ".config";
+        PKG_MONITORING = PKG_BASE + ".monitoring";
+        PKG_OPENAPI = PKG_BASE + ".openapi";
     }
 
     private void createDirectories(Path srcMain) throws IOException {
@@ -204,7 +216,7 @@ public class AdapterWrapperGenerator {
                 PKG_DOMAIN_SERVICE, PKG_DOMAIN_EXCEPTION,
                 PKG_INFRA_REST_ADAPTER, PKG_INFRA_REST_CONFIG, PKG_INFRA_MOCK,
                 PKG_INFRA_IDEMPOTENCY, PKG_DOMAIN_MODEL, PKG_ACL_MAPPER,
-                PKG_ACL_TRANSLATOR, PKG_CONFIG
+                PKG_ACL_TRANSLATOR, PKG_CONFIG, PKG_MONITORING, PKG_OPENAPI
         };
         for (String pkg : packages) {
             resolvePackagePath(srcMain, pkg);
@@ -811,11 +823,38 @@ public class AdapterWrapperGenerator {
             sb.append("     * ").append(ep.getSummary()).append("\n");
             sb.append("     *\n");
             sb.append("     * @param crReferenceId identifiant de reference du Control Record\n");
-            sb.append("     * @param domainModel l'objet du domaine BIAN\n");
+            if (ep.hasRequestBody()) {
+                sb.append("     * @param domainModel l'objet du domaine BIAN\n");
+            }
+            // Path params Javadoc
+            for (ParamInfo p : ep.getPathParams()) {
+                sb.append("     * @param ").append(p.getName()).append(" ").append(p.getDescription()).append("\n");
+            }
+            // Query params Javadoc
+            for (ParamInfo p : ep.getQueryParams()) {
+                sb.append("     * @param ").append(p.getName()).append(" ").append(p.getDescription()).append("\n");
+            }
+            if (ep.isPaginated()) {
+                sb.append("     * @param page numero de page (0-based)\n");
+                sb.append("     * @param size nombre d'elements par page\n");
+            }
             sb.append("     * @return le Domain Model enrichi avec la reponse\n");
             sb.append("     */\n");
             sb.append("    ").append(domainModelName).append(" ").append(ep.toMethodName());
-            sb.append("(String crReferenceId, ").append(domainModelName).append(" domainModel);\n\n");
+            sb.append("(String crReferenceId");
+            if (ep.hasRequestBody()) {
+                sb.append(", ").append(domainModelName).append(" domainModel");
+            }
+            for (ParamInfo p : ep.getPathParams()) {
+                sb.append(", ").append(p.toJavaType()).append(" ").append(p.getName());
+            }
+            for (ParamInfo p : ep.getQueryParams()) {
+                sb.append(", ").append(p.toJavaType()).append(" ").append(p.getName());
+            }
+            if (ep.isPaginated()) {
+                sb.append(", int page, int size");
+            }
+            sb.append(");\n\n");
         }
 
         sb.append("}\n");
@@ -918,34 +957,101 @@ public class AdapterWrapperGenerator {
             String responseDto = ep.toResponseDtoName();
             String mapperField = methodName + "Mapper";
             String fallbackName = methodName + "Fallback";
+            String httpMethod = ep.getMethod() != null ? ep.getMethod().toUpperCase() : "POST";
 
             sb.append("    @CircuitBreaker(name = \"restAdapter\", fallbackMethod = \"").append(fallbackName).append("\")\n");
             sb.append("    @Retry(name = \"restAdapter\")\n");
             sb.append("    @Bulkhead(name = \"restAdapter\")\n");
             sb.append("    @Override\n");
             sb.append("    public ").append(domainModelName).append(" ").append(methodName);
-            sb.append("(String crReferenceId, ").append(domainModelName).append(" domainModel) {\n");
+            sb.append("(String crReferenceId");
+            if (ep.hasRequestBody()) {
+                sb.append(", ").append(domainModelName).append(" domainModel");
+            }
+            for (ParamInfo p : ep.getPathParams()) {
+                sb.append(", ").append(p.toJavaType()).append(" ").append(p.getName());
+            }
+            for (ParamInfo p : ep.getQueryParams()) {
+                sb.append(", ").append(p.toJavaType()).append(" ").append(p.getName());
+            }
+            if (ep.isPaginated()) {
+                sb.append(", int page, int size");
+            }
+            sb.append(") {\n");
 
-            sb.append("        log.info(\"[REST-CALL] ").append(ep.getOperation()).append(" -> {} | crRef={}\", adapterBaseUrl, crReferenceId);\n");
+            sb.append("        log.info(\"[REST-CALL] ").append(httpMethod).append(" ").append(ep.getOperation()).append(" -> {} | crRef={}\", adapterBaseUrl, crReferenceId);\n");
 
-            // Idempotency check
+            // Idempotency check (POST/PUT only)
             if (ep.isIdempotent()) {
                 sb.append("        // Verification d'idempotence\n");
                 sb.append("        idempotencyService.checkAndMark(crReferenceId + \"-").append(methodName).append("\");\n");
             }
 
-            sb.append("        // ACL : Domain Model -> Adapter Request DTO\n");
-            sb.append("        ").append(requestDto).append(" adapterRequest = ").append(mapperField).append(".toAdapterRequest(domainModel);\n\n");
+            // Build URL with path params and query params
+            sb.append("        // Construction de l'URL\n");
+            sb.append("        StringBuilder urlBuilder = new StringBuilder(adapterBaseUrl + \"").append(ep.getPath()).append("\");\n");
+            // Replace path params in URL
+            for (ParamInfo p : ep.getPathParams()) {
+                sb.append("        urlBuilder = new StringBuilder(urlBuilder.toString().replace(\"{" + "").append(p.getName()).append("" + "}\", String.valueOf(").append(p.getName()).append(")));\n");
+            }
+            // Append query params
+            if (!ep.getQueryParams().isEmpty() || ep.isPaginated()) {
+                sb.append("        urlBuilder.append(\"?\");\n");
+                boolean first = true;
+                for (ParamInfo p : ep.getQueryParams()) {
+                    if (!first) sb.append("        urlBuilder.append(\"&\");\n");
+                    sb.append("        if (").append(p.getName()).append(" != null) {\n");
+                    sb.append("            urlBuilder.append(\"").append(p.getName()).append("=\").append(").append(p.getName()).append(");\n");
+                    sb.append("        }\n");
+                    first = false;
+                }
+                if (ep.isPaginated()) {
+                    if (!first) sb.append("        urlBuilder.append(\"&\");\n");
+                    sb.append("        urlBuilder.append(\"page=\").append(page).append(\"&size=\").append(size);\n");
+                }
+            }
+            sb.append("        String url = urlBuilder.toString();\n\n");
 
-            sb.append("        String url = adapterBaseUrl + \"").append(ep.getPath()).append("\";\n");
+            if (ep.hasRequestBody()) {
+                sb.append("        // ACL : Domain Model -> Adapter Request DTO\n");
+                sb.append("        ").append(requestDto).append(" adapterRequest = ").append(mapperField).append(".toAdapterRequest(domainModel);\n\n");
+            }
+
             sb.append("        try {\n");
             sb.append("            HttpHeaders headers = new HttpHeaders();\n");
             sb.append("            headers.setContentType(MediaType.APPLICATION_JSON);\n");
             sb.append("            headers.set(\"X-Correlation-Id\", crReferenceId);\n");
-            sb.append("            HttpEntity<").append(requestDto).append("> entity = new HttpEntity<>(adapterRequest, headers);\n");
+            // Custom headers from contract
+            for (HeaderInfo h : ep.getHeaders()) {
+                sb.append("            headers.set(\"").append(h.getName()).append("\", \"").append(h.getValue()).append("\");\n");
+            }
+
             sb.append("            long start = System.currentTimeMillis();\n");
-            sb.append("            ResponseEntity<").append(responseDto).append("> response = restTemplate.postForEntity(url, entity, ").append(responseDto).append(".class);\n");
-            sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.getOperation()).append(" en {}ms \u2014 HTTP {}\", System.currentTimeMillis() - start, response.getStatusCode());\n\n");
+
+            // HTTP method-specific call
+            if ("GET".equals(httpMethod)) {
+                sb.append("            HttpEntity<?> entity = new HttpEntity<>(headers);\n");
+                sb.append("            ResponseEntity<").append(responseDto).append("> response = restTemplate.exchange(\n");
+                sb.append("                url, org.springframework.http.HttpMethod.GET, entity, ").append(responseDto).append(".class);\n");
+            } else if ("DELETE".equals(httpMethod)) {
+                sb.append("            HttpEntity<?> entity = new HttpEntity<>(headers);\n");
+                sb.append("            ResponseEntity<").append(responseDto).append("> response = restTemplate.exchange(\n");
+                sb.append("                url, org.springframework.http.HttpMethod.DELETE, entity, ").append(responseDto).append(".class);\n");
+            } else if ("PUT".equals(httpMethod)) {
+                sb.append("            HttpEntity<").append(requestDto).append("> entity = new HttpEntity<>(adapterRequest, headers);\n");
+                sb.append("            ResponseEntity<").append(responseDto).append("> response = restTemplate.exchange(\n");
+                sb.append("                url, org.springframework.http.HttpMethod.PUT, entity, ").append(responseDto).append(".class);\n");
+            } else if ("PATCH".equals(httpMethod)) {
+                sb.append("            HttpEntity<").append(requestDto).append("> entity = new HttpEntity<>(adapterRequest, headers);\n");
+                sb.append("            ResponseEntity<").append(responseDto).append("> response = restTemplate.exchange(\n");
+                sb.append("                url, org.springframework.http.HttpMethod.PATCH, entity, ").append(responseDto).append(".class);\n");
+            } else {
+                // POST (default)
+                sb.append("            HttpEntity<").append(requestDto).append("> entity = new HttpEntity<>(adapterRequest, headers);\n");
+                sb.append("            ResponseEntity<").append(responseDto).append("> response = restTemplate.postForEntity(url, entity, ").append(responseDto).append(".class);\n");
+            }
+
+            sb.append("            log.info(\"[REST-RESPONSE] ").append(httpMethod).append(" ").append(ep.getOperation()).append(" en {}ms — HTTP {}\", System.currentTimeMillis() - start, response.getStatusCode());\n\n");
             sb.append("            // ACL : Adapter Response DTO -> Domain Model\n");
             sb.append("            return ").append(mapperField).append(".fromAdapterResponse(response.getBody());\n");
             sb.append("        } catch (Exception e) {\n");
@@ -954,10 +1060,23 @@ public class AdapterWrapperGenerator {
             sb.append("        }\n");
             sb.append("    }\n\n");
 
-            // Fallback
+            // Fallback — same signature
             sb.append("    public ").append(domainModelName).append(" ").append(fallbackName);
-            sb.append("(String crReferenceId, ").append(domainModelName).append(" domainModel, Throwable t) {\n");
-            sb.append("        log.error(\"[RESILIENCE-FALLBACK] Adapter indisponible pour ").append(ep.getOperation()).append(" \u2014 cause : {}\", t.getMessage());\n");
+            sb.append("(String crReferenceId");
+            if (ep.hasRequestBody()) {
+                sb.append(", ").append(domainModelName).append(" domainModel");
+            }
+            for (ParamInfo p : ep.getPathParams()) {
+                sb.append(", ").append(p.toJavaType()).append(" ").append(p.getName());
+            }
+            for (ParamInfo p : ep.getQueryParams()) {
+                sb.append(", ").append(p.toJavaType()).append(" ").append(p.getName());
+            }
+            if (ep.isPaginated()) {
+                sb.append(", int page, int size");
+            }
+            sb.append(", Throwable t) {\n");
+            sb.append("        log.error(\"[RESILIENCE-FALLBACK] Adapter indisponible pour ").append(ep.getOperation()).append(" — cause : {}\", t.getMessage());\n");
             sb.append("        throw new RuntimeException(\"Adapter temporairement indisponible (").append(ep.getOperation()).append("). Veuillez reessayer plus tard.\", t);\n");
             sb.append("    }\n\n");
         }
@@ -1067,7 +1186,20 @@ public class AdapterWrapperGenerator {
             String domainModelName = capitalize(ep.toMethodName()) + "DomainModel";
             sb.append("    @Override\n");
             sb.append("    public ").append(domainModelName).append(" ").append(ep.toMethodName());
-            sb.append("(String crReferenceId, ").append(domainModelName).append(" domainModel) {\n");
+            sb.append("(String crReferenceId");
+            if (ep.hasRequestBody()) {
+                sb.append(", ").append(domainModelName).append(" domainModel");
+            }
+            for (ParamInfo p : ep.getPathParams()) {
+                sb.append(", ").append(p.toJavaType()).append(" ").append(p.getName());
+            }
+            for (ParamInfo p : ep.getQueryParams()) {
+                sb.append(", ").append(p.toJavaType()).append(" ").append(p.getName());
+            }
+            if (ep.isPaginated()) {
+                sb.append(", int page, int size");
+            }
+            sb.append(") {\n");
             sb.append("        log.info(\"[MOCK] ").append(ep.toMethodName()).append(" appele | crRef={}\", crReferenceId);\n");
             sb.append("        ").append(domainModelName).append(" response = new ").append(domainModelName).append("();\n");
 
@@ -1098,6 +1230,8 @@ public class AdapterWrapperGenerator {
     private void generateRestClientConfig(Path srcMain, AdapterContractInfo contract) throws IOException {
         Path dir = resolvePackagePath(srcMain, PKG_INFRA_REST_CONFIG);
         Path file = dir.resolve("RestClientConfig.java");
+        boolean hasAuth = contract.hasAuth();
+        String authType = hasAuth ? contract.getAuth().getType() : "none";
 
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(PKG_INFRA_REST_CONFIG).append(";\n\n");
@@ -1108,7 +1242,23 @@ public class AdapterWrapperGenerator {
         sb.append("import org.springframework.http.client.SimpleClientHttpRequestFactory;\n");
         sb.append("import org.springframework.web.client.RestTemplate;\n");
         sb.append("import org.slf4j.Logger;\n");
-        sb.append("import org.slf4j.LoggerFactory;\n\n");
+        sb.append("import org.slf4j.LoggerFactory;\n");
+        if (hasAuth && ("oauth2".equals(authType) || "bearer".equals(authType) || "api_key".equals(authType) || "basic".equals(authType))) {
+            sb.append("import java.nio.charset.StandardCharsets;\n");
+            sb.append("import java.util.Base64;\n");
+        }
+        if (hasAuth && "mtls".equals(authType)) {
+            sb.append("import javax.net.ssl.SSLContext;\n");
+            sb.append("import javax.net.ssl.KeyManagerFactory;\n");
+            sb.append("import javax.net.ssl.TrustManagerFactory;\n");
+            sb.append("import java.io.FileInputStream;\n");
+            sb.append("import java.security.KeyStore;\n");
+            sb.append("import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;\n");
+            sb.append("import org.apache.http.impl.client.HttpClients;\n");
+            sb.append("import org.apache.http.impl.client.CloseableHttpClient;\n");
+            sb.append("import org.apache.http.conn.ssl.SSLConnectionSocketFactory;\n");
+        }
+        sb.append("\n");
 
         sb.append("@Configuration\n@Profile(\"rest\")\n");
         sb.append("public class RestClientConfig {\n\n");
@@ -1118,25 +1268,157 @@ public class AdapterWrapperGenerator {
         sb.append("    @Value(\"${adapter.websphere.read-timeout:30000}\")\n");
         sb.append("    private int readTimeout;\n\n");
 
+        // Auth-specific @Value fields
+        if (hasAuth) {
+            switch (authType) {
+                case "api_key" -> {
+                    sb.append("    @Value(\"${adapter.auth.api-key-header:").append(contract.getAuth().getApiKeyHeader()).append("}\")").append("\n");
+                    sb.append("    private String apiKeyHeader;\n\n");
+                    sb.append("    @Value(\"${adapter.auth.api-key-value:").append(contract.getAuth().getApiKeyValue()).append("}\")").append("\n");
+                    sb.append("    private String apiKeyValue;\n\n");
+                }
+                case "bearer" -> {
+                    sb.append("    @Value(\"${adapter.auth.bearer-token:").append(contract.getAuth().getBearerToken()).append("}\")").append("\n");
+                    sb.append("    private String bearerToken;\n\n");
+                }
+                case "oauth2" -> {
+                    sb.append("    @Value(\"${adapter.auth.oauth2.token-url:").append(contract.getAuth().getOauth2TokenUrl()).append("}\")").append("\n");
+                    sb.append("    private String oauth2TokenUrl;\n\n");
+                    sb.append("    @Value(\"${adapter.auth.oauth2.client-id:").append(contract.getAuth().getOauth2ClientId()).append("}\")").append("\n");
+                    sb.append("    private String oauth2ClientId;\n\n");
+                    sb.append("    @Value(\"${adapter.auth.oauth2.client-secret:").append(contract.getAuth().getOauth2ClientSecret()).append("}\")").append("\n");
+                    sb.append("    private String oauth2ClientSecret;\n\n");
+                    sb.append("    @Value(\"${adapter.auth.oauth2.scope:").append(contract.getAuth().getOauth2Scope()).append("}\")").append("\n");
+                    sb.append("    private String oauth2Scope;\n\n");
+                }
+                case "basic" -> {
+                    sb.append("    @Value(\"${adapter.auth.basic.username:").append(contract.getAuth().getBasicUsername()).append("}\")").append("\n");
+                    sb.append("    private String basicUsername;\n\n");
+                    sb.append("    @Value(\"${adapter.auth.basic.password:").append(contract.getAuth().getBasicPassword()).append("}\")").append("\n");
+                    sb.append("    private String basicPassword;\n\n");
+                }
+                case "mtls" -> {
+                    sb.append("    @Value(\"${adapter.auth.mtls.keystore-path:").append(contract.getAuth().getMtlsKeystorePath()).append("}\")").append("\n");
+                    sb.append("    private String keystorePath;\n\n");
+                    sb.append("    @Value(\"${adapter.auth.mtls.keystore-password:").append(contract.getAuth().getMtlsKeystorePassword()).append("}\")").append("\n");
+                    sb.append("    private String keystorePassword;\n\n");
+                    sb.append("    @Value(\"${adapter.auth.mtls.truststore-path:").append(contract.getAuth().getMtlsTruststorePath()).append("}\")").append("\n");
+                    sb.append("    private String truststorePath;\n\n");
+                    sb.append("    @Value(\"${adapter.auth.mtls.truststore-password:").append(contract.getAuth().getMtlsTruststorePassword()).append("}\")").append("\n");
+                    sb.append("    private String truststorePassword;\n\n");
+                }
+            }
+        }
+
         sb.append("    @Bean\n");
         sb.append("    public RestTemplate restTemplate() {\n");
-        sb.append("        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();\n");
-        sb.append("        factory.setConnectTimeout(connectTimeout);\n");
-        sb.append("        factory.setReadTimeout(readTimeout);\n");
-        sb.append("        RestTemplate restTemplate = new RestTemplate(factory);\n\n");
+
+        // mTLS requires special SSL factory
+        if (hasAuth && "mtls".equals(authType)) {
+            sb.append("        try {\n");
+            sb.append("            KeyStore keyStore = KeyStore.getInstance(\"PKCS12\");\n");
+            sb.append("            keyStore.load(new FileInputStream(keystorePath), keystorePassword.toCharArray());\n");
+            sb.append("            KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());\n");
+            sb.append("            kmf.init(keyStore, keystorePassword.toCharArray());\n\n");
+            sb.append("            KeyStore trustStore = KeyStore.getInstance(\"PKCS12\");\n");
+            sb.append("            trustStore.load(new FileInputStream(truststorePath), truststorePassword.toCharArray());\n");
+            sb.append("            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());\n");
+            sb.append("            tmf.init(trustStore);\n\n");
+            sb.append("            SSLContext sslContext = SSLContext.getInstance(\"TLS\");\n");
+            sb.append("            sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);\n\n");
+            sb.append("            SSLConnectionSocketFactory socketFactory = new SSLConnectionSocketFactory(sslContext);\n");
+            sb.append("            CloseableHttpClient httpClient = HttpClients.custom().setSSLSocketFactory(socketFactory).build();\n");
+            sb.append("            HttpComponentsClientHttpRequestFactory factory = new HttpComponentsClientHttpRequestFactory(httpClient);\n");
+            sb.append("            factory.setConnectTimeout(connectTimeout);\n");
+            sb.append("            factory.setReadTimeout(readTimeout);\n");
+            sb.append("            RestTemplate restTemplate = new RestTemplate(factory);\n\n");
+        } else {
+            sb.append("        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();\n");
+            sb.append("        factory.setConnectTimeout(connectTimeout);\n");
+            sb.append("        factory.setReadTimeout(readTimeout);\n");
+            sb.append("        RestTemplate restTemplate = new RestTemplate(factory);\n\n");
+        }
+
+        // Auth interceptor
+        if (hasAuth) {
+            sb.append("        // Intercepteur d'authentification\n");
+            sb.append("        restTemplate.getInterceptors().add((request, body, execution) -> {\n");
+            switch (authType) {
+                case "api_key" -> {
+                    sb.append("            request.getHeaders().set(apiKeyHeader, apiKeyValue);\n");
+                }
+                case "bearer" -> {
+                    sb.append("            request.getHeaders().setBearerAuth(bearerToken);\n");
+                }
+                case "oauth2" -> {
+                    sb.append("            // TODO: Implementer le renouvellement automatique du token OAuth2\n");
+                    sb.append("            // Pour l'instant, utiliser un token statique configure\n");
+                    sb.append("            String token = obtainOAuth2Token();\n");
+                    sb.append("            request.getHeaders().setBearerAuth(token);\n");
+                }
+                case "basic" -> {
+                    sb.append("            String credentials = basicUsername + \":\" + basicPassword;\n");
+                    sb.append("            String encoded = Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));\n");
+                    sb.append("            request.getHeaders().set(\"Authorization\", \"Basic \" + encoded);\n");
+                }
+            }
+            sb.append("            return execution.execute(request, body);\n");
+            sb.append("        });\n\n");
+        }
+
+        // Logging interceptor
+        sb.append("        // Intercepteur de logging\n");
         sb.append("        restTemplate.getInterceptors().add((request, body, execution) -> {\n");
-        sb.append("            log.debug(\"[REST-OUT] {} {} — body: {} bytes\", request.getMethod(), request.getURI(), body.length);\n");
+        sb.append("            log.debug(\"[REST-OUT] {} {} \u2014 body: {} bytes\", request.getMethod(), request.getURI(), body.length);\n");
         sb.append("            var response = execution.execute(request, body);\n");
         sb.append("            log.debug(\"[REST-IN] HTTP {}\", response.getStatusCode());\n");
         sb.append("            return response;\n");
         sb.append("        });\n\n");
-        sb.append("        log.info(\"[REST-CONFIG] RestTemplate configure — connectTimeout={}ms, readTimeout={}ms\", connectTimeout, readTimeout);\n");
+
+        sb.append("        log.info(\"[REST-CONFIG] RestTemplate configure \u2014 connectTimeout={}ms, readTimeout={}ms, auth={}\", connectTimeout, readTimeout, \"").append(authType).append("\");\n");
         sb.append("        return restTemplate;\n");
+
+        if (hasAuth && "mtls".equals(authType)) {
+            sb.append("        } catch (Exception e) {\n");
+            sb.append("            throw new RuntimeException(\"Erreur de configuration mTLS\", e);\n");
+            sb.append("        }\n");
+        }
+
         sb.append("    }\n");
+
+        // OAuth2 token method
+        if (hasAuth && "oauth2".equals(authType)) {
+            sb.append("\n");
+            sb.append("    /**\n");
+            sb.append("     * Obtient un token OAuth2 via le flux client_credentials.\n");
+            sb.append("     * En production, implementer un cache avec renouvellement automatique.\n");
+            sb.append("     */\n");
+            sb.append("    private String obtainOAuth2Token() {\n");
+            sb.append("        RestTemplate tokenClient = new RestTemplate();\n");
+            sb.append("        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();\n");
+            sb.append("        headers.setContentType(org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED);\n");
+            sb.append("        String credentials = Base64.getEncoder().encodeToString(\n");
+            sb.append("            (oauth2ClientId + \":\" + oauth2ClientSecret).getBytes(StandardCharsets.UTF_8));\n");
+            sb.append("        headers.set(\"Authorization\", \"Basic \" + credentials);\n\n");
+            sb.append("        String body = \"grant_type=client_credentials\";\n");
+            sb.append("        if (oauth2Scope != null && !oauth2Scope.isBlank()) {\n");
+            sb.append("            body += \"&scope=\" + oauth2Scope;\n");
+            sb.append("        }\n\n");
+            sb.append("        org.springframework.http.HttpEntity<String> entity = new org.springframework.http.HttpEntity<>(body, headers);\n");
+            sb.append("        org.springframework.http.ResponseEntity<java.util.Map> response = tokenClient.postForEntity(oauth2TokenUrl, entity, java.util.Map.class);\n");
+            sb.append("        if (response.getBody() != null && response.getBody().containsKey(\"access_token\")) {\n");
+            sb.append("            String token = (String) response.getBody().get(\"access_token\");\n");
+            sb.append("            log.debug(\"[OAUTH2] Token obtenu avec succes\");\n");
+            sb.append("            return token;\n");
+            sb.append("        }\n");
+            sb.append("        throw new RuntimeException(\"Impossible d'obtenir le token OAuth2 depuis \" + oauth2TokenUrl);\n");
+            sb.append("    }\n");
+        }
+
         sb.append("}\n");
 
         Files.writeString(file, sb.toString());
-        log.info("[ADAPTER-WRAPPER] RestClientConfig genere");
+        log.info("[ADAPTER-WRAPPER] RestClientConfig genere (auth={})", authType);
     }
 
     // =====================================================================
@@ -1214,31 +1496,109 @@ public class AdapterWrapperGenerator {
             String responseDto = ep.toResponseDtoName();
             String domainModelName = capitalize(methodName) + "DomainModel";
             String mapperField = methodName + "Mapper";
-            String endpointPath = "/{cr-reference-id}/" + toKebabCase(ep.getOperation());
+            String httpMethod = ep.getMethod() != null ? ep.getMethod().toUpperCase() : "POST";
+
+            // Build endpoint path with extra path params
+            StringBuilder pathBuilder = new StringBuilder("/{cr-reference-id}/" + toKebabCase(ep.getOperation()));
+            for (ParamInfo p : ep.getPathParams()) {
+                pathBuilder.append("/{" + p.getName() + "}");
+            }
+            String endpointPath = pathBuilder.toString();
 
             sb.append("    @Operation(operationId = \"").append(methodName).append("\",\n");
             sb.append("               summary = \"").append(ep.getSummary()).append("\")\n");
-            sb.append("    @PostMapping(\"").append(endpointPath).append("\")\n");
+
+            // HTTP method annotation
+            switch (httpMethod) {
+                case "GET" -> sb.append("    @GetMapping(\"").append(endpointPath).append("\")\n");
+                case "PUT" -> sb.append("    @PutMapping(\"").append(endpointPath).append("\")\n");
+                case "DELETE" -> sb.append("    @DeleteMapping(\"").append(endpointPath).append("\")\n");
+                case "PATCH" -> sb.append("    @PatchMapping(\"").append(endpointPath).append("\")\n");
+                default -> sb.append("    @PostMapping(\"").append(endpointPath).append("\")\n");
+            }
+
             sb.append("    public ResponseEntity<ApiResponse<").append(responseDto).append(">> ").append(methodName).append("(\n");
             sb.append("            @Parameter(description = \"Control Record Reference ID\")\n");
-            sb.append("            @PathVariable(\"cr-reference-id\") String crReferenceId,\n");
-            sb.append("            @Valid @RequestBody ApiRequest<").append(requestDto).append("> envelope) {\n\n");
+            sb.append("            @PathVariable(\"cr-reference-id\") String crReferenceId");
 
-            sb.append("        log.info(\"[REST-IN] POST ").append(basePath).append("{} | request_id={} | source={}\",\n");
-            sb.append("                \"").append(endpointPath).append("\", envelope.getRequestId(), envelope.getSourceSystem());\n");
+            // Path params
+            for (ParamInfo p : ep.getPathParams()) {
+                sb.append(",\n            @Parameter(description = \"").append(p.getDescription()).append("\")\n");
+                sb.append("            @PathVariable(\"").append(p.getName()).append("\") ").append(p.toJavaType()).append(" ").append(p.getName());
+            }
+
+            // Query params
+            for (ParamInfo p : ep.getQueryParams()) {
+                sb.append(",\n            @Parameter(description = \"").append(p.getDescription()).append("\")\n");
+                sb.append("            @RequestParam(");
+                if (!p.isRequired()) sb.append("required = false, ");
+                if (p.getDefaultValue() != null) sb.append("defaultValue = \"").append(p.getDefaultValue()).append("\", ");
+                sb.append("name = \"").append(p.getName()).append("\") ").append(p.toJavaType()).append(" ").append(p.getName());
+            }
+
+            // Pagination params
+            if (ep.isPaginated()) {
+                sb.append(",\n            @RequestParam(defaultValue = \"0\") int page");
+                sb.append(",\n            @RequestParam(defaultValue = \"20\") int size");
+            }
+
+            // Request body (POST, PUT, PATCH only)
+            if (ep.hasRequestBody()) {
+                sb.append(",\n            @Valid @RequestBody ApiRequest<").append(requestDto).append("> envelope");
+            }
+            sb.append(") {\n\n");
+
+            // Logging
+            if (ep.hasRequestBody()) {
+                sb.append("        log.info(\"[REST-IN] ").append(httpMethod).append(" ").append(basePath).append("{} | request_id={} | source={}\",\n");
+                sb.append("                \"").append(endpointPath).append("\", envelope.getRequestId(), envelope.getSourceSystem());\n");
+            } else {
+                sb.append("        log.info(\"[REST-IN] ").append(httpMethod).append(" ").append(basePath).append("{} | crRef={}\",\n");
+                sb.append("                \"").append(endpointPath).append("\", crReferenceId);\n");
+            }
+
             sb.append("        try {\n");
-            sb.append("            // ACL : API Request DTO -> Domain Model\n");
-            sb.append("            ").append(requestDto).append(" payload = envelope.getPayload();\n");
-            sb.append("            ").append(domainModelName).append(" domainModel = ").append(mapperField).append(".toModel(payload);\n\n");
-            sb.append("            // Appel du service avec le Domain Model\n");
-            sb.append("            ").append(domainModelName).append(" resultModel = service.").append(methodName).append("(crReferenceId, domainModel);\n\n");
+
+            if (ep.hasRequestBody()) {
+                sb.append("            // ACL : API Request DTO -> Domain Model\n");
+                sb.append("            ").append(requestDto).append(" payload = envelope.getPayload();\n");
+                sb.append("            ").append(domainModelName).append(" domainModel = ").append(mapperField).append(".toModel(payload);\n\n");
+            }
+
+            // Build service call with all params
+            sb.append("            // Appel du service\n");
+            sb.append("            ").append(domainModelName).append(" resultModel = service.").append(methodName).append("(crReferenceId");
+            if (ep.hasRequestBody()) {
+                sb.append(", domainModel");
+            }
+            for (ParamInfo p : ep.getPathParams()) {
+                sb.append(", ").append(p.getName());
+            }
+            for (ParamInfo p : ep.getQueryParams()) {
+                sb.append(", ").append(p.getName());
+            }
+            if (ep.isPaginated()) {
+                sb.append(", page, size");
+            }
+            sb.append(");\n\n");
+
             sb.append("            // ACL : Domain Model -> API Response DTO\n");
             sb.append("            ").append(responseDto).append(" result = ").append(mapperField).append(".toApiResponse(resultModel);\n");
-            sb.append("            ApiResponse<").append(responseDto).append("> apiResponse = ApiResponse.success(envelope.getRequestId(), result);\n");
-            sb.append("            log.info(\"[REST-OUT] 200 OK | request_id={}\", envelope.getRequestId());\n");
+
+            if (ep.hasRequestBody()) {
+                sb.append("            ApiResponse<").append(responseDto).append("> apiResponse = ApiResponse.success(envelope.getRequestId(), result);\n");
+                sb.append("            log.info(\"[REST-OUT] 200 OK | request_id={}\", envelope.getRequestId());\n");
+            } else {
+                sb.append("            ApiResponse<").append(responseDto).append("> apiResponse = ApiResponse.success(crReferenceId, result);\n");
+                sb.append("            log.info(\"[REST-OUT] 200 OK | crRef={}\", crReferenceId);\n");
+            }
             sb.append("            return ResponseEntity.ok(apiResponse);\n");
             sb.append("        } catch (Exception e) {\n");
-            sb.append("            log.error(\"[REST-ERROR] ").append(methodName).append(" failed | request_id={}\", envelope.getRequestId(), e);\n");
+            if (ep.hasRequestBody()) {
+                sb.append("            log.error(\"[REST-ERROR] ").append(methodName).append(" failed | request_id={}\", envelope.getRequestId(), e);\n");
+            } else {
+                sb.append("            log.error(\"[REST-ERROR] ").append(methodName).append(" failed | crRef={}\", crReferenceId, e);\n");
+            }
             sb.append("            throw e;\n");
             sb.append("        }\n");
             sb.append("    }\n\n");
@@ -1382,9 +1742,20 @@ public class AdapterWrapperGenerator {
                 "# Resilience4j — TimeLimiter\n" +
                 "resilience4j.timelimiter.instances.restAdapter.timeout-duration=30s\n\n" +
                 "# Actuator\n" +
-                "management.endpoints.web.exposure.include=health,info,circuitbreakers,retries,bulkheads,metrics\n" +
+                "management.endpoints.web.exposure.include=health,info,circuitbreakers,retries,bulkheads,metrics,prometheus\n" +
                 "management.endpoint.health.show-details=always\n" +
-                "management.health.circuitbreakers.enabled=true\n");
+                "management.health.circuitbreakers.enabled=true\n\n" +
+                "# Prometheus\n" +
+                "management.metrics.export.prometheus.enabled=true\n" +
+                "management.metrics.distribution.percentiles-histogram.http.server.requests=true\n" +
+                "management.metrics.distribution.percentiles.http.server.requests=0.5,0.95,0.99\n" +
+                "management.metrics.tags.application=wrapper-bian-" + contract.toKebabCase() + "\n\n" +
+                "# OpenTelemetry Tracing\n" +
+                "management.tracing.enabled=true\n" +
+                "management.tracing.sampling.probability=1.0\n" +
+                "management.zipkin.tracing.endpoint=http://localhost:9411/api/v2/spans\n\n" +
+                "# Logging correlation (trace_id, span_id)\n" +
+                "logging.pattern.correlation=[${spring.application.name:},%mdc{traceId:-},%mdc{spanId:-}]\n");
 
         // application-mock.properties
         Files.writeString(resourcesDir.resolve("application-mock.properties"),
@@ -1452,6 +1823,10 @@ public class AdapterWrapperGenerator {
         sb.append("        <dependency><groupId>org.springdoc</groupId><artifactId>springdoc-openapi-starter-webmvc-ui</artifactId><version>2.5.0</version></dependency>\n");
         sb.append("        <dependency><groupId>io.github.resilience4j</groupId><artifactId>resilience4j-spring-boot3</artifactId><version>2.2.0</version></dependency>\n");
         sb.append("        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-aop</artifactId></dependency>\n\n");
+        sb.append("        <!-- Monitoring & Observabilite -->\n");
+        sb.append("        <dependency><groupId>io.micrometer</groupId><artifactId>micrometer-registry-prometheus</artifactId></dependency>\n");
+        sb.append("        <dependency><groupId>io.micrometer</groupId><artifactId>micrometer-tracing-bridge-otel</artifactId></dependency>\n");
+        sb.append("        <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-exporter-zipkin</artifactId></dependency>\n\n");
         sb.append("        <!-- Test -->\n");
         sb.append("        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>\n");
         sb.append("        <dependency><groupId>au.com.dius.pact.consumer</groupId><artifactId>junit5</artifactId><version>4.6.7</version><scope>test</scope></dependency>\n");
@@ -1640,6 +2015,254 @@ public class AdapterWrapperGenerator {
         sb.append("}\n");
         Files.writeString(file, sb.toString());
         log.info("[ADAPTER-WRAPPER] Pact Consumer Tests generes : {}", testName);
+    }
+
+    // =====================================================================
+    // MONITORING : Micrometer + OpenTelemetry + Actuator
+    // =====================================================================
+
+    private void generateMonitoringConfig(Path srcMain, AdapterContractInfo contract) throws IOException {
+        Path dir = resolvePackagePath(srcMain, PKG_MONITORING);
+        String adapterKebab = contract.toKebabCase();
+
+        // 1. MetricsConfig — custom Micrometer metrics
+        Path metricsFile = dir.resolve("MetricsConfig.java");
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(PKG_MONITORING).append(";\n\n");
+        sb.append("import io.micrometer.core.instrument.Counter;\n");
+        sb.append("import io.micrometer.core.instrument.MeterRegistry;\n");
+        sb.append("import io.micrometer.core.instrument.Timer;\n");
+        sb.append("import org.springframework.context.annotation.Bean;\n");
+        sb.append("import org.springframework.context.annotation.Configuration;\n\n");
+
+        sb.append("/**\n");
+        sb.append(" * Configuration des metriques Micrometer pour le Wrapper BIAN.\n");
+        sb.append(" * <p>Expose des metriques custom pour le monitoring Prometheus/Grafana.</p>\n");
+        sb.append(" */\n");
+        sb.append("@Configuration\n");
+        sb.append("public class MetricsConfig {\n\n");
+
+        // Counter for each endpoint
+        for (EndpointInfo ep : contract.getEndpoints()) {
+            String method = ep.toMethodName();
+            sb.append("    @Bean\n");
+            sb.append("    public Counter ").append(method).append("SuccessCounter(MeterRegistry registry) {\n");
+            sb.append("        return Counter.builder(\"bian.wrapper.").append(adapterKebab).append(".").append(method).append(".success\")\n");
+            sb.append("                .description(\"Nombre d'appels reussis pour ").append(method).append("\")\n");
+            sb.append("                .tag(\"adapter\", \"").append(adapterKebab).append("\")\n");
+            sb.append("                .tag(\"operation\", \"").append(method).append("\")\n");
+            sb.append("                .register(registry);\n");
+            sb.append("    }\n\n");
+
+            sb.append("    @Bean\n");
+            sb.append("    public Counter ").append(method).append("ErrorCounter(MeterRegistry registry) {\n");
+            sb.append("        return Counter.builder(\"bian.wrapper.").append(adapterKebab).append(".").append(method).append(".error\")\n");
+            sb.append("                .description(\"Nombre d'appels en erreur pour ").append(method).append("\")\n");
+            sb.append("                .tag(\"adapter\", \"").append(adapterKebab).append("\")\n");
+            sb.append("                .tag(\"operation\", \"").append(method).append("\")\n");
+            sb.append("                .register(registry);\n");
+            sb.append("    }\n\n");
+
+            sb.append("    @Bean\n");
+            sb.append("    public Timer ").append(method).append("Timer(MeterRegistry registry) {\n");
+            sb.append("        return Timer.builder(\"bian.wrapper.").append(adapterKebab).append(".").append(method).append(".duration\")\n");
+            sb.append("                .description(\"Duree des appels pour ").append(method).append("\")\n");
+            sb.append("                .tag(\"adapter\", \"").append(adapterKebab).append("\")\n");
+            sb.append("                .tag(\"operation\", \"").append(method).append("\")\n");
+            sb.append("                .register(registry);\n");
+            sb.append("    }\n\n");
+        }
+
+        // Global circuit breaker metrics
+        sb.append("    @Bean\n");
+        sb.append("    public Counter circuitBreakerOpenCounter(MeterRegistry registry) {\n");
+        sb.append("        return Counter.builder(\"bian.wrapper.").append(adapterKebab).append(".circuit_breaker.open\")\n");
+        sb.append("                .description(\"Nombre de fois que le circuit breaker s'est ouvert\")\n");
+        sb.append("                .tag(\"adapter\", \"").append(adapterKebab).append("\")\n");
+        sb.append("                .register(registry);\n");
+        sb.append("    }\n\n");
+
+        sb.append("    @Bean\n");
+        sb.append("    public Counter idempotencyHitCounter(MeterRegistry registry) {\n");
+        sb.append("        return Counter.builder(\"bian.wrapper.").append(adapterKebab).append(".idempotency.hit\")\n");
+        sb.append("                .description(\"Nombre de requetes idempotentes detectees (doublons)\")\n");
+        sb.append("                .tag(\"adapter\", \"").append(adapterKebab).append("\")\n");
+        sb.append("                .register(registry);\n");
+        sb.append("    }\n");
+
+        sb.append("}\n");
+        Files.writeString(metricsFile, sb.toString());
+
+        // 2. TracingConfig — OpenTelemetry configuration
+        Path tracingFile = dir.resolve("TracingConfig.java");
+        sb = new StringBuilder();
+        sb.append("package ").append(PKG_MONITORING).append(";\n\n");
+        sb.append("import io.micrometer.observation.ObservationRegistry;\n");
+        sb.append("import io.micrometer.observation.aop.ObservedAspect;\n");
+        sb.append("import org.springframework.context.annotation.Bean;\n");
+        sb.append("import org.springframework.context.annotation.Configuration;\n\n");
+
+        sb.append("/**\n");
+        sb.append(" * Configuration du tracing distribue avec OpenTelemetry.\n");
+        sb.append(" * <p>Active l'aspect @Observed pour le tracing automatique des methodes annotees.</p>\n");
+        sb.append(" * <p>Compatible avec Zipkin, Jaeger, et tout collecteur OTLP.</p>\n");
+        sb.append(" */\n");
+        sb.append("@Configuration\n");
+        sb.append("public class TracingConfig {\n\n");
+        sb.append("    @Bean\n");
+        sb.append("    public ObservedAspect observedAspect(ObservationRegistry observationRegistry) {\n");
+        sb.append("        return new ObservedAspect(observationRegistry);\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+        Files.writeString(tracingFile, sb.toString());
+
+        // 3. HealthIndicatorConfig — custom health indicators
+        Path healthFile = dir.resolve("AdapterHealthIndicator.java");
+        sb = new StringBuilder();
+        sb.append("package ").append(PKG_MONITORING).append(";\n\n");
+        sb.append("import org.springframework.boot.actuate.health.Health;\n");
+        sb.append("import org.springframework.boot.actuate.health.HealthIndicator;\n");
+        sb.append("import org.springframework.stereotype.Component;\n");
+        sb.append("import org.springframework.beans.factory.annotation.Value;\n");
+        sb.append("import org.springframework.web.client.RestTemplate;\n");
+        sb.append("import org.slf4j.Logger;\n");
+        sb.append("import org.slf4j.LoggerFactory;\n\n");
+
+        sb.append("/**\n");
+        sb.append(" * Health Indicator custom pour verifier la connectivite avec l'Adapter WebSphere.\n");
+        sb.append(" * <p>Expose un endpoint /actuator/health/adapter qui verifie que l'adapter est joignable.</p>\n");
+        sb.append(" */\n");
+        sb.append("@Component\n");
+        sb.append("public class AdapterHealthIndicator implements HealthIndicator {\n\n");
+        sb.append("    private static final Logger log = LoggerFactory.getLogger(AdapterHealthIndicator.class);\n\n");
+        sb.append("    @Value(\"${adapter.websphere.base-url:http://localhost:9080}\")\n");
+        sb.append("    private String adapterBaseUrl;\n\n");
+        sb.append("    private final RestTemplate restTemplate;\n\n");
+        sb.append("    public AdapterHealthIndicator(RestTemplate restTemplate) {\n");
+        sb.append("        this.restTemplate = restTemplate;\n");
+        sb.append("    }\n\n");
+        sb.append("    @Override\n");
+        sb.append("    public Health health() {\n");
+        sb.append("        try {\n");
+        sb.append("            restTemplate.getForEntity(adapterBaseUrl + \"/health\", String.class);\n");
+        sb.append("            return Health.up()\n");
+        sb.append("                    .withDetail(\"adapter_url\", adapterBaseUrl)\n");
+        sb.append("                    .withDetail(\"adapter_name\", \"").append(contract.getAdapterName()).append("\")\n");
+        sb.append("                    .build();\n");
+        sb.append("        } catch (Exception e) {\n");
+        sb.append("            log.warn(\"[HEALTH] Adapter indisponible : {}\", e.getMessage());\n");
+        sb.append("            return Health.down()\n");
+        sb.append("                    .withDetail(\"adapter_url\", adapterBaseUrl)\n");
+        sb.append("                    .withDetail(\"adapter_name\", \"").append(contract.getAdapterName()).append("\")\n");
+        sb.append("                    .withDetail(\"error\", e.getMessage())\n");
+        sb.append("                    .build();\n");
+        sb.append("        }\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+        Files.writeString(healthFile, sb.toString());
+
+        log.info("[ADAPTER-WRAPPER] Monitoring genere : MetricsConfig, TracingConfig, AdapterHealthIndicator");
+    }
+
+    // =====================================================================
+    // OPENAPI / SWAGGER 3.0
+    // =====================================================================
+
+    private void generateOpenApiConfig(Path srcMain, AdapterContractInfo contract, BianMapping bianMapping) throws IOException {
+        Path dir = resolvePackagePath(srcMain, PKG_OPENAPI);
+        Path file = dir.resolve("OpenApiConfig.java");
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(PKG_OPENAPI).append(";\n\n");
+        sb.append("import io.swagger.v3.oas.models.OpenAPI;\n");
+        sb.append("import io.swagger.v3.oas.models.info.Info;\n");
+        sb.append("import io.swagger.v3.oas.models.info.Contact;\n");
+        sb.append("import io.swagger.v3.oas.models.info.License;\n");
+        sb.append("import io.swagger.v3.oas.models.servers.Server;\n");
+        sb.append("import io.swagger.v3.oas.models.Components;\n");
+        sb.append("import io.swagger.v3.oas.models.security.SecurityScheme;\n");
+        sb.append("import io.swagger.v3.oas.models.security.SecurityRequirement;\n");
+        sb.append("import io.swagger.v3.oas.models.tags.Tag;\n");
+        sb.append("import org.springframework.context.annotation.Bean;\n");
+        sb.append("import org.springframework.context.annotation.Configuration;\n\n");
+        sb.append("import java.util.List;\n\n");
+
+        sb.append("/**\n");
+        sb.append(" * Configuration OpenAPI 3.0 / Swagger pour l'API BIAN.\n");
+        sb.append(" * <p>Service Domain : ").append(bianMapping.getServiceDomainTitle()).append(" (").append(bianMapping.getBianId()).append(")</p>\n");
+        sb.append(" * <p>Adapter : ").append(contract.getAdapterName()).append("</p>\n");
+        sb.append(" */\n");
+        sb.append("@Configuration\n");
+        sb.append("public class OpenApiConfig {\n\n");
+
+        sb.append("    @Bean\n");
+        sb.append("    public OpenAPI bianOpenAPI() {\n");
+        sb.append("        return new OpenAPI()\n");
+        sb.append("                .info(new Info()\n");
+        sb.append("                        .title(\"").append(bianMapping.getServiceDomainTitle()).append(" API — ").append(contract.getAdapterName()).append("\")\n");
+        sb.append("                        .description(\"API BIAN pour le Service Domain ").append(bianMapping.getServiceDomainTitle());
+        sb.append(" (").append(bianMapping.getBianId()).append("). ");
+        sb.append(contract.getDescription() != null ? contract.getDescription() : "").append("\")\n");
+        sb.append("                        .version(\"1.0.0\")\n");
+        sb.append("                        .contact(new Contact()\n");
+        sb.append("                                .name(\"Equipe Architecture\")\n");
+        sb.append("                                .email(\"architecture@bank.com\"))\n");
+        sb.append("                        .license(new License()\n");
+        sb.append("                                .name(\"Proprietary\")\n");
+        sb.append("                                .url(\"https://www.bank.com/licenses\")))\n");
+
+        sb.append("                .servers(List.of(\n");
+        sb.append("                        new Server().url(\"http://localhost:8080\").description(\"Environnement local\"),\n");
+        sb.append("                        new Server().url(\"https://api-dev.bank.com\").description(\"Environnement DEV\"),\n");
+        sb.append("                        new Server().url(\"https://api-staging.bank.com\").description(\"Environnement STAGING\"),\n");
+        sb.append("                        new Server().url(\"https://api.bank.com\").description(\"Environnement PRODUCTION\")\n");
+        sb.append("                ))\n");
+
+        // Tags for each endpoint
+        sb.append("                .tags(List.of(\n");
+        for (int i = 0; i < contract.getEndpoints().size(); i++) {
+            EndpointInfo ep = contract.getEndpoints().get(i);
+            sb.append("                        new Tag().name(\"").append(ep.toMethodName()).append("\").description(\"").append(ep.getSummary()).append("\")");
+            if (i < contract.getEndpoints().size() - 1) sb.append(",");
+            sb.append("\n");
+        }
+        sb.append("                ))\n");
+
+        // Security scheme
+        if (contract.hasAuth()) {
+            String authType = contract.getAuth().getType();
+            sb.append("                .components(new Components()\n");
+            switch (authType) {
+                case "bearer", "oauth2" -> {
+                    sb.append("                        .addSecuritySchemes(\"bearerAuth\", new SecurityScheme()\n");
+                    sb.append("                                .type(SecurityScheme.Type.HTTP)\n");
+                    sb.append("                                .scheme(\"bearer\")\n");
+                    sb.append("                                .bearerFormat(\"JWT\")))\n");
+                    sb.append("                .addSecurityItem(new SecurityRequirement().addList(\"bearerAuth\"))\n");
+                }
+                case "api_key" -> {
+                    sb.append("                        .addSecuritySchemes(\"apiKeyAuth\", new SecurityScheme()\n");
+                    sb.append("                                .type(SecurityScheme.Type.APIKEY)\n");
+                    sb.append("                                .in(SecurityScheme.In.HEADER)\n");
+                    sb.append("                                .name(\"").append(contract.getAuth().getApiKeyHeader()).append("\")))\n");
+                    sb.append("                .addSecurityItem(new SecurityRequirement().addList(\"apiKeyAuth\"))\n");
+                }
+                case "basic" -> {
+                    sb.append("                        .addSecuritySchemes(\"basicAuth\", new SecurityScheme()\n");
+                    sb.append("                                .type(SecurityScheme.Type.HTTP)\n");
+                    sb.append("                                .scheme(\"basic\")))\n");
+                    sb.append("                .addSecurityItem(new SecurityRequirement().addList(\"basicAuth\"))\n");
+                }
+                default -> sb.append("                )\n");
+            }
+        }
+
+        sb.append("                ;\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+
+        Files.writeString(file, sb.toString());
+        log.info("[ADAPTER-WRAPPER] OpenApiConfig genere pour {}", bianMapping.getServiceDomainTitle());
     }
 
     // =====================================================================

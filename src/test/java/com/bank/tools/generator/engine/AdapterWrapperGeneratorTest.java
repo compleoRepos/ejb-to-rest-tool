@@ -643,4 +643,285 @@ class AdapterWrapperGeneratorTest {
             }
         }
     }
+
+    // ============================================================
+    // Tests Monitoring & Observabilite
+    // ============================================================
+
+    @Nested
+    @DisplayName("Monitoring et Observabilite")
+    class MonitoringTests {
+
+        @Test
+        @DisplayName("Genere la configuration Micrometer MetricsConfig")
+        void shouldGenerateMetricsConfig() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                List<String> files = walk.filter(Files::isRegularFile)
+                        .map(p -> p.getFileName().toString())
+                        .toList();
+
+                assertTrue(files.contains("MetricsConfig.java"),
+                        "MetricsConfig.java doit etre genere");
+            }
+        }
+
+        @Test
+        @DisplayName("MetricsConfig contient les compteurs par endpoint")
+        void shouldMetricsConfigContainCountersPerEndpoint() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> metrics = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("MetricsConfig.java"))
+                        .findFirst();
+
+                assertTrue(metrics.isPresent());
+                String content = Files.readString(metrics.get());
+                assertTrue(content.contains("Counter"), "MetricsConfig doit utiliser Counter");
+                assertTrue(content.contains("Timer"), "MetricsConfig doit utiliser Timer");
+                assertTrue(content.contains("MeterRegistry"), "MetricsConfig doit utiliser MeterRegistry");
+                assertTrue(content.contains("bian.wrapper"), "Metriques doivent avoir le prefixe bian.wrapper");
+                assertTrue(content.contains(".success"), "Doit avoir des compteurs de succes");
+                assertTrue(content.contains(".error"), "Doit avoir des compteurs d'erreur");
+                assertTrue(content.contains(".duration"), "Doit avoir des timers de duree");
+            }
+        }
+
+        @Test
+        @DisplayName("Genere la configuration OpenTelemetry TracingConfig")
+        void shouldGenerateTracingConfig() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> tracing = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("TracingConfig.java"))
+                        .findFirst();
+
+                assertTrue(tracing.isPresent(), "TracingConfig.java doit etre genere");
+                String content = Files.readString(tracing.get());
+                assertTrue(content.contains("ObservedAspect"), "TracingConfig doit configurer ObservedAspect");
+                assertTrue(content.contains("ObservationRegistry"), "TracingConfig doit utiliser ObservationRegistry");
+            }
+        }
+
+        @Test
+        @DisplayName("Genere le HealthIndicator pour l'Adapter")
+        void shouldGenerateAdapterHealthIndicator() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> health = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("AdapterHealthIndicator.java"))
+                        .findFirst();
+
+                assertTrue(health.isPresent(), "AdapterHealthIndicator.java doit etre genere");
+                String content = Files.readString(health.get());
+                assertTrue(content.contains("HealthIndicator"), "Doit implementer HealthIndicator");
+                assertTrue(content.contains("Health.up()"), "Doit retourner Health.up() en cas de succes");
+                assertTrue(content.contains("Health.down()"), "Doit retourner Health.down() en cas d'erreur");
+            }
+        }
+
+        @Test
+        @DisplayName("Le pom.xml contient les dependances Prometheus et OpenTelemetry")
+        void shouldPomContainMonitoringDependencies() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+            Path pomFile = projectRoot.resolve("pom.xml");
+
+            assertTrue(Files.exists(pomFile));
+            String pomContent = Files.readString(pomFile);
+            assertTrue(pomContent.contains("micrometer-registry-prometheus"), "pom.xml doit contenir micrometer-registry-prometheus");
+            assertTrue(pomContent.contains("micrometer-tracing-bridge-otel"), "pom.xml doit contenir micrometer-tracing-bridge-otel");
+            assertTrue(pomContent.contains("opentelemetry-exporter-zipkin"), "pom.xml doit contenir opentelemetry-exporter-zipkin");
+        }
+
+        @Test
+        @DisplayName("Les proprietes Spring contiennent la config Prometheus et tracing")
+        void shouldPropertiesContainMonitoringConfig() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> restProps = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("application-rest.properties"))
+                        .findFirst();
+
+                assertTrue(restProps.isPresent());
+                String content = Files.readString(restProps.get());
+                assertTrue(content.contains("prometheus"), "Doit contenir la config Prometheus");
+                assertTrue(content.contains("management.tracing.enabled=true"), "Doit activer le tracing");
+                assertTrue(content.contains("management.metrics.tags.application"), "Doit taguer l'application");
+            }
+        }
+    }
+
+    // ============================================================
+    // Tests OpenAPI / Swagger
+    // ============================================================
+
+    @Nested
+    @DisplayName("OpenAPI / Swagger 3.0")
+    class OpenApiTests {
+
+        @Test
+        @DisplayName("Genere la configuration OpenApiConfig")
+        void shouldGenerateOpenApiConfig() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                List<String> files = walk.filter(Files::isRegularFile)
+                        .map(p -> p.getFileName().toString())
+                        .toList();
+
+                assertTrue(files.contains("OpenApiConfig.java"),
+                        "OpenApiConfig.java doit etre genere");
+            }
+        }
+
+        @Test
+        @DisplayName("OpenApiConfig contient les metadonnees BIAN")
+        void shouldOpenApiConfigContainBianMetadata() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> openapi = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("OpenApiConfig.java"))
+                        .findFirst();
+
+                assertTrue(openapi.isPresent());
+                String content = Files.readString(openapi.get());
+                assertTrue(content.contains("OpenAPI"), "Doit configurer OpenAPI");
+                assertTrue(content.contains("Info"), "Doit contenir les infos de l'API");
+                assertTrue(content.contains("Server"), "Doit definir les serveurs");
+                assertTrue(content.contains("Tag"), "Doit definir les tags par endpoint");
+                assertTrue(content.contains("CommandChequier"), "Doit contenir le nom de l'adapter");
+            }
+        }
+
+        @Test
+        @DisplayName("Les proprietes Spring contiennent la config Swagger")
+        void shouldPropertiesContainSwaggerConfig() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> appProps = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("application.properties"))
+                        .findFirst();
+
+                assertTrue(appProps.isPresent());
+                String content = Files.readString(appProps.get());
+                assertTrue(content.contains("springdoc"), "Doit contenir la config springdoc");
+                assertTrue(content.contains("swagger-ui"), "Doit contenir le chemin swagger-ui");
+            }
+        }
+    }
+
+    // ============================================================
+    // Tests Multi-HTTP (GET, PUT, DELETE)
+    // ============================================================
+
+    @Nested
+    @DisplayName("Support Multi-HTTP")
+    class MultiHttpTests {
+
+        @Test
+        @DisplayName("Le Controller genere les annotations GET pour les endpoints GET")
+        void shouldGenerateGetMapping() throws IOException {
+            AdapterContractInfo contract = createMultiEndpointContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> controller = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().contains("Controller"))
+                        .findFirst();
+
+                assertTrue(controller.isPresent());
+                String content = Files.readString(controller.get());
+                assertTrue(content.contains("@PostMapping"), "Controller doit contenir @PostMapping");
+                assertTrue(content.contains("@GetMapping"), "Controller doit contenir @GetMapping");
+            }
+        }
+
+        @Test
+        @DisplayName("Le RestAdapter genere les appels GET pour les endpoints GET")
+        void shouldRestAdapterSupportGet() throws IOException {
+            AdapterContractInfo contract = createMultiEndpointContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> adapter = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().contains("RestAdapter"))
+                        .findFirst();
+
+                assertTrue(adapter.isPresent());
+                String content = Files.readString(adapter.get());
+                assertTrue(content.contains("getForEntity") || content.contains("exchange"),
+                        "RestAdapter doit utiliser getForEntity ou exchange pour les GET");
+            }
+        }
+    }
+
+    // ============================================================
+    // Tests Authentification
+    // ============================================================
+
+    @Nested
+    @DisplayName("Authentification")
+    class AuthTests {
+
+        @Test
+        @DisplayName("Genere la config RestClient avec API Key quand auth est configuree")
+        void shouldGenerateRestClientWithApiKeyAuth() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            AdapterContractInfo.AuthConfig auth = new AdapterContractInfo.AuthConfig();
+            auth.setType("api_key");
+            auth.setApiKeyHeader("X-API-Key");
+            contract.setAuth(auth);
+
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> config = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("RestClientConfig.java"))
+                        .findFirst();
+
+                assertTrue(config.isPresent());
+                String content = Files.readString(config.get());
+                assertTrue(content.contains("X-API-Key") || content.contains("api-key") || content.contains("Interceptor"),
+                        "RestClientConfig doit configurer l'authentification API Key");
+            }
+        }
+
+        @Test
+        @DisplayName("OpenApiConfig contient le security scheme quand auth est configuree")
+        void shouldOpenApiConfigContainSecurityScheme() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            AdapterContractInfo.AuthConfig auth = new AdapterContractInfo.AuthConfig();
+            auth.setType("bearer");
+            contract.setAuth(auth);
+
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> openapi = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("OpenApiConfig.java"))
+                        .findFirst();
+
+                assertTrue(openapi.isPresent());
+                String content = Files.readString(openapi.get());
+                assertTrue(content.contains("SecurityScheme"), "OpenApiConfig doit definir un SecurityScheme");
+                assertTrue(content.contains("bearerAuth"), "OpenApiConfig doit definir bearerAuth");
+            }
+        }
+    }
 }
