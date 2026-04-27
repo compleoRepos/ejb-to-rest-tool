@@ -141,6 +141,38 @@
                                 <small style="color:#6b7280; margin-left:0.5rem;">Recommande : verifiez le mapping avant de generer</small>
                             </div>
                         </div>
+
+                        <!-- Mode de transport -->
+                        <div style="margin-top:1.5rem; padding-top:1.5rem; border-top:1px solid #e5e7eb;">
+                            <p style="font-weight:600; font-size:1rem; margin-bottom:0.75rem;"><i class="fas fa-exchange-alt" style="color:#4f46e5;"></i> Mode de transport (couche Infrastructure)</p>
+                            <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+                                <label style="display:flex; align-items:flex-start; gap:0.5rem; padding:1rem; border:2px solid #e5e7eb; border-radius:8px; cursor:pointer; flex:1; min-width:200px;" id="labelJndi">
+                                    <input type="radio" name="transportMode" value="jndi" checked style="margin-top:3px; accent-color:#4f46e5;">
+                                    <div>
+                                        <strong style="color:#1e293b;">JNDI (EJB direct)</strong>
+                                        <p style="margin:0.25rem 0 0 0; font-size:0.85rem; color:#6b7280;">Appel direct de l'EJB via JNDI lookup. Necessite un acces reseau au serveur EJB.</p>
+                                    </div>
+                                </label>
+                                <label style="display:flex; align-items:flex-start; gap:0.5rem; padding:1rem; border:2px solid #e5e7eb; border-radius:8px; cursor:pointer; flex:1; min-width:200px;" id="labelRest">
+                                    <input type="radio" name="transportMode" value="rest" style="margin-top:3px; accent-color:#4f46e5;">
+                                    <div>
+                                        <strong style="color:#1e293b;">REST (Adapter WebSphere)</strong>
+                                        <p style="margin:0.25rem 0 0 0; font-size:0.85rem; color:#6b7280;">Appel via HTTP/REST vers un adapter WebSphere. Genere aussi les tests Pact Consumer-Driven.</p>
+                                    </div>
+                                </label>
+                            </div>
+                            <div id="restDescription" style="display:none; margin-top:1rem; padding:1rem; background:#fef3c7; border-radius:8px; border-left:4px solid #f59e0b;">
+                                <p style="margin:0 0 0.5rem 0; font-weight:600; color:#b45309;"><i class="fas fa-plug"></i> Mode REST Adapter active</p>
+                                <p style="margin:0; color:#374151; font-size:0.9rem;">L'API generee appellera un adapter WebSphere via HTTP au lieu de l'EJB directement :</p>
+                                <ul style="margin:0.5rem 0 0 1.5rem; color:#374151; font-size:0.9rem;">
+                                    <li><strong>RestAdapter</strong> : Appelle l'adapter WebSphere via RestTemplate (profil <code>rest</code>)</li>
+                                    <li><strong>RestClientConfig</strong> : Configuration des timeouts, retry, interceptors</li>
+                                    <li><strong>Pact Consumer Tests</strong> : Contrats generes automatiquement pour l'equipe WebSphere</li>
+                                    <li><strong>Resilience4j</strong> : Circuit Breaker, Retry, Bulkhead sur chaque appel</li>
+                                    <li>Les profils <code>jndi</code> et <code>mock</code> restent disponibles comme fallback</li>
+                                </ul>
+                            </div>
+                        </div>
                     </div>
                 </div>
 

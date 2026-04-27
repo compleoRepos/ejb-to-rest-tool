@@ -43,6 +43,8 @@ public class AclArchitectureGenerator {
     private String PKG_INFRA_EJB_EXCEPTION;
     private String PKG_INFRA_EJB_TYPES;
     private String PKG_INFRA_MOCK;
+    private String PKG_INFRA_REST_ADAPTER;
+    private String PKG_INFRA_REST_CONFIG;
     private String PKG_CONFIG;
     private String PKG_API_DTO_VALIDATION;
 
@@ -137,8 +139,14 @@ public class AclArchitectureGenerator {
 
     public void generate(Path srcMain, ProjectAnalysisResult analysis,
                          Map<String, BianMapping> bianMappings) throws IOException {
+        generate(srcMain, analysis, bianMappings, "jndi");
+    }
 
-        log.info("[ACL] ========== DEBUT GENERATION ARCHITECTURE ACL ==========");
+    public void generate(Path srcMain, ProjectAnalysisResult analysis,
+                         Map<String, BianMapping> bianMappings, String transportMode) throws IOException {
+
+        log.info("[ACL] ========== DEBUT GENERATION ARCHITECTURE ACL (transport={}) ==========", transportMode);
+        boolean restMode = "rest".equalsIgnoreCase(transportMode);
 
         // Determiner le package de base depuis srcMain
         // srcMain = .../src/main/java/com/bank/api
@@ -187,14 +195,25 @@ public class AclArchitectureGenerator {
         // 8. Generer l'ExceptionTranslator (couche Infrastructure)
         generateExceptionTranslator(srcMain, analysis);
 
-        // 9. Generer les JndiAdapters (couche Infrastructure)
+        // 9. Generer les JndiAdapters (couche Infrastructure) — toujours generes comme fallback
         for (BianControllerGroup group : groups) {
             generateJndiAdapter(srcMain, group, analysis);
         }
 
-        // 10. Generer les MockAdapters (couche Infrastructure)
+        // 10. Generer les MockAdapters (couche Infrastructure) — toujours generes pour les tests
         for (BianControllerGroup group : groups) {
             generateMockAdapter(srcMain, group, analysis);
+        }
+
+        if (restMode) {
+            // 10b. Generer les RestAdapters (couche Infrastructure — appel adapter WebSphere via REST)
+            log.info("[ACL] Mode REST : generation des RestAdapters et RestClientConfig");
+            for (BianControllerGroup group : groups) {
+                generateRestAdapter(srcMain, group, analysis);
+            }
+
+            // 10c. Generer la configuration RestTemplate (couche Infrastructure)
+            generateRestClientConfig(srcMain);
         }
 
         // 11. Generer les Controllers BIAN (couche API)
@@ -206,10 +225,16 @@ public class AclArchitectureGenerator {
         generateGlobalExceptionHandler(srcMain);
 
         // 13. Generer les profils Spring (Config)
-        generateSpringProfiles(srcMain);
+        generateSpringProfiles(srcMain, restMode);
 
         // 14. Generer les tests d'integration
         generateIntegrationTests(srcMain, groups, analysis);
+
+        if (restMode) {
+            // 15. Generer les tests Pact Consumer (contrats avec l'adapter WebSphere)
+            log.info("[ACL] Mode REST : generation des Pact Consumer Tests");
+            generatePactConsumerTests(srcMain, groups, analysis);
+        }
 
         log.info("[ACL] ========== FIN GENERATION ARCHITECTURE ACL ==========");
     }
@@ -241,6 +266,8 @@ public class AclArchitectureGenerator {
         PKG_INFRA_EJB_EXCEPTION = PKG_BASE + ".infrastructure.ejb.exception";
         PKG_INFRA_EJB_TYPES = PKG_BASE + ".infrastructure.ejb.types";
         PKG_INFRA_MOCK = PKG_BASE + ".infrastructure.mock";
+        PKG_INFRA_REST_ADAPTER = PKG_BASE + ".infrastructure.rest.adapter";
+        PKG_INFRA_REST_CONFIG = PKG_BASE + ".infrastructure.rest.config";
         PKG_CONFIG = PKG_BASE + ".config";
         PKG_API_DTO_VALIDATION = PKG_BASE + ".dto.validation";
     }
@@ -252,6 +279,7 @@ public class AclArchitectureGenerator {
                 PKG_DOMAIN_SERVICE, PKG_DOMAIN_EXCEPTION,
                 PKG_INFRA_EJB_ADAPTER, PKG_INFRA_EJB_MAPPER, PKG_INFRA_EJB_EXCEPTION,
                 PKG_INFRA_EJB_TYPES, PKG_INFRA_MOCK,
+                PKG_INFRA_REST_ADAPTER, PKG_INFRA_REST_CONFIG,
                 PKG_CONFIG, PKG_API_DTO_VALIDATION
         };
         for (String pkg : packages) {
@@ -2201,7 +2229,7 @@ public class AclArchitectureGenerator {
     // CONFIG : Profils Spring
     // =====================================================================
 
-    private void generateSpringProfiles(Path srcMain) throws IOException {
+    private void generateSpringProfiles(Path srcMain, boolean restMode) throws IOException {
         Path resourcesDir = resolveResourcesDir(srcMain);
         Files.createDirectories(resourcesDir);
 
@@ -2266,10 +2294,30 @@ public class AclArchitectureGenerator {
                 springdoc.api-docs.enabled=${SWAGGER_ENABLED:false}
                 """);
 
+        // Profil REST (appel adapter WebSphere via HTTP)
+        Files.writeString(resourcesDir.resolve("application-rest.properties"), """
+                # =====================================================================
+                # Profil REST (appel adapter WebSphere via HTTP)
+                # =====================================================================
+                # Activer avec : --spring.profiles.active=rest
+                # Ou dans application.properties : spring.profiles.group.prod=rest
+                
+                # URL de base de l'adapter WebSphere
+                adapter.websphere.base-url=http://adapter-websphere:8080
+                
+                # Timeouts HTTP (en millisecondes)
+                adapter.websphere.connect-timeout=5000
+                adapter.websphere.read-timeout=30000
+                
+                # Retry configuration
+                adapter.websphere.retry.max-attempts=3
+                adapter.websphere.retry.delay=1000
+                """);
+
         // Generer les fichiers de configuration Liberty (server.xml, jvm.options, bootstrap.properties)
         generateLibertyServerConfig(srcMain);
 
-        log.info("[ACL] Profils Spring generes (jndi, mock, http, dev, prod, liberty)");
+        log.info("[ACL] Profils Spring generes (jndi, mock, rest, http, dev, prod, liberty)");
     }
 
     /**
@@ -2846,5 +2894,426 @@ public class AclArchitectureGenerator {
         sb.append("}\n");
         Files.writeString(dir.resolve("ValidIBANValidator.java"), sb.toString());
         log.info("[ACL] Validation generee : ValidIBANValidator");
+    }
+
+    // =====================================================================
+    // COUCHE INFRASTRUCTURE : RestAdapter (appel adapter WebSphere via HTTP)
+    // =====================================================================
+
+    /**
+     * Genere un RestAdapter par service domain.
+     * Active avec @Profile("rest"), il appelle l'adapter WebSphere via RestTemplate
+     * au lieu d'appeler l'EJB directement via JNDI.
+     *
+     * L'adapter WebSphere expose du REST classique (non-BIAN).
+     * Le contrat est defini par les tests Pact Consumer.
+     */
+    private void generateRestAdapter(Path srcMain, BianControllerGroup group, ProjectAnalysisResult analysis) throws IOException {
+        String adapterName = toPascalCase(group.serviceDomain) + "RestAdapter";
+        Path dir = resolvePackagePath(srcMain, PKG_INFRA_REST_ADAPTER);
+        Path file = dir.resolve(adapterName + ".java");
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(PKG_INFRA_REST_ADAPTER).append(";\n\n");
+
+        // Imports
+        Set<String> imports = new TreeSet<>();
+        for (BianEndpoint ep : group.endpoints) {
+            if (ep.requestDtoName != null) imports.add("import " + PKG_API_DTO_REQUEST + "." + ep.requestDtoName + ";");
+            if (ep.responseDtoName != null) imports.add("import " + PKG_API_DTO_RESPONSE + "." + ep.responseDtoName + ";");
+        }
+        imports.add("import " + PKG_DOMAIN_SERVICE + "." + group.serviceInterfaceName + ";");
+        imports.add("import " + PKG_DOMAIN_EXCEPTION + ".ApiException;");
+        imports.add("import org.slf4j.Logger;");
+        imports.add("import org.slf4j.LoggerFactory;");
+        imports.add("import org.springframework.beans.factory.annotation.Value;");
+        imports.add("import org.springframework.context.annotation.Profile;");
+        imports.add("import org.springframework.stereotype.Service;");
+        imports.add("import org.springframework.web.client.RestTemplate;");
+        imports.add("import org.springframework.web.client.HttpClientErrorException;");
+        imports.add("import org.springframework.web.client.HttpServerErrorException;");
+        imports.add("import org.springframework.web.client.ResourceAccessException;");
+        imports.add("import org.springframework.http.HttpEntity;");
+        imports.add("import org.springframework.http.HttpHeaders;");
+        imports.add("import org.springframework.http.MediaType;");
+        imports.add("import org.springframework.http.ResponseEntity;");
+        imports.add("import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;");
+        imports.add("import io.github.resilience4j.retry.annotation.Retry;");
+        imports.add("import io.github.resilience4j.bulkhead.annotation.Bulkhead;");
+
+        for (String imp : imports) sb.append(imp).append("\n");
+        sb.append("\n");
+
+        sb.append("/**\n");
+        sb.append(" * Adapter REST pour le domaine BIAN ").append(group.serviceDomainTitle).append(".\n");
+        sb.append(" * Appelle l'adapter WebSphere via HTTP/REST au lieu de l'EJB via JNDI.\n");
+        sb.append(" *\n");
+        sb.append(" * Activer ce profil avec : spring.profiles.active=rest\n");
+        sb.append(" * Configurer l'URL de l'adapter dans application-rest.properties\n");
+        sb.append(" */\n");
+        sb.append("@Service\n");
+        sb.append("@Profile(\"rest\")\n");
+        sb.append("public class ").append(adapterName).append(" implements ").append(group.serviceInterfaceName).append(" {\n\n");
+
+        sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(adapterName).append(".class);\n\n");
+
+        // Champs
+        sb.append("    private final RestTemplate restTemplate;\n\n");
+        sb.append("    @Value(\"${adapter.websphere.base-url:http://localhost:8090}\")\n");
+        sb.append("    private String adapterBaseUrl;\n\n");
+
+        // Constructeur
+        sb.append("    public ").append(adapterName).append("(RestTemplate restTemplate) {\n");
+        sb.append("        this.restTemplate = restTemplate;\n");
+        sb.append("    }\n\n");
+
+        // Methodes de service
+        for (BianEndpoint ep : group.endpoints) {
+            String returnType = ep.responseDtoName != null ? ep.responseDtoName : "void";
+            boolean hasReturn = ep.responseDtoName != null;
+            boolean hasCrRef = ep.bianMapping.getUrl() != null && ep.bianMapping.getUrl().contains("{cr-reference-id}");
+
+            // Construire le path REST vers l'adapter WebSphere
+            String adapterPath = "/api/" + toKebabCase(group.serviceDomain) + "/" + toKebabCase(ep.useCaseName);
+
+            // Resilience4j annotations
+            String fallbackName = ep.methodName + "Fallback";
+            sb.append("    @CircuitBreaker(name = \"restAdapter\", fallbackMethod = \"").append(fallbackName).append("\")\n");
+            sb.append("    @Retry(name = \"restAdapter\")\n");
+            sb.append("    @Bulkhead(name = \"restAdapter\")\n");
+            sb.append("    @Override\n");
+            sb.append("    public ").append(returnType).append(" ").append(ep.methodName).append("(");
+
+            List<String> params = new ArrayList<>();
+            if (hasCrRef) params.add("String crReferenceId");
+            if (ep.requestDtoName != null) params.add(ep.requestDtoName + " request");
+            sb.append(String.join(", ", params));
+            sb.append(") {\n");
+
+            sb.append("        log.info(\"[REST-CALL] ").append(ep.useCaseName).append(" -> {}\", adapterBaseUrl);\n");
+
+            // Construire l'URL
+            sb.append("        String url = adapterBaseUrl + \"").append(adapterPath).append("\";\n");
+            if (hasCrRef) {
+                sb.append("        url = url + \"/\" + crReferenceId;\n");
+            }
+
+            sb.append("        try {\n");
+            sb.append("            HttpHeaders headers = new HttpHeaders();\n");
+            sb.append("            headers.setContentType(MediaType.APPLICATION_JSON);\n");
+
+            if (ep.requestDtoName != null) {
+                sb.append("            HttpEntity<").append(ep.requestDtoName).append("> entity = new HttpEntity<>(request, headers);\n");
+            } else {
+                sb.append("            HttpEntity<Void> entity = new HttpEntity<>(headers);\n");
+            }
+
+            sb.append("            long start = System.currentTimeMillis();\n");
+
+            if (hasReturn) {
+                sb.append("            ResponseEntity<").append(returnType).append("> response = restTemplate.postForEntity(url, entity, ").append(returnType).append(".class);\n");
+                sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.useCaseName).append(" en {}ms — HTTP {}\", System.currentTimeMillis() - start, response.getStatusCode());\n");
+                sb.append("            return response.getBody();\n");
+            } else {
+                sb.append("            restTemplate.postForEntity(url, entity, Void.class);\n");
+                sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.useCaseName).append(" en {}ms\", System.currentTimeMillis() - start);\n");
+            }
+
+            sb.append("        } catch (HttpClientErrorException e) {\n");
+            sb.append("            log.error(\"[REST-ERROR] Erreur client HTTP {} pour ").append(ep.useCaseName).append(" : {}\", e.getStatusCode(), e.getResponseBodyAsString());\n");
+            sb.append("            throw new ApiException(\"ADAPTER_CLIENT_ERROR\", \"Erreur client adapter WebSphere : \" + e.getMessage(), e.getStatusCode().value(), e);\n");
+            sb.append("        } catch (HttpServerErrorException e) {\n");
+            sb.append("            log.error(\"[REST-ERROR] Erreur serveur HTTP {} pour ").append(ep.useCaseName).append(" : {}\", e.getStatusCode(), e.getResponseBodyAsString());\n");
+            sb.append("            throw new ApiException(\"ADAPTER_SERVER_ERROR\", \"Erreur serveur adapter WebSphere : \" + e.getMessage(), e.getStatusCode().value(), e);\n");
+            sb.append("        } catch (ResourceAccessException e) {\n");
+            sb.append("            log.error(\"[REST-ERROR] Adapter WebSphere inaccessible pour ").append(ep.useCaseName).append(" : {}\", e.getMessage());\n");
+            sb.append("            throw new ApiException(\"ADAPTER_UNREACHABLE\", \"Adapter WebSphere inaccessible : \" + e.getMessage(), 503, e);\n");
+            sb.append("        }\n");
+            sb.append("    }\n\n");
+
+            // Fallback Resilience4j
+            sb.append("    public ").append(returnType).append(" ").append(fallbackName).append("(");
+            List<String> fallbackParams = new ArrayList<>(params);
+            fallbackParams.add("Throwable t");
+            sb.append(String.join(", ", fallbackParams));
+            sb.append(") {\n");
+            sb.append("        log.error(\"[RESILIENCE-FALLBACK] Adapter WebSphere indisponible pour ").append(ep.useCaseName).append(" — cause : {}\", t.getMessage());\n");
+            sb.append("        throw new RuntimeException(\"Adapter WebSphere temporairement indisponible (").append(ep.useCaseName).append("). Veuillez reessayer plus tard.\", t);\n");
+            sb.append("    }\n\n");
+
+            // Methode Bytes supplementaire pour les endpoints byte[]
+            if (isByteArrayResponse(ep, analysis)) {
+                sb.append("    @Override\n");
+                sb.append("    public byte[] ").append(ep.methodName).append("Bytes(");
+                List<String> bytesParams = new ArrayList<>();
+                if (hasCrRef) bytesParams.add("String crReferenceId");
+                if (ep.requestDtoName != null) bytesParams.add(ep.requestDtoName + " request");
+                sb.append(String.join(", ", bytesParams));
+                sb.append(") {\n");
+                sb.append("        ").append(ep.responseDtoName).append(" response = ").append(ep.methodName).append("(");
+                List<String> callArgs = new ArrayList<>();
+                if (hasCrRef) callArgs.add("crReferenceId");
+                if (ep.requestDtoName != null) callArgs.add("request");
+                sb.append(String.join(", ", callArgs));
+                sb.append(");\n");
+                sb.append("        return response != null ? response.toString().getBytes() : null;\n");
+                sb.append("    }\n\n");
+            }
+        }
+
+        sb.append("}\n");
+
+        Files.writeString(file, sb.toString());
+        log.info("[ACL] RestAdapter genere : {}", adapterName);
+    }
+
+    // =====================================================================
+    // COUCHE INFRASTRUCTURE : RestClientConfig
+    // =====================================================================
+
+    /**
+     * Genere la configuration du RestTemplate avec timeouts et interceptors.
+     */
+    private void generateRestClientConfig(Path srcMain) throws IOException {
+        Path dir = resolvePackagePath(srcMain, PKG_INFRA_REST_CONFIG);
+        Path file = dir.resolve("RestClientConfig.java");
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(PKG_INFRA_REST_CONFIG).append(";\n\n");
+        sb.append("import org.springframework.beans.factory.annotation.Value;\n");
+        sb.append("import org.springframework.context.annotation.Bean;\n");
+        sb.append("import org.springframework.context.annotation.Configuration;\n");
+        sb.append("import org.springframework.context.annotation.Profile;\n");
+        sb.append("import org.springframework.http.client.SimpleClientHttpRequestFactory;\n");
+        sb.append("import org.springframework.web.client.RestTemplate;\n");
+        sb.append("import org.springframework.http.client.ClientHttpRequestInterceptor;\n");
+        sb.append("import org.slf4j.Logger;\n");
+        sb.append("import org.slf4j.LoggerFactory;\n\n");
+
+        sb.append("/**\n");
+        sb.append(" * Configuration du RestTemplate pour appeler l'adapter WebSphere.\n");
+        sb.append(" * Active uniquement avec le profil 'rest'.\n");
+        sb.append(" *\n");
+        sb.append(" * Configurable via application-rest.properties :\n");
+        sb.append(" * - adapter.websphere.connect-timeout (defaut: 5000ms)\n");
+        sb.append(" * - adapter.websphere.read-timeout (defaut: 30000ms)\n");
+        sb.append(" */\n");
+        sb.append("@Configuration\n");
+        sb.append("@Profile(\"rest\")\n");
+        sb.append("public class RestClientConfig {\n\n");
+
+        sb.append("    private static final Logger log = LoggerFactory.getLogger(RestClientConfig.class);\n\n");
+
+        sb.append("    @Value(\"${adapter.websphere.connect-timeout:5000}\")\n");
+        sb.append("    private int connectTimeout;\n\n");
+        sb.append("    @Value(\"${adapter.websphere.read-timeout:30000}\")\n");
+        sb.append("    private int readTimeout;\n\n");
+
+        sb.append("    @Bean\n");
+        sb.append("    public RestTemplate restTemplate() {\n");
+        sb.append("        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();\n");
+        sb.append("        factory.setConnectTimeout(connectTimeout);\n");
+        sb.append("        factory.setReadTimeout(readTimeout);\n\n");
+        sb.append("        RestTemplate restTemplate = new RestTemplate(factory);\n\n");
+        sb.append("        // Interceptor de logging\n");
+        sb.append("        restTemplate.getInterceptors().add((request, body, execution) -> {\n");
+        sb.append("            log.debug(\"[REST-OUT] {} {} — body: {} bytes\", request.getMethod(), request.getURI(), body.length);\n");
+        sb.append("            var response = execution.execute(request, body);\n");
+        sb.append("            log.debug(\"[REST-IN] HTTP {}\", response.getStatusCode());\n");
+        sb.append("            return response;\n");
+        sb.append("        });\n\n");
+        sb.append("        log.info(\"[REST-CONFIG] RestTemplate configure — connectTimeout={}ms, readTimeout={}ms\", connectTimeout, readTimeout);\n");
+        sb.append("        return restTemplate;\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+
+        Files.writeString(file, sb.toString());
+        log.info("[ACL] RestClientConfig genere");
+    }
+
+    // =====================================================================
+    // TESTS : Pact Consumer Tests
+    // =====================================================================
+
+    /**
+     * Genere les tests Pact Consumer-Driven pour chaque service domain.
+     * Ces tests definissent le contrat attendu entre l'API BIAN (consumer)
+     * et l'adapter WebSphere (provider).
+     *
+     * Le fichier Pact genere (.json) sert de specification vivante
+     * que l'equipe WebSphere utilise pour valider leur adapter.
+     */
+    private void generatePactConsumerTests(Path srcMain, List<BianControllerGroup> groups,
+                                            ProjectAnalysisResult analysis) throws IOException {
+        Path testJavaRoot = resolveTestJavaRoot(srcMain);
+        String testPkg = PKG_BASE + ".pact";
+        Path testDir = testJavaRoot.resolve(testPkg.replace(".", "/"));
+        Files.createDirectories(testDir);
+
+        for (BianControllerGroup group : groups) {
+            String testName = toPascalCase(group.serviceDomain) + "PactConsumerTest";
+            Path file = testDir.resolve(testName + ".java");
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("package ").append(testPkg).append(";\n\n");
+
+            // Imports
+            Set<String> imports = new TreeSet<>();
+            for (BianEndpoint ep : group.endpoints) {
+                if (ep.requestDtoName != null) imports.add("import " + PKG_API_DTO_REQUEST + "." + ep.requestDtoName + ";");
+                if (ep.responseDtoName != null) imports.add("import " + PKG_API_DTO_RESPONSE + "." + ep.responseDtoName + ";");
+            }
+            imports.add("import au.com.dius.pact.consumer.dsl.PactDslWithProvider;");
+            imports.add("import au.com.dius.pact.consumer.dsl.PactDslJsonBody;");
+            imports.add("import au.com.dius.pact.consumer.junit5.PactConsumerTestExt;");
+            imports.add("import au.com.dius.pact.consumer.junit5.PactTestFor;");
+            imports.add("import au.com.dius.pact.consumer.MockServer;");
+            imports.add("import au.com.dius.pact.core.model.V4Pact;");
+            imports.add("import au.com.dius.pact.core.model.annotations.Pact;");
+            imports.add("import org.junit.jupiter.api.Test;");
+            imports.add("import org.junit.jupiter.api.extension.ExtendWith;");
+            imports.add("import org.springframework.http.HttpEntity;");
+            imports.add("import org.springframework.http.HttpHeaders;");
+            imports.add("import org.springframework.http.MediaType;");
+            imports.add("import org.springframework.http.ResponseEntity;");
+            imports.add("import org.springframework.web.client.RestTemplate;");
+            imports.add("import static org.junit.jupiter.api.Assertions.*;");
+
+            for (String imp : imports) sb.append(imp).append("\n");
+            sb.append("\n");
+
+            String providerName = "adapter-websphere-" + group.serviceDomain;
+            String consumerName = "api-bian-" + group.serviceDomain;
+
+            sb.append("/**\n");
+            sb.append(" * Tests Pact Consumer-Driven pour le domaine ").append(group.serviceDomainTitle).append(".\n");
+            sb.append(" *\n");
+            sb.append(" * Consumer : API BIAN (").append(consumerName).append(")\n");
+            sb.append(" * Provider : Adapter WebSphere (").append(providerName).append(")\n");
+            sb.append(" *\n");
+            sb.append(" * Ces tests generent un fichier Pact (target/pacts/) qui sert de contrat\n");
+            sb.append(" * entre l'API BIAN et l'adapter WebSphere.\n");
+            sb.append(" * L'equipe WebSphere utilise ce fichier pour valider leur adapter.\n");
+            sb.append(" */\n");
+            sb.append("@ExtendWith(PactConsumerTestExt.class)\n");
+            sb.append("@PactTestFor(providerName = \"").append(providerName).append("\")\n");
+            sb.append("public class ").append(testName).append(" {\n\n");
+
+            // Pour chaque endpoint, generer un @Pact et un @Test
+            for (BianEndpoint ep : group.endpoints) {
+                String pactMethodName = toLowerCamel(ep.methodName) + "Pact";
+                String testMethodName = "test" + capitalize(ep.methodName);
+                String adapterPath = "/api/" + toKebabCase(group.serviceDomain) + "/" + toKebabCase(ep.useCaseName);
+                boolean hasCrRef = ep.bianMapping.getUrl() != null && ep.bianMapping.getUrl().contains("{cr-reference-id}");
+                boolean hasReturn = ep.responseDtoName != null;
+
+                // --- @Pact method ---
+                sb.append("    @Pact(consumer = \"").append(consumerName).append("\")\n");
+                sb.append("    public V4Pact ").append(pactMethodName).append("(PactDslWithProvider builder) {\n");
+                sb.append("        PactDslJsonBody requestBody = new PactDslJsonBody()\n");
+
+                // Ajouter les champs du request DTO au contrat
+                if (ep.requestDtoName != null) {
+                    DtoInfo requestDto = findDto(analysis, ep.useCaseInfo != null ? ep.useCaseInfo.getInputDtoClassName() : null);
+                    if (requestDto != null && requestDto.getFields() != null) {
+                        for (DtoInfo.FieldInfo field : requestDto.getFields()) {
+                            if (LEGACY_FIELDS.contains(field.getName())) continue;
+                            String type = field.getType();
+                            if (type == null) type = "String";
+                            String cleanName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
+                            if (type.contains("int") || type.contains("Integer") || type.contains("long") || type.contains("Long")) {
+                                sb.append("                .numberType(\"").append(cleanName).append("\", 1)\n");
+                            } else if (type.contains("boolean") || type.contains("Boolean")) {
+                                sb.append("                .booleanType(\"").append(cleanName).append("\", true)\n");
+                            } else if (type.contains("BigDecimal") || type.contains("double") || type.contains("Double") || type.contains("float")) {
+                                sb.append("                .decimalType(\"").append(cleanName).append("\", 100.0)\n");
+                            } else {
+                                sb.append("                .stringType(\"").append(cleanName).append("\", \"sample\")\n");
+                            }
+                        }
+                    } else {
+                        sb.append("                .stringType(\"data\", \"sample\")\n");
+                    }
+                } else {
+                    sb.append("                .stringType(\"data\", \"sample\")\n");
+                }
+                sb.append("                ;\n\n");
+
+                sb.append("        PactDslJsonBody responseBody = new PactDslJsonBody()\n");
+                // Ajouter les champs du response DTO au contrat
+                if (hasReturn) {
+                    DtoInfo responseDto = findDto(analysis, ep.useCaseInfo != null ? ep.useCaseInfo.getOutputDtoClassName() : null);
+                    if (responseDto != null && responseDto.getFields() != null) {
+                        for (DtoInfo.FieldInfo field : responseDto.getFields()) {
+                            if (LEGACY_FIELDS.contains(field.getName())) continue;
+                            String type = field.getType();
+                            if (type == null) type = "String";
+                            String cleanName = FIELD_RENAME.getOrDefault(field.getName(), field.getName());
+                            if (type.contains("int") || type.contains("Integer") || type.contains("long") || type.contains("Long")) {
+                                sb.append("                .numberType(\"").append(cleanName).append("\")\n");
+                            } else if (type.contains("boolean") || type.contains("Boolean")) {
+                                sb.append("                .booleanType(\"").append(cleanName).append("\")\n");
+                            } else if (type.contains("BigDecimal") || type.contains("double") || type.contains("Double") || type.contains("float")) {
+                                sb.append("                .decimalType(\"").append(cleanName).append("\")\n");
+                            } else {
+                                sb.append("                .stringType(\"").append(cleanName).append("\")\n");
+                            }
+                        }
+                    } else {
+                        sb.append("                .stringType(\"status\", \"OK\")\n");
+                    }
+                } else {
+                    sb.append("                .stringType(\"status\", \"OK\")\n");
+                }
+                sb.append("                ;\n\n");
+
+                String path = hasCrRef ? adapterPath + "/12345" : adapterPath;
+                sb.append("        return builder\n");
+                sb.append("                .given(\"").append(ep.useCaseName).append(" est disponible\")\n");
+                sb.append("                .uponReceiving(\"Appel ").append(ep.useCaseName).append("\")\n");
+                sb.append("                .path(\"").append(path).append("\")\n");
+                sb.append("                .method(\"POST\")\n");
+                sb.append("                .headers(\"Content-Type\", \"application/json\")\n");
+                sb.append("                .body(requestBody)\n");
+                sb.append("                .willRespondWith()\n");
+                sb.append("                .status(200)\n");
+                sb.append("                .headers(java.util.Map.of(\"Content-Type\", \"application/json\"))\n");
+                sb.append("                .body(responseBody)\n");
+                sb.append("                .toPact(V4Pact.class);\n");
+                sb.append("    }\n\n");
+
+                // --- @Test method ---
+                sb.append("    @Test\n");
+                sb.append("    @PactTestFor(pactMethod = \"").append(pactMethodName).append("\")\n");
+                sb.append("    void ").append(testMethodName).append("(MockServer mockServer) {\n");
+                sb.append("        RestTemplate restTemplate = new RestTemplate();\n");
+                sb.append("        String url = mockServer.getUrl() + \"").append(path).append("\";\n\n");
+                sb.append("        HttpHeaders headers = new HttpHeaders();\n");
+                sb.append("        headers.setContentType(MediaType.APPLICATION_JSON);\n");
+
+                if (ep.requestDtoName != null) {
+                    sb.append("        ").append(ep.requestDtoName).append(" request = new ").append(ep.requestDtoName).append("();\n");
+                    sb.append("        HttpEntity<").append(ep.requestDtoName).append("> entity = new HttpEntity<>(request, headers);\n");
+                } else {
+                    sb.append("        HttpEntity<String> entity = new HttpEntity<>(\"{}\", headers);\n");
+                }
+
+                if (hasReturn) {
+                    sb.append("        ResponseEntity<").append(ep.responseDtoName).append("> response = restTemplate.postForEntity(url, entity, ").append(ep.responseDtoName).append(".class);\n\n");
+                    sb.append("        assertEquals(200, response.getStatusCode().value());\n");
+                    sb.append("        assertNotNull(response.getBody());\n");
+                } else {
+                    sb.append("        ResponseEntity<String> response = restTemplate.postForEntity(url, entity, String.class);\n\n");
+                    sb.append("        assertEquals(200, response.getStatusCode().value());\n");
+                }
+
+                sb.append("    }\n\n");
+            }
+
+            sb.append("}\n");
+
+            Files.writeString(file, sb.toString());
+            log.info("[ACL] Pact Consumer Test genere : {}", testName);
+        }
     }
 }

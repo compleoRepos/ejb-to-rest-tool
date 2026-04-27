@@ -199,6 +199,7 @@ public class GeneratorController {
 
     @PostMapping("/generate")
     public String generateProject(@RequestParam(value = "bianMode", defaultValue = "false") boolean bianMode,
+                                    @RequestParam(value = "transportMode", defaultValue = "jndi") String transportMode,
                                     RedirectAttributes redirectAttributes, HttpSession session) {
         String projectId = (String) session.getAttribute("projectId");
         ProjectAnalysisResult analysisResult = (ProjectAnalysisResult) session.getAttribute("analysisResult");
@@ -216,8 +217,8 @@ public class GeneratorController {
         }
 
         try {
-            log.info("Generation du projet API pour : {} (BIAN={})", projectId, bianMode);
-            generatorService.generateProject(projectId, analysisResult, bianMode);
+            log.info("Generation du projet API pour : {} (BIAN={}, transport={})", projectId, bianMode, transportMode);
+            generatorService.generateProject(projectId, analysisResult, bianMode, transportMode);
 
             // Le rapport est deja genere dans generateProject()
             EnhancementReport report = generatorService.getLastEnhancementReport();
@@ -249,6 +250,7 @@ public class GeneratorController {
     @ResponseBody
     public ResponseEntity<Map<String, Object>> generateProjectApi(
             @RequestParam(value = "bianMode", defaultValue = "false") boolean bianMode,
+            @RequestParam(value = "transportMode", defaultValue = "jndi") String transportMode,
             HttpSession session) {
         String projectId = (String) session.getAttribute("projectId");
         ProjectAnalysisResult analysisResult = (ProjectAnalysisResult) session.getAttribute("analysisResult");
@@ -268,8 +270,8 @@ public class GeneratorController {
         }
 
         try {
-            log.info("[API] Generation du projet API pour : {} (BIAN={})", projectId, bianMode);
-            generatorService.generateProject(projectId, analysisResult, bianMode);
+            log.info("[API] Generation du projet API pour : {} (BIAN={}, transport={})", projectId, bianMode, transportMode);
+            generatorService.generateProject(projectId, analysisResult, bianMode, transportMode);
 
             // Le rapport est deja genere dans generateProject() — on le recupere directement
             EnhancementReport report = generatorService.getLastEnhancementReport();

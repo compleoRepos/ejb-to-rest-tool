@@ -129,7 +129,11 @@ public class CodeGenerationEngine {
     // ===================== POINT D'ENTREE =====================
 
     public Path generateProject(ProjectAnalysisResult analysisResult, Path outputDir, boolean bianMode) throws IOException {
-        log.info("Debut de la generation du projet API REST (v3 - G1-G14, BIAN={})", bianMode);
+        return generateProject(analysisResult, outputDir, bianMode, "jndi");
+    }
+
+    public Path generateProject(ProjectAnalysisResult analysisResult, Path outputDir, boolean bianMode, String transportMode) throws IOException {
+        log.info("Debut de la generation du projet API REST (v3 - G1-G14, BIAN={}, transport={})", bianMode, transportMode);
 
         Path projectRoot = outputDir.resolve("generated-api");
         Files.createDirectories(projectRoot);
@@ -221,7 +225,7 @@ public class CodeGenerationEngine {
                     bianMappingMap.put(uc.getClassName(), uc.getBianMapping());
                 }
                 try {
-                    aclArchitectureGenerator.generate(srcMain, analysisResult, bianMappingMap);
+                    aclArchitectureGenerator.generate(srcMain, analysisResult, bianMappingMap, transportMode);
                     log.info("[ACL] Architecture decouplée generee avec succes ({} UseCases)", bianUseCases.size());
                 } catch (Exception e) {
                     log.error("[ACL] Erreur lors de la generation ACL : {}", e.getMessage(), e);
@@ -421,6 +425,14 @@ public class CodeGenerationEngine {
                         <dependency>
                             <groupId>org.springframework.boot</groupId>
                             <artifactId>spring-boot-starter-test</artifactId>
+                            <scope>test</scope>
+                        </dependency>
+                
+                        <!-- Pact Consumer Tests (contrats avec l'adapter WebSphere) -->
+                        <dependency>
+                            <groupId>au.com.dius.pact.consumer</groupId>
+                            <artifactId>junit5</artifactId>
+                            <version>4.6.7</version>
                             <scope>test</scope>
                         </dependency>
                 """);

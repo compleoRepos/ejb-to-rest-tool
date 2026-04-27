@@ -131,6 +131,10 @@ public class GeneratorService {
     }
 
     public Path generateProject(String projectId, ProjectAnalysisResult analysisResult, boolean bianMode) throws IOException {
+        return generateProject(projectId, analysisResult, bianMode, "jndi");
+    }
+
+    public Path generateProject(String projectId, ProjectAnalysisResult analysisResult, boolean bianMode, String transportMode) throws IOException {
         Path outputDir = Path.of(appConfig.getOutputDir(), projectId);
         Files.createDirectories(outputDir);
 
@@ -144,8 +148,8 @@ public class GeneratorService {
             }
         }
 
-        Path projectRoot = engine.generateProject(analysisResult, outputDir, bianMode);
-        log.info("Etape 1/2 : Code de base genere dans {}", projectRoot);
+        Path projectRoot = engine.generateProject(analysisResult, outputDir, bianMode, transportMode);
+        log.info("Etape 1/2 : Code de base genere dans {} (transport={})", projectRoot, transportMode);
 
         EnhancementReport report = enhancer.enhance(projectRoot, analysisResult);
         log.info("Etape 2/2 : Ameliorations IA appliquees - Score: {}/100, Regles: {}/{}",

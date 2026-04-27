@@ -222,8 +222,17 @@ function launchTransformation() {
         addLogEntry('INFO', 'Mode BIAN active - URLs conformes au standard BIAN');
     }
 
+    // Check transport mode (JNDI vs REST)
+    var transportRadio = document.querySelector('input[name="transportMode"]:checked');
+    var transportMode = transportRadio ? transportRadio.value : 'jndi';
+    if (transportMode === 'rest') {
+        addLogEntry('INFO', 'Mode REST active - Appel via adapter WebSphere + Pact Consumer Tests');
+    } else {
+        addLogEntry('INFO', 'Mode JNDI active - Appel direct EJB via JNDI');
+    }
+
     // Start AJAX call to server
-    fetch('/api/generate?bianMode=' + bianMode, {
+    fetch('/api/generate?bianMode=' + bianMode + '&transportMode=' + transportMode, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin'
@@ -489,5 +498,31 @@ document.addEventListener('DOMContentLoaded', function() {
         bianToggle.addEventListener('change', function() {
             bianDesc.style.display = this.checked ? 'block' : 'none';
         });
+    }
+
+    // Transport mode toggle (JNDI / REST)
+    var transportRadios = document.querySelectorAll('input[name="transportMode"]');
+    var restDesc = document.getElementById('restDescription');
+    var labelJndi = document.getElementById('labelJndi');
+    var labelRest = document.getElementById('labelRest');
+    transportRadios.forEach(function(radio) {
+        radio.addEventListener('change', function() {
+            if (restDesc) {
+                restDesc.style.display = this.value === 'rest' ? 'block' : 'none';
+            }
+            if (labelJndi) {
+                labelJndi.style.borderColor = this.value === 'jndi' ? '#4f46e5' : '#e5e7eb';
+                labelJndi.style.background = this.value === 'jndi' ? '#f0f4ff' : 'transparent';
+            }
+            if (labelRest) {
+                labelRest.style.borderColor = this.value === 'rest' ? '#4f46e5' : '#e5e7eb';
+                labelRest.style.background = this.value === 'rest' ? '#f0f4ff' : 'transparent';
+            }
+        });
+    });
+    // Set initial style for JNDI (default selected)
+    if (labelJndi) {
+        labelJndi.style.borderColor = '#4f46e5';
+        labelJndi.style.background = '#f0f4ff';
     }
 });
