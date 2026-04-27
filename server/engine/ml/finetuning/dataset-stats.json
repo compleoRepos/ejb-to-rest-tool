@@ -1,18 +1,20 @@
 {
-  "total_entries": 364,
-  "new_entries_added": 22,
-  "categories": {
-    "ejb_session_bean": 149,
-    "jdbc_dao": 6,
-    "servlet": 165,
-    "soap_webservice": 6,
-    "jms_mdb": 26,
-    "struts": 6,
-    "hibernate": 6
+  "total_entries": 27237,
+  "unique_repos": 764,
+  "size_mb": 310.4,
+  "by_category": {
+    "struts": 6928,
+    "hibernate": 5077,
+    "servlet": 4470,
+    "jdbc_dao": 3305,
+    "soap_webservice": 2657,
+    "jms_mdb": 2398,
+    "ejb_session_bean": 1897,
+    "spring_legacy": 505
   },
-  "methods": {
+  "by_method": {
+    "rule_based": 27202,
     "expert": 32,
-    "rule_based_user_project": 3,
-    "rule_based": 329
+    "rule_based_user_project": 3
   }
 }

@@ -1,6 +1,6 @@
 # Fine-tuning LLM — Java EE vers Spring Boot
 
-Guide complet pour entraîner un modèle de langage spécialisé dans la modernisation de code Java legacy (EJB, Servlet, Struts, SOAP, JDBC, Hibernate, JMS) vers Spring Boot 3.x et microservices cloud-native.
+Guide complet pour entraîner un modèle de langage spécialisé dans la modernisation de code Java legacy (EJB, Servlet, Struts, SOAP, JDBC, Hibernate, JMS, Spring Legacy) vers Spring Boot 3.x et microservices cloud-native.
 
 ## Table des matières
 
@@ -21,27 +21,39 @@ Ce package contient tout le nécessaire pour créer un LLM spécialisé dans la 
 
 | Fichier | Description |
 |---------|-------------|
-| `finetuning-dataset.jsonl` | Dataset de 364 paires legacy → Spring Boot (format OpenAI) |
+| `finetuning-dataset.jsonl` | Dataset de **27 237 paires** legacy → Spring Boot (format OpenAI) — voir `DOWNLOAD.md` |
 | `train.py` | Script de fine-tuning Unsloth/LoRA (GPU requis) |
 | `Modelfile` | Configuration Ollama avec system prompt enrichi (pas de GPU requis) |
 | `dataset-stats.json` | Statistiques détaillées du dataset |
+| `repos-catalog.json` | Catalogue des 1000 repos GitHub sélectionnés — voir `DOWNLOAD.md` |
+| `DOWNLOAD.md` | Liens de téléchargement des fichiers volumineux (S3) |
 
-Le dataset a été construit à partir de **50 projets GitHub open source** et **4 projets bancaires réels** (BOA/BMCE Direct), couvrant 7 catégories de technologies legacy.
+Le dataset a été construit à partir de **884 projets GitHub open source** (sélectionnés parmi 5 779 candidats via 128 requêtes ciblées) et **4 projets bancaires réels** (BOA/BMCE Direct), couvrant **8 catégories** de technologies legacy et **187 814 fichiers Java** analysés.
 
 ### Distribution du dataset
 
-| Catégorie | Entrées | Source |
-|-----------|---------|--------|
-| Servlet → RestController | 165 | 50 repos GitHub |
-| EJB Session Bean → Spring Service | 149 | 50 repos GitHub + 4 projets bancaires |
-| JMS/MDB → Spring JMS Listener | 26 | repos GitHub + exemples experts |
-| JDBC DAO → Spring Data JPA | 6 | exemples experts |
-| SOAP WebService → REST Controller | 6 | exemples experts |
-| Struts Action → Spring MVC | 6 | exemples experts |
-| Hibernate → Spring Data JPA | 6 | exemples experts |
-| **Total** | **364** | |
+| Catégorie | Entrées | Part | Description |
+|-----------|---------|------|-------------|
+| Struts → Spring MVC | 6 928 | 25.4% | ActionSupport, ActionForm, struts-config.xml |
+| Hibernate → Spring Data JPA | 5 077 | 18.6% | SessionFactory, HQL, Criteria API |
+| Servlet → REST Controller | 4 470 | 16.4% | HttpServlet, doGet/doPost, web.xml |
+| JDBC DAO → Spring Data JPA | 3 305 | 12.1% | PreparedStatement, ResultSet, DataSource |
+| SOAP → REST Controller | 2 657 | 9.8% | @WebService, @WebMethod, JAX-WS |
+| JMS/MDB → Spring JMS | 2 398 | 8.8% | @MessageDriven, MessageListener |
+| EJB → Spring Service | 1 897 | 7.0% | @Stateless, @Stateful, @Singleton |
+| Spring Legacy → Spring Boot | 505 | 1.9% | XML config, JdbcTemplate |
+| **Total** | **27 237** | **100%** | **310 MB, 764 repos uniques** |
 
-Les entrées sont réparties en 3 méthodes de génération : **rule-based** (329 paires par transformation automatique), **expert** (32 paires écrites manuellement avec haute qualité) et **user_project** (3 paires extraites des projets bancaires réels).
+### Comparaison avec la version précédente
+
+| Métrique | v1 (50 repos) | v2 (884 repos) | Facteur |
+|----------|---------------|-----------------|---------|
+| Repos analysés | 50 | 884 | **x17.7** |
+| Fichiers Java scannés | ~2 000 | 187 814 | **x94** |
+| Paires d'entraînement | 364 | 27 237 | **x74.8** |
+| Catégories couvertes | 7 | 8 | +1 |
+| Taille du dataset | 2.2 MB | 310 MB | **x141** |
+| Domaines métier | ~5 | Banking, ERP, CRM, E-commerce, Healthcare, Insurance, Logistics, Telecom, Education... | **x10+** |
 
 ---
 
@@ -66,14 +78,14 @@ ollama pull codellama:13b-instruct
 
 ### Pour l'Option B (Fine-tuning Unsloth/LoRA)
 
-Un GPU NVIDIA avec au moins 12 Go de VRAM est nécessaire.
+Un GPU NVIDIA avec au moins 16 Go de VRAM est recommandé pour un dataset de cette taille.
 
-| GPU | VRAM | Modèle recommandé | Temps estimé |
-|-----|------|--------------------|--------------|
-| RTX 3060 | 12 Go | Mistral 7B | ~45 min |
-| RTX 3080/4070 | 12-16 Go | CodeLlama 13B | ~30 min |
-| RTX 3090/4080 | 24 Go | CodeLlama 13B | ~20 min |
-| A100 | 40-80 Go | CodeLlama 13B | ~10 min |
+| GPU | VRAM | Modèle recommandé | Temps estimé (27K entrées) |
+|-----|------|--------------------|----------------------------|
+| RTX 4070 | 12 Go | Mistral 7B | ~4-6 heures |
+| RTX 3090/4080 | 24 Go | CodeLlama 13B | ~3-4 heures |
+| A100 | 40-80 Go | CodeLlama 13B | ~1-2 heures |
+| H100 | 80 Go | CodeLlama 13B | ~30-45 min |
 
 ```bash
 # Installer les dépendances Python
@@ -94,13 +106,16 @@ Le fichier `finetuning-dataset.jsonl` contient des entrées au format OpenAI Mes
 {
   "messages": [
     {"role": "system", "content": "Tu es un expert en modernisation Java EE..."},
-    {"role": "user", "content": "Modernise ce code Java legacy (ejb_session_bean):\n\n```java\n@Stateless\npublic class AccountServiceBean...```"},
-    {"role": "assistant", "content": "```java\n@Service\n@Transactional\npublic class AccountService...```"}
+    {"role": "user", "content": "Modernise ce code Java legacy (struts):\n\n```java\npublic class OrderAction extends ActionSupport...```"},
+    {"role": "assistant", "content": "```java\n@RestController\n@RequestMapping(\"/api/orders\")\npublic class OrderController...```"}
   ],
   "metadata": {
-    "category": "ejb_session_bean",
-    "source": "expert_template",
-    "method": "expert"
+    "category": "struts",
+    "source": "user/struts-ecommerce-app",
+    "method": "rule_based",
+    "score": 45,
+    "original_file": "OrderAction.java",
+    "class_name": "OrderAction"
   }
 }
 ```
@@ -121,6 +136,7 @@ with open('finetuning-dataset.jsonl') as f:
         cats[entry['metadata']['category']] += 1
 for cat, count in cats.most_common():
     print(f'  {cat}: {count}')
+print(f'  TOTAL: {sum(cats.values())}')
 "
 ```
 
@@ -133,10 +149,9 @@ Cette option utilise un modèle de base (CodeLlama 13B) avec un system prompt en
 ### Étape 1 : Préparer le modèle
 
 ```bash
-# Se placer dans le répertoire finetuning
 cd server/engine/ml/finetuning/
 
-# Télécharger le modèle de base (si pas déjà fait)
+# Télécharger le modèle de base
 ollama pull codellama:13b-instruct
 
 # Créer le modèle personnalisé
@@ -146,12 +161,7 @@ ollama create ejb-modernizer -f Modelfile
 ### Étape 2 : Tester le modèle
 
 ```bash
-# Test interactif
 ollama run ejb-modernizer
-
-# Prompt de test :
-# Modernise ce code Java legacy (ejb_session_bean) vers Spring Boot 3.x :
-# @Stateless public class OrderServiceBean { @EJB private OrderDAO orderDAO; ... }
 ```
 
 ### Étape 3 : Tester via l'API
@@ -164,20 +174,18 @@ curl http://localhost:11434/api/generate -d '{
 }'
 ```
 
-**Temps de réponse estimé** : 5-15 secondes selon le hardware.
-
 ---
 
 ## Option B — Fine-tuning Unsloth/LoRA (qualité maximale)
 
-Cette option entraîne réellement le modèle sur le dataset de 364 paires, produisant un modèle spécialisé avec des résultats nettement supérieurs.
+Cette option entraîne réellement le modèle sur les 27 237 paires, produisant un modèle spécialisé avec des résultats nettement supérieurs.
 
 ### Étape 1 : Entraîner le modèle
 
 ```bash
 cd server/engine/ml/finetuning/
 
-# Option recommandée : CodeLlama 13B (meilleur pour le code)
+# Option recommandée : CodeLlama 13B
 python train.py \
   --model codellama \
   --dataset ./finetuning-dataset.jsonl \
@@ -188,10 +196,10 @@ python train.py \
 python train.py \
   --model mistral \
   --dataset ./finetuning-dataset.jsonl \
-  --epochs 5 \
+  --epochs 3 \
   --output ./outputs
 
-# Alternative : DeepSeek Coder (spécialisé code)
+# Alternative : DeepSeek Coder
 python train.py \
   --model deepseek \
   --dataset ./finetuning-dataset.jsonl \
@@ -199,24 +207,18 @@ python train.py \
   --output ./outputs
 ```
 
-Le script affiche la progression en temps réel avec la loss d'entraînement.
-
 ### Étape 2 : Convertir en GGUF pour Ollama
 
 ```bash
 python train.py --export-gguf --output ./outputs
 ```
 
-Cela génère un fichier `.gguf` quantifié en Q4_K_M (bon compromis qualité/taille).
-
 ### Étape 3 : Créer le modèle Ollama
 
 ```bash
-# Modifier le Modelfile pour pointer vers le GGUF
-# Remplacer "FROM codellama:13b-instruct" par :
+# Modifier le Modelfile : remplacer "FROM codellama:13b-instruct" par :
 # FROM ./outputs-gguf/ejb-modernizer-q4_k_m.gguf
 
-# Créer le modèle
 ollama create ejb-modernizer -f Modelfile
 ```
 
@@ -237,13 +239,8 @@ Le fichier `server/engine/ml/llm-adapter.ts` gère automatiquement le routage en
 
 ### Configuration
 
-Dans le fichier `.env` ou les variables d'environnement :
-
 ```env
-# URL de l'API Ollama (Docker)
 OLLAMA_BASE_URL=http://localhost:11434
-
-# Nom du modèle fine-tuné
 OLLAMA_MODEL=ejb-modernizer
 ```
 
@@ -255,7 +252,7 @@ Requête utilisateur
     ▼
 llm-adapter.ts
     │
-    ├── Ollama disponible ? ──► ejb-modernizer (fine-tuné)
+    ├── Ollama disponible ? ──► ejb-modernizer (fine-tuné sur 27K paires)
     │                              │
     │                              ▼
     │                          Réponse rapide (~5s)
@@ -272,8 +269,6 @@ llm-adapter.ts
 
 ### Métriques de qualité
 
-Pour évaluer la qualité du modèle fine-tuné, utilisez les critères suivants :
-
 | Critère | Description | Poids |
 |---------|-------------|-------|
 | Compilation | Le code généré compile sans erreur | 30% |
@@ -285,31 +280,21 @@ Pour évaluer la qualité du modèle fine-tuné, utilisez les critères suivants
 ### Script de test rapide
 
 ```bash
-# Tester avec 5 exemples du dataset
 python3 -c "
-import json, subprocess
+import json, subprocess, random
 
 with open('finetuning-dataset.jsonl') as f:
     entries = [json.loads(line) for line in f]
 
-# Prendre 5 exemples aléatoires
-import random
 samples = random.sample(entries, 5)
-
 for i, entry in enumerate(samples):
-    user_msg = entry['messages'][1]['content']
-    expected = entry['messages'][2]['content']
-    
-    # Appeler Ollama
+    user_msg = entry['messages'][1]['content'][:500]
     result = subprocess.run(
         ['ollama', 'run', 'ejb-modernizer', user_msg],
         capture_output=True, text=True, timeout=60
     )
-    
-    print(f'--- Test {i+1} ---')
-    print(f'Category: {entry[\"metadata\"][\"category\"]}')
+    print(f'--- Test {i+1} ({entry[\"metadata\"][\"category\"]}) ---')
     print(f'Generated: {result.stdout[:200]}...')
-    print()
 "
 ```
 
@@ -317,22 +302,9 @@ for i, entry in enumerate(samples):
 
 ## Dépannage
 
-### Ollama ne démarre pas
-
-```bash
-# Vérifier que Docker est en cours d'exécution
-docker ps
-
-# Redémarrer Ollama
-ollama serve
-
-# Vérifier les logs
-journalctl -u ollama -f
-```
-
 ### Erreur "out of memory" pendant le fine-tuning
 
-Réduire la taille du modèle ou les paramètres :
+Avec un dataset de 27K entrées, le fine-tuning nécessite plus de mémoire :
 
 ```bash
 # Utiliser Mistral 7B au lieu de CodeLlama 13B
@@ -341,6 +313,16 @@ python train.py --model mistral --dataset ./finetuning-dataset.jsonl
 # Ou réduire le batch size dans train.py :
 # TRAINING_CONFIG["per_device_train_batch_size"] = 1
 # TRAINING_CONFIG["gradient_accumulation_steps"] = 8
+```
+
+### Le dataset est trop volumineux pour la RAM
+
+Utiliser un sous-ensemble pour les premiers tests :
+
+```bash
+# Prendre les 5000 premières entrées
+head -5000 finetuning-dataset.jsonl > finetuning-dataset-5k.jsonl
+python train.py --dataset ./finetuning-dataset-5k.jsonl
 ```
 
 ### Le modèle génère du texte incohérent
@@ -355,23 +337,13 @@ curl http://localhost:11434/api/generate -d '{
 }'
 ```
 
-### Le GGUF est trop volumineux
-
-Utiliser une quantification plus agressive :
-
-```python
-# Dans train.py, changer q4_k_m par q4_0 (plus petit, légèrement moins précis)
-model.save_pretrained_gguf(gguf_dir, tokenizer, quantization_method="q4_0")
-```
-
 ---
 
 ## Enrichir le dataset
 
-Pour améliorer la qualité du modèle, ajouter de nouvelles paires au dataset :
+Pour améliorer la qualité du modèle, ajouter de nouvelles paires :
 
 ```bash
-# Format d'une entrée
 echo '{
   "messages": [
     {"role": "system", "content": "Tu es un expert en modernisation Java EE..."},
@@ -381,8 +353,6 @@ echo '{
   "metadata": {"category": "ejb_session_bean", "source": "manual", "method": "expert"}
 }' >> finetuning-dataset.jsonl
 ```
-
-Les catégories sous-représentées (jdbc_dao, soap_webservice, struts, hibernate) bénéficieraient le plus de nouveaux exemples experts.
 
 ---
 

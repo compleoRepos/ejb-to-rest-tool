@@ -136,3 +136,7 @@ test-projects/
 
 # Generated reports
 reports/
+
+# Large fine-tuning dataset (310 MB) - download separately
+server/engine/ml/finetuning/finetuning-dataset.jsonl
+server/engine/ml/finetuning/repos-catalog.json
