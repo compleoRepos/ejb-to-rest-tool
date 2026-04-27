@@ -47,6 +47,7 @@ public class AclArchitectureGenerator {
     private String PKG_INFRA_REST_CONFIG;
     private String PKG_CONFIG;
     private String PKG_API_DTO_VALIDATION;
+    private String PKG_API_DTO_ENVELOPE;
 
     // Tracking des types de champs des Response DTOs generes (pour eviter les type mismatch dans les mappers)
     // Cle = responseDtoName, Valeur = Map<fieldName, cleanedFieldType>
@@ -174,6 +175,9 @@ public class AclArchitectureGenerator {
         // 3b. Generer les annotations de validation (@ValidRIB, @ValidIBAN)
         generateValidationAnnotations(srcMain);
 
+        // 3c. Generer les classes d'enveloppe standardisee (ApiRequest<T>, ApiResponse<T>)
+        generateEnvelopeClasses(srcMain);
+
         // 4. Generer les Exceptions (couche Domain)
         generateDomainExceptions(srcMain, analysis);
 
@@ -270,6 +274,7 @@ public class AclArchitectureGenerator {
         PKG_INFRA_REST_CONFIG = PKG_BASE + ".infrastructure.rest.config";
         PKG_CONFIG = PKG_BASE + ".config";
         PKG_API_DTO_VALIDATION = PKG_BASE + ".dto.validation";
+        PKG_API_DTO_ENVELOPE = PKG_BASE + ".dto.envelope";
     }
 
     private void createDirectories(Path srcMain) throws IOException {
@@ -280,7 +285,7 @@ public class AclArchitectureGenerator {
                 PKG_INFRA_EJB_ADAPTER, PKG_INFRA_EJB_MAPPER, PKG_INFRA_EJB_EXCEPTION,
                 PKG_INFRA_EJB_TYPES, PKG_INFRA_MOCK,
                 PKG_INFRA_REST_ADAPTER, PKG_INFRA_REST_CONFIG,
-                PKG_CONFIG, PKG_API_DTO_VALIDATION
+                PKG_CONFIG, PKG_API_DTO_VALIDATION, PKG_API_DTO_ENVELOPE
         };
         for (String pkg : packages) {
             Files.createDirectories(javaRoot.resolve(pkg.replace(".", "/")));
@@ -1953,11 +1958,11 @@ public class AclArchitectureGenerator {
             if (ep.requestDtoName != null) imports.add("import " + PKG_API_DTO_REQUEST + "." + ep.requestDtoName + ";");
             if (ep.responseDtoName != null) imports.add("import " + PKG_API_DTO_RESPONSE + "." + ep.responseDtoName + ";");
         }
+        imports.add("import " + PKG_API_DTO_ENVELOPE + ".ApiRequest;");
+        imports.add("import " + PKG_API_DTO_ENVELOPE + ".ApiResponse;");
         imports.add("import " + PKG_DOMAIN_SERVICE + "." + group.serviceInterfaceName + ";");
         imports.add("import io.swagger.v3.oas.annotations.Operation;");
         imports.add("import io.swagger.v3.oas.annotations.Parameter;");
-        imports.add("import io.swagger.v3.oas.annotations.responses.ApiResponse;");
-        imports.add("import io.swagger.v3.oas.annotations.responses.ApiResponses;");
         imports.add("import io.swagger.v3.oas.annotations.tags.Tag;");
         imports.add("import org.springframework.validation.annotation.Validated;");
         imports.add("import jakarta.validation.Valid;");
@@ -2059,68 +2064,102 @@ public class AclArchitectureGenerator {
 
             // Correction 7: byte[] → Content-Disposition
             boolean isByteArray = isByteArrayResponse(ep, analysis);
-            String returnType;
-            if (isByteArray) {
-                returnType = "byte[]";
-            } else {
-                returnType = ep.responseDtoName != null ? ep.responseDtoName : "Void";
-            }
-            sb.append("    public ResponseEntity<").append(returnType).append("> ").append(ep.methodName).append("(\n");
-
-            List<String> methodParams = new ArrayList<>();
             boolean hasCrRef = url.contains("{cr-reference-id}");
             boolean hasBqRef = url.contains("{bq-reference-id}");
 
-            if (hasCrRef) {
-                methodParams.add("            @Parameter(description = \"Control Record Reference ID\")\n            @PathVariable(\"cr-reference-id\") String crReferenceId");
-            }
-            if (hasBqRef) {
-                methodParams.add("            @Parameter(description = \"Behavior Qualifier Reference ID\")\n            @PathVariable(\"bq-reference-id\") String bqReferenceId");
-            }
-            if (ep.requestDtoName != null) {
-                methodParams.add("            @Valid @RequestBody " + ep.requestDtoName + " request");
-            }
-
-            sb.append(String.join(",\n", methodParams));
-            sb.append(") {\n\n");
-
-            sb.append("        log.info(\"[REST-IN] ").append(httpMethod).append(" ").append(basePath).append(relativePath).append("\");");
-            sb.append("\n");
-
-            // try/catch avec [REST-ERROR]
-            sb.append("        try {\n");
-
-            // Appel au service
-            List<String> callParams = new ArrayList<>();
-            if (hasCrRef) callParams.add("crReferenceId");
-            if (ep.requestDtoName != null) callParams.add("request");
-
             if (isByteArray) {
+                // Cas byte[] : pas d'enveloppe, retour binaire direct
+                sb.append("    public ResponseEntity<byte[]> ").append(ep.methodName).append("(\n");
+                List<String> methodParams = new ArrayList<>();
+                if (hasCrRef) methodParams.add("            @Parameter(description = \"Control Record Reference ID\")\n            @PathVariable(\"cr-reference-id\") String crReferenceId");
+                if (hasBqRef) methodParams.add("            @Parameter(description = \"Behavior Qualifier Reference ID\")\n            @PathVariable(\"bq-reference-id\") String bqReferenceId");
+                if (ep.requestDtoName != null) methodParams.add("            @Valid @RequestBody ApiRequest<" + ep.requestDtoName + "> envelope");
+                sb.append(String.join(",\n", methodParams));
+                sb.append(") {\n\n");
+                sb.append("        log.info(\"[REST-IN] ").append(httpMethod).append(" ").append(basePath).append(relativePath).append(" | request_id={}\", ");
+                if (ep.requestDtoName != null) {
+                    sb.append("envelope.getRequestId()");
+                } else {
+                    sb.append("\"N/A\"");
+                }
+                sb.append(");\n");
+                sb.append("        try {\n");
+                List<String> callParams = new ArrayList<>();
+                if (hasCrRef) callParams.add("crReferenceId");
+                if (ep.requestDtoName != null) callParams.add("envelope.getPayload()");
                 sb.append("            byte[] data = ").append(serviceField).append(".").append(ep.methodName).append("Bytes(").append(String.join(", ", callParams)).append(");\n");
                 sb.append("            log.info(\"[REST-OUT] 200 OK (byte[] size={})\", data != null ? data.length : 0);\n");
                 sb.append("            return ResponseEntity.ok()\n");
                 sb.append("                    .header(\"Content-Disposition\", \"attachment; filename=document.pdf\")\n");
                 sb.append("                    .header(\"Content-Type\", \"application/pdf\")\n");
                 sb.append("                    .body(data);\n");
-            } else if (ep.responseDtoName != null) {
-                sb.append("            ").append(ep.responseDtoName).append(" response = ").append(serviceField).append(".").append(ep.methodName).append("(").append(String.join(", ", callParams)).append(");\n");
-                sb.append("            log.info(\"[REST-OUT] ").append(httpStatus).append(" OK\");\n");
-                if (httpStatus == 201) {
-                    sb.append("            return ResponseEntity.status(HttpStatus.CREATED).body(response);\n");
-                } else {
-                    sb.append("            return ResponseEntity.ok(response);\n");
-                }
+                sb.append("        } catch (Exception e) {\n");
+                sb.append("            log.error(\"[REST-ERROR] ").append(ep.methodName).append(" failed\", e);\n");
+                sb.append("            throw e;\n");
+                sb.append("        }\n");
+                sb.append("    }\n\n");
             } else {
-                sb.append("            ").append(serviceField).append(".").append(ep.methodName).append("(").append(String.join(", ", callParams)).append(");\n");
-                sb.append("            log.info(\"[REST-OUT] ").append(httpStatus).append(" OK\");\n");
-                sb.append("            return ResponseEntity.ok().build();\n");
-            }
+                // Cas standard : enveloppe ApiRequest / ApiResponse
+                String responsePayloadType = ep.responseDtoName != null ? ep.responseDtoName : "Void";
+                sb.append("    public ResponseEntity<ApiResponse<").append(responsePayloadType).append(">> ").append(ep.methodName).append("(\n");
 
-            sb.append("        } catch (Exception e) {\n");
-            sb.append("            log.error(\"[REST-ERROR] ").append(ep.methodName).append(" failed\", e);\n");
-            sb.append("            throw e;\n");
-            sb.append("        }\n");
-            sb.append("    }\n\n");
+                List<String> methodParams = new ArrayList<>();
+                if (hasCrRef) {
+                    methodParams.add("            @Parameter(description = \"Control Record Reference ID\")\n            @PathVariable(\"cr-reference-id\") String crReferenceId");
+                }
+                if (hasBqRef) {
+                    methodParams.add("            @Parameter(description = \"Behavior Qualifier Reference ID\")\n            @PathVariable(\"bq-reference-id\") String bqReferenceId");
+                }
+                if (ep.requestDtoName != null) {
+                    methodParams.add("            @Valid @RequestBody ApiRequest<" + ep.requestDtoName + "> envelope");
+                }
+
+                sb.append(String.join(",\n", methodParams));
+                sb.append(") {\n\n");
+
+                // Log avec request_id pour tracabilite
+                if (ep.requestDtoName != null) {
+                    sb.append("        log.info(\"[REST-IN] ").append(httpMethod).append(" ").append(basePath).append(relativePath).append(" | request_id={} | source={}\", envelope.getRequestId(), envelope.getSourceSystem());\n");
+                } else {
+                    sb.append("        log.info(\"[REST-IN] ").append(httpMethod).append(" ").append(basePath).append(relativePath).append("\");\n");
+                }
+
+                sb.append("        try {\n");
+
+                // Extraire le payload de l'enveloppe et appeler le service
+                List<String> callParams = new ArrayList<>();
+                if (hasCrRef) callParams.add("crReferenceId");
+                if (ep.requestDtoName != null) {
+                    sb.append("            ").append(ep.requestDtoName).append(" payload = envelope.getPayload();\n");
+                    callParams.add("payload");
+                }
+
+                if (ep.responseDtoName != null) {
+                    sb.append("            ").append(ep.responseDtoName).append(" result = ").append(serviceField).append(".").append(ep.methodName).append("(").append(String.join(", ", callParams)).append(");\n");
+                    // Wrapper la reponse dans l'enveloppe ApiResponse
+                    if (ep.requestDtoName != null) {
+                        sb.append("            ApiResponse<").append(ep.responseDtoName).append("> apiResponse = ApiResponse.success(envelope.getRequestId(), result);\n");
+                    } else {
+                        sb.append("            ApiResponse<").append(ep.responseDtoName).append("> apiResponse = ApiResponse.success(null, result);\n");
+                    }
+                    sb.append("            log.info(\"[REST-OUT] ").append(httpStatus).append(" OK\");\n");
+                    if (httpStatus == 201) {
+                        sb.append("            return ResponseEntity.status(HttpStatus.CREATED).body(apiResponse);\n");
+                    } else {
+                        sb.append("            return ResponseEntity.ok(apiResponse);\n");
+                    }
+                } else {
+                    sb.append("            ").append(serviceField).append(".").append(ep.methodName).append("(").append(String.join(", ", callParams)).append(");\n");
+                    sb.append("            log.info(\"[REST-OUT] ").append(httpStatus).append(" OK\");\n");
+                    sb.append("            return ResponseEntity.ok(ApiResponse.success(null, null));\n");
+                }
+
+                sb.append("        } catch (Exception e) {\n");
+                sb.append("            log.error(\"[REST-ERROR] ").append(ep.methodName).append(" failed\", e);\n");
+                sb.append("            throw e;\n");
+                sb.append("        }\n");
+                sb.append("    }\n\n");
+            }
         }
 
         sb.append("}\n");
@@ -2141,6 +2180,7 @@ public class AclArchitectureGenerator {
                 package %s;
 
                 import %s.ApiException;
+                import %s.ApiResponse;
                 import org.slf4j.Logger;
                 import org.slf4j.LoggerFactory;
                 import org.slf4j.MDC;
@@ -2151,75 +2191,78 @@ public class AclArchitectureGenerator {
                 import org.springframework.web.bind.annotation.ControllerAdvice;
                 import org.springframework.web.bind.annotation.ExceptionHandler;
 
-                import java.time.LocalDateTime;
+                import java.time.Instant;
                 import java.util.LinkedHashMap;
                 import java.util.Map;
                 import java.util.stream.Collectors;
 
                 /**
                  * Gestionnaire global des exceptions REST.
-                 * Produit des reponses JSON structurees avec correlation-id pour la tracabilite.
+                 * Produit des reponses JSON dans le format d'enveloppe standardise ApiResponse.
                  */
                 @ControllerAdvice
                 public class GlobalExceptionHandler {
 
                     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-                    private Map<String, Object> buildErrorBody(int status, String code, String message) {
-                        Map<String, Object> body = new LinkedHashMap<>();
-                        body.put("timestamp", LocalDateTime.now().toString());
-                        body.put("status", status);
-                        body.put("code", code);
-                        body.put("message", message);
+                    private Map<String, Object> buildErrorPayload(String code, String message) {
+                        Map<String, Object> payload = new LinkedHashMap<>();
+                        payload.put("code", code);
+                        payload.put("message", message);
                         String correlationId = MDC.get("correlationId");
                         if (correlationId != null) {
-                            body.put("correlationId", correlationId);
+                            payload.put("correlationId", correlationId);
                         }
-                        return body;
+                        return payload;
                     }
 
                     @ExceptionHandler(ApiException.class)
-                    public ResponseEntity<Map<String, Object>> handleApiException(ApiException ex) {
+                    public ResponseEntity<ApiResponse<Map<String, Object>>> handleApiException(ApiException ex) {
                         log.warn("[EXCEPTION] ApiException: {} (code={})", ex.getMessage(), ex.getCode());
-                        Map<String, Object> body = buildErrorBody(ex.getHttpStatus(), ex.getCode(), ex.getMessage());
-                        return new ResponseEntity<>(body, HttpStatus.valueOf(ex.getHttpStatus()));
+                        Map<String, Object> payload = buildErrorPayload(ex.getCode(), ex.getMessage());
+                        ApiResponse<Map<String, Object>> response = ApiResponse.error(null, "ERROR", payload);
+                        return new ResponseEntity<>(response, HttpStatus.valueOf(ex.getHttpStatus()));
                     }
 
                     @ExceptionHandler(MethodArgumentNotValidException.class)
-                    public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException ex) {
+                    public ResponseEntity<ApiResponse<Map<String, Object>>> handleValidation(MethodArgumentNotValidException ex) {
                         String errors = ex.getBindingResult().getFieldErrors().stream()
                             .map(e -> e.getField() + ": " + e.getDefaultMessage())
                             .collect(Collectors.joining(", "));
                         log.warn("[EXCEPTION] Validation: {}", errors);
-                        Map<String, Object> body = buildErrorBody(400, "VALIDATION_ERROR", errors);
-                        return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
+                        Map<String, Object> payload = buildErrorPayload("VALIDATION_ERROR", errors);
+                        ApiResponse<Map<String, Object>> response = ApiResponse.error(null, "VALIDATION_ERROR", payload);
+                        return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
                     }
 
                     @ExceptionHandler(AccessDeniedException.class)
-                    public ResponseEntity<Map<String, Object>> handleAccessDenied(AccessDeniedException ex) {
+                    public ResponseEntity<ApiResponse<Map<String, Object>>> handleAccessDenied(AccessDeniedException ex) {
                         log.warn("[EXCEPTION] Acces refuse: {}", ex.getMessage());
-                        Map<String, Object> body = buildErrorBody(403, "ACCESS_DENIED", "Acces refuse");
-                        return new ResponseEntity<>(body, HttpStatus.FORBIDDEN);
+                        Map<String, Object> payload = buildErrorPayload("ACCESS_DENIED", "Acces refuse");
+                        ApiResponse<Map<String, Object>> response = ApiResponse.error(null, "ACCESS_DENIED", payload);
+                        return new ResponseEntity<>(response, HttpStatus.FORBIDDEN);
                     }
 
                     @ExceptionHandler(RuntimeException.class)
-                    public ResponseEntity<Map<String, Object>> handleRuntime(RuntimeException ex) {
+                    public ResponseEntity<ApiResponse<Map<String, Object>>> handleRuntime(RuntimeException ex) {
                         log.error("[EXCEPTION] RuntimeException: {}", ex.getMessage(), ex);
                         String message = ex.getMessage() != null && ex.getMessage().contains("temporairement indisponible")
                             ? ex.getMessage()
                             : "Service temporairement indisponible";
-                        Map<String, Object> body = buildErrorBody(503, "SERVICE_UNAVAILABLE", message);
-                        return new ResponseEntity<>(body, HttpStatus.SERVICE_UNAVAILABLE);
+                        Map<String, Object> payload = buildErrorPayload("SERVICE_UNAVAILABLE", message);
+                        ApiResponse<Map<String, Object>> response = ApiResponse.error(null, "SERVICE_UNAVAILABLE", payload);
+                        return new ResponseEntity<>(response, HttpStatus.SERVICE_UNAVAILABLE);
                     }
 
                     @ExceptionHandler(Exception.class)
-                    public ResponseEntity<Map<String, Object>> handleGeneric(Exception ex) {
+                    public ResponseEntity<ApiResponse<Map<String, Object>>> handleGeneric(Exception ex) {
                         log.error("[EXCEPTION] Erreur interne: {}", ex.getMessage(), ex);
-                        Map<String, Object> body = buildErrorBody(500, "INTERNAL_ERROR", "Erreur interne du serveur");
-                        return new ResponseEntity<>(body, HttpStatus.INTERNAL_SERVER_ERROR);
+                        Map<String, Object> payload = buildErrorPayload("INTERNAL_ERROR", "Erreur interne du serveur");
+                        ApiResponse<Map<String, Object>> response = ApiResponse.error(null, "INTERNAL_ERROR", payload);
+                        return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);
                     }
                 }
-                """.formatted(PKG_CONFIG, PKG_DOMAIN_EXCEPTION);
+                """.formatted(PKG_CONFIG, PKG_DOMAIN_EXCEPTION, PKG_API_DTO_ENVELOPE);
 
         Files.writeString(file, code);
         log.info("[ACL] GlobalExceptionHandler genere");
@@ -2470,6 +2513,7 @@ public class AclArchitectureGenerator {
             for (BianEndpoint ep : group.endpoints) {
                 if (ep.requestDtoName != null) imports.add("import " + PKG_API_DTO_REQUEST + "." + ep.requestDtoName + ";");
             }
+            imports.add("import " + PKG_API_DTO_ENVELOPE + ".ApiRequest;");
             imports.add("import com.fasterxml.jackson.databind.ObjectMapper;");
             imports.add("import org.junit.jupiter.api.DisplayName;");
             imports.add("import org.junit.jupiter.api.Test;");
@@ -2520,11 +2564,13 @@ public class AclArchitectureGenerator {
                 };
 
                 if (ep.requestDtoName != null) {
-                    sb.append("        ").append(ep.requestDtoName).append(" request = new ").append(ep.requestDtoName).append("();\n");
-                    sb.append("        // TODO: Remplir les champs obligatoires\n\n");
+                    sb.append("        ").append(ep.requestDtoName).append(" payload = new ").append(ep.requestDtoName).append("();\n");
+                    sb.append("        // TODO: Remplir les champs obligatoires du payload\n");
+                    sb.append("        ApiRequest<").append(ep.requestDtoName).append("> envelope = new ApiRequest<>(\n");
+                    sb.append("                \"test-request-001\", \"test-system\", java.time.Instant.now().toString(), payload);\n\n");
                     sb.append("        mockMvc.perform(").append(mockMvcMethod).append("(\"").append(testUrl).append("\")\n");
                     sb.append("                .contentType(MediaType.APPLICATION_JSON)\n");
-                    sb.append("                .content(objectMapper.writeValueAsString(request)))\n");
+                    sb.append("                .content(objectMapper.writeValueAsString(envelope)))\n");
                 } else {
                     sb.append("        mockMvc.perform(").append(mockMvcMethod).append("(\"").append(testUrl).append("\"))\n");
                 }
@@ -2538,14 +2584,24 @@ public class AclArchitectureGenerator {
                 sb.append(";\n");
                 sb.append("    }\n\n");;
 
-                // Test validation (pour les endpoints avec body)
+                // Test validation : enveloppe sans request_id/source_system/timestamp doit retourner 400
                 if (ep.requestDtoName != null && !"GET".equals(httpMethod)) {
                     sb.append("    @Test\n");
-                    sb.append("    @DisplayName(\"Validation: ").append(ep.methodName).append(" avec body vide doit retourner 400\")\n");
-                    sb.append("    void ").append(ep.methodName).append("_withEmptyBody_shouldReturn400() throws Exception {\n");
+                    sb.append("    @DisplayName(\"Validation: ").append(ep.methodName).append(" avec enveloppe vide doit retourner 400\")\n");
+                    sb.append("    void ").append(ep.methodName).append("_withEmptyEnvelope_shouldReturn400() throws Exception {\n");
                     sb.append("        mockMvc.perform(").append(mockMvcMethod).append("(\"").append(testUrl).append("\")\n");
                     sb.append("                .contentType(MediaType.APPLICATION_JSON)\n");
                     sb.append("                .content(\"{}\"))\n");
+                    sb.append("                .andExpect(status().isBadRequest());\n");
+                    sb.append("    }\n\n");
+
+                    sb.append("    @Test\n");
+                    sb.append("    @DisplayName(\"Validation: ").append(ep.methodName).append(" avec payload null doit retourner 400\")\n");
+                    sb.append("    void ").append(ep.methodName).append("_withNullPayload_shouldReturn400() throws Exception {\n");
+                    sb.append("        String envelopeNoPayload = \"{\\\"request_id\\\":\\\"test-001\\\",\\\"source_system\\\":\\\"test\\\",\\\"timestamp\\\":\\\"2026-01-01T00:00:00Z\\\"}\";\n");
+                    sb.append("        mockMvc.perform(").append(mockMvcMethod).append("(\"").append(testUrl).append("\")\n");
+                    sb.append("                .contentType(MediaType.APPLICATION_JSON)\n");
+                    sb.append("                .content(envelopeNoPayload))\n");
                     sb.append("                .andExpect(status().isBadRequest());\n");
                     sb.append("    }\n\n");
                 }
@@ -2871,6 +2927,117 @@ public class AclArchitectureGenerator {
             }
         }
         return false;
+    }
+
+    // =====================================================================
+    // COUCHE API : Enveloppe standardisee (ApiRequest<T>, ApiResponse<T>)
+    // =====================================================================
+
+    /**
+     * Genere les classes d'enveloppe standardisee pour l'API BIAN :
+     * - ApiRequest<T>  : enveloppe d'entree avec request_id, source_system, timestamp, payload
+     * - ApiResponse<T> : enveloppe de sortie avec request_id, source_system, timestamp, status, payload
+     *
+     * Les clients de l'API doivent envoyer leurs requetes dans ce format d'enveloppe.
+     * Le Controller extrait le payload et le transmet au service metier.
+     */
+    private void generateEnvelopeClasses(Path srcMain) throws IOException {
+        Path dir = resolvePackagePath(srcMain, PKG_API_DTO_ENVELOPE);
+
+        // --- ApiRequest.java ---
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(PKG_API_DTO_ENVELOPE).append(";\n\n");
+        sb.append("import com.fasterxml.jackson.annotation.JsonProperty;\n");
+        sb.append("import jakarta.validation.Valid;\n");
+        sb.append("import jakarta.validation.constraints.NotBlank;\n");
+        sb.append("import jakarta.validation.constraints.NotNull;\n\n");
+        sb.append("/**\n");
+        sb.append(" * Enveloppe standardisee pour les requetes entrantes de l'API BIAN.\n");
+        sb.append(" * Tous les clients doivent envoyer leurs requetes dans ce format.\n");
+        sb.append(" *\n");
+        sb.append(" * @param <T> le type du payload metier\n");
+        sb.append(" */\n");
+        sb.append("public class ApiRequest<T> {\n\n");
+        sb.append("    @NotBlank(message = \"request_id est obligatoire\")\n");
+        sb.append("    @JsonProperty(\"request_id\")\n");
+        sb.append("    private String requestId;\n\n");
+        sb.append("    @NotBlank(message = \"source_system est obligatoire\")\n");
+        sb.append("    @JsonProperty(\"source_system\")\n");
+        sb.append("    private String sourceSystem;\n\n");
+        sb.append("    @NotBlank(message = \"timestamp est obligatoire\")\n");
+        sb.append("    @JsonProperty(\"timestamp\")\n");
+        sb.append("    private String timestamp;\n\n");
+        sb.append("    @NotNull(message = \"payload est obligatoire\")\n");
+        sb.append("    @Valid\n");
+        sb.append("    @JsonProperty(\"payload\")\n");
+        sb.append("    private T payload;\n\n");
+        sb.append("    public ApiRequest() {}\n\n");
+        sb.append("    public ApiRequest(String requestId, String sourceSystem, String timestamp, T payload) {\n");
+        sb.append("        this.requestId = requestId;\n");
+        sb.append("        this.sourceSystem = sourceSystem;\n");
+        sb.append("        this.timestamp = timestamp;\n");
+        sb.append("        this.payload = payload;\n");
+        sb.append("    }\n\n");
+        sb.append("    public String getRequestId() { return requestId; }\n");
+        sb.append("    public void setRequestId(String requestId) { this.requestId = requestId; }\n\n");
+        sb.append("    public String getSourceSystem() { return sourceSystem; }\n");
+        sb.append("    public void setSourceSystem(String sourceSystem) { this.sourceSystem = sourceSystem; }\n\n");
+        sb.append("    public String getTimestamp() { return timestamp; }\n");
+        sb.append("    public void setTimestamp(String timestamp) { this.timestamp = timestamp; }\n\n");
+        sb.append("    public T getPayload() { return payload; }\n");
+        sb.append("    public void setPayload(T payload) { this.payload = payload; }\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("ApiRequest.java"), sb.toString());
+        log.info("[ACL] Enveloppe generee : ApiRequest<T>");
+
+        // --- ApiResponse.java ---
+        sb = new StringBuilder();
+        sb.append("package ").append(PKG_API_DTO_ENVELOPE).append(";\n\n");
+        sb.append("import com.fasterxml.jackson.annotation.JsonProperty;\n\n");
+        sb.append("/**\n");
+        sb.append(" * Enveloppe standardisee pour les reponses de l'API BIAN.\n");
+        sb.append(" * Toutes les reponses sont wrappees dans ce format.\n");
+        sb.append(" *\n");
+        sb.append(" * @param <T> le type du payload metier de reponse\n");
+        sb.append(" */\n");
+        sb.append("public class ApiResponse<T> {\n\n");
+        sb.append("    @JsonProperty(\"request_id\")\n");
+        sb.append("    private String requestId;\n\n");
+        sb.append("    @JsonProperty(\"source_system\")\n");
+        sb.append("    private String sourceSystem;\n\n");
+        sb.append("    @JsonProperty(\"timestamp\")\n");
+        sb.append("    private String timestamp;\n\n");
+        sb.append("    @JsonProperty(\"status\")\n");
+        sb.append("    private String status;\n\n");
+        sb.append("    @JsonProperty(\"payload\")\n");
+        sb.append("    private T payload;\n\n");
+        sb.append("    public ApiResponse() {}\n\n");
+        sb.append("    public ApiResponse(String requestId, String sourceSystem, String timestamp, String status, T payload) {\n");
+        sb.append("        this.requestId = requestId;\n");
+        sb.append("        this.sourceSystem = sourceSystem;\n");
+        sb.append("        this.timestamp = timestamp;\n");
+        sb.append("        this.status = status;\n");
+        sb.append("        this.payload = payload;\n");
+        sb.append("    }\n\n");
+        sb.append("    public static <T> ApiResponse<T> success(String requestId, T payload) {\n");
+        sb.append("        return new ApiResponse<>(requestId, \"bian-api\", java.time.Instant.now().toString(), \"SUCCESS\", payload);\n");
+        sb.append("    }\n\n");
+        sb.append("    public static <T> ApiResponse<T> error(String requestId, String status, T payload) {\n");
+        sb.append("        return new ApiResponse<>(requestId, \"bian-api\", java.time.Instant.now().toString(), status, payload);\n");
+        sb.append("    }\n\n");
+        sb.append("    public String getRequestId() { return requestId; }\n");
+        sb.append("    public void setRequestId(String requestId) { this.requestId = requestId; }\n\n");
+        sb.append("    public String getSourceSystem() { return sourceSystem; }\n");
+        sb.append("    public void setSourceSystem(String sourceSystem) { this.sourceSystem = sourceSystem; }\n\n");
+        sb.append("    public String getTimestamp() { return timestamp; }\n");
+        sb.append("    public void setTimestamp(String timestamp) { this.timestamp = timestamp; }\n\n");
+        sb.append("    public String getStatus() { return status; }\n");
+        sb.append("    public void setStatus(String status) { this.status = status; }\n\n");
+        sb.append("    public T getPayload() { return payload; }\n");
+        sb.append("    public void setPayload(T payload) { this.payload = payload; }\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("ApiResponse.java"), sb.toString());
+        log.info("[ACL] Enveloppe generee : ApiResponse<T>");
     }
 
     // =====================================================================
