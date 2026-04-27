@@ -63,6 +63,8 @@ public class AdapterWrapperGenerator {
     private String PKG_CONFIG;
     private String PKG_MONITORING;
     private String PKG_OPENAPI;
+    private String PKG_AUDIT;
+    private String PKG_CATALOG;
 
     public AdapterWrapperGenerator(BianAutoDetector bianAutoDetector) {
         this.bianAutoDetector = bianAutoDetector;
@@ -176,7 +178,16 @@ public class AdapterWrapperGenerator {
         // 22. Generer la configuration OpenAPI/Swagger 3.0
         generateOpenApiConfig(srcMain, contract, bianMapping);
 
-        // 23. Generer le README
+        // 23. Generer l'Audit Trail (tracabilite reglementaire)
+        generateAuditTrail(srcMain, contract);
+
+        // 24. Generer la configuration 3scale API Gateway
+        generate3scaleConfig(projectRoot, contract, bianMapping);
+
+        // 25. Generer le Catalogue BIAN Dashboard
+        generateBianCatalog(srcMain, contract, bianMapping);
+
+        // 26. Generer le README
         generateReadme(projectRoot, contract, bianMapping);
 
         log.info("[ADAPTER-WRAPPER] ========== FIN GENERATION WRAPPER BIAN ==========");
@@ -207,6 +218,8 @@ public class AdapterWrapperGenerator {
         PKG_CONFIG = PKG_BASE + ".config";
         PKG_MONITORING = PKG_BASE + ".monitoring";
         PKG_OPENAPI = PKG_BASE + ".openapi";
+        PKG_AUDIT = PKG_BASE + ".audit";
+        PKG_CATALOG = PKG_BASE + ".catalog";
     }
 
     private void createDirectories(Path srcMain) throws IOException {
@@ -216,7 +229,8 @@ public class AdapterWrapperGenerator {
                 PKG_DOMAIN_SERVICE, PKG_DOMAIN_EXCEPTION,
                 PKG_INFRA_REST_ADAPTER, PKG_INFRA_REST_CONFIG, PKG_INFRA_MOCK,
                 PKG_INFRA_IDEMPOTENCY, PKG_DOMAIN_MODEL, PKG_ACL_MAPPER,
-                PKG_ACL_TRANSLATOR, PKG_CONFIG, PKG_MONITORING, PKG_OPENAPI
+                PKG_ACL_TRANSLATOR, PKG_CONFIG, PKG_MONITORING, PKG_OPENAPI,
+                PKG_AUDIT, PKG_CATALOG
         };
         for (String pkg : packages) {
             resolvePackagePath(srcMain, pkg);
@@ -2263,6 +2277,677 @@ public class AdapterWrapperGenerator {
 
         Files.writeString(file, sb.toString());
         log.info("[ADAPTER-WRAPPER] OpenApiConfig genere pour {}", bianMapping.getServiceDomainTitle());
+    }
+
+    // =====================================================================
+    // AUDIT TRAIL (Tracabilite reglementaire bancaire)
+    // =====================================================================
+
+    private void generateAuditTrail(Path srcMain, AdapterContractInfo contract) throws IOException {
+        // 1. AuditEvent — modele d'evenement d'audit
+        generateAuditEvent(srcMain);
+        // 2. AuditLogger — service de journalisation structuree
+        generateAuditLogger(srcMain);
+        // 3. AuditFilter — filtre HTTP qui intercepte toutes les requetes/reponses
+        generateAuditFilter(srcMain, contract);
+        log.info("[ADAPTER-WRAPPER] Audit Trail genere (AuditEvent, AuditLogger, AuditFilter)");
+    }
+
+    private void generateAuditEvent(Path srcMain) throws IOException {
+        Path dir = resolvePackagePath(srcMain, PKG_AUDIT);
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(PKG_AUDIT).append(";\n\n");
+        sb.append("import com.fasterxml.jackson.annotation.JsonInclude;\n");
+        sb.append("import java.time.Instant;\n");
+        sb.append("import java.util.Map;\n\n");
+        sb.append("/**\n");
+        sb.append(" * Modele d'evenement d'audit pour la tracabilite reglementaire.\n");
+        sb.append(" * <p>Chaque appel API genere un AuditEvent contenant :\n");
+        sb.append(" * le nom de l'utilisateur, l'action effectuee, le type d'action,\n");
+        sb.append(" * la date/heure et le detail precis de l'action.</p>\n");
+        sb.append(" */\n");
+        sb.append("@JsonInclude(JsonInclude.Include.NON_NULL)\n");
+        sb.append("public class AuditEvent {\n\n");
+        sb.append("    private String eventId;\n");
+        sb.append("    private Instant timestamp;\n");
+        sb.append("    private String userName;\n");
+        sb.append("    private String sourceSystem;\n");
+        sb.append("    private String requestId;\n");
+        sb.append("    private String action;\n");
+        sb.append("    private String actionType;\n");
+        sb.append("    private String httpMethod;\n");
+        sb.append("    private String endpoint;\n");
+        sb.append("    private int httpStatus;\n");
+        sb.append("    private long durationMs;\n");
+        sb.append("    private String clientIp;\n");
+        sb.append("    private String userAgent;\n");
+        sb.append("    private String traceId;\n");
+        sb.append("    private String spanId;\n");
+        sb.append("    private String requestPayloadSummary;\n");
+        sb.append("    private String responseStatus;\n");
+        sb.append("    private String errorMessage;\n");
+        sb.append("    private Map<String, String> metadata;\n\n");
+        // Constructeur
+        sb.append("    public AuditEvent() {\n");
+        sb.append("        this.timestamp = Instant.now();\n");
+        sb.append("    }\n\n");
+        // Getters/Setters
+        String[] fields = {"eventId:String", "timestamp:Instant", "userName:String", "sourceSystem:String",
+                "requestId:String", "action:String", "actionType:String", "httpMethod:String",
+                "endpoint:String", "httpStatus:int", "durationMs:long", "clientIp:String",
+                "userAgent:String", "traceId:String", "spanId:String",
+                "requestPayloadSummary:String", "responseStatus:String", "errorMessage:String",
+                "metadata:Map<String, String>"};
+        for (String f : fields) {
+            String[] parts = f.split(":");
+            String name = parts[0];
+            String type = parts[1];
+            String cap = name.substring(0, 1).toUpperCase() + name.substring(1);
+            sb.append("    public ").append(type).append(" get").append(cap).append("() { return this.").append(name).append("; }\n");
+            sb.append("    public void set").append(cap).append("(").append(type).append(" ").append(name).append(") { this.").append(name).append(" = ").append(name).append("; }\n");
+        }
+        sb.append("\n    @Override\n");
+        sb.append("    public String toString() {\n");
+        sb.append("        return \"AuditEvent{\" +\n");
+        sb.append("                \"eventId='\" + eventId + '\\'' +\n");
+        sb.append("                \", timestamp=\" + timestamp +\n");
+        sb.append("                \", userName='\" + userName + '\\'' +\n");
+        sb.append("                \", action='\" + action + '\\'' +\n");
+        sb.append("                \", actionType='\" + actionType + '\\'' +\n");
+        sb.append("                \", httpMethod='\" + httpMethod + '\\'' +\n");
+        sb.append("                \", endpoint='\" + endpoint + '\\'' +\n");
+        sb.append("                \", httpStatus=\" + httpStatus +\n");
+        sb.append("                \", durationMs=\" + durationMs +\n");
+        sb.append("                \", responseStatus='\" + responseStatus + '\\'' +\n");
+        sb.append("                '}';\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("AuditEvent.java"), sb.toString());
+    }
+
+    private void generateAuditLogger(Path srcMain) throws IOException {
+        Path dir = resolvePackagePath(srcMain, PKG_AUDIT);
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(PKG_AUDIT).append(";\n\n");
+        sb.append("import com.fasterxml.jackson.databind.ObjectMapper;\n");
+        sb.append("import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;\n");
+        sb.append("import org.slf4j.Logger;\n");
+        sb.append("import org.slf4j.LoggerFactory;\n");
+        sb.append("import org.springframework.stereotype.Service;\n\n");
+        sb.append("/**\n");
+        sb.append(" * Service de journalisation d'audit structuree.\n");
+        sb.append(" * <p>Enregistre chaque evenement d'audit en JSON structure\n");
+        sb.append(" * dans un logger dedie 'AUDIT' pour la tracabilite reglementaire.</p>\n");
+        sb.append(" */\n");
+        sb.append("@Service\n");
+        sb.append("public class AuditLogger {\n\n");
+        sb.append("    private static final Logger AUDIT_LOG = LoggerFactory.getLogger(\"AUDIT\");\n");
+        sb.append("    private static final Logger log = LoggerFactory.getLogger(AuditLogger.class);\n");
+        sb.append("    private final ObjectMapper objectMapper;\n\n");
+        sb.append("    public AuditLogger() {\n");
+        sb.append("        this.objectMapper = new ObjectMapper();\n");
+        sb.append("        this.objectMapper.registerModule(new JavaTimeModule());\n");
+        sb.append("    }\n\n");
+        sb.append("    /**\n");
+        sb.append("     * Enregistre un evenement d'audit en JSON structure.\n");
+        sb.append("     */\n");
+        sb.append("    public void logAuditEvent(AuditEvent event) {\n");
+        sb.append("        try {\n");
+        sb.append("            String json = objectMapper.writeValueAsString(event);\n");
+        sb.append("            AUDIT_LOG.info(json);\n");
+        sb.append("        } catch (Exception e) {\n");
+        sb.append("            log.error(\"[AUDIT] Erreur de serialisation de l'evenement d'audit\", e);\n");
+        sb.append("            AUDIT_LOG.info(\"[AUDIT] eventId={} action={} user={} status={}\",\n");
+        sb.append("                    event.getEventId(), event.getAction(), event.getUserName(), event.getResponseStatus());\n");
+        sb.append("        }\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("AuditLogger.java"), sb.toString());
+    }
+
+    private void generateAuditFilter(Path srcMain, AdapterContractInfo contract) throws IOException {
+        Path dir = resolvePackagePath(srcMain, PKG_AUDIT);
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(PKG_AUDIT).append(";\n\n");
+        sb.append("import jakarta.servlet.*;\n");
+        sb.append("import jakarta.servlet.http.HttpServletRequest;\n");
+        sb.append("import jakarta.servlet.http.HttpServletResponse;\n");
+        sb.append("import org.slf4j.MDC;\n");
+        sb.append("import org.springframework.core.Ordered;\n");
+        sb.append("import org.springframework.core.annotation.Order;\n");
+        sb.append("import org.springframework.stereotype.Component;\n");
+        sb.append("import org.springframework.web.util.ContentCachingRequestWrapper;\n");
+        sb.append("import org.springframework.web.util.ContentCachingResponseWrapper;\n\n");
+        sb.append("import java.io.IOException;\n");
+        sb.append("import java.nio.charset.StandardCharsets;\n");
+        sb.append("import java.util.UUID;\n\n");
+        sb.append("/**\n");
+        sb.append(" * Filtre HTTP qui intercepte toutes les requetes/reponses pour l'audit trail.\n");
+        sb.append(" * <p>Capture automatiquement : utilisateur, action, type, date/heure,\n");
+        sb.append(" * detail de l'action, IP source, duree, trace ID.</p>\n");
+        sb.append(" */\n");
+        sb.append("@Component\n");
+        sb.append("@Order(Ordered.HIGHEST_PRECEDENCE)\n");
+        sb.append("public class AuditFilter implements Filter {\n\n");
+        sb.append("    private final AuditLogger auditLogger;\n\n");
+        sb.append("    public AuditFilter(AuditLogger auditLogger) {\n");
+        sb.append("        this.auditLogger = auditLogger;\n");
+        sb.append("    }\n\n");
+        sb.append("    @Override\n");
+        sb.append("    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)\n");
+        sb.append("            throws IOException, ServletException {\n\n");
+        sb.append("        HttpServletRequest httpRequest = (HttpServletRequest) request;\n");
+        sb.append("        HttpServletResponse httpResponse = (HttpServletResponse) response;\n\n");
+        sb.append("        // Ne pas auditer les endpoints techniques (actuator, swagger)\n");
+        sb.append("        String uri = httpRequest.getRequestURI();\n");
+        sb.append("        if (uri.startsWith(\"/actuator\") || uri.startsWith(\"/swagger\") || uri.startsWith(\"/v3/api-docs\")) {\n");
+        sb.append("            chain.doFilter(request, response);\n");
+        sb.append("            return;\n");
+        sb.append("        }\n\n");
+        sb.append("        ContentCachingRequestWrapper wrappedRequest = new ContentCachingRequestWrapper(httpRequest);\n");
+        sb.append("        ContentCachingResponseWrapper wrappedResponse = new ContentCachingResponseWrapper(httpResponse);\n\n");
+        sb.append("        long startTime = System.currentTimeMillis();\n");
+        sb.append("        String eventId = UUID.randomUUID().toString();\n");
+        sb.append("        MDC.put(\"auditEventId\", eventId);\n\n");
+        sb.append("        try {\n");
+        sb.append("            chain.doFilter(wrappedRequest, wrappedResponse);\n");
+        sb.append("        } finally {\n");
+        sb.append("            long duration = System.currentTimeMillis() - startTime;\n\n");
+        sb.append("            AuditEvent event = new AuditEvent();\n");
+        sb.append("            event.setEventId(eventId);\n");
+        sb.append("            event.setHttpMethod(httpRequest.getMethod());\n");
+        sb.append("            event.setEndpoint(uri);\n");
+        sb.append("            event.setHttpStatus(wrappedResponse.getStatus());\n");
+        sb.append("            event.setDurationMs(duration);\n");
+        sb.append("            event.setClientIp(getClientIp(httpRequest));\n");
+        sb.append("            event.setUserAgent(httpRequest.getHeader(\"User-Agent\"));\n");
+        sb.append("            event.setTraceId(MDC.get(\"traceId\"));\n");
+        sb.append("            event.setSpanId(MDC.get(\"spanId\"));\n\n");
+        sb.append("            // Extraire le source_system et request_id du body (si POST/PUT)\n");
+        sb.append("            String body = new String(wrappedRequest.getContentAsByteArray(), StandardCharsets.UTF_8);\n");
+        sb.append("            if (body.contains(\"source_system\")) {\n");
+        sb.append("                event.setSourceSystem(extractJsonField(body, \"source_system\"));\n");
+        sb.append("                event.setUserName(extractJsonField(body, \"source_system\"));\n");
+        sb.append("            }\n");
+        sb.append("            if (body.contains(\"request_id\")) {\n");
+        sb.append("                event.setRequestId(extractJsonField(body, \"request_id\"));\n");
+        sb.append("            }\n\n");
+        sb.append("            // Deduire l'action a partir de l'URI et de la methode HTTP\n");
+        sb.append("            event.setAction(deduceAction(uri));\n");
+        sb.append("            event.setActionType(httpRequest.getMethod());\n\n");
+        sb.append("            // Resume du payload (tronque a 500 chars pour securite)\n");
+        sb.append("            if (body.length() > 0) {\n");
+        sb.append("                event.setRequestPayloadSummary(body.length() > 500 ? body.substring(0, 500) + \"...\" : body);\n");
+        sb.append("            }\n\n");
+        sb.append("            // Statut de la reponse\n");
+        sb.append("            int status = wrappedResponse.getStatus();\n");
+        sb.append("            event.setResponseStatus(status >= 200 && status < 300 ? \"SUCCESS\" : \"ERROR\");\n");
+        sb.append("            if (status >= 400) {\n");
+        sb.append("                String responseBody = new String(wrappedResponse.getContentAsByteArray(), StandardCharsets.UTF_8);\n");
+        sb.append("                event.setErrorMessage(responseBody.length() > 500 ? responseBody.substring(0, 500) : responseBody);\n");
+        sb.append("            }\n\n");
+        sb.append("            auditLogger.logAuditEvent(event);\n");
+        sb.append("            wrappedResponse.copyBodyToResponse();\n");
+        sb.append("            MDC.remove(\"auditEventId\");\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
+        sb.append("    private String getClientIp(HttpServletRequest request) {\n");
+        sb.append("        String xff = request.getHeader(\"X-Forwarded-For\");\n");
+        sb.append("        if (xff != null && !xff.isEmpty()) {\n");
+        sb.append("            return xff.split(\",\")[0].trim();\n");
+        sb.append("        }\n");
+        sb.append("        return request.getRemoteAddr();\n");
+        sb.append("    }\n\n");
+        sb.append("    private String deduceAction(String uri) {\n");
+        sb.append("        String[] parts = uri.split(\"/\");\n");
+        sb.append("        if (parts.length > 0) {\n");
+        sb.append("            return parts[parts.length - 1];\n");
+        sb.append("        }\n");
+        sb.append("        return uri;\n");
+        sb.append("    }\n\n");
+        sb.append("    private String extractJsonField(String json, String field) {\n");
+        sb.append("        try {\n");
+        sb.append("            String search = \"\\\"\" + field + \"\\\"\\\\s*:\\\\s*\\\"([^\\\"]*)\\\"\";\n");
+        sb.append("            java.util.regex.Matcher m = java.util.regex.Pattern.compile(search).matcher(json);\n");
+        sb.append("            if (m.find()) return m.group(1);\n");
+        sb.append("        } catch (Exception ignored) {}\n");
+        sb.append("        return null;\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("AuditFilter.java"), sb.toString());
+    }
+
+    // =====================================================================
+    // 3SCALE API GATEWAY CONFIGURATION
+    // =====================================================================
+
+    private void generate3scaleConfig(Path projectRoot, AdapterContractInfo contract, BianMapping bianMapping) throws IOException {
+        // Generer les fichiers de configuration 3scale dans src/main/resources/3scale/
+        Path threescaleDir = projectRoot.resolve("src/main/resources/3scale");
+        Files.createDirectories(threescaleDir);
+
+        // 1. API Product definition
+        generate3scaleApiProduct(threescaleDir, contract, bianMapping);
+        // 2. Backend definition
+        generate3scaleBackend(threescaleDir, contract);
+        // 3. Application Plan
+        generate3scaleApplicationPlan(threescaleDir, contract);
+        // 4. Policies
+        generate3scalePolicies(threescaleDir, contract);
+        // 5. Mapping Rules (metrics)
+        generate3scaleMappingRules(threescaleDir, contract, bianMapping);
+
+        log.info("[ADAPTER-WRAPPER] Configuration 3scale generee (api-product, backend, app-plan, policies, mapping-rules)");
+    }
+
+    private void generate3scaleApiProduct(Path dir, AdapterContractInfo contract, BianMapping bianMapping) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\n");
+        sb.append("  \"api_product\": {\n");
+        sb.append("    \"name\": \"BIAN ").append(bianMapping.getServiceDomainTitle()).append(" API\",\n");
+        sb.append("    \"system_name\": \"bian_").append(contract.toKebabCase().replace("-", "_")).append("_api\",\n");
+        sb.append("    \"description\": \"").append(contract.getDescription() != null ? contract.getDescription() : "API BIAN " + contract.getAdapterName()).append("\",\n");
+        sb.append("    \"deployment_option\": \"hosted\",\n");
+        sb.append("    \"backend_version\": \"1\",\n");
+        sb.append("    \"state\": \"published\",\n");
+        sb.append("    \"version\": \"").append(contract.getVersion() != null ? contract.getVersion() : "1.0.0").append("\",\n");
+        sb.append("    \"bian_service_domain\": \"").append(bianMapping.getServiceDomainTitle()).append("\",\n");
+        sb.append("    \"bian_id\": \"").append(bianMapping.getBianId()).append("\",\n");
+        sb.append("    \"authentication\": {\n");
+        sb.append("      \"type\": \"api_key\",\n");
+        sb.append("      \"credentials_location\": \"headers\",\n");
+        sb.append("      \"user_key_name\": \"X-API-Key\"\n");
+        sb.append("    }\n");
+        sb.append("  }\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("api-product.json"), sb.toString());
+    }
+
+    private void generate3scaleBackend(Path dir, AdapterContractInfo contract) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\n");
+        sb.append("  \"backend\": {\n");
+        sb.append("    \"name\": \"").append(contract.getAdapterName()).append(" Backend\",\n");
+        sb.append("    \"system_name\": \"").append(contract.toKebabCase().replace("-", "_")).append("_backend\",\n");
+        sb.append("    \"private_endpoint\": \"http://wrapper-bian-").append(contract.toKebabCase()).append(".svc.cluster.local:8080\",\n");
+        sb.append("    \"description\": \"Backend du Wrapper BIAN pour ").append(contract.getAdapterName()).append("\",\n");
+        sb.append("    \"health_check\": {\n");
+        sb.append("      \"path\": \"/actuator/health\",\n");
+        sb.append("      \"interval\": 30,\n");
+        sb.append("      \"timeout\": 5\n");
+        sb.append("    },\n");
+        sb.append("    \"metrics\": {\n");
+        sb.append("      \"prometheus_endpoint\": \"/actuator/prometheus\"\n");
+        sb.append("    }\n");
+        sb.append("  }\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("backend.json"), sb.toString());
+    }
+
+    private void generate3scaleApplicationPlan(Path dir, AdapterContractInfo contract) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\n");
+        sb.append("  \"application_plans\": [\n");
+        sb.append("    {\n");
+        sb.append("      \"name\": \"Basic\",\n");
+        sb.append("      \"system_name\": \"basic_plan\",\n");
+        sb.append("      \"state\": \"published\",\n");
+        sb.append("      \"default\": true,\n");
+        sb.append("      \"limits\": [\n");
+        sb.append("        { \"period\": \"minute\", \"value\": 60, \"metric\": \"hits\" },\n");
+        sb.append("        { \"period\": \"day\", \"value\": 10000, \"metric\": \"hits\" }\n");
+        sb.append("      ]\n");
+        sb.append("    },\n");
+        sb.append("    {\n");
+        sb.append("      \"name\": \"Premium\",\n");
+        sb.append("      \"system_name\": \"premium_plan\",\n");
+        sb.append("      \"state\": \"published\",\n");
+        sb.append("      \"default\": false,\n");
+        sb.append("      \"limits\": [\n");
+        sb.append("        { \"period\": \"minute\", \"value\": 300, \"metric\": \"hits\" },\n");
+        sb.append("        { \"period\": \"day\", \"value\": 100000, \"metric\": \"hits\" }\n");
+        sb.append("      ]\n");
+        sb.append("    }\n");
+        sb.append("  ]\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("application-plans.json"), sb.toString());
+    }
+
+    private void generate3scalePolicies(Path dir, AdapterContractInfo contract) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\n");
+        sb.append("  \"policies\": [\n");
+        sb.append("    {\n");
+        sb.append("      \"name\": \"cors\",\n");
+        sb.append("      \"version\": \"builtin\",\n");
+        sb.append("      \"enabled\": true,\n");
+        sb.append("      \"configuration\": {\n");
+        sb.append("        \"allow_headers\": [\"Content-Type\", \"Authorization\", \"X-API-Key\", \"X-Request-ID\"],\n");
+        sb.append("        \"allow_methods\": [\"GET\", \"POST\", \"PUT\", \"DELETE\", \"PATCH\", \"OPTIONS\"],\n");
+        sb.append("        \"allow_origin\": \"*\",\n");
+        sb.append("        \"allow_credentials\": true\n");
+        sb.append("      }\n");
+        sb.append("    },\n");
+        sb.append("    {\n");
+        sb.append("      \"name\": \"rate_limit\",\n");
+        sb.append("      \"version\": \"builtin\",\n");
+        sb.append("      \"enabled\": true,\n");
+        sb.append("      \"configuration\": {\n");
+        sb.append("        \"fixed_window_limiters\": [\n");
+        sb.append("          { \"key\": { \"name\": \"X-API-Key\", \"scope\": \"global\" }, \"count\": 100, \"window\": 60 }\n");
+        sb.append("        ]\n");
+        sb.append("      }\n");
+        sb.append("    },\n");
+        sb.append("    {\n");
+        sb.append("      \"name\": \"logging\",\n");
+        sb.append("      \"version\": \"builtin\",\n");
+        sb.append("      \"enabled\": true,\n");
+        sb.append("      \"configuration\": {\n");
+        sb.append("        \"enable_access_logs\": true,\n");
+        sb.append("        \"custom_logging\": \"{{request.method}} {{request.path}} -> {{response.status}} ({{response.time}}ms)\"\n");
+        sb.append("      }\n");
+        sb.append("    },\n");
+        sb.append("    {\n");
+        sb.append("      \"name\": \"headers\",\n");
+        sb.append("      \"version\": \"builtin\",\n");
+        sb.append("      \"enabled\": true,\n");
+        sb.append("      \"configuration\": {\n");
+        sb.append("        \"request\": [\n");
+        sb.append("          { \"op\": \"set\", \"header\": \"X-3scale-Proxy\", \"value\": \"true\" },\n");
+        sb.append("          { \"op\": \"set\", \"header\": \"X-Forwarded-Proto\", \"value\": \"https\" }\n");
+        sb.append("        ],\n");
+        sb.append("        \"response\": [\n");
+        sb.append("          { \"op\": \"set\", \"header\": \"X-BIAN-Service-Domain\", \"value\": \"").append(contract.getAdapterName()).append("\" }\n");
+        sb.append("        ]\n");
+        sb.append("      }\n");
+        sb.append("    }\n");
+        sb.append("  ]\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("policies.json"), sb.toString());
+    }
+
+    private void generate3scaleMappingRules(Path dir, AdapterContractInfo contract, BianMapping bianMapping) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\n");
+        sb.append("  \"mapping_rules\": [\n");
+        sb.append("    {\n");
+        sb.append("      \"http_method\": \"GET\",\n");
+        sb.append("      \"pattern\": \"/api/v1/").append(contract.toKebabCase()).append("/\",\n");
+        sb.append("      \"metric_system_name\": \"hits\",\n");
+        sb.append("      \"delta\": 1\n");
+        sb.append("    }");
+        for (EndpointInfo ep : contract.getEndpoints()) {
+            sb.append(",\n    {\n");
+            sb.append("      \"http_method\": \"").append(ep.getMethod().toUpperCase()).append("\",\n");
+            sb.append("      \"pattern\": \"/api/v1/").append(contract.toKebabCase()).append("/").append(toKebabCase(ep.getOperation())).append("\",\n");
+            sb.append("      \"metric_system_name\": \"").append(ep.toMethodName()).append("\",\n");
+            sb.append("      \"delta\": 1\n");
+            sb.append("    }");
+        }
+        sb.append("\n  ],\n");
+        sb.append("  \"metrics\": [\n");
+        sb.append("    { \"system_name\": \"hits\", \"friendly_name\": \"Hits\", \"unit\": \"hit\", \"description\": \"Nombre total d'appels\" }");
+        for (EndpointInfo ep : contract.getEndpoints()) {
+            sb.append(",\n    { \"system_name\": \"").append(ep.toMethodName());
+            sb.append("\", \"friendly_name\": \"").append(toPascalCase(ep.getOperation()));
+            sb.append("\", \"unit\": \"hit\", \"description\": \"");
+            sb.append(ep.getSummary() != null ? ep.getSummary() : ep.getOperation()).append("\" }");
+        }
+        sb.append("\n  ]\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("mapping-rules.json"), sb.toString());
+    }
+
+    // =====================================================================
+    // CATALOGUE BIAN DASHBOARD
+    // =====================================================================
+
+    private void generateBianCatalog(Path srcMain, AdapterContractInfo contract, BianMapping bianMapping) throws IOException {
+        // 1. CatalogEntry model
+        generateCatalogEntry(srcMain);
+        // 2. CatalogController — endpoint REST /api/v1/catalog
+        generateCatalogController(srcMain, contract, bianMapping);
+        // 3. Dashboard HTML — page web interactive
+        generateCatalogDashboard(srcMain, contract, bianMapping);
+        log.info("[ADAPTER-WRAPPER] Catalogue BIAN genere (CatalogEntry, CatalogController, dashboard.html)");
+    }
+
+    private void generateCatalogEntry(Path srcMain) throws IOException {
+        Path dir = resolvePackagePath(srcMain, PKG_CATALOG);
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(PKG_CATALOG).append(";\n\n");
+        sb.append("import java.time.Instant;\n");
+        sb.append("import java.util.List;\n");
+        sb.append("import java.util.Map;\n\n");
+        sb.append("/**\n");
+        sb.append(" * Entree du catalogue BIAN representant un Service Domain wrappe.\n");
+        sb.append(" */\n");
+        sb.append("public class CatalogEntry {\n\n");
+        sb.append("    private String serviceDomainId;\n");
+        sb.append("    private String serviceDomainTitle;\n");
+        sb.append("    private String adapterName;\n");
+        sb.append("    private String version;\n");
+        sb.append("    private String status;\n");
+        sb.append("    private String baseUrl;\n");
+        sb.append("    private String description;\n");
+        sb.append("    private Instant deployedAt;\n");
+        sb.append("    private Instant lastHealthCheck;\n");
+        sb.append("    private String healthStatus;\n");
+        sb.append("    private List<EndpointSummary> endpoints;\n");
+        sb.append("    private Map<String, Object> metrics;\n\n");
+        // Inner class EndpointSummary
+        sb.append("    public static class EndpointSummary {\n");
+        sb.append("        private String operation;\n");
+        sb.append("        private String method;\n");
+        sb.append("        private String path;\n");
+        sb.append("        private String summary;\n");
+        sb.append("        private boolean idempotent;\n");
+        sb.append("        private boolean paginated;\n\n");
+        String[] epFields = {"operation:String", "method:String", "path:String", "summary:String", "idempotent:boolean", "paginated:boolean"};
+        for (String f : epFields) {
+            String[] parts = f.split(":");
+            String name = parts[0]; String type = parts[1];
+            String cap = name.substring(0, 1).toUpperCase() + name.substring(1);
+            String getter = type.equals("boolean") ? "is" : "get";
+            sb.append("        public ").append(type).append(" ").append(getter).append(cap).append("() { return this.").append(name).append("; }\n");
+            sb.append("        public void set").append(cap).append("(").append(type).append(" ").append(name).append(") { this.").append(name).append(" = ").append(name).append("; }\n");
+        }
+        sb.append("    }\n\n");
+        // Getters/Setters for CatalogEntry
+        String[] ceFields = {"serviceDomainId:String", "serviceDomainTitle:String", "adapterName:String",
+                "version:String", "status:String", "baseUrl:String", "description:String",
+                "deployedAt:Instant", "lastHealthCheck:Instant", "healthStatus:String",
+                "endpoints:List<EndpointSummary>", "metrics:Map<String, Object>"};
+        for (String f : ceFields) {
+            String[] parts = f.split(":");
+            String name = parts[0]; String type = parts[1];
+            String cap = name.substring(0, 1).toUpperCase() + name.substring(1);
+            sb.append("    public ").append(type).append(" get").append(cap).append("() { return this.").append(name).append("; }\n");
+            sb.append("    public void set").append(cap).append("(").append(type).append(" ").append(name).append(") { this.").append(name).append(" = ").append(name).append("; }\n");
+        }
+        sb.append("}\n");
+        Files.writeString(dir.resolve("CatalogEntry.java"), sb.toString());
+    }
+
+    private void generateCatalogController(Path srcMain, AdapterContractInfo contract, BianMapping bianMapping) throws IOException {
+        Path dir = resolvePackagePath(srcMain, PKG_CATALOG);
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(PKG_CATALOG).append(";\n\n");
+        sb.append("import io.swagger.v3.oas.annotations.Operation;\n");
+        sb.append("import io.swagger.v3.oas.annotations.tags.Tag;\n");
+        sb.append("import org.springframework.beans.factory.annotation.Value;\n");
+        sb.append("import org.springframework.boot.actuate.health.HealthEndpoint;\n");
+        sb.append("import org.springframework.boot.actuate.health.Status;\n");
+        sb.append("import org.springframework.http.ResponseEntity;\n");
+        sb.append("import org.springframework.web.bind.annotation.*;\n\n");
+        sb.append("import java.time.Instant;\n");
+        sb.append("import java.util.*;\n\n");
+        sb.append("/**\n");
+        sb.append(" * Catalogue BIAN — expose les metadonnees du Service Domain wrappe.\n");
+        sb.append(" * <p>Endpoint : GET /api/v1/catalog</p>\n");
+        sb.append(" */\n");
+        sb.append("@RestController\n");
+        sb.append("@RequestMapping(\"/api/v1/catalog\")\n");
+        sb.append("@Tag(name = \"BIAN Catalog\", description = \"Catalogue des Service Domains BIAN wrappes\")\n");
+        sb.append("public class CatalogController {\n\n");
+        sb.append("    private final HealthEndpoint healthEndpoint;\n");
+        sb.append("    private final Instant startupTime = Instant.now();\n\n");
+        sb.append("    @Value(\"${spring.application.name:wrapper-bian}\")\n");
+        sb.append("    private String appName;\n\n");
+        sb.append("    public CatalogController(HealthEndpoint healthEndpoint) {\n");
+        sb.append("        this.healthEndpoint = healthEndpoint;\n");
+        sb.append("    }\n\n");
+        sb.append("    @Operation(summary = \"Liste des Service Domains wrappes\")\n");
+        sb.append("    @GetMapping\n");
+        sb.append("    public ResponseEntity<List<CatalogEntry>> getCatalog() {\n");
+        sb.append("        CatalogEntry entry = new CatalogEntry();\n");
+        sb.append("        entry.setServiceDomainId(\"").append(bianMapping.getBianId()).append("\");\n");
+        sb.append("        entry.setServiceDomainTitle(\"").append(bianMapping.getServiceDomainTitle()).append("\");\n");
+        sb.append("        entry.setAdapterName(\"").append(contract.getAdapterName()).append("\");\n");
+        sb.append("        entry.setVersion(\"").append(contract.getVersion() != null ? contract.getVersion() : "1.0.0").append("\");\n");
+        sb.append("        entry.setStatus(\"ACTIVE\");\n");
+        sb.append("        entry.setBaseUrl(\"/api/v1/").append(contract.toKebabCase()).append("\");\n");
+        sb.append("        entry.setDescription(\"").append(contract.getDescription() != null ? contract.getDescription().replace("\"", "\\\""): "").append("\");\n");
+        sb.append("        entry.setDeployedAt(startupTime);\n");
+        sb.append("        entry.setLastHealthCheck(Instant.now());\n\n");
+        sb.append("        // Health check\n");
+        sb.append("        try {\n");
+        sb.append("            Status status = healthEndpoint.health().getStatus();\n");
+        sb.append("            entry.setHealthStatus(status.getCode());\n");
+        sb.append("        } catch (Exception e) {\n");
+        sb.append("            entry.setHealthStatus(\"UNKNOWN\");\n");
+        sb.append("        }\n\n");
+        sb.append("        // Endpoints\n");
+        sb.append("        List<CatalogEntry.EndpointSummary> endpoints = new ArrayList<>();\n");
+        for (EndpointInfo ep : contract.getEndpoints()) {
+            sb.append("        {\n");
+            sb.append("            CatalogEntry.EndpointSummary es = new CatalogEntry.EndpointSummary();\n");
+            sb.append("            es.setOperation(\"").append(ep.toMethodName()).append("\");\n");
+            sb.append("            es.setMethod(\"").append(ep.getMethod().toUpperCase()).append("\");\n");
+            sb.append("            es.setPath(\"/api/v1/").append(contract.toKebabCase()).append("/").append(toKebabCase(ep.getOperation())).append("\");\n");
+            sb.append("            es.setSummary(\"").append(ep.getSummary() != null ? ep.getSummary() : "").append("\");\n");
+            sb.append("            es.setIdempotent(").append(ep.isIdempotent()).append(");\n");
+            sb.append("            es.setPaginated(").append(ep.isPaginated()).append(");\n");
+            sb.append("            endpoints.add(es);\n");
+            sb.append("        }\n");
+        }
+        sb.append("        entry.setEndpoints(endpoints);\n\n");
+        sb.append("        // Metriques\n");
+        sb.append("        Map<String, Object> metrics = new LinkedHashMap<>();\n");
+        sb.append("        metrics.put(\"total_endpoints\", ").append(contract.getEndpoints().size()).append(");\n");
+        sb.append("        metrics.put(\"swagger_url\", \"/swagger-ui.html\");\n");
+        sb.append("        metrics.put(\"prometheus_url\", \"/actuator/prometheus\");\n");
+        sb.append("        metrics.put(\"health_url\", \"/actuator/health\");\n");
+        sb.append("        entry.setMetrics(metrics);\n\n");
+        sb.append("        return ResponseEntity.ok(List.of(entry));\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+        Files.writeString(dir.resolve("CatalogController.java"), sb.toString());
+    }
+
+    private void generateCatalogDashboard(Path srcMain, AdapterContractInfo contract, BianMapping bianMapping) throws IOException {
+        // Generer le dashboard HTML dans src/main/resources/static/
+        // srcMain = projectRoot/src/main/java/com/bank/api
+        // Remonter PKG_BASE.split(".").length niveaux (com/bank/api=3) + 1 (java) = 4 → src/main
+        Path srcMainDir = srcMain;
+        for (int i = 0; i < PKG_BASE.split("\\.").length + 1; i++) {
+            srcMainDir = srcMainDir.getParent();
+        }
+        // srcMainDir = .../src/main
+        Path staticDir = srcMainDir.resolve("resources/static");
+        Files.createDirectories(staticDir);
+        StringBuilder sb = new StringBuilder();
+        sb.append("<!DOCTYPE html>\n<html lang=\"fr\">\n<head>\n");
+        sb.append("    <meta charset=\"UTF-8\">\n");
+        sb.append("    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
+        sb.append("    <title>Catalogue BIAN — ").append(contract.getAdapterName()).append("</title>\n");
+        sb.append("    <style>\n");
+        sb.append("        * { margin: 0; padding: 0; box-sizing: border-box; }\n");
+        sb.append("        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; color: #333; }\n");
+        sb.append("        .header { background: linear-gradient(135deg, #1a237e, #283593); color: white; padding: 30px 40px; }\n");
+        sb.append("        .header h1 { font-size: 28px; margin-bottom: 8px; }\n");
+        sb.append("        .header p { opacity: 0.8; font-size: 14px; }\n");
+        sb.append("        .container { max-width: 1200px; margin: 30px auto; padding: 0 20px; }\n");
+        sb.append("        .card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }\n");
+        sb.append("        .card h2 { color: #1a237e; margin-bottom: 16px; font-size: 20px; }\n");
+        sb.append("        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }\n");
+        sb.append("        .status-active { background: #e8f5e9; color: #2e7d32; }\n");
+        sb.append("        .status-down { background: #ffebee; color: #c62828; }\n");
+        sb.append("        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }\n");
+        sb.append("        .metric-card { background: #f8f9fa; border-radius: 8px; padding: 16px; text-align: center; }\n");
+        sb.append("        .metric-value { font-size: 32px; font-weight: 700; color: #1a237e; }\n");
+        sb.append("        .metric-label { font-size: 13px; color: #666; margin-top: 4px; }\n");
+        sb.append("        table { width: 100%; border-collapse: collapse; margin-top: 12px; }\n");
+        sb.append("        th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #eee; }\n");
+        sb.append("        th { background: #f8f9fa; font-weight: 600; color: #555; font-size: 13px; }\n");
+        sb.append("        .method-badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; color: white; }\n");
+        sb.append("        .method-GET { background: #43a047; } .method-POST { background: #1565c0; }\n");
+        sb.append("        .method-PUT { background: #ef6c00; } .method-DELETE { background: #c62828; }\n");
+        sb.append("        .method-PATCH { background: #6a1b9a; }\n");
+        sb.append("        .links a { display: inline-block; margin: 4px 8px 4px 0; padding: 8px 16px; background: #1a237e; color: white; border-radius: 6px; text-decoration: none; font-size: 13px; }\n");
+        sb.append("        .links a:hover { background: #283593; }\n");
+        sb.append("        #health-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }\n");
+        sb.append("    </style>\n");
+        sb.append("</head>\n<body>\n");
+        sb.append("    <div class=\"header\">\n");
+        sb.append("        <h1>Catalogue BIAN</h1>\n");
+        sb.append("        <p>Service Domain : ").append(bianMapping.getServiceDomainTitle()).append(" (").append(bianMapping.getBianId()).append(") | Adapter : ").append(contract.getAdapterName()).append("</p>\n");
+        sb.append("    </div>\n");
+        sb.append("    <div class=\"container\">\n");
+        // Metriques
+        sb.append("        <div class=\"grid\">\n");
+        sb.append("            <div class=\"metric-card\"><div class=\"metric-value\">").append(contract.getEndpoints().size()).append("</div><div class=\"metric-label\">Endpoints</div></div>\n");
+        sb.append("            <div class=\"metric-card\"><div class=\"metric-value\" id=\"health-status\">...</div><div class=\"metric-label\">Sante</div></div>\n");
+        sb.append("            <div class=\"metric-card\"><div class=\"metric-value\">").append(contract.getVersion() != null ? contract.getVersion() : "1.0.0").append("</div><div class=\"metric-label\">Version</div></div>\n");
+        sb.append("            <div class=\"metric-card\"><div class=\"metric-value\" id=\"uptime\">...</div><div class=\"metric-label\">Uptime</div></div>\n");
+        sb.append("        </div>\n");
+        // Endpoints
+        sb.append("        <div class=\"card\">\n");
+        sb.append("            <h2>Endpoints BIAN</h2>\n");
+        sb.append("            <table>\n");
+        sb.append("                <thead><tr><th>Operation</th><th>Methode</th><th>Path</th><th>Description</th><th>Idempotent</th><th>Pagine</th></tr></thead>\n");
+        sb.append("                <tbody>\n");
+        for (EndpointInfo ep : contract.getEndpoints()) {
+            sb.append("                <tr>");
+            sb.append("<td>").append(ep.toMethodName()).append("</td>");
+            sb.append("<td><span class=\"method-badge method-").append(ep.getMethod().toUpperCase()).append("\">").append(ep.getMethod().toUpperCase()).append("</span></td>");
+            sb.append("<td>/api/v1/").append(contract.toKebabCase()).append("/").append(toKebabCase(ep.getOperation())).append("</td>");
+            sb.append("<td>").append(ep.getSummary() != null ? ep.getSummary() : "-").append("</td>");
+            sb.append("<td>").append(ep.isIdempotent() ? "Oui" : "Non").append("</td>");
+            sb.append("<td>").append(ep.isPaginated() ? "Oui" : "Non").append("</td>");
+            sb.append("</tr>\n");
+        }
+        sb.append("                </tbody>\n");
+        sb.append("            </table>\n");
+        sb.append("        </div>\n");
+        // Liens
+        sb.append("        <div class=\"card links\">\n");
+        sb.append("            <h2>Liens rapides</h2>\n");
+        sb.append("            <a href=\"/swagger-ui.html\" target=\"_blank\">Swagger UI</a>\n");
+        sb.append("            <a href=\"/actuator/health\" target=\"_blank\">Health Check</a>\n");
+        sb.append("            <a href=\"/actuator/prometheus\" target=\"_blank\">Prometheus Metrics</a>\n");
+        sb.append("            <a href=\"/api/v1/catalog\" target=\"_blank\">Catalog API (JSON)</a>\n");
+        sb.append("        </div>\n");
+        sb.append("    </div>\n");
+        // JS pour health check dynamique
+        sb.append("    <script>\n");
+        sb.append("        async function checkHealth() {\n");
+        sb.append("            try {\n");
+        sb.append("                const res = await fetch('/actuator/health');\n");
+        sb.append("                const data = await res.json();\n");
+        sb.append("                const el = document.getElementById('health-status');\n");
+        sb.append("                el.textContent = data.status;\n");
+        sb.append("                el.style.color = data.status === 'UP' ? '#2e7d32' : '#c62828';\n");
+        sb.append("            } catch (e) {\n");
+        sb.append("                document.getElementById('health-status').textContent = 'DOWN';\n");
+        sb.append("                document.getElementById('health-status').style.color = '#c62828';\n");
+        sb.append("            }\n");
+        sb.append("        }\n");
+        sb.append("        checkHealth();\n");
+        sb.append("        setInterval(checkHealth, 30000);\n");
+        sb.append("    </script>\n");
+        sb.append("</body>\n</html>\n");
+        Files.writeString(staticDir.resolve("catalog.html"), sb.toString());
     }
 
     // =====================================================================

@@ -924,4 +924,260 @@ class AdapterWrapperGeneratorTest {
             }
         }
     }
+
+    // ============================================================
+    // AUDIT TRAIL
+    // ============================================================
+
+    @Nested
+    @DisplayName("Audit Trail")
+    class AuditTrailTests {
+
+        @Test
+        @DisplayName("Doit generer AuditEvent, AuditLogger et AuditFilter")
+        void shouldGenerateAuditTrailClasses() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                List<String> auditFiles = walk.filter(Files::isRegularFile)
+                        .map(p -> p.getFileName().toString())
+                        .filter(n -> n.startsWith("Audit"))
+                        .sorted()
+                        .toList();
+
+                assertTrue(auditFiles.contains("AuditEvent.java"), "AuditEvent.java doit etre genere");
+                assertTrue(auditFiles.contains("AuditFilter.java"), "AuditFilter.java doit etre genere");
+                assertTrue(auditFiles.contains("AuditLogger.java"), "AuditLogger.java doit etre genere");
+            }
+        }
+
+        @Test
+        @DisplayName("AuditEvent doit contenir tous les champs reglementaires")
+        void auditEventShouldContainAllRequiredFields() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> auditEvent = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("AuditEvent.java"))
+                        .findFirst();
+
+                assertTrue(auditEvent.isPresent());
+                String content = Files.readString(auditEvent.get());
+                assertTrue(content.contains("userName"), "AuditEvent doit contenir userName");
+                assertTrue(content.contains("action"), "AuditEvent doit contenir action");
+                assertTrue(content.contains("actionType"), "AuditEvent doit contenir actionType");
+                assertTrue(content.contains("timestamp"), "AuditEvent doit contenir timestamp");
+                assertTrue(content.contains("requestPayloadSummary"), "AuditEvent doit contenir le detail de l'action");
+                assertTrue(content.contains("sourceSystem"), "AuditEvent doit contenir sourceSystem");
+                assertTrue(content.contains("clientIp"), "AuditEvent doit contenir clientIp");
+                assertTrue(content.contains("traceId"), "AuditEvent doit contenir traceId");
+                assertTrue(content.contains("durationMs"), "AuditEvent doit contenir durationMs");
+            }
+        }
+
+        @Test
+        @DisplayName("AuditFilter doit intercepter les requetes HTTP et exclure actuator")
+        void auditFilterShouldInterceptAndExcludeActuator() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> auditFilter = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("AuditFilter.java"))
+                        .findFirst();
+
+                assertTrue(auditFilter.isPresent());
+                String content = Files.readString(auditFilter.get());
+                assertTrue(content.contains("implements Filter"), "AuditFilter doit implementer Filter");
+                assertTrue(content.contains("/actuator"), "AuditFilter doit exclure /actuator");
+                assertTrue(content.contains("/swagger"), "AuditFilter doit exclure /swagger");
+                assertTrue(content.contains("ContentCachingRequestWrapper"), "AuditFilter doit utiliser ContentCachingRequestWrapper");
+                assertTrue(content.contains("source_system"), "AuditFilter doit extraire source_system");
+                assertTrue(content.contains("request_id"), "AuditFilter doit extraire request_id");
+            }
+        }
+
+        @Test
+        @DisplayName("AuditLogger doit logger en JSON structure")
+        void auditLoggerShouldLogStructuredJson() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> auditLogger = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("AuditLogger.java"))
+                        .findFirst();
+
+                assertTrue(auditLogger.isPresent());
+                String content = Files.readString(auditLogger.get());
+                assertTrue(content.contains("ObjectMapper"), "AuditLogger doit utiliser ObjectMapper");
+                assertTrue(content.contains("AUDIT"), "AuditLogger doit utiliser le logger AUDIT");
+                assertTrue(content.contains("writeValueAsString"), "AuditLogger doit serialiser en JSON");
+            }
+        }
+    }
+
+    // ============================================================
+    // 3SCALE API GATEWAY
+    // ============================================================
+
+    @Nested
+    @DisplayName("3scale API Gateway")
+    class ThreeScaleTests {
+
+        @Test
+        @DisplayName("Doit generer les 5 fichiers de configuration 3scale")
+        void shouldGenerate3scaleConfigFiles() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            Path threescaleDir = projectRoot.resolve("src/main/resources/3scale");
+            assertTrue(Files.exists(threescaleDir), "Le repertoire 3scale doit exister");
+
+            assertTrue(Files.exists(threescaleDir.resolve("api-product.json")), "api-product.json doit exister");
+            assertTrue(Files.exists(threescaleDir.resolve("backend.json")), "backend.json doit exister");
+            assertTrue(Files.exists(threescaleDir.resolve("application-plans.json")), "application-plans.json doit exister");
+            assertTrue(Files.exists(threescaleDir.resolve("policies.json")), "policies.json doit exister");
+            assertTrue(Files.exists(threescaleDir.resolve("mapping-rules.json")), "mapping-rules.json doit exister");
+        }
+
+        @Test
+        @DisplayName("api-product.json doit contenir les metadonnees BIAN")
+        void apiProductShouldContainBianMetadata() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            String content = Files.readString(projectRoot.resolve("src/main/resources/3scale/api-product.json"));
+            assertTrue(content.contains("bian_service_domain"), "api-product doit contenir bian_service_domain");
+            assertTrue(content.contains("bian_id"), "api-product doit contenir bian_id");
+            assertTrue(content.contains("authentication"), "api-product doit contenir authentication");
+            assertTrue(content.contains("X-API-Key"), "api-product doit contenir X-API-Key");
+        }
+
+        @Test
+        @DisplayName("policies.json doit contenir CORS, rate_limit, logging et headers")
+        void policiesShouldContainAllPolicies() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            String content = Files.readString(projectRoot.resolve("src/main/resources/3scale/policies.json"));
+            assertTrue(content.contains("cors"), "policies doit contenir cors");
+            assertTrue(content.contains("rate_limit"), "policies doit contenir rate_limit");
+            assertTrue(content.contains("logging"), "policies doit contenir logging");
+            assertTrue(content.contains("headers"), "policies doit contenir headers");
+        }
+
+        @Test
+        @DisplayName("mapping-rules.json doit contenir les regles pour chaque endpoint")
+        void mappingRulesShouldContainEndpointRules() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            String content = Files.readString(projectRoot.resolve("src/main/resources/3scale/mapping-rules.json"));
+            assertTrue(content.contains("mapping_rules"), "mapping-rules doit contenir mapping_rules");
+            assertTrue(content.contains("metrics"), "mapping-rules doit contenir metrics");
+            assertTrue(content.contains("enrg-commande"), "mapping-rules doit contenir l'endpoint enrg-commande");
+        }
+
+        @Test
+        @DisplayName("application-plans.json doit contenir Basic et Premium")
+        void applicationPlansShouldContainBasicAndPremium() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            String content = Files.readString(projectRoot.resolve("src/main/resources/3scale/application-plans.json"));
+            assertTrue(content.contains("Basic"), "application-plans doit contenir Basic");
+            assertTrue(content.contains("Premium"), "application-plans doit contenir Premium");
+            assertTrue(content.contains("limits"), "application-plans doit contenir limits");
+        }
+    }
+
+    // ============================================================
+    // CATALOGUE BIAN DASHBOARD
+    // ============================================================
+
+    @Nested
+    @DisplayName("Catalogue BIAN Dashboard")
+    class CatalogTests {
+
+        @Test
+        @DisplayName("Doit generer CatalogEntry, CatalogController et dashboard.html")
+        void shouldGenerateCatalogFiles() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                List<String> catalogFiles = walk.filter(Files::isRegularFile)
+                        .map(p -> p.getFileName().toString())
+                        .filter(n -> n.contains("Catalog") || n.equals("catalog.html"))
+                        .sorted()
+                        .toList();
+
+                assertTrue(catalogFiles.contains("CatalogEntry.java"), "CatalogEntry.java doit etre genere");
+                assertTrue(catalogFiles.contains("CatalogController.java"), "CatalogController.java doit etre genere");
+                assertTrue(catalogFiles.contains("catalog.html"), "catalog.html doit etre genere");
+            }
+        }
+
+        @Test
+        @DisplayName("CatalogController doit exposer /api/v1/catalog")
+        void catalogControllerShouldExposeEndpoint() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> controller = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("CatalogController.java"))
+                        .findFirst();
+
+                assertTrue(controller.isPresent());
+                String content = Files.readString(controller.get());
+                assertTrue(content.contains("/api/v1/catalog"), "CatalogController doit exposer /api/v1/catalog");
+                assertTrue(content.contains("@GetMapping"), "CatalogController doit avoir un @GetMapping");
+                assertTrue(content.contains("HealthEndpoint"), "CatalogController doit utiliser HealthEndpoint");
+                assertTrue(content.contains("CommandChequier"), "CatalogController doit contenir le nom de l'adapter");
+            }
+        }
+
+        @Test
+        @DisplayName("CatalogEntry doit contenir les metadonnees BIAN")
+        void catalogEntryShouldContainBianMetadata() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> entry = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("CatalogEntry.java"))
+                        .findFirst();
+
+                assertTrue(entry.isPresent());
+                String content = Files.readString(entry.get());
+                assertTrue(content.contains("serviceDomainId"), "CatalogEntry doit contenir serviceDomainId");
+                assertTrue(content.contains("serviceDomainTitle"), "CatalogEntry doit contenir serviceDomainTitle");
+                assertTrue(content.contains("healthStatus"), "CatalogEntry doit contenir healthStatus");
+                assertTrue(content.contains("EndpointSummary"), "CatalogEntry doit contenir EndpointSummary");
+                assertTrue(content.contains("metrics"), "CatalogEntry doit contenir metrics");
+            }
+        }
+
+        @Test
+        @DisplayName("Dashboard HTML doit contenir les endpoints et les liens rapides")
+        void dashboardShouldContainEndpointsAndLinks() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            Path dashboard = projectRoot.resolve("src/main/resources/static/catalog.html");
+            assertTrue(Files.exists(dashboard), "catalog.html doit exister");
+
+            String content = Files.readString(dashboard);
+            assertTrue(content.contains("Catalogue BIAN"), "Dashboard doit contenir le titre");
+            assertTrue(content.contains("swagger-ui.html"), "Dashboard doit contenir le lien Swagger");
+            assertTrue(content.contains("/actuator/health"), "Dashboard doit contenir le lien Health");
+            assertTrue(content.contains("/actuator/prometheus"), "Dashboard doit contenir le lien Prometheus");
+            assertTrue(content.contains("/api/v1/catalog"), "Dashboard doit contenir le lien Catalog API");
+            assertTrue(content.contains("checkHealth"), "Dashboard doit contenir le JS de health check");
+        }
+    }
 }
