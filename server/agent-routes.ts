@@ -18,6 +18,7 @@ import * as db from "./db";
 import archiver from "archiver";
 import { LearningEngine } from "./learning/LearningEngine";
 import type { ChoiceWithAutoResolve } from "./learning/ConfidenceScorer";
+import { storagePut } from "./storage";
 
 const learningEngine = new LearningEngine();
 
@@ -233,7 +234,9 @@ export function registerAgentRoutes(app: Express) {
   });
 
   // ─── GET /api/agent/:id/download ────────────────────────────────────────────
-  router.get("/:id/download", (req: Request, res: Response) => {
+  // v10.0: Upload ZIP to S3 on first download, then redirect to S3 URL on subsequent requests.
+  // This ensures the ZIP remains available even after server restart.
+  router.get("/:id/download", async (req: Request, res: Response) => {
     const { id } = req.params;
     const store = getAgentStore();
     const session = store.get(id);
@@ -246,50 +249,41 @@ export function registerAgentRoutes(app: Express) {
       return res.status(400).json({ error: "Session non terminée" });
     }
 
+    const projectName = session.config.options.projectName || "migration";
+
+    // ─── v10.0: Check if ZIP is already persisted in S3 ─────────────────
+    // If downloadUrl is an S3 URL (starts with http), redirect to it
+    if (session.downloadUrl && session.downloadUrl.startsWith("http")) {
+      return res.redirect(session.downloadUrl);
+    }
+
+    // ─── Build ZIP from in-memory data ──────────────────────────────────
     if (!session.generatedProject) {
       return res.status(400).json({ error: "Aucun projet généré" });
     }
 
-    const projectName = session.config.options.projectName || "migration";
-
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename="${projectName}-spring-boot.zip"`);
-
-    const archive = archiver("zip", { zlib: { level: 9 } });
-    archive.pipe(res);
-
     // FIX v5.8.1: Deduplicate ALL files in the ZIP using a Map (path → content)
-    // Priority: spring-generator files > multiTech files > migration report
     const zipEntries = new Map<string, string>();
     
     // 1. Add spring-generator files (highest priority)
     for (const file of session.generatedProject.files) {
       zipEntries.set(file.path, file.content);
     }
-
     // 2. Add multi-tech files (skip duplicates from spring-generator)
     for (const file of session.generatedProject.multiTechFiles) {
       if (!zipEntries.has(file.path)) {
         zipEntries.set(file.path, file.content);
       }
     }
-
     // 3. Add migration report only if not already included
-    const reportPath = "MIGRATION_REPORT.md";
-    if (session.migrationReport && !zipEntries.has(reportPath)) {
-      zipEntries.set(reportPath, session.migrationReport);
+    if (session.migrationReport && !zipEntries.has("MIGRATION_REPORT.md")) {
+      zipEntries.set("MIGRATION_REPORT.md", session.migrationReport);
     }
-
     // 4. Add microservice files if available
     if (session.microserviceResult) {
-      // Add microservice report
-      if (session.microserviceResult.report) {
-        const msReportPath = "MICROSERVICES_REPORT.md";
-        if (!zipEntries.has(msReportPath)) {
-          zipEntries.set(msReportPath, session.microserviceResult.report);
-        }
+      if (session.microserviceResult.report && !zipEntries.has("MICROSERVICES_REPORT.md")) {
+        zipEntries.set("MICROSERVICES_REPORT.md", session.microserviceResult.report);
       }
-      // Add all generated microservice files (Spring Boot projects, Docker, K8s, etc.)
       if (session.microserviceResult.generatedFiles) {
         for (const file of session.microserviceResult.generatedFiles) {
           if (!zipEntries.has(file.path)) {
@@ -298,7 +292,6 @@ export function registerAgentRoutes(app: Express) {
         }
       }
     }
-
     // 5. Add enhanced reports if available (v7.4)
     if (session.enhancedReports?.enhanced) {
       const reportMap: Record<string, string> = {
@@ -316,12 +309,39 @@ export function registerAgentRoutes(app: Express) {
       }
     }
 
-    // Write all unique entries to the archive
-    for (const [path, content] of zipEntries) {
-      archive.append(content, { name: path });
-    }
+    // ─── v10.0: Build ZIP buffer, upload to S3, then serve ──────────────
+    try {
+      const archive = archiver("zip", { zlib: { level: 9 } });
+      const chunks: Buffer[] = [];
+      archive.on("data", (chunk: Buffer) => chunks.push(chunk));
+      for (const [path, content] of zipEntries) {
+        archive.append(content, { name: path });
+      }
+      await archive.finalize();
+      const zipBuffer = Buffer.concat(chunks);
 
-    archive.finalize();
+      // Upload to S3 for persistence
+      const suffix = Math.random().toString(36).slice(2, 8);
+      const s3Key = `agent-artifacts/${projectName}-${suffix}.zip`;
+      try {
+        const { url } = await storagePut(s3Key, zipBuffer, "application/zip");
+        // Persist S3 URL back to session (in-memory + DB)
+        session.downloadUrl = url;
+        store.update(id, { downloadUrl: url });
+        console.log(`[Agent] ZIP uploaded to S3: ${url}`);
+      } catch (s3Err) {
+        console.warn("[Agent] S3 upload failed, serving from memory:", s3Err);
+      }
+
+      // Serve the ZIP
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader("Content-Disposition", `attachment; filename="${projectName}-spring-boot.zip"`);
+      res.setHeader("Content-Length", zipBuffer.length.toString());
+      return res.send(zipBuffer);
+    } catch (err) {
+      console.error("[Agent Download Error]", err);
+      return res.status(500).json({ error: "Erreur lors de la génération du ZIP" });
+    }
   });
 
   // ─── GET /api/agent/:id/reports — v7.4 Enhanced Reports ───────────────────
@@ -484,6 +504,7 @@ export function registerAgentRoutes(app: Express) {
   });
 
   // ─── GET /api/agent/sessions ────────────────────────────────────────────────
+  // v10.0: Return artifact availability info so the frontend knows what's downloadable
   router.get("/sessions", (_req: Request, res: Response) => {
     const store = getAgentStore();
     const sessions = store.list().map((s) => ({
@@ -496,6 +517,12 @@ export function registerAgentRoutes(app: Express) {
       projectName: s.config.options.projectName,
       sourceType: s.config.source.type,
       outputType: s.config.output.type,
+      // v10.0: Artifact availability
+      hasZip: !!(s.downloadUrl),
+      hasReports: !!(s.enhancedReports?.enhanced),
+      hasMicroservices: !!(s.microserviceResult),
+      hasSagas: !!(s.sagaResult),
+      qualityGrade: s.qualityScore?.grade ?? null,
     }));
 
     res.json({ sessions });

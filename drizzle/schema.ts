@@ -295,3 +295,55 @@ export const crossModuleLinks = mysqlTable("cross_module_links", {
 
 export type CrossModuleLink = typeof crossModuleLinks.$inferSelect;
 export type InsertCrossModuleLink = typeof crossModuleLinks.$inferInsert;
+
+// ============================================================
+// Agent Sessions (Persistent Agent IA sessions)
+// ============================================================
+
+export const agentSessions = mysqlTable("agent_sessions", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  projectName: varchar("project_name", { length: 255 }).notNull(),
+  state: mysqlEnum("state", [
+    "IDLE", "RUNNING", "AWAITING_INPUT", "COMPLETED", "FAILED", "CANCELLED"
+  ]).default("IDLE").notNull(),
+  currentPhase: varchar("current_phase", { length: 50 }).default("IDLE").notNull(),
+
+  // Config
+  configData: json("config_data"),
+
+  // Analysis & Generation results (JSON blobs)
+  analysisResultData: json("analysis_result_data"),
+  irData: json("ir_data"),
+  pendingAmbiguitiesData: json("pending_ambiguities_data"),
+  userChoicesData: json("user_choices_data"),
+  generatedProjectData: json("generated_project_data"),
+  compilationResultData: json("compilation_result_data"),
+
+  // Microservices & Saga
+  microserviceResultData: json("microservice_result_data"),
+  sagaResultData: json("saga_result_data"),
+
+  // Reports
+  migrationReport: text("migration_report"),
+  enhancedReportsData: json("enhanced_reports_data"),
+  qualityScoreData: json("quality_score_data"),
+
+  // Artifacts (S3 URLs)
+  zipUrl: varchar("zip_url", { length: 500 }),
+  reportUrls: json("report_urls").$type<Record<string, string>>(),
+
+  // Events (timeline)
+  eventsData: json("events_data").$type<any[]>(),
+
+  // Git
+  prResultData: json("pr_result_data"),
+
+  // Error tracking
+  errorMessage: text("error_message"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type AgentSessionRow = typeof agentSessions.$inferSelect;
+export type InsertAgentSession = typeof agentSessions.$inferInsert;

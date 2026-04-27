@@ -20,7 +20,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { sessionStore } from "../session-store";
 import type { CompleoSession, SessionStatus } from "../compleo-routes";
-import { upsertProjectFromAgent } from "../db";
+import { getDb, upsertProjectFromAgent } from "../db";
+import { agentSessions } from "../../drizzle/schema";
+import { eq } from "drizzle-orm";
 import { MicroserviceSplitter, buildParsedModules } from "../engine/microservices/microservice-splitter";
 import { MicroserviceGenerator, type MicroserviceOutput } from "../engine/microservices/microservice-generator";
 import { MLEnhancer, type MLConfig } from "../engine/ml/ml-enhancer";
@@ -151,7 +153,104 @@ export interface AgentSession {
 
 export class AgentSessionStore {
   private sessions = new Map<string, AgentSession>();
+  private loaded = false;
 
+  constructor() {
+    this.loadFromDB().catch(err => {
+      console.warn("[AgentSessionStore] Failed to load from DB:", err);
+    });
+  }
+
+  // ─── DB Persistence ─────────────────────────────────────────────────
+  private async loadFromDB(): Promise<void> {
+    try {
+      const db = await getDb();
+      if (!db) { this.loaded = true; return; }
+      let rows;
+      try {
+        rows = await db.select().from(agentSessions);
+      } catch (dbErr: any) {
+        if (dbErr?.cause?.code === "ER_NO_SUCH_TABLE" || dbErr?.cause?.errno === 1146) {
+          console.warn("[AgentSessionStore] Table agent_sessions not found — will be created by migration");
+          this.loaded = true;
+          return;
+        }
+        throw dbErr;
+      }
+      for (const row of rows) {
+        const session: AgentSession = {
+          id: row.id,
+          config: (row.configData as AgentConfig) ?? { source: { type: "zip" }, output: { type: "zip" }, options: {} },
+          state: row.state as AgentSessionState,
+          currentPhase: row.currentPhase as AgentPhase,
+          events: (row.eventsData as AgentEvent[]) ?? [],
+          createdAt: row.createdAt.getTime(),
+          updatedAt: row.updatedAt.getTime(),
+          analysisResult: row.analysisResultData as AnalysisResult | undefined,
+          ir: row.irData as ProjectIR | undefined,
+          pendingAmbiguities: row.pendingAmbiguitiesData as Ambiguity[] | undefined,
+          userChoices: row.userChoicesData as UserChoice[] | undefined,
+          generatedProject: row.generatedProjectData as GeneratedProject | undefined,
+          compilationResult: row.compilationResultData as LoopResult | undefined,
+          microserviceResult: row.microserviceResultData as any,
+          sagaResult: row.sagaResultData as any,
+          migrationReport: row.migrationReport ?? undefined,
+          enhancedReports: row.enhancedReportsData as any,
+          qualityScore: row.qualityScoreData as any,
+          downloadUrl: row.zipUrl ?? undefined,
+          prResult: row.prResultData as PRResult | undefined,
+          errorMessage: row.errorMessage ?? undefined,
+        };
+        this.sessions.set(row.id, session);
+      }
+      console.log(`[AgentSessionStore] Restored ${rows.length} agent sessions from DB`);
+    } catch (err) {
+      console.warn("[AgentSessionStore] DB load failed, starting with empty store:", err);
+    }
+    this.loaded = true;
+  }
+
+  private async saveToDB(session: AgentSession): Promise<void> {
+    try {
+      const db = await getDb();
+      if (!db) return;
+      const row = {
+        id: session.id,
+        projectName: session.config.options.projectName || "agent-migration",
+        state: session.state as any,
+        currentPhase: session.currentPhase,
+        configData: session.config as any,
+        analysisResultData: session.analysisResult as any ?? null,
+        irData: session.ir as any ?? null,
+        pendingAmbiguitiesData: session.pendingAmbiguities as any ?? null,
+        userChoicesData: session.userChoices as any ?? null,
+        generatedProjectData: session.generatedProject as any ?? null,
+        compilationResultData: session.compilationResult as any ?? null,
+        microserviceResultData: session.microserviceResult as any ?? null,
+        sagaResultData: session.sagaResult as any ?? null,
+        migrationReport: session.migrationReport ?? null,
+        enhancedReportsData: session.enhancedReports as any ?? null,
+        qualityScoreData: session.qualityScore as any ?? null,
+        zipUrl: session.downloadUrl ?? null,
+        reportUrls: null,
+        eventsData: session.events as any ?? null,
+        prResultData: session.prResult as any ?? null,
+        errorMessage: session.errorMessage ?? null,
+      };
+      const existing = await db.select({ id: agentSessions.id })
+        .from(agentSessions)
+        .where(eq(agentSessions.id, session.id));
+      if (existing.length > 0) {
+        await db.update(agentSessions).set(row).where(eq(agentSessions.id, session.id));
+      } else {
+        await db.insert(agentSessions).values(row);
+      }
+    } catch (err) {
+      console.warn("[AgentSessionStore] Failed to save to DB:", err);
+    }
+  }
+
+  // ─── Public API (unchanged interface) ──────────────────────────────
   create(config: AgentConfig): AgentSession {
     const id = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const session: AgentSession = {
@@ -164,6 +263,7 @@ export class AgentSessionStore {
       updatedAt: Date.now(),
     };
     this.sessions.set(id, session);
+    this.saveToDB(session).catch(err => console.warn("[AgentSessionStore] Async save failed:", err));
     return session;
   }
 
@@ -175,7 +275,19 @@ export class AgentSessionStore {
     const session = this.sessions.get(id);
     if (!session) return undefined;
     Object.assign(session, patch, { updatedAt: Date.now() });
+    // Persist to DB asynchronously
+    this.saveToDB(session).catch(err => console.warn("[AgentSessionStore] Async save failed:", err));
     return session;
+  }
+
+  /**
+   * Persist a session to DB explicitly (call after modifying session fields).
+   */
+  persist(id: string): void {
+    const session = this.sessions.get(id);
+    if (session) {
+      this.saveToDB(session).catch(err => console.warn("[AgentSessionStore] Async persist failed:", err));
+    }
   }
 
   addEvent(id: string, event: AgentEvent): void {
@@ -183,6 +295,7 @@ export class AgentSessionStore {
     if (session) {
       session.events.push(event);
       session.updatedAt = Date.now();
+      // Don't persist on every event to avoid DB spam — persist on phase changes
     }
   }
 
@@ -191,7 +304,15 @@ export class AgentSessionStore {
   }
 
   delete(id: string): boolean {
-    return this.sessions.delete(id);
+    const result = this.sessions.delete(id);
+    if (result) {
+      getDb().then(db => {
+        if (db) db.delete(agentSessions)
+          .where(eq(agentSessions.id, id))
+          .catch(err => console.warn("[AgentSessionStore] Async delete failed:", err));
+      });
+    }
+    return result;
   }
 }
 

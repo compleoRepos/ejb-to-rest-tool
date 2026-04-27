@@ -16,7 +16,9 @@ import {
   ArrowLeft, Bot, FileCode2, Layers, Clock, TrendingUp,
   Network, GitBranch, AlertTriangle, CheckCircle2, Activity,
   BarChart3, Shield, Loader2, ExternalLink, Workflow,
+  Download, FileText, Package,
 } from "lucide-react";
+import { toast } from "sonner";
 
 // ─── Technology color mapping ────────────────────────────────────────────────
 const TECH_COLORS: Record<string, string> = {
@@ -151,7 +153,193 @@ function useSagaInfo(projectName: string | undefined): { sagaInfo: SagaInfo | nu
   return { sagaInfo, loading };
 }
 
-// ─── Scan result card ────────────────────────────────────────────────────────
+// ─── Hook: fetch agent artifacts for a project ───────────────────────────────
+interface AgentArtifact {
+  sessionId: string;
+  state: string;
+  createdAt: number;
+  updatedAt: number;
+  projectName: string;
+  hasZip: boolean;
+  hasReports: boolean;
+  hasMicroservices: boolean;
+  hasSagas: boolean;
+  qualityGrade: string | null;
+}
+
+function useAgentArtifacts(projectName: string | undefined): { artifacts: AgentArtifact[]; loading: boolean } {
+  const [artifacts, setArtifacts] = useState<AgentArtifact[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!projectName) return;
+    let cancelled = false;
+    const fetchArtifacts = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch("/api/agent/sessions");
+        if (!res.ok) { setLoading(false); return; }
+        const json = await res.json();
+        const sessions = (json.sessions || []) as AgentArtifact[];
+        // Filter completed sessions for this project
+        const matching = sessions
+          .filter((s) => s.state === "COMPLETED" && s.projectName === projectName)
+          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        if (!cancelled) setArtifacts(matching);
+      } catch {
+        if (!cancelled) setArtifacts([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    fetchArtifacts();
+    return () => { cancelled = true; };
+  }, [projectName]);
+
+  return { artifacts, loading };
+}
+
+// ─── Artifacts card ───────────────────────────────────────────────────────────────
+function ArtifactsCard({ artifacts, loading, onNavigate }: {
+  artifacts: AgentArtifact[];
+  loading: boolean;
+  onNavigate: (path: string) => void;
+}) {
+  if (loading) {
+    return (
+      <Card className="border-cyan-500/30 bg-cyan-500/5">
+        <CardContent className="p-6">
+          <div className="flex items-center gap-3">
+            <Loader2 className="w-5 h-5 animate-spin text-cyan-400" />
+            <span className="text-sm text-muted-foreground">Chargement des artefacts...</span>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (artifacts.length === 0) return null;
+
+  const latest = artifacts[0];
+  const date = latest.updatedAt
+    ? new Date(latest.updatedAt).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })
+    : "—";
+
+  return (
+    <Card className="border-cyan-500/30 bg-cyan-500/5">
+      <CardContent className="p-6">
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-lg bg-cyan-500/20">
+                <Package className="w-5 h-5 text-cyan-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold">Artefacts de migration</h3>
+                <p className="text-sm text-muted-foreground">
+                  {artifacts.length} analyse{artifacts.length > 1 ? "s" : ""} complétée{artifacts.length > 1 ? "s" : ""} — dernière le {date}
+                </p>
+              </div>
+            </div>
+            {latest.qualityGrade && (
+              <Badge variant="outline" className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 font-mono text-sm">
+                Grade {latest.qualityGrade}
+              </Badge>
+            )}
+          </div>
+
+          {/* Artifact badges */}
+          <div className="flex flex-wrap gap-2">
+            {latest.hasZip && (
+              <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 gap-1">
+                <Download className="w-3 h-3" /> ZIP Spring Boot
+              </Badge>
+            )}
+            {latest.hasReports && (
+              <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20 gap-1">
+                <FileText className="w-3 h-3" /> Rapports enrichis
+              </Badge>
+            )}
+            {latest.hasMicroservices && (
+              <Badge variant="outline" className="bg-purple-500/10 text-purple-400 border-purple-500/20 gap-1">
+                <Layers className="w-3 h-3" /> Microservices
+              </Badge>
+            )}
+            {latest.hasSagas && (
+              <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/20 gap-1">
+                <Workflow className="w-3 h-3" /> Sagas
+              </Badge>
+            )}
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex flex-wrap gap-2">
+            {latest.hasZip && (
+              <Button
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+                onClick={() => {
+                  window.open(`/api/agent/${latest.sessionId}/download`, "_blank");
+                  toast.success("Téléchargement du ZIP lancé");
+                }}
+              >
+                <Download className="w-4 h-4" />
+                Télécharger le ZIP
+              </Button>
+            )}
+            {latest.hasReports && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 border-blue-500/30 text-blue-400 hover:bg-blue-500/10"
+                onClick={() => onNavigate(`/compleo/agent?sessionId=${latest.sessionId}`)}
+              >
+                <FileText className="w-4 h-4" />
+                Voir les rapports
+              </Button>
+            )}
+          </div>
+
+          {/* Older sessions */}
+          {artifacts.length > 1 && (
+            <div className="border-t border-border/50 pt-3">
+              <span className="text-xs text-muted-foreground uppercase tracking-wider">Analyses précédentes</span>
+              <div className="mt-2 space-y-1">
+                {artifacts.slice(1, 4).map((a) => {
+                  const d = a.updatedAt
+                    ? new Date(a.updatedAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+                    : "—";
+                  return (
+                    <div key={a.sessionId} className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground font-mono text-xs">{d}</span>
+                      <div className="flex gap-2">
+                        {a.hasZip && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs gap-1"
+                            onClick={() => window.open(`/api/agent/${a.sessionId}/download`, "_blank")}
+                          >
+                            <Download className="w-3 h-3" /> ZIP
+                          </Button>
+                        )}
+                        {a.qualityGrade && (
+                          <Badge variant="outline" className="text-xs font-mono">{a.qualityGrade}</Badge>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Scan result card ────────────────────────────────────────────────────────────
 function ScanCard({ scan }: { scan: any }) {
   const duration = scan.durationMs ? `${(scan.durationMs / 1000).toFixed(1)}s` : "—";
   const date = scan.completedAt
@@ -351,6 +539,7 @@ export default function ProjectDetail({ id }: { id: number }) {
   const { data: project, isLoading: projectLoading } = trpc.projects.getById.useQuery({ id });
   const { data: scans, isLoading: scansLoading } = trpc.scans.list.useQuery({ projectId: id });
   const { sagaInfo, loading: sagaLoading } = useSagaInfo(project?.name);
+  const { artifacts, loading: artifactsLoading } = useAgentArtifacts(project?.name);
 
   if (projectLoading || scansLoading) return <ProjectDetailSkeleton />;
 
@@ -501,10 +690,17 @@ export default function ProjectDetail({ id }: { id: number }) {
           </Card>
         )}
 
-        {/* ── Last scan ──────────────────────────────────────────────── */}
+        {/* ── Artefacts de migration (v10.0) ───────────────────────────── */}
+        <ArtifactsCard
+          artifacts={artifacts}
+          loading={artifactsLoading}
+          onNavigate={setLocation}
+        />
+
+        {/* ── Last scan ────────────────────────────────────────────────────── */}
         {lastScan && <ScanCard scan={lastScan} />}
 
-        {/* ── Saga Orchestration card ────────────────────────────────── */}
+        {/* ── Saga Orchestration card ────────────────────────────── */}
         <SagaCard
           sagaInfo={sagaInfo}
           loading={sagaLoading}
