@@ -13,6 +13,8 @@
  * @author Hamza NORDINE
  */
 
+import { RAG_SEED_EXAMPLES } from "./rag-seed-data";
+
 // ── Types ────────────────────────────────────────────────────────
 
 export interface MigrationPair {
@@ -459,6 +461,41 @@ export class EmbeddingService {
     scored.sort((a, b) => b.score - a.score);
 
     return scored.slice(0, topK).map(s => s.pair);
+  }
+
+  /**
+   * Seed the store with pre-built migration examples from real BOA/BMCE projects.
+   * Call after initialize() to populate the RAG with 15 real-world examples.
+   */
+  async seedFromExamples(): Promise<number> {
+    if (!this.initialized) {
+      throw new Error("EmbeddingService not initialized — call initialize() first");
+    }
+
+    let count = 0;
+    for (const example of RAG_SEED_EXAMPLES) {
+      const alreadyIndexed = this.memoryStore.some(item => item.pair.id === example.id);
+      if (alreadyIndexed) continue;
+
+      const pair: MigrationPair = {
+        id: example.id,
+        ejbCode: example.legacy,
+        springCode: example.modern,
+        meta: {
+          className: example.id,
+          methodName: example.category,
+          javaType: example.category,
+          hasOracle: example.tags.includes("Oracle"),
+          hasJms: example.tags.includes("JMS") || example.tags.includes("JMS_MDB"),
+        },
+      };
+
+      await this.indexPair(pair);
+      count++;
+    }
+
+    console.log(`[EmbeddingService] Seeded ${count} real-world migration examples from BOA/BMCE projects`);
+    return count;
   }
 
   /**

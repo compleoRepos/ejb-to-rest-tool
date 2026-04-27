@@ -72,7 +72,9 @@ export class MLEnhancer {
     if (!this._enabled) return;
     try {
       await this.embedding.initialize();
-      console.log("ML Enhancer prêt");
+      // Seed with real-world migration examples from BOA/BMCE projects
+      const seeded = await this.embedding.seedFromExamples();
+      console.log(`ML Enhancer prêt — ${seeded} exemples RAG chargés`);
     } catch (e) {
       console.warn(`ML Enhancer init échoué (Ollama dispo ?): ${e}`);
       this._enabled = false;
