@@ -1,21 +1,24 @@
 /**
- * MLEnhancer — Compleo v7.3 ML Layer
+ * MLEnhancer — Compleo v9.0 ML Layer
  *
  * Orchestrateur de la couche ML. Point d'entrée unique pour :
  *   - Améliorer le code généré par les règles via LLM + RAG
  *   - Indexer des exemples de migration réussis
+ *   - Diagnostiquer l'état des backends LLM
  *
- * v7.3: EJBSignature remplace methodName/voInType/voOutType
- *       pour donner au LLM la signature EJB source complète
- *       (paramètres, type retour, classe, type Java).
+ * v9.0: Support du modèle fine-tuné ejb-modernizer (27K paires).
+ *       Le modèle fine-tuné est prioritaire sur Ollama.
+ *       Manus invokeLLM en fallback cloud.
+ *       Nouveau: backend tracking, diagnostics, learned patterns.
  *
  * Le ML est optionnel et désactivé par défaut.
- * Si Ollama/ChromaDB ne sont pas disponibles, le code rule-based
+ * Si aucun LLM n'est disponible, le code rule-based
  * est retourné sans modification.
  */
 
 import { EmbeddingService } from "./embedding-service";
 import { GenerationService } from "./generation-service";
+import { getBackendStatus, type LLMBackend } from "./llm-adapter";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -28,8 +31,9 @@ export interface MLConfig {
 }
 
 export interface EnhanceResult {
-  code:   string;
-  source: "ml" | "rules" | "rules-corrected";
+  code:    string;
+  source:  "ml" | "rules" | "rules-corrected";
+  backend?: LLMBackend;
 }
 
 /**
@@ -42,7 +46,20 @@ export interface EJBSignature {
   params:      Array<{ name: string; type: string }>;
   returnType:  string;
   className:   string;
-  javaType:    string;   // EJB3X, EJB2X, SERVLET, BATCH, etc.
+  javaType:    string;   // EJB3X, EJB2X, SERVLET, BATCH, JDBC, HIBERNATE, JMS, SOAP, STRUTS
+}
+
+/**
+ * Diagnostics about the ML layer state.
+ */
+export interface MLDiagnostics {
+  enabled:           boolean;
+  ragBackend:        string;
+  ragExamplesCount:  number;
+  llmBackend:        LLMBackend;
+  finetunedAvailable: boolean;
+  manusAvailable:    boolean;
+  supportedTechnologies: string[];
 }
 
 // ── Enhancer ─────────────────────────────────────────────────────
@@ -52,15 +69,17 @@ export class MLEnhancer {
   private generation:    GenerationService;
   private _enabled:      boolean;
   private minConfidence: number;
+  private ollamaUrl:     string;
 
   constructor(config: MLConfig) {
     this._enabled      = config.enabled;
     this.minConfidence = config.minConfidence ?? 0.6;
+    this.ollamaUrl     = config.ollamaUrl;
     this.embedding     = new EmbeddingService(
       config.chromaUrl, config.ollamaUrl
     );
     this.generation    = new GenerationService(
-      config.ollamaUrl, config.model
+      config.ollamaUrl, config.model ?? "ejb-modernizer"
     );
   }
 
@@ -75,6 +94,10 @@ export class MLEnhancer {
       // Seed with real-world migration examples from BOA/BMCE projects
       const seeded = await this.embedding.seedFromExamples();
       console.log(`ML Enhancer prêt — ${seeded} exemples RAG chargés`);
+
+      // Log backend status
+      const status = await getBackendStatus(this.ollamaUrl);
+      console.log(`ML Backend: preferred=${status.preferred}, finetuned=${status.finetuned}, manus=${status.manus}`);
     } catch (e) {
       console.warn(`ML Enhancer init échoué (Ollama dispo ?): ${e}`);
       this._enabled = false;
@@ -89,15 +112,30 @@ export class MLEnhancer {
   }
 
   /**
+   * Get diagnostics about the ML layer state.
+   */
+  async getDiagnostics(): Promise<MLDiagnostics> {
+    const status = await getBackendStatus(this.ollamaUrl);
+    return {
+      enabled:              this._enabled,
+      ragBackend:           this.embedding.isReady() ? this.embedding.getBackendMode() : "not-initialized",
+      ragExamplesCount:     this.embedding.getMemoryCount(),
+      llmBackend:           status.preferred,
+      finetunedAvailable:   status.finetuned,
+      manusAvailable:       status.manus,
+      supportedTechnologies: GenerationService.getSupportedTechnologies(),
+    };
+  }
+
+  /**
    * Enhance rule-based code using LLM + RAG.
    *
-   * v7.3: Accepts EJBSignature instead of individual voInType/voOutType.
-   * The signature is passed to the LLM prompt and used for post-validation.
+   * v9.0: Returns backend info. Fine-tuned model gets confidence boost.
    *
-   * Overload 1 (v7.3): ejbCode, ruleCode, ejbSignature
+   * Overload 1 (v7.3+): ejbCode, ruleCode, ejbSignature
    * Overload 2 (legacy): ejbCode, ruleCode, methodName, voInType, voOutType
    *
-   * @returns Enhanced code and its source ("ml", "rules", or "rules-corrected")
+   * @returns Enhanced code, its source, and which backend was used
    */
   async enhance(
     ejbCode:    string,
@@ -127,7 +165,7 @@ export class MLEnhancer {
       // 1. Chercher des exemples similaires via RAG
       const similar = await this.embedding.findSimilar(ejbCode, 3);
 
-      // 2. Améliorer avec le LLM (v7.3: passe la signature complète)
+      // 2. Améliorer avec le LLM (v9.0: prompts enrichis + fine-tuned priority)
       const result = await this.generation.improveServiceMethod(
         ejbCode, ruleCode, similar, signature
       );
@@ -138,7 +176,11 @@ export class MLEnhancer {
 
       // 3. Retourner ML si confiance suffisante, sinon rule-based
       if (result.confidence >= this.minConfidence) {
-        return { code: result.code, source: result.source };
+        return {
+          code:    result.code,
+          source:  result.source,
+          backend: result.backend,
+        };
       }
       return { code: ruleCode, source: "rules" };
 
