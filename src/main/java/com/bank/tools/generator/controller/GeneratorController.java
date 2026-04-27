@@ -596,6 +596,138 @@ public class GeneratorController {
     }
 
     // ============================================================
+    // Adapter Contract → Wrapper BIAN
+    // ============================================================
+
+    /**
+     * Page IHM : Import du contrat JSON d'adapter.
+     */
+    @GetMapping("/adapter-wrapper")
+    public String adapterWrapperPage(Model model, HttpSession session) {
+        populateCommon(model, session);
+        return "adapter-wrapper";
+    }
+
+    /**
+     * API : Generer un Wrapper BIAN a partir d'un contrat JSON d'adapter.
+     * Upload le fichier JSON → parse le contrat → genere le Wrapper BIAN complet.
+     */
+    @PostMapping("/api/generate-adapter-wrapper")
+    @ResponseBody
+    public ResponseEntity<Map<String, Object>> generateAdapterWrapper(
+            @RequestParam("file") MultipartFile file,
+            HttpSession session) {
+
+        Map<String, Object> response = new HashMap<>();
+
+        if (file.isEmpty()) {
+            response.put("success", false);
+            response.put("error", "Veuillez selectionner un fichier JSON.");
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        try {
+            log.info("[API] Generation Wrapper BIAN depuis contrat adapter : {}", file.getOriginalFilename());
+            Path wrapperProject = generatorService.generateAdapterWrapper(file);
+
+            session.setAttribute("adapterWrapperPath", wrapperProject.toString());
+
+            response.put("success", true);
+            response.put("projectPath", wrapperProject.toString());
+            response.put("message", "Wrapper BIAN genere avec succes");
+
+            // Lister les fichiers generes
+            try (Stream<Path> walk = Files.walk(wrapperProject)) {
+                List<String> files = walk.filter(Files::isRegularFile)
+                        .map(p -> wrapperProject.relativize(p).toString())
+                        .sorted()
+                        .collect(Collectors.toList());
+                response.put("generatedFiles", files);
+                response.put("fileCount", files.size());
+            }
+
+            return ResponseEntity.ok(response);
+        } catch (IOException | RuntimeException e) {
+            log.error("[API] Erreur generation Wrapper BIAN", e);
+            response.put("success", false);
+            response.put("error", "Erreur lors de la generation : " + e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
+    /**
+     * API : Generer un Wrapper BIAN a partir d'un contrat JSON brut (body).
+     */
+    @PostMapping("/api/generate-adapter-wrapper-json")
+    @ResponseBody
+    public ResponseEntity<Map<String, Object>> generateAdapterWrapperFromJson(
+            @RequestBody String jsonContent,
+            HttpSession session) {
+
+        Map<String, Object> response = new HashMap<>();
+
+        if (jsonContent == null || jsonContent.isBlank()) {
+            response.put("success", false);
+            response.put("error", "Le contrat JSON est vide.");
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        try {
+            log.info("[API] Generation Wrapper BIAN depuis JSON brut");
+            Path wrapperProject = generatorService.generateAdapterWrapperFromJson(jsonContent);
+
+            session.setAttribute("adapterWrapperPath", wrapperProject.toString());
+
+            response.put("success", true);
+            response.put("projectPath", wrapperProject.toString());
+            response.put("message", "Wrapper BIAN genere avec succes");
+
+            try (Stream<Path> walk = Files.walk(wrapperProject)) {
+                List<String> files = walk.filter(Files::isRegularFile)
+                        .map(p -> wrapperProject.relativize(p).toString())
+                        .sorted()
+                        .collect(Collectors.toList());
+                response.put("generatedFiles", files);
+                response.put("fileCount", files.size());
+            }
+
+            return ResponseEntity.ok(response);
+        } catch (IOException | RuntimeException e) {
+            log.error("[API] Erreur generation Wrapper BIAN depuis JSON", e);
+            response.put("success", false);
+            response.put("error", "Erreur lors de la generation : " + e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
+    /**
+     * Telechargement du Wrapper BIAN genere (ZIP).
+     */
+    @GetMapping("/download-adapter-wrapper")
+    public ResponseEntity<Resource> downloadAdapterWrapper(HttpSession session) {
+        String wrapperPath = (String) session.getAttribute("adapterWrapperPath");
+
+        if (wrapperPath == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        try {
+            Path wrapperDir = Path.of(wrapperPath);
+            Path zipPath = generatorService.createWrapperZip(wrapperDir);
+            Resource resource = new FileSystemResource(zipPath.toFile());
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .header(HttpHeaders.CONTENT_DISPOSITION,
+                            "attachment; filename=\"wrapper-bian.zip\"")
+                    .body(resource);
+        } catch (IOException | RuntimeException e) {
+            log.error("Erreur lors du telechargement du wrapper", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    // ============================================================
     // Logs
     // ============================================================
     @GetMapping("/logs")

@@ -5,10 +5,13 @@ import com.bank.tools.generator.ai.SmartCodeEnhancer;
 import com.bank.tools.generator.config.AppConfig;
 import com.bank.tools.generator.engine.CodeGenerationEngine;
 import com.bank.tools.generator.engine.OpenApiClientGenerator;
+import com.bank.tools.generator.engine.AdapterWrapperGenerator;
 import com.bank.tools.generator.engine.WsdlClientGenerator;
+import com.bank.tools.generator.model.AdapterContractInfo;
 import com.bank.tools.generator.model.OpenApiContractInfo;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
 import com.bank.tools.generator.model.WsdlContractInfo;
+import com.bank.tools.generator.parser.AdapterContractParser;
 import com.bank.tools.generator.parser.EjbProjectParser;
 import com.bank.tools.generator.parser.OpenApiContractParser;
 import com.bank.tools.generator.parser.WsdlContractParser;
@@ -58,11 +61,14 @@ public class GeneratorService {
     private final OpenApiClientGenerator openApiGenerator;
     private final WsdlContractParser wsdlParser;
     private final WsdlClientGenerator wsdlGenerator;
+    private final AdapterContractParser adapterContractParser;
+    private final AdapterWrapperGenerator adapterWrapperGenerator;
 
     public GeneratorService(AppConfig appConfig, EjbProjectParser parser,
                             CodeGenerationEngine engine, SmartCodeEnhancer enhancer,
                             OpenApiContractParser openApiParser, OpenApiClientGenerator openApiGenerator,
-                            WsdlContractParser wsdlParser, WsdlClientGenerator wsdlGenerator) {
+                            WsdlContractParser wsdlParser, WsdlClientGenerator wsdlGenerator,
+                            AdapterContractParser adapterContractParser, AdapterWrapperGenerator adapterWrapperGenerator) {
         this.appConfig = appConfig;
         this.parser = parser;
         this.engine = engine;
@@ -71,6 +77,8 @@ public class GeneratorService {
         this.openApiGenerator = openApiGenerator;
         this.wsdlParser = wsdlParser;
         this.wsdlGenerator = wsdlGenerator;
+        this.adapterContractParser = adapterContractParser;
+        this.adapterWrapperGenerator = adapterWrapperGenerator;
     }
 
     // ============================================================
@@ -375,6 +383,77 @@ public class GeneratorService {
 
         log.info("ZIP client partenaire cree : {}", zipFile);
         return zipFile;
+    }
+
+    // ============================================================
+    // Adapter Contract → Wrapper BIAN
+    // ============================================================
+
+    /**
+     * Upload et parse un contrat JSON d'adapter, puis genere le Wrapper BIAN complet.
+     *
+     * @param file fichier JSON du contrat adapter
+     * @return chemin du projet wrapper genere
+     */
+    public Path generateAdapterWrapper(MultipartFile file) throws IOException {
+        // 1. Sauvegarder le fichier
+        String projectId = "adapter-" + UUID.randomUUID().toString().substring(0, 8);
+        Path uploadDir = Path.of(appConfig.getUploadDir(), projectId);
+        Files.createDirectories(uploadDir);
+        Path contractFile = uploadDir.resolve(file.getOriginalFilename());
+        Files.copy(file.getInputStream(), contractFile, StandardCopyOption.REPLACE_EXISTING);
+
+        log.info("[ADAPTER-WRAPPER] Contrat uploade : {}", contractFile.getFileName());
+
+        // 2. Parser le contrat
+        AdapterContractInfo contract = adapterContractParser.parse(contractFile);
+
+        // 3. Generer le wrapper
+        Path outputDir = Path.of(appConfig.getOutputDir(), projectId);
+        Files.createDirectories(outputDir);
+        Path wrapperProject = adapterWrapperGenerator.generate(contract, outputDir);
+
+        log.info("[ADAPTER-WRAPPER] Wrapper genere pour {} : {} endpoints",
+                contract.getAdapterName(), contract.getEndpoints().size());
+
+        return wrapperProject;
+    }
+
+    /**
+     * Genere un Wrapper BIAN a partir d'un contrat JSON brut (String).
+     *
+     * @param jsonContent contenu JSON du contrat adapter
+     * @return chemin du projet wrapper genere
+     */
+    public Path generateAdapterWrapperFromJson(String jsonContent) throws IOException {
+        String projectId = "adapter-" + UUID.randomUUID().toString().substring(0, 8);
+
+        // Parser le contrat depuis le JSON brut
+        AdapterContractInfo contract = adapterContractParser.parseFromString(jsonContent);
+
+        // Generer le wrapper
+        Path outputDir = Path.of(appConfig.getOutputDir(), projectId);
+        Files.createDirectories(outputDir);
+        Path wrapperProject = adapterWrapperGenerator.generate(contract, outputDir);
+
+        log.info("[ADAPTER-WRAPPER] Wrapper genere pour {} : {} endpoints",
+                contract.getAdapterName(), contract.getEndpoints().size());
+
+        return wrapperProject;
+    }
+
+    /**
+     * Parse un contrat adapter JSON et retourne les infos sans generer.
+     */
+    public AdapterContractInfo parseAdapterContract(String jsonContent) throws IOException {
+        return adapterContractParser.parseFromString(jsonContent);
+    }
+
+    /**
+     * Cree un ZIP de telechargement pour un wrapper genere.
+     */
+    public Path createWrapperZip(Path wrapperProjectDir) throws IOException {
+        return createPartnerClientZip(wrapperProjectDir);
     }
 
     // ============================================================

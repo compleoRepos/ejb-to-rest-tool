@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adapter Wrapper BIAN - Direction Digitale Factory - BMCE Bank</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" th:replace="~{fragments/sidebar :: sidebar(activePage='adapter-wrapper')}"></aside>
+    <main class="main-content">
+        <header class="page-header">
+            <div class="page-header-left">
+                <h1 class="page-title"><i class="fas fa-layer-group"></i> Adapter Wrapper BIAN</h1>
+                <p class="page-subtitle">Generez un Wrapper BIAN complet a partir du contrat JSON d'un Adapter WebSphere</p>
+            </div>
+        </header>
+
+        <div class="page-alerts" id="alertContainer"></div>
+
+        <div class="page-body">
+            <!-- Architecture diagram -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title"><i class="fas fa-project-diagram"></i> Flux d'architecture</h2>
+                </div>
+                <div class="card-body">
+                    <div class="architecture-flow">
+                        <div class="flow-step">
+                            <div class="flow-icon"><i class="fas fa-mobile-alt"></i></div>
+                            <div class="flow-label">Mobile / Web App</div>
+                        </div>
+                        <div class="flow-arrow"><i class="fas fa-arrow-right"></i></div>
+                        <div class="flow-step">
+                            <div class="flow-icon"><i class="fas fa-server"></i></div>
+                            <div class="flow-label">Backend e-banking</div>
+                        </div>
+                        <div class="flow-arrow"><i class="fas fa-arrow-right"></i></div>
+                        <div class="flow-step flow-step-highlight">
+                            <div class="flow-icon"><i class="fas fa-layer-group"></i></div>
+                            <div class="flow-label">Wrapper BIAN</div>
+                            <div class="flow-badge">Genere ici</div>
+                        </div>
+                        <div class="flow-arrow"><i class="fas fa-arrow-right"></i></div>
+                        <div class="flow-step">
+                            <div class="flow-icon"><i class="fas fa-exchange-alt"></i></div>
+                            <div class="flow-label">Adapter WebSphere</div>
+                        </div>
+                        <div class="flow-arrow"><i class="fas fa-arrow-right"></i></div>
+                        <div class="flow-step">
+                            <div class="flow-icon"><i class="fas fa-database"></i></div>
+                            <div class="flow-label">Core Banking (eGB)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabs : Upload File / JSON Editor -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="tab-nav">
+                        <button class="tab-btn active" onclick="switchTab('upload')" id="tab-upload">
+                            <i class="fas fa-file-upload"></i> Uploader un fichier JSON
+                        </button>
+                        <button class="tab-btn" onclick="switchTab('editor')" id="tab-editor">
+                            <i class="fas fa-edit"></i> Editeur JSON
+                        </button>
+                        <button class="tab-btn" onclick="switchTab('template')" id="tab-template">
+                            <i class="fas fa-clipboard-list"></i> Template
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ==================== TAB Upload ==================== -->
+                <div class="card-body tab-content" id="content-upload">
+                    <div class="info-box">
+                        <i class="fas fa-info-circle"></i>
+                        <div>
+                            <strong>Pipeline Adapter Contract &rarr; Wrapper BIAN</strong><br>
+                            Uploadez le contrat JSON normalise d'un Adapter WebSphere. L'outil genere automatiquement :
+                            <ul style="margin-top:8px; margin-bottom:0">
+                                <li><strong>Controller BIAN</strong> avec enveloppe ApiRequest/ApiResponse</li>
+                                <li><strong>Service Interface</strong> (couche domaine decouple)</li>
+                                <li><strong>RestAdapter</strong> avec Circuit Breaker, Retry, Idempotency</li>
+                                <li><strong>DTOs</strong> Request/Response a partir des champs du contrat</li>
+                                <li><strong>Tests Pact</strong> (Consumer-Driven Contract)</li>
+                                <li><strong>Tests d'integration</strong> avec MockAdapter</li>
+                                <li><strong>Configuration</strong> Spring Boot + Resilience4j</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <form id="uploadForm" class="partner-form" enctype="multipart/form-data">
+                        <div class="form-row">
+                            <div class="form-group" style="grid-column: span 2">
+                                <label for="adapterFile"><i class="fas fa-file-code"></i> Contrat JSON de l'Adapter</label>
+                                <div class="file-upload-zone" id="adapterDropZone">
+                                    <input type="file" id="adapterFile" name="file" accept=".json" required>
+                                    <div class="file-upload-content">
+                                        <i class="fas fa-cloud-upload-alt"></i>
+                                        <p>Glissez un fichier JSON ou <span class="link">parcourir</span></p>
+                                        <small>Format accepte : .json (contrat normalise d'adapter)</small>
+                                    </div>
+                                    <div class="file-upload-selected" id="adapterFileSelected" style="display:none">
+                                        <i class="fas fa-file-code"></i>
+                                        <span id="adapterFileName"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary btn-lg" id="uploadSubmitBtn">
+                                <i class="fas fa-rocket"></i> Generer le Wrapper BIAN
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- ==================== TAB Editor ==================== -->
+                <div class="card-body tab-content" id="content-editor" style="display:none">
+                    <div class="info-box">
+                        <i class="fas fa-info-circle"></i>
+                        <div>
+                            <strong>Editeur JSON en ligne</strong><br>
+                            Collez ou editez directement le contrat JSON de l'adapter. Cliquez sur "Valider" pour verifier la syntaxe,
+                            puis sur "Generer" pour lancer la generation du Wrapper BIAN.
+                        </div>
+                    </div>
+
+                    <div class="json-editor-container">
+                        <div class="json-editor-toolbar">
+                            <button class="btn btn-sm" onclick="formatJson()"><i class="fas fa-indent"></i> Formater</button>
+                            <button class="btn btn-sm" onclick="validateJson()"><i class="fas fa-check"></i> Valider</button>
+                            <button class="btn btn-sm" onclick="loadTemplate()"><i class="fas fa-clipboard-list"></i> Charger template</button>
+                            <span class="json-status" id="jsonStatus"></span>
+                        </div>
+                        <textarea id="jsonEditor" class="json-editor" rows="25" spellcheck="false"
+                                  placeholder="Collez ici le contrat JSON de l'adapter..."></textarea>
+                    </div>
+
+                    <div class="form-actions">
+                        <button class="btn btn-primary btn-lg" id="editorSubmitBtn" onclick="submitJson()">
+                            <i class="fas fa-rocket"></i> Generer le Wrapper BIAN
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ==================== TAB Template ==================== -->
+                <div class="card-body tab-content" id="content-template" style="display:none">
+                    <div class="info-box">
+                        <i class="fas fa-info-circle"></i>
+                        <div>
+                            <strong>Format du contrat JSON normalise</strong><br>
+                            Voici le format que les Adapters WebSphere doivent respecter. Chaque adapter expose un ou plusieurs endpoints
+                            qui correspondent a des capacites metier (EJB legacy).
+                        </div>
+                    </div>
+
+                    <pre class="json-template"><code>{
+  "adapter_name": "CommandChequier",
+  "adapter_base_url": "http://websphere-host:9080/api/adapter",
+  "description": "Adapter pour la commande de chequiers",
+  "version": "1.0.0",
+  "endpoints": [
+    {
+      "operation": "enrg_commande",
+      "method": "POST",
+      "path": "/command-chequier/enrg-commande",
+      "summary": "Enregistrer une commande de chequier",
+      "idempotent": true,
+      "timeout_seconds": 30,
+      "max_retries": 3,
+      "request_fields": [
+        { "name": "numeroCarte", "type": "String", "required": true, "description": "Numero de carte bancaire" },
+        { "name": "quantite", "type": "Integer", "required": true, "description": "Nombre de chequiers" },
+        { "name": "adresseLivraison", "type": "String", "required": false, "description": "Adresse de livraison" }
+      ],
+      "response_fields": [
+        { "name": "code", "type": "String", "description": "Code retour (OK, KO)" },
+        { "name": "message", "type": "String", "description": "Message descriptif" },
+        { "name": "reference", "type": "String", "description": "Reference de la commande" }
+      ]
+    },
+    {
+      "operation": "consult_commande",
+      "method": "GET",
+      "path": "/command-chequier/consult/{reference}",
+      "summary": "Consulter le statut d'une commande",
+      "idempotent": false,
+      "timeout_seconds": 15,
+      "max_retries": 2,
+      "request_fields": [
+        { "name": "reference", "type": "String", "required": true, "description": "Reference de la commande" }
+      ],
+      "response_fields": [
+        { "name": "reference", "type": "String", "description": "Reference de la commande" },
+        { "name": "statut", "type": "String", "description": "Statut (EN_COURS, LIVRE, ANNULE)" },
+        { "name": "dateCreation", "type": "LocalDate", "description": "Date de creation" },
+        { "name": "dateLivraison", "type": "LocalDate", "description": "Date de livraison prevue" }
+      ]
+    }
+  ]
+}</code></pre>
+
+                    <h3 style="margin-top:24px"><i class="fas fa-book"></i> Reference des types supportes</h3>
+                    <table class="data-table" style="margin-top:12px">
+                        <thead>
+                            <tr>
+                                <th>Type JSON</th>
+                                <th>Type Java genere</th>
+                                <th>Exemple</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><code>String</code></td><td>String</td><td>"ABC123"</td></tr>
+                            <tr><td><code>Integer</code> / <code>int</code></td><td>Integer</td><td>42</td></tr>
+                            <tr><td><code>Long</code></td><td>Long</td><td>1234567890</td></tr>
+                            <tr><td><code>Double</code> / <code>number</code></td><td>Double</td><td>99.95</td></tr>
+                            <tr><td><code>Boolean</code> / <code>bool</code></td><td>Boolean</td><td>true</td></tr>
+                            <tr><td><code>BigDecimal</code> / <code>decimal</code></td><td>java.math.BigDecimal</td><td>1000.50</td></tr>
+                            <tr><td><code>LocalDate</code> / <code>date</code></td><td>java.time.LocalDate</td><td>"2026-04-27"</td></tr>
+                            <tr><td><code>LocalDateTime</code> / <code>datetime</code></td><td>java.time.LocalDateTime</td><td>"2026-04-27T10:00:00"</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3 style="margin-top:24px"><i class="fas fa-shield-alt"></i> Fonctionnalites de resilience generees</h3>
+                    <table class="data-table" style="margin-top:12px">
+                        <thead>
+                            <tr>
+                                <th>Fonctionnalite</th>
+                                <th>Implementation</th>
+                                <th>Configuration</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>Circuit Breaker</strong></td>
+                                <td>Resilience4j @CircuitBreaker</td>
+                                <td>Seuil 50%, 10 appels minimum, 60s demi-ouvert</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Retry</strong></td>
+                                <td>Resilience4j @Retry</td>
+                                <td>Configurable par endpoint (max_retries), backoff exponentiel</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Bulkhead</strong></td>
+                                <td>Resilience4j @Bulkhead</td>
+                                <td>25 appels concurrents max, 5s attente</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Idempotency</strong></td>
+                                <td>IdempotencyService (ConcurrentHashMap + TTL)</td>
+                                <td>Base sur request_id, TTL 24h</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Timeout</strong></td>
+                                <td>RestTemplate connectTimeout/readTimeout</td>
+                                <td>Configurable par endpoint (timeout_seconds)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Progress -->
+            <div class="card" id="progressCard" style="display:none">
+                <div class="card-body">
+                    <div class="generation-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <p class="progress-text" id="progressText">Generation en cours...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Result -->
+            <div class="card" id="resultCard" style="display:none">
+                <div class="card-header">
+                    <h2 class="card-title"><i class="fas fa-check-circle" style="color:#22c55e"></i> Wrapper BIAN genere</h2>
+                </div>
+                <div class="card-body">
+                    <div class="result-details" id="resultDetails"></div>
+                    <div class="result-files" id="resultFiles"></div>
+                    <div class="result-actions" style="margin-top:20px">
+                        <a th:href="@{/download-adapter-wrapper}" class="btn btn-primary">
+                            <i class="fas fa-download"></i> Telecharger le ZIP
+                        </a>
+                        <button class="btn btn-secondary" onclick="resetForm()">
+                            <i class="fas fa-redo"></i> Nouveau contrat
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+// ==================== TAB SWITCHING ====================
+function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+    document.getElementById('tab-' + tab).classList.add('active');
+    document.getElementById('content-' + tab).style.display = 'block';
+}
+
+// ==================== FILE INPUT DISPLAY ====================
+document.getElementById('adapterFile').addEventListener('change', function() {
+    if (this.files.length > 0) {
+        document.getElementById('adapterFileName').textContent = this.files[0].name;
+        document.querySelector('#adapterDropZone .file-upload-content').style.display = 'none';
+        document.getElementById('adapterFileSelected').style.display = 'flex';
+    }
+});
+
+// ==================== ALERTS ====================
+function showAlert(type, message) {
+    const container = document.getElementById('alertContainer');
+    const icon = type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle';
+    container.innerHTML = `<div class="alert alert-${type}"><i class="fas ${icon}"></i> ${message}</div>`;
+}
+
+// ==================== JSON EDITOR ====================
+function formatJson() {
+    const editor = document.getElementById('jsonEditor');
+    try {
+        const obj = JSON.parse(editor.value);
+        editor.value = JSON.stringify(obj, null, 2);
+        setJsonStatus('valid', 'JSON valide');
+    } catch (e) {
+        setJsonStatus('error', 'Erreur : ' + e.message);
+    }
+}
+
+function validateJson() {
+    const editor = document.getElementById('jsonEditor');
+    try {
+        const obj = JSON.parse(editor.value);
+        if (!obj.adapter_name) throw new Error('Champ "adapter_name" manquant');
+        if (!obj.endpoints || !obj.endpoints.length) throw new Error('Champ "endpoints" manquant ou vide');
+        setJsonStatus('valid', 'Contrat valide (' + obj.endpoints.length + ' endpoint(s))');
+    } catch (e) {
+        setJsonStatus('error', 'Erreur : ' + e.message);
+    }
+}
+
+function setJsonStatus(type, message) {
+    const el = document.getElementById('jsonStatus');
+    el.className = 'json-status json-status-' + type;
+    el.innerHTML = '<i class="fas ' + (type === 'valid' ? 'fa-check-circle' : 'fa-times-circle') + '"></i> ' + message;
+}
+
+function loadTemplate() {
+    const template = {
+        adapter_name: "CommandChequier",
+        adapter_base_url: "http://websphere-host:9080/api/adapter",
+        description: "Adapter pour la commande de chequiers",
+        version: "1.0.0",
+        endpoints: [{
+            operation: "enrg_commande",
+            method: "POST",
+            path: "/command-chequier/enrg-commande",
+            summary: "Enregistrer une commande de chequier",
+            idempotent: true,
+            timeout_seconds: 30,
+            max_retries: 3,
+            request_fields: [
+                { name: "numeroCarte", type: "String", required: true, description: "Numero de carte bancaire" },
+                { name: "quantite", type: "Integer", required: true, description: "Nombre de chequiers" },
+                { name: "adresseLivraison", type: "String", required: false, description: "Adresse de livraison" }
+            ],
+            response_fields: [
+                { name: "code", type: "String", description: "Code retour" },
+                { name: "message", type: "String", description: "Message descriptif" },
+                { name: "reference", type: "String", description: "Reference de la commande" }
+            ]
+        }]
+    };
+    document.getElementById('jsonEditor').value = JSON.stringify(template, null, 2);
+    setJsonStatus('valid', 'Template charge');
+}
+
+// ==================== PROGRESS ====================
+function animateProgress() {
+    const fill = document.getElementById('progressFill');
+    const text = document.getElementById('progressText');
+    document.getElementById('progressCard').style.display = 'block';
+    document.getElementById('resultCard').style.display = 'none';
+
+    const steps = [
+        { pct: 15, msg: 'Parsing du contrat JSON...' },
+        { pct: 30, msg: 'Detection du mapping BIAN...' },
+        { pct: 45, msg: 'Generation des DTOs...' },
+        { pct: 55, msg: 'Generation du Controller BIAN...' },
+        { pct: 65, msg: 'Generation du RestAdapter avec resilience...' },
+        { pct: 75, msg: 'Generation des tests Pact...' },
+        { pct: 85, msg: 'Generation de la configuration...' },
+        { pct: 92, msg: 'Finalisation...' }
+    ];
+
+    let i = 0;
+    const interval = setInterval(() => {
+        if (i < steps.length) {
+            fill.style.width = steps[i].pct + '%';
+            text.textContent = steps[i].msg;
+            i++;
+        } else {
+            clearInterval(interval);
+        }
+    }, 600);
+}
+
+// ==================== FORM SUBMISSION (File Upload) ====================
+document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+
+    const btn = document.getElementById('uploadSubmitBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generation en cours...';
+    animateProgress();
+
+    try {
+        const response = await fetch('/api/generate-adapter-wrapper', { method: 'POST', body: formData });
+        const data = await response.json();
+        handleResult(data);
+    } catch (error) {
+        showAlert('error', 'Erreur de communication : ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-rocket"></i> Generer le Wrapper BIAN';
+    }
+});
+
+// ==================== FORM SUBMISSION (JSON Editor) ====================
+async function submitJson() {
+    const jsonContent = document.getElementById('jsonEditor').value;
+    if (!jsonContent.trim()) {
+        showAlert('error', 'Veuillez saisir un contrat JSON.');
+        return;
+    }
+
+    try { JSON.parse(jsonContent); } catch (e) {
+        showAlert('error', 'JSON invalide : ' + e.message);
+        return;
+    }
+
+    const btn = document.getElementById('editorSubmitBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generation en cours...';
+    animateProgress();
+
+    try {
+        const response = await fetch('/api/generate-adapter-wrapper-json', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: jsonContent
+        });
+        const data = await response.json();
+        handleResult(data);
+    } catch (error) {
+        showAlert('error', 'Erreur de communication : ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-rocket"></i> Generer le Wrapper BIAN';
+    }
+}
+
+// ==================== HANDLE RESULT ====================
+function handleResult(data) {
+    document.getElementById('progressFill').style.width = '100%';
+    document.getElementById('progressText').textContent = 'Termine !';
+
+    if (data.success) {
+        document.getElementById('resultDetails').innerHTML = `
+            <div class="result-item"><strong><i class="fas fa-check-circle" style="color:#22c55e"></i> Statut :</strong> Wrapper genere avec succes</div>
+            <div class="result-item"><strong><i class="fas fa-file"></i> Fichiers generes :</strong> ${data.fileCount || 'N/A'}</div>
+        `;
+
+        // File tree
+        if (data.generatedFiles) {
+            let filesHtml = '<div class="file-tree" style="margin-top:16px"><h4><i class="fas fa-folder-open"></i> Arborescence</h4><ul class="tree-list">';
+            data.generatedFiles.forEach(f => {
+                const icon = f.endsWith('.java') ? 'fa-file-code' : f.endsWith('.properties') ? 'fa-cog' : f.endsWith('.xml') ? 'fa-file-code' : 'fa-file';
+                filesHtml += `<li><i class="fas ${icon}"></i> ${f}</li>`;
+            });
+            filesHtml += '</ul></div>';
+            document.getElementById('resultFiles').innerHTML = filesHtml;
+        }
+
+        document.getElementById('resultCard').style.display = 'block';
+        showAlert('success', data.message);
+    } else {
+        showAlert('error', data.error);
+    }
+}
+
+function resetForm() {
+    document.getElementById('progressCard').style.display = 'none';
+    document.getElementById('resultCard').style.display = 'none';
+    document.getElementById('alertContainer').innerHTML = '';
+    document.getElementById('uploadForm').reset();
+    document.querySelector('#adapterDropZone .file-upload-content').style.display = 'block';
+    document.getElementById('adapterFileSelected').style.display = 'none';
+    document.getElementById('jsonEditor').value = '';
+    document.getElementById('jsonStatus').innerHTML = '';
+}
+</script>
+
+<style>
+/* Architecture flow */
+.architecture-flow {
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px; padding: 20px 0; flex-wrap: wrap;
+}
+.flow-step {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 16px 20px; border: 2px solid var(--border-color, #e0e0e0);
+    border-radius: 10px; min-width: 120px; position: relative;
+    background: white; transition: all 0.2s;
+}
+.flow-step-highlight {
+    border-color: var(--primary-color, #2563eb);
+    background: #f0f7ff;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+}
+.flow-icon { font-size: 24px; color: var(--text-muted, #666); margin-bottom: 8px; }
+.flow-step-highlight .flow-icon { color: var(--primary-color, #2563eb); }
+.flow-label { font-size: 12px; font-weight: 600; text-align: center; }
+.flow-badge {
+    position: absolute; top: -10px; right: -10px;
+    background: var(--primary-color, #2563eb); color: white;
+    font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600;
+}
+.flow-arrow { color: var(--text-muted, #999); font-size: 18px; }
+
+/* Tab navigation */
+.tab-nav { display: flex; gap: 0; border-bottom: 2px solid var(--border-color, #e0e0e0); }
+.tab-btn {
+    padding: 12px 24px; border: none; background: none; cursor: pointer;
+    font-size: 14px; font-weight: 600; color: var(--text-muted, #666);
+    border-bottom: 3px solid transparent; transition: all 0.2s;
+}
+.tab-btn:hover { color: var(--primary-color, #2563eb); }
+.tab-btn.active { color: var(--primary-color, #2563eb); border-bottom-color: var(--primary-color, #2563eb); }
+
+/* Info box */
+.info-box {
+    display: flex; gap: 12px; padding: 16px; margin-bottom: 24px;
+    background: #f0f7ff; border-left: 4px solid var(--primary-color, #2563eb);
+    border-radius: 6px; font-size: 13px;
+}
+.info-box > i { font-size: 20px; color: var(--primary-color, #2563eb); margin-top: 2px; }
+.info-box ul { padding-left: 20px; }
+.info-box li { margin-bottom: 4px; }
+
+/* Partner form */
+.partner-form { margin-top: 16px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 20px; }
+.form-group label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 13px; }
+
+/* File upload zone */
+.file-upload-zone {
+    border: 2px dashed var(--border-color, #d0d0d0); border-radius: 8px;
+    padding: 32px; text-align: center; position: relative;
+}
+.file-upload-zone:hover { border-color: var(--primary-color, #2563eb); background: #f8faff; }
+.file-upload-zone input[type="file"] {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    opacity: 0; cursor: pointer;
+}
+.file-upload-content i { font-size: 32px; color: var(--text-muted, #999); margin-bottom: 8px; }
+.file-upload-content p { margin: 4px 0; }
+.file-upload-content .link { color: var(--primary-color, #2563eb); text-decoration: underline; }
+.file-upload-content small { color: var(--text-muted, #999); }
+.file-upload-selected { display: flex; align-items: center; gap: 8px; justify-content: center; }
+.file-upload-selected i { color: var(--primary-color, #2563eb); font-size: 20px; }
+
+/* JSON Editor */
+.json-editor-container { margin-bottom: 20px; }
+.json-editor-toolbar {
+    display: flex; gap: 8px; align-items: center; padding: 8px 12px;
+    background: #f5f5f5; border: 1px solid var(--border-color, #d0d0d0);
+    border-bottom: none; border-radius: 6px 6px 0 0;
+}
+.json-editor {
+    width: 100%; padding: 16px; border: 1px solid var(--border-color, #d0d0d0);
+    border-radius: 0 0 6px 6px; font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 13px; line-height: 1.5; resize: vertical; background: #1e1e2e; color: #cdd6f4;
+}
+.json-status { margin-left: auto; font-size: 12px; font-weight: 600; }
+.json-status-valid { color: #22c55e; }
+.json-status-error { color: #ef4444; }
+.btn-sm { padding: 4px 12px; font-size: 12px; border: 1px solid var(--border-color, #d0d0d0); border-radius: 4px; background: white; cursor: pointer; }
+.btn-sm:hover { background: #f0f0f0; }
+
+/* JSON Template */
+.json-template {
+    background: #1e1e2e; color: #cdd6f4; padding: 20px; border-radius: 8px;
+    font-size: 13px; line-height: 1.6; overflow-x: auto;
+}
+
+/* Form actions */
+.form-actions { margin-top: 24px; }
+.btn-lg { padding: 12px 32px; font-size: 15px; }
+
+/* Progress */
+.generation-progress { margin-top: 8px; }
+.progress-bar { height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--primary-color, #2563eb); width: 0; transition: width 0.5s; }
+.progress-text { font-size: 13px; color: var(--text-muted, #666); margin-top: 8px; }
+
+/* Result */
+.result-details { display: grid; gap: 8px; }
+.result-item { font-size: 14px; }
+.result-actions { display: flex; gap: 12px; }
+
+/* File tree */
+.tree-list { list-style: none; padding-left: 0; font-size: 13px; font-family: monospace; }
+.tree-list li { padding: 3px 0; color: var(--text-muted, #666); }
+.tree-list li i { width: 20px; color: var(--primary-color, #2563eb); }
+
+/* Data table */
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.data-table th { background: #f5f5f5; padding: 10px 14px; text-align: left; font-weight: 600; border-bottom: 2px solid var(--border-color, #e0e0e0); }
+.data-table td { padding: 8px 14px; border-bottom: 1px solid var(--border-color, #f0f0f0); }
+.data-table code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+</style>
+</body>
+</html>
