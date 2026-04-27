@@ -1,0 +1,18 @@
+{
+  "total_entries": 364,
+  "new_entries_added": 22,
+  "categories": {
+    "ejb_session_bean": 149,
+    "jdbc_dao": 6,
+    "servlet": 165,
+    "soap_webservice": 6,
+    "jms_mdb": 26,
+    "struts": 6,
+    "hibernate": 6
+  },
+  "methods": {
+    "expert": 32,
+    "rule_based_user_project": 3,
+    "rule_based": 329
+  }
+}
