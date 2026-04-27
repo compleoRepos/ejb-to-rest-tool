@@ -2297,21 +2297,74 @@ public class AclArchitectureGenerator {
         // Profil REST (appel adapter WebSphere via HTTP)
         Files.writeString(resourcesDir.resolve("application-rest.properties"), """
                 # =====================================================================
-                # Profil REST (appel adapter WebSphere via HTTP)
+                # Profil REST — Appel adapter WebSphere via HTTP
                 # =====================================================================
                 # Activer avec : --spring.profiles.active=rest
                 # Ou dans application.properties : spring.profiles.group.prod=rest
                 
-                # URL de base de l'adapter WebSphere
+                # --- URL de base de l'adapter WebSphere ---
                 adapter.websphere.base-url=http://adapter-websphere:8080
                 
-                # Timeouts HTTP (en millisecondes)
+                # --- Timeouts HTTP (en millisecondes) ---
                 adapter.websphere.connect-timeout=5000
                 adapter.websphere.read-timeout=30000
                 
-                # Retry configuration
-                adapter.websphere.retry.max-attempts=3
-                adapter.websphere.retry.delay=1000
+                # =====================================================================
+                # Resilience4j — Circuit Breaker
+                # =====================================================================
+                # Taille de la fenetre glissante pour calculer le taux d'echec
+                resilience4j.circuitbreaker.instances.restAdapter.sliding-window-size=10
+                # Seuil de taux d'echec (%) pour ouvrir le circuit
+                resilience4j.circuitbreaker.instances.restAdapter.failure-rate-threshold=50
+                # Duree en etat OPEN avant de passer en HALF_OPEN (secondes)
+                resilience4j.circuitbreaker.instances.restAdapter.wait-duration-in-open-state=30s
+                # Nombre d'appels autorises en HALF_OPEN pour tester la reprise
+                resilience4j.circuitbreaker.instances.restAdapter.permitted-number-of-calls-in-half-open-state=3
+                # Nombre minimum d'appels avant de calculer le taux d'echec
+                resilience4j.circuitbreaker.instances.restAdapter.minimum-number-of-calls=5
+                # Transition automatique de OPEN vers HALF_OPEN
+                resilience4j.circuitbreaker.instances.restAdapter.automatic-transition-from-open-to-half-open-enabled=true
+                # Exceptions qui comptent comme echec
+                resilience4j.circuitbreaker.instances.restAdapter.record-exceptions=org.springframework.web.client.HttpServerErrorException,org.springframework.web.client.ResourceAccessException,java.util.concurrent.TimeoutException
+                # Exceptions ignorees (erreurs client 4xx ne sont pas des echecs infra)
+                resilience4j.circuitbreaker.instances.restAdapter.ignore-exceptions=org.springframework.web.client.HttpClientErrorException
+                
+                # =====================================================================
+                # Resilience4j — Retry
+                # =====================================================================
+                # Nombre maximum de tentatives (incluant l'appel initial)
+                resilience4j.retry.instances.restAdapter.max-attempts=3
+                # Delai entre les tentatives (millisecondes)
+                resilience4j.retry.instances.restAdapter.wait-duration=1000
+                # Backoff exponentiel (multiplier le delai a chaque retry)
+                resilience4j.retry.instances.restAdapter.enable-exponential-backoff=true
+                resilience4j.retry.instances.restAdapter.exponential-backoff-multiplier=2
+                # Exceptions declenchant un retry
+                resilience4j.retry.instances.restAdapter.retry-exceptions=org.springframework.web.client.HttpServerErrorException,org.springframework.web.client.ResourceAccessException
+                # Exceptions ne declenchant PAS de retry
+                resilience4j.retry.instances.restAdapter.ignore-exceptions=org.springframework.web.client.HttpClientErrorException
+                
+                # =====================================================================
+                # Resilience4j — Bulkhead (limitation de concurrence)
+                # =====================================================================
+                # Nombre maximum d'appels concurrents autorises
+                resilience4j.bulkhead.instances.restAdapter.max-concurrent-calls=25
+                # Duree max d'attente pour obtenir un slot (millisecondes)
+                resilience4j.bulkhead.instances.restAdapter.max-wait-duration=500
+                
+                # =====================================================================
+                # Resilience4j — TimeLimiter
+                # =====================================================================
+                # Timeout global par appel (secondes)
+                resilience4j.timelimiter.instances.restAdapter.timeout-duration=30s
+                resilience4j.timelimiter.instances.restAdapter.cancel-running-future=true
+                
+                # =====================================================================
+                # Actuator — Monitoring des circuits
+                # =====================================================================
+                management.endpoints.web.exposure.include=health,info,circuitbreakers,retries,bulkheads,metrics
+                management.endpoint.health.show-details=always
+                management.health.circuitbreakers.enabled=true
                 """);
 
         // Generer les fichiers de configuration Liberty (server.xml, jvm.options, bootstrap.properties)
