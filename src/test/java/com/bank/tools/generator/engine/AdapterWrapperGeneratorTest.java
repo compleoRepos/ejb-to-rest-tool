@@ -416,5 +416,231 @@ class AdapterWrapperGeneratorTest {
                 assertTrue(content.contains("RestTemplate"), "RestAdapter doit utiliser RestTemplate");
             }
         }
+
+        @Test
+        @DisplayName("Le RestAdapter utilise les ACL Mappers et l'ExceptionTranslator")
+        void shouldUseAclMappersAndExceptionTranslator() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> adapter = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().contains("RestAdapter"))
+                        .findFirst();
+
+                assertTrue(adapter.isPresent());
+                String content = Files.readString(adapter.get());
+                assertTrue(content.contains("AclMapper"), "RestAdapter doit injecter les ACL Mappers");
+                assertTrue(content.contains("AdapterExceptionTranslator"), "RestAdapter doit injecter l'ExceptionTranslator");
+                assertTrue(content.contains("toAdapterRequest"), "RestAdapter doit appeler toAdapterRequest");
+                assertTrue(content.contains("fromAdapterResponse"), "RestAdapter doit appeler fromAdapterResponse");
+                assertTrue(content.contains("exceptionTranslator.translate"), "RestAdapter doit deleguer les exceptions au translator");
+            }
+        }
+
+        @Test
+        @DisplayName("Le RestAdapter travaille avec les Domain Models")
+        void shouldWorkWithDomainModels() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> adapter = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().contains("RestAdapter"))
+                        .findFirst();
+
+                assertTrue(adapter.isPresent());
+                String content = Files.readString(adapter.get());
+                assertTrue(content.contains("DomainModel"), "RestAdapter doit utiliser les Domain Models");
+            }
+        }
+    }
+
+    // ============================================================
+    // Tests de la couche ACL (Anti-Corruption Layer)
+    // ============================================================
+
+    @Nested
+    @DisplayName("Couche ACL")
+    class AclLayer {
+
+        @Test
+        @DisplayName("Genere les Domain Models pour chaque endpoint")
+        void shouldGenerateDomainModels() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                List<String> files = walk.filter(Files::isRegularFile)
+                        .map(p -> p.getFileName().toString())
+                        .toList();
+
+                assertTrue(files.contains("EnrgCommandeDomainModel.java"),
+                        "EnrgCommandeDomainModel.java doit etre genere");
+            }
+        }
+
+        @Test
+        @DisplayName("Le Domain Model contient les champs request + response")
+        void shouldDomainModelContainAllFields() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> domainModel = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("EnrgCommandeDomainModel.java"))
+                        .findFirst();
+
+                assertTrue(domainModel.isPresent());
+                String content = Files.readString(domainModel.get());
+                assertTrue(content.contains("numeroCarte"), "Domain Model doit contenir numeroCarte (champ request)");
+                assertTrue(content.contains("quantite"), "Domain Model doit contenir quantite (champ request)");
+                assertTrue(content.contains("code"), "Domain Model doit contenir code (champ response)");
+                assertTrue(content.contains("reference"), "Domain Model doit contenir reference (champ response)");
+            }
+        }
+
+        @Test
+        @DisplayName("Genere les ACL Mappers pour chaque endpoint")
+        void shouldGenerateAclMappers() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                List<String> files = walk.filter(Files::isRegularFile)
+                        .map(p -> p.getFileName().toString())
+                        .toList();
+
+                assertTrue(files.contains("EnrgCommandeAclMapper.java"),
+                        "EnrgCommandeAclMapper.java doit etre genere");
+            }
+        }
+
+        @Test
+        @DisplayName("L'ACL Mapper a les 4 methodes de traduction")
+        void shouldAclMapperHaveAllTranslationMethods() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> mapper = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("EnrgCommandeAclMapper.java"))
+                        .findFirst();
+
+                assertTrue(mapper.isPresent());
+                String content = Files.readString(mapper.get());
+                assertTrue(content.contains("toModel"), "ACL Mapper doit avoir toModel (API DTO -> Domain)");
+                assertTrue(content.contains("toApiResponse"), "ACL Mapper doit avoir toApiResponse (Domain -> API DTO)");
+                assertTrue(content.contains("toAdapterRequest"), "ACL Mapper doit avoir toAdapterRequest (Domain -> Adapter DTO)");
+                assertTrue(content.contains("fromAdapterResponse"), "ACL Mapper doit avoir fromAdapterResponse (Adapter DTO -> Domain)");
+            }
+        }
+
+        @Test
+        @DisplayName("Genere l'ExceptionTranslator")
+        void shouldGenerateExceptionTranslator() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                List<String> files = walk.filter(Files::isRegularFile)
+                        .map(p -> p.getFileName().toString())
+                        .toList();
+
+                assertTrue(files.contains("AdapterExceptionTranslator.java"),
+                        "AdapterExceptionTranslator.java doit etre genere");
+            }
+        }
+
+        @Test
+        @DisplayName("L'ExceptionTranslator traduit les exceptions HTTP")
+        void shouldExceptionTranslatorHandleHttpExceptions() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> translator = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().equals("AdapterExceptionTranslator.java"))
+                        .findFirst();
+
+                assertTrue(translator.isPresent());
+                String content = Files.readString(translator.get());
+                assertTrue(content.contains("HttpClientErrorException"), "Doit gerer HttpClientErrorException");
+                assertTrue(content.contains("HttpServerErrorException"), "Doit gerer HttpServerErrorException");
+                assertTrue(content.contains("ResourceAccessException"), "Doit gerer ResourceAccessException");
+            }
+        }
+
+        @Test
+        @DisplayName("Le Controller utilise les ACL Mappers")
+        void shouldControllerUseAclMappers() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> controller = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().contains("Controller"))
+                        .findFirst();
+
+                assertTrue(controller.isPresent());
+                String content = Files.readString(controller.get());
+                assertTrue(content.contains("toModel"), "Controller doit appeler toModel");
+                assertTrue(content.contains("toApiResponse"), "Controller doit appeler toApiResponse");
+                assertTrue(content.contains("DomainModel"), "Controller doit utiliser les Domain Models");
+            }
+        }
+
+        @Test
+        @DisplayName("Le Service Interface travaille avec les Domain Models")
+        void shouldServiceInterfaceUseDomainModels() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> service = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().contains("Service.java"))
+                        .findFirst();
+
+                assertTrue(service.isPresent());
+                String content = Files.readString(service.get());
+                assertTrue(content.contains("DomainModel"), "Service Interface doit utiliser les Domain Models");
+                assertFalse(content.contains("import " + "com.bank.api.dto.request"), "Service Interface ne doit PAS importer les DTOs API");
+            }
+        }
+
+        @Test
+        @DisplayName("Le MockAdapter travaille avec les Domain Models")
+        void shouldMockAdapterUseDomainModels() throws IOException {
+            AdapterContractInfo contract = createTestContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                Optional<Path> mock = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().contains("MockAdapter"))
+                        .findFirst();
+
+                assertTrue(mock.isPresent());
+                String content = Files.readString(mock.get());
+                assertTrue(content.contains("DomainModel"), "MockAdapter doit utiliser les Domain Models");
+            }
+        }
+
+        @Test
+        @DisplayName("Multi-endpoints : genere les ACL Mappers et Domain Models pour chaque endpoint")
+        void shouldGenerateAclForMultiEndpoints() throws IOException {
+            AdapterContractInfo contract = createMultiEndpointContract();
+            Path projectRoot = generator.generate(contract, outputDir);
+
+            try (Stream<Path> walk = Files.walk(projectRoot)) {
+                List<String> files = walk.filter(Files::isRegularFile)
+                        .map(p -> p.getFileName().toString())
+                        .toList();
+
+                assertTrue(files.contains("EnrgCommandeDomainModel.java"));
+                assertTrue(files.contains("ConsultCommandeDomainModel.java"));
+                assertTrue(files.contains("EnrgCommandeAclMapper.java"));
+                assertTrue(files.contains("ConsultCommandeAclMapper.java"));
+            }
+        }
     }
 }

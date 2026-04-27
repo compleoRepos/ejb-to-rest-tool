@@ -55,6 +55,9 @@ public class AdapterWrapperGenerator {
     private String PKG_INFRA_REST_CONFIG;
     private String PKG_INFRA_MOCK;
     private String PKG_INFRA_IDEMPOTENCY;
+    private String PKG_DOMAIN_MODEL;
+    private String PKG_ACL_MAPPER;
+    private String PKG_ACL_TRANSLATOR;
     private String PKG_CONFIG;
 
     public AdapterWrapperGenerator(BianAutoDetector bianAutoDetector) {
@@ -111,46 +114,59 @@ public class AdapterWrapperGenerator {
         // 4. Generer les Exceptions (couche Domain)
         generateDomainExceptions(srcMain);
 
-        // 5. Generer l'interface Service (couche Domain)
+        // 5. Generer les Domain Models BIAN (couche Domain)
+        for (EndpointInfo ep : contract.getEndpoints()) {
+            generateDomainModel(srcMain, ep);
+        }
+
+        // 6. Generer l'interface Service (couche Domain) — travaille avec les Domain Models
         generateServiceInterface(srcMain, contract, bianMapping);
 
-        // 6. Generer le RestAdapter avec resilience (couche Infrastructure)
+        // 7. Generer les ACL Mappers (couche ACL) — traduit API DTO ↔ Domain Model
+        for (EndpointInfo ep : contract.getEndpoints()) {
+            generateAclMapper(srcMain, ep);
+        }
+
+        // 8. Generer l'ExceptionTranslator (couche ACL)
+        generateExceptionTranslator(srcMain);
+
+        // 9. Generer le RestAdapter avec resilience (couche Infrastructure) — travaille avec les Domain Models
         generateRestAdapter(srcMain, contract, bianMapping);
 
-        // 7. Generer le service d'idempotence (couche Infrastructure)
+        // 10. Generer le service d'idempotence (couche Infrastructure)
         generateIdempotencyService(srcMain);
 
-        // 8. Generer le MockAdapter (couche Infrastructure)
+        // 11. Generer le MockAdapter (couche Infrastructure)
         generateMockAdapter(srcMain, contract, bianMapping);
 
-        // 9. Generer le RestClientConfig (couche Infrastructure)
+        // 12. Generer le RestClientConfig (couche Infrastructure)
         generateRestClientConfig(srcMain, contract);
 
-        // 10. Generer le Controller BIAN (couche API)
+        // 13. Generer le Controller BIAN (couche API)
         generateBianController(srcMain, contract, bianMapping);
 
-        // 11. Generer le GlobalExceptionHandler (Config)
+        // 14. Generer le GlobalExceptionHandler (Config)
         generateGlobalExceptionHandler(srcMain);
 
-        // 12. Generer la SecurityConfig (Config)
+        // 15. Generer la SecurityConfig (Config)
         generateSecurityConfig(srcMain);
 
-        // 13. Generer les profils Spring (Config)
+        // 16. Generer les profils Spring (Config)
         generateSpringProfiles(srcMain, contract);
 
-        // 14. Generer l'Application main class
+        // 17. Generer l'Application main class
         generateApplicationClass(srcMain, contract);
 
-        // 15. Generer le pom.xml
+        // 18. Generer le pom.xml
         generatePomXml(projectRoot, contract);
 
-        // 16. Generer les tests d'integration
+        // 19. Generer les tests d'integration
         generateIntegrationTests(srcMain, contract, bianMapping);
 
-        // 17. Generer les tests Pact Consumer
+        // 20. Generer les tests Pact Consumer
         generatePactConsumerTests(srcMain, contract, bianMapping);
 
-        // 18. Generer le README
+        // 21. Generer le README
         generateReadme(projectRoot, contract, bianMapping);
 
         log.info("[ADAPTER-WRAPPER] ========== FIN GENERATION WRAPPER BIAN ==========");
@@ -175,6 +191,9 @@ public class AdapterWrapperGenerator {
         PKG_INFRA_REST_CONFIG = PKG_BASE + ".infrastructure.rest.config";
         PKG_INFRA_MOCK = PKG_BASE + ".infrastructure.mock";
         PKG_INFRA_IDEMPOTENCY = PKG_BASE + ".infrastructure.idempotency";
+        PKG_DOMAIN_MODEL = PKG_BASE + ".domain.model";
+        PKG_ACL_MAPPER = PKG_BASE + ".acl.mapper";
+        PKG_ACL_TRANSLATOR = PKG_BASE + ".acl.translator";
         PKG_CONFIG = PKG_BASE + ".config";
     }
 
@@ -184,7 +203,8 @@ public class AdapterWrapperGenerator {
                 PKG_API_DTO_ENVELOPE, PKG_API_DTO_VALIDATION,
                 PKG_DOMAIN_SERVICE, PKG_DOMAIN_EXCEPTION,
                 PKG_INFRA_REST_ADAPTER, PKG_INFRA_REST_CONFIG, PKG_INFRA_MOCK,
-                PKG_INFRA_IDEMPOTENCY, PKG_CONFIG
+                PKG_INFRA_IDEMPOTENCY, PKG_DOMAIN_MODEL, PKG_ACL_MAPPER,
+                PKG_ACL_TRANSLATOR, PKG_CONFIG
         };
         for (String pkg : packages) {
             resolvePackagePath(srcMain, pkg);
@@ -472,6 +492,286 @@ public class AdapterWrapperGenerator {
     }
 
     // =====================================================================
+    // COUCHE DOMAIN : Domain Model BIAN
+    // =====================================================================
+
+    /**
+     * Genere un objet du domaine BIAN pour chaque endpoint.
+     * Le Domain Model est l'objet metier pur, decouple des DTOs API et des DTOs Adapter.
+     * Il represente la donnee telle que le domaine BIAN la comprend.
+     */
+    private void generateDomainModel(Path srcMain, EndpointInfo ep) throws IOException {
+        String modelName = capitalize(ep.toMethodName()) + "DomainModel";
+        Path dir = resolvePackagePath(srcMain, PKG_DOMAIN_MODEL);
+        Path file = dir.resolve(modelName + ".java");
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(PKG_DOMAIN_MODEL).append(";\n\n");
+
+        Set<String> imports = new TreeSet<>();
+        // Collecter les types qui necessitent un import
+        for (FieldInfo f : ep.getRequestFields()) {
+            String javaType = f.toJavaType();
+            if (javaType.contains(".")) imports.add("import " + javaType + ";");
+        }
+        for (FieldInfo f : ep.getResponseFields()) {
+            String javaType = f.toJavaType();
+            if (javaType.contains(".")) imports.add("import " + javaType + ";");
+        }
+        for (String imp : imports) sb.append(imp).append("\n");
+        if (!imports.isEmpty()) sb.append("\n");
+
+        sb.append("/**\n");
+        sb.append(" * Objet du domaine BIAN pour l'operation ").append(ep.getOperation()).append(".\n");
+        sb.append(" *\n");
+        sb.append(" * <p>Ce modele represente la donnee metier pure, decouple des DTOs API\n");
+        sb.append(" * (couche presentation) et des DTOs de l'Adapter WebSphere (couche infrastructure).\n");
+        sb.append(" * Il est utilise par la couche Service et les ACL Mappers.</p>\n");
+        sb.append(" */\n");
+        sb.append("public class ").append(modelName).append(" {\n\n");
+
+        // Collecter tous les champs (request + response) en evitant les doublons
+        Map<String, FieldInfo> allFields = new LinkedHashMap<>();
+        for (FieldInfo f : ep.getRequestFields()) {
+            allFields.put(f.getName(), f);
+        }
+        for (FieldInfo f : ep.getResponseFields()) {
+            allFields.putIfAbsent(f.getName(), f);
+        }
+
+        // Champs
+        for (Map.Entry<String, FieldInfo> entry : allFields.entrySet()) {
+            FieldInfo f = entry.getValue();
+            if (f.getDescription() != null && !f.getDescription().isBlank()) {
+                sb.append("    /** ").append(f.getDescription()).append(" */\n");
+            }
+            sb.append("    private ").append(simpleType(f.toJavaType())).append(" ").append(f.getName()).append(";\n\n");
+        }
+
+        // Constructeur vide
+        sb.append("    public ").append(modelName).append("() {}\n\n");
+
+        // Getters & Setters
+        for (Map.Entry<String, FieldInfo> entry : allFields.entrySet()) {
+            FieldInfo f = entry.getValue();
+            String type = simpleType(f.toJavaType());
+            String cap = capitalize(f.getName());
+            sb.append("    public ").append(type).append(" get").append(cap).append("() { return ").append(f.getName()).append("; }\n");
+            sb.append("    public void set").append(cap).append("(").append(type).append(" ").append(f.getName()).append(") { this.").append(f.getName()).append(" = ").append(f.getName()).append("; }\n\n");
+        }
+
+        sb.append("}\n");
+        Files.writeString(file, sb.toString());
+        log.info("[ACL] Domain Model genere : {}", modelName);
+    }
+
+    // =====================================================================
+    // COUCHE ACL : Mapper (Anti-Corruption Layer)
+    // =====================================================================
+
+    /**
+     * Genere un ACL Mapper pour chaque endpoint.
+     * Le Mapper traduit entre :
+     * - API Request DTO → Domain Model (entree)
+     * - Domain Model → Adapter Request DTO (sortie vers WebSphere)
+     * - Adapter Response DTO → Domain Model (retour de WebSphere)
+     * - Domain Model → API Response DTO (sortie vers le client)
+     */
+    private void generateAclMapper(Path srcMain, EndpointInfo ep) throws IOException {
+        String mapperName = capitalize(ep.toMethodName()) + "AclMapper";
+        String domainModelName = capitalize(ep.toMethodName()) + "DomainModel";
+        String requestDtoName = ep.toRequestDtoName();
+        String responseDtoName = ep.toResponseDtoName();
+        Path dir = resolvePackagePath(srcMain, PKG_ACL_MAPPER);
+        Path file = dir.resolve(mapperName + ".java");
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(PKG_ACL_MAPPER).append(";\n\n");
+
+        Set<String> imports = new TreeSet<>();
+        imports.add("import " + PKG_API_DTO_REQUEST + "." + requestDtoName + ";");
+        imports.add("import " + PKG_API_DTO_RESPONSE + "." + responseDtoName + ";");
+        imports.add("import " + PKG_DOMAIN_MODEL + "." + domainModelName + ";");
+        imports.add("import org.springframework.stereotype.Component;");
+        imports.add("import org.slf4j.Logger;");
+        imports.add("import org.slf4j.LoggerFactory;");
+        for (String imp : imports) sb.append(imp).append("\n");
+        sb.append("\n");
+
+        sb.append("/**\n");
+        sb.append(" * ACL Mapper pour l'operation ").append(ep.getOperation()).append(".\n");
+        sb.append(" *\n");
+        sb.append(" * <p>Anti-Corruption Layer : traduit entre les DTOs de l'API (couche presentation),\n");
+        sb.append(" * le Domain Model BIAN (couche metier) et les DTOs de l'Adapter WebSphere (couche infrastructure).</p>\n");
+        sb.append(" *\n");
+        sb.append(" * <p>Flux :</p>\n");
+        sb.append(" * <pre>\n");
+        sb.append(" * API Request DTO → Domain Model → (Service) → Domain Model → API Response DTO\n");
+        sb.append(" *                                                ↕\n");
+        sb.append(" *                                       Adapter DTO (WebSphere)\n");
+        sb.append(" * </pre>\n");
+        sb.append(" */\n");
+        sb.append("@Component\n");
+        sb.append("public class ").append(mapperName).append(" {\n\n");
+        sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(mapperName).append(".class);\n\n");
+
+        // ---- toModel : API Request DTO → Domain Model ----
+        sb.append("    /**\n");
+        sb.append("     * Convertit le DTO de requete API en objet du domaine BIAN.\n");
+        sb.append("     *\n");
+        sb.append("     * @param request le DTO de requete venant de la couche API\n");
+        sb.append("     * @return l'objet du domaine BIAN\n");
+        sb.append("     */\n");
+        sb.append("    public ").append(domainModelName).append(" toModel(").append(requestDtoName).append(" request) {\n");
+        sb.append("        log.debug(\"[ACL-MAPPER] Conversion API Request → Domain Model pour ").append(ep.getOperation()).append("\");\n");
+        sb.append("        ").append(domainModelName).append(" model = new ").append(domainModelName).append("();\n");
+        for (FieldInfo f : ep.getRequestFields()) {
+            String cap = capitalize(f.getName());
+            sb.append("        model.set").append(cap).append("(request.get").append(cap).append("());\n");
+        }
+        sb.append("        return model;\n");
+        sb.append("    }\n\n");
+
+        // ---- toAdapterRequest : Domain Model → Adapter Request DTO (meme structure pour l'instant) ----
+        sb.append("    /**\n");
+        sb.append("     * Convertit l'objet du domaine BIAN en DTO pour l'Adapter WebSphere.\n");
+        sb.append("     * Cette methode isole le domaine des changements de contrat de l'adapter.\n");
+        sb.append("     *\n");
+        sb.append("     * @param model l'objet du domaine BIAN\n");
+        sb.append("     * @return le DTO de requete pour l'adapter\n");
+        sb.append("     */\n");
+        sb.append("    public ").append(requestDtoName).append(" toAdapterRequest(").append(domainModelName).append(" model) {\n");
+        sb.append("        log.debug(\"[ACL-MAPPER] Conversion Domain Model → Adapter Request pour ").append(ep.getOperation()).append("\");\n");
+        sb.append("        ").append(requestDtoName).append(" adapterRequest = new ").append(requestDtoName).append("();\n");
+        for (FieldInfo f : ep.getRequestFields()) {
+            String cap = capitalize(f.getName());
+            sb.append("        adapterRequest.set").append(cap).append("(model.get").append(cap).append("());\n");
+        }
+        sb.append("        return adapterRequest;\n");
+        sb.append("    }\n\n");
+
+        // ---- fromAdapterResponse : Adapter Response DTO → Domain Model ----
+        sb.append("    /**\n");
+        sb.append("     * Convertit la reponse de l'Adapter WebSphere en objet du domaine BIAN.\n");
+        sb.append("     *\n");
+        sb.append("     * @param adapterResponse la reponse de l'adapter\n");
+        sb.append("     * @return l'objet du domaine BIAN enrichi\n");
+        sb.append("     */\n");
+        sb.append("    public ").append(domainModelName).append(" fromAdapterResponse(").append(responseDtoName).append(" adapterResponse) {\n");
+        sb.append("        log.debug(\"[ACL-MAPPER] Conversion Adapter Response → Domain Model pour ").append(ep.getOperation()).append("\");\n");
+        sb.append("        ").append(domainModelName).append(" model = new ").append(domainModelName).append("();\n");
+        for (FieldInfo f : ep.getResponseFields()) {
+            String cap = capitalize(f.getName());
+            sb.append("        model.set").append(cap).append("(adapterResponse.get").append(cap).append("());\n");
+        }
+        sb.append("        return model;\n");
+        sb.append("    }\n\n");
+
+        // ---- toApiResponse : Domain Model → API Response DTO ----
+        sb.append("    /**\n");
+        sb.append("     * Convertit l'objet du domaine BIAN en DTO de reponse pour l'API.\n");
+        sb.append("     *\n");
+        sb.append("     * @param model l'objet du domaine BIAN\n");
+        sb.append("     * @return le DTO de reponse pour la couche API\n");
+        sb.append("     */\n");
+        sb.append("    public ").append(responseDtoName).append(" toApiResponse(").append(domainModelName).append(" model) {\n");
+        sb.append("        log.debug(\"[ACL-MAPPER] Conversion Domain Model → API Response pour ").append(ep.getOperation()).append("\");\n");
+        sb.append("        ").append(responseDtoName).append(" response = new ").append(responseDtoName).append("();\n");
+        for (FieldInfo f : ep.getResponseFields()) {
+            String cap = capitalize(f.getName());
+            sb.append("        response.set").append(cap).append("(model.get").append(cap).append("());\n");
+        }
+        sb.append("        return response;\n");
+        sb.append("    }\n\n");
+
+        sb.append("}\n");
+        Files.writeString(file, sb.toString());
+        log.info("[ACL] Mapper genere : {}", mapperName);
+    }
+
+    // =====================================================================
+    // COUCHE ACL : ExceptionTranslator
+    // =====================================================================
+
+    /**
+     * Genere l'ExceptionTranslator qui traduit les exceptions de l'Adapter WebSphere
+     * en exceptions du domaine BIAN.
+     */
+    private void generateExceptionTranslator(Path srcMain) throws IOException {
+        Path dir = resolvePackagePath(srcMain, PKG_ACL_TRANSLATOR);
+        Path file = dir.resolve("AdapterExceptionTranslator.java");
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(PKG_ACL_TRANSLATOR).append(";\n\n");
+        sb.append("import ").append(PKG_DOMAIN_EXCEPTION).append(".ApiException;\n");
+        sb.append("import org.slf4j.Logger;\n");
+        sb.append("import org.slf4j.LoggerFactory;\n");
+        sb.append("import org.springframework.stereotype.Component;\n");
+        sb.append("import org.springframework.web.client.HttpClientErrorException;\n");
+        sb.append("import org.springframework.web.client.HttpServerErrorException;\n");
+        sb.append("import org.springframework.web.client.ResourceAccessException;\n\n");
+
+        sb.append("/**\n");
+        sb.append(" * Traducteur d'exceptions de la couche Anti-Corruption Layer.\n");
+        sb.append(" *\n");
+        sb.append(" * <p>Traduit les exceptions techniques de l'Adapter WebSphere\n");
+        sb.append(" * en exceptions metier du domaine BIAN, isolant ainsi le domaine\n");
+        sb.append(" * des details d'implementation de l'infrastructure.</p>\n");
+        sb.append(" */\n");
+        sb.append("@Component\n");
+        sb.append("public class AdapterExceptionTranslator {\n\n");
+        sb.append("    private static final Logger log = LoggerFactory.getLogger(AdapterExceptionTranslator.class);\n\n");
+
+        sb.append("    /**\n");
+        sb.append("     * Traduit une exception technique en exception domaine.\n");
+        sb.append("     *\n");
+        sb.append("     * @param ex l'exception technique de l'adapter\n");
+        sb.append("     * @param operation le nom de l'operation en cours\n");
+        sb.append("     * @return une ApiException du domaine\n");
+        sb.append("     */\n");
+        sb.append("    public ApiException translate(Exception ex, String operation) {\n");
+        sb.append("        log.warn(\"[ACL-TRANSLATOR] Exception adapter pour {} : {} ({})\",\n");
+        sb.append("                operation, ex.getMessage(), ex.getClass().getSimpleName());\n\n");
+
+        sb.append("        if (ex instanceof HttpClientErrorException clientEx) {\n");
+        sb.append("            int status = clientEx.getStatusCode().value();\n");
+        sb.append("            if (status == 400) {\n");
+        sb.append("                return new ApiException(\"ADAPTER_VALIDATION_ERROR\",\n");
+        sb.append("                    \"Donnees invalides pour l'adapter (\" + operation + \") : \" + clientEx.getResponseBodyAsString(), 400, clientEx);\n");
+        sb.append("            } else if (status == 404) {\n");
+        sb.append("                return new ApiException(\"ADAPTER_NOT_FOUND\",\n");
+        sb.append("                    \"Ressource introuvable sur l'adapter (\" + operation + \")\", 404, clientEx);\n");
+        sb.append("            } else if (status == 409) {\n");
+        sb.append("                return new ApiException(\"ADAPTER_CONFLICT\",\n");
+        sb.append("                    \"Conflit detecte sur l'adapter (\" + operation + \")\", 409, clientEx);\n");
+        sb.append("            } else {\n");
+        sb.append("                return new ApiException(\"ADAPTER_CLIENT_ERROR\",\n");
+        sb.append("                    \"Erreur client adapter (\" + operation + \") : HTTP \" + status, status, clientEx);\n");
+        sb.append("            }\n");
+        sb.append("        }\n\n");
+
+        sb.append("        if (ex instanceof HttpServerErrorException serverEx) {\n");
+        sb.append("            return new ApiException(\"ADAPTER_SERVER_ERROR\",\n");
+        sb.append("                \"Erreur serveur adapter (\" + operation + \") : HTTP \" + serverEx.getStatusCode().value(),\n");
+        sb.append("                serverEx.getStatusCode().value(), serverEx);\n");
+        sb.append("        }\n\n");
+
+        sb.append("        if (ex instanceof ResourceAccessException) {\n");
+        sb.append("            return new ApiException(\"ADAPTER_UNREACHABLE\",\n");
+        sb.append("                \"Adapter inaccessible (\" + operation + \") : \" + ex.getMessage(), 503, ex);\n");
+        sb.append("        }\n\n");
+
+        sb.append("        // Exception inconnue\n");
+        sb.append("        return new ApiException(\"ADAPTER_UNKNOWN_ERROR\",\n");
+        sb.append("            \"Erreur inattendue (\" + operation + \") : \" + ex.getMessage(), 500, ex);\n");
+        sb.append("    }\n");
+        sb.append("}\n");
+
+        Files.writeString(file, sb.toString());
+        log.info("[ACL] ExceptionTranslator genere");
+    }
+
+    // =====================================================================
     // COUCHE DOMAIN : Service Interface
     // =====================================================================
 
@@ -485,8 +785,8 @@ public class AdapterWrapperGenerator {
 
         Set<String> imports = new TreeSet<>();
         for (EndpointInfo ep : contract.getEndpoints()) {
-            imports.add("import " + PKG_API_DTO_REQUEST + "." + ep.toRequestDtoName() + ";");
-            imports.add("import " + PKG_API_DTO_RESPONSE + "." + ep.toResponseDtoName() + ";");
+            String domainModelName = capitalize(ep.toMethodName()) + "DomainModel";
+            imports.add("import " + PKG_DOMAIN_MODEL + "." + domainModelName + ";");
         }
         for (String imp : imports) sb.append(imp).append("\n");
         sb.append("\n");
@@ -495,6 +795,10 @@ public class AdapterWrapperGenerator {
         sb.append(" * Interface du service BIAN pour le domaine ").append(bianMapping.getServiceDomainTitle()).append(".\n");
         sb.append(" * Adapter: ").append(contract.getAdapterName()).append("\n");
         sb.append(" *\n");
+        sb.append(" * <p>Le service travaille exclusivement avec les Domain Models BIAN,\n");
+        sb.append(" * jamais avec les DTOs API ou les DTOs Adapter. La traduction est\n");
+        sb.append(" * assuree par la couche ACL (Anti-Corruption Layer).</p>\n");
+        sb.append(" *\n");
         sb.append(" * Implementations :\n");
         sb.append(" * - RestAdapter (profil 'rest') : appelle l'adapter WebSphere via HTTP\n");
         sb.append(" * - MockAdapter (profil 'mock') : donnees simulees pour les tests\n");
@@ -502,11 +806,16 @@ public class AdapterWrapperGenerator {
         sb.append("public interface ").append(serviceName).append(" {\n\n");
 
         for (EndpointInfo ep : contract.getEndpoints()) {
+            String domainModelName = capitalize(ep.toMethodName()) + "DomainModel";
             sb.append("    /**\n");
             sb.append("     * ").append(ep.getSummary()).append("\n");
+            sb.append("     *\n");
+            sb.append("     * @param crReferenceId identifiant de reference du Control Record\n");
+            sb.append("     * @param domainModel l'objet du domaine BIAN\n");
+            sb.append("     * @return le Domain Model enrichi avec la reponse\n");
             sb.append("     */\n");
-            sb.append("    ").append(ep.toResponseDtoName()).append(" ").append(ep.toMethodName());
-            sb.append("(String crReferenceId, ").append(ep.toRequestDtoName()).append(" request);\n\n");
+            sb.append("    ").append(domainModelName).append(" ").append(ep.toMethodName());
+            sb.append("(String crReferenceId, ").append(domainModelName).append(" domainModel);\n\n");
         }
 
         sb.append("}\n");
@@ -528,11 +837,15 @@ public class AdapterWrapperGenerator {
 
         Set<String> imports = new TreeSet<>();
         for (EndpointInfo ep : contract.getEndpoints()) {
+            String domainModelName = capitalize(ep.toMethodName()) + "DomainModel";
+            String mapperName = capitalize(ep.toMethodName()) + "AclMapper";
+            imports.add("import " + PKG_DOMAIN_MODEL + "." + domainModelName + ";");
+            imports.add("import " + PKG_ACL_MAPPER + "." + mapperName + ";");
             imports.add("import " + PKG_API_DTO_REQUEST + "." + ep.toRequestDtoName() + ";");
             imports.add("import " + PKG_API_DTO_RESPONSE + "." + ep.toResponseDtoName() + ";");
         }
         imports.add("import " + PKG_DOMAIN_SERVICE + "." + contract.toServiceName() + ";");
-        imports.add("import " + PKG_DOMAIN_EXCEPTION + ".ApiException;");
+        imports.add("import " + PKG_ACL_TRANSLATOR + ".AdapterExceptionTranslator;");
         imports.add("import " + PKG_INFRA_IDEMPOTENCY + ".IdempotencyService;");
         imports.add("import org.slf4j.Logger;");
         imports.add("import org.slf4j.LoggerFactory;");
@@ -540,9 +853,6 @@ public class AdapterWrapperGenerator {
         imports.add("import org.springframework.context.annotation.Profile;");
         imports.add("import org.springframework.stereotype.Service;");
         imports.add("import org.springframework.web.client.RestTemplate;");
-        imports.add("import org.springframework.web.client.HttpClientErrorException;");
-        imports.add("import org.springframework.web.client.HttpServerErrorException;");
-        imports.add("import org.springframework.web.client.ResourceAccessException;");
         imports.add("import org.springframework.http.HttpEntity;");
         imports.add("import org.springframework.http.HttpHeaders;");
         imports.add("import org.springframework.http.MediaType;");
@@ -570,28 +880,51 @@ public class AdapterWrapperGenerator {
 
         sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(adapterName).append(".class);\n\n");
         sb.append("    private final RestTemplate restTemplate;\n");
-        sb.append("    private final IdempotencyService idempotencyService;\n\n");
-        sb.append("    @Value(\"${adapter.websphere.base-url:").append(contract.getAdapterBaseUrl()).append("}\")\n");
+        sb.append("    private final IdempotencyService idempotencyService;\n");
+        sb.append("    private final AdapterExceptionTranslator exceptionTranslator;\n");
+        // Injecter les mappers ACL
+        for (EndpointInfo ep : contract.getEndpoints()) {
+            String mapperName = capitalize(ep.toMethodName()) + "AclMapper";
+            String mapperField = ep.toMethodName() + "Mapper";
+            sb.append("    private final ").append(mapperName).append(" ").append(mapperField).append(";\n");
+        }
+        sb.append("\n");
+        sb.append("    @Value(\"${adapter.websphere.base-url:").append(contract.getAdapterBaseUrl()).append("}\")").append("\n");
         sb.append("    private String adapterBaseUrl;\n\n");
 
-        sb.append("    public ").append(adapterName).append("(RestTemplate restTemplate, IdempotencyService idempotencyService) {\n");
+        // Constructeur avec injection
+        sb.append("    public ").append(adapterName).append("(RestTemplate restTemplate, IdempotencyService idempotencyService,\n");
+        sb.append("            AdapterExceptionTranslator exceptionTranslator");
+        for (EndpointInfo ep : contract.getEndpoints()) {
+            String mapperName = capitalize(ep.toMethodName()) + "AclMapper";
+            String mapperField = ep.toMethodName() + "Mapper";
+            sb.append(",\n            ").append(mapperName).append(" ").append(mapperField);
+        }
+        sb.append(") {\n");
         sb.append("        this.restTemplate = restTemplate;\n");
         sb.append("        this.idempotencyService = idempotencyService;\n");
+        sb.append("        this.exceptionTranslator = exceptionTranslator;\n");
+        for (EndpointInfo ep : contract.getEndpoints()) {
+            String mapperField = ep.toMethodName() + "Mapper";
+            sb.append("        this.").append(mapperField).append(" = ").append(mapperField).append(";\n");
+        }
         sb.append("    }\n\n");
 
-        // Methodes
+        // Methodes — travaillent avec les Domain Models via les ACL Mappers
         for (EndpointInfo ep : contract.getEndpoints()) {
             String methodName = ep.toMethodName();
+            String domainModelName = capitalize(methodName) + "DomainModel";
             String requestDto = ep.toRequestDtoName();
             String responseDto = ep.toResponseDtoName();
+            String mapperField = methodName + "Mapper";
             String fallbackName = methodName + "Fallback";
 
             sb.append("    @CircuitBreaker(name = \"restAdapter\", fallbackMethod = \"").append(fallbackName).append("\")\n");
             sb.append("    @Retry(name = \"restAdapter\")\n");
             sb.append("    @Bulkhead(name = \"restAdapter\")\n");
             sb.append("    @Override\n");
-            sb.append("    public ").append(responseDto).append(" ").append(methodName);
-            sb.append("(String crReferenceId, ").append(requestDto).append(" request) {\n");
+            sb.append("    public ").append(domainModelName).append(" ").append(methodName);
+            sb.append("(String crReferenceId, ").append(domainModelName).append(" domainModel) {\n");
 
             sb.append("        log.info(\"[REST-CALL] ").append(ep.getOperation()).append(" -> {} | crRef={}\", adapterBaseUrl, crReferenceId);\n");
 
@@ -601,32 +934,30 @@ public class AdapterWrapperGenerator {
                 sb.append("        idempotencyService.checkAndMark(crReferenceId + \"-").append(methodName).append("\");\n");
             }
 
+            sb.append("        // ACL : Domain Model -> Adapter Request DTO\n");
+            sb.append("        ").append(requestDto).append(" adapterRequest = ").append(mapperField).append(".toAdapterRequest(domainModel);\n\n");
+
             sb.append("        String url = adapterBaseUrl + \"").append(ep.getPath()).append("\";\n");
             sb.append("        try {\n");
             sb.append("            HttpHeaders headers = new HttpHeaders();\n");
             sb.append("            headers.setContentType(MediaType.APPLICATION_JSON);\n");
             sb.append("            headers.set(\"X-Correlation-Id\", crReferenceId);\n");
-            sb.append("            HttpEntity<").append(requestDto).append("> entity = new HttpEntity<>(request, headers);\n");
+            sb.append("            HttpEntity<").append(requestDto).append("> entity = new HttpEntity<>(adapterRequest, headers);\n");
             sb.append("            long start = System.currentTimeMillis();\n");
             sb.append("            ResponseEntity<").append(responseDto).append("> response = restTemplate.postForEntity(url, entity, ").append(responseDto).append(".class);\n");
-            sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.getOperation()).append(" en {}ms — HTTP {}\", System.currentTimeMillis() - start, response.getStatusCode());\n");
-            sb.append("            return response.getBody();\n");
-            sb.append("        } catch (HttpClientErrorException e) {\n");
-            sb.append("            log.error(\"[REST-ERROR] Erreur client HTTP {} pour ").append(ep.getOperation()).append(" : {}\", e.getStatusCode(), e.getResponseBodyAsString());\n");
-            sb.append("            throw new ApiException(\"ADAPTER_CLIENT_ERROR\", \"Erreur client adapter : \" + e.getMessage(), e.getStatusCode().value(), e);\n");
-            sb.append("        } catch (HttpServerErrorException e) {\n");
-            sb.append("            log.error(\"[REST-ERROR] Erreur serveur HTTP {} pour ").append(ep.getOperation()).append(" : {}\", e.getStatusCode(), e.getResponseBodyAsString());\n");
-            sb.append("            throw new ApiException(\"ADAPTER_SERVER_ERROR\", \"Erreur serveur adapter : \" + e.getMessage(), e.getStatusCode().value(), e);\n");
-            sb.append("        } catch (ResourceAccessException e) {\n");
-            sb.append("            log.error(\"[REST-ERROR] Adapter inaccessible pour ").append(ep.getOperation()).append(" : {}\", e.getMessage());\n");
-            sb.append("            throw new ApiException(\"ADAPTER_UNREACHABLE\", \"Adapter inaccessible : \" + e.getMessage(), 503, e);\n");
+            sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.getOperation()).append(" en {}ms \u2014 HTTP {}\", System.currentTimeMillis() - start, response.getStatusCode());\n\n");
+            sb.append("            // ACL : Adapter Response DTO -> Domain Model\n");
+            sb.append("            return ").append(mapperField).append(".fromAdapterResponse(response.getBody());\n");
+            sb.append("        } catch (Exception e) {\n");
+            sb.append("            // ACL : Exception Adapter -> Exception Domaine\n");
+            sb.append("            throw exceptionTranslator.translate(e, \"").append(ep.getOperation()).append("\");\n");
             sb.append("        }\n");
             sb.append("    }\n\n");
 
             // Fallback
-            sb.append("    public ").append(responseDto).append(" ").append(fallbackName);
-            sb.append("(String crReferenceId, ").append(requestDto).append(" request, Throwable t) {\n");
-            sb.append("        log.error(\"[RESILIENCE-FALLBACK] Adapter indisponible pour ").append(ep.getOperation()).append(" — cause : {}\", t.getMessage());\n");
+            sb.append("    public ").append(domainModelName).append(" ").append(fallbackName);
+            sb.append("(String crReferenceId, ").append(domainModelName).append(" domainModel, Throwable t) {\n");
+            sb.append("        log.error(\"[RESILIENCE-FALLBACK] Adapter indisponible pour ").append(ep.getOperation()).append(" \u2014 cause : {}\", t.getMessage());\n");
             sb.append("        throw new RuntimeException(\"Adapter temporairement indisponible (").append(ep.getOperation()).append("). Veuillez reessayer plus tard.\", t);\n");
             sb.append("    }\n\n");
         }
@@ -714,8 +1045,8 @@ public class AdapterWrapperGenerator {
 
         Set<String> imports = new TreeSet<>();
         for (EndpointInfo ep : contract.getEndpoints()) {
-            imports.add("import " + PKG_API_DTO_REQUEST + "." + ep.toRequestDtoName() + ";");
-            imports.add("import " + PKG_API_DTO_RESPONSE + "." + ep.toResponseDtoName() + ";");
+            String domainModelName = capitalize(ep.toMethodName()) + "DomainModel";
+            imports.add("import " + PKG_DOMAIN_MODEL + "." + domainModelName + ";");
         }
         imports.add("import " + PKG_DOMAIN_SERVICE + "." + contract.toServiceName() + ";");
         imports.add("import org.slf4j.Logger;");
@@ -725,19 +1056,27 @@ public class AdapterWrapperGenerator {
         for (String imp : imports) sb.append(imp).append("\n");
         sb.append("\n");
 
+        sb.append("/**\n");
+        sb.append(" * MockAdapter pour les tests — travaille avec les Domain Models BIAN.\n");
+        sb.append(" */\n");
         sb.append("@Service\n@Profile(\"mock\")\n");
         sb.append("public class ").append(adapterName).append(" implements ").append(contract.toServiceName()).append(" {\n\n");
         sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(adapterName).append(".class);\n\n");
 
         for (EndpointInfo ep : contract.getEndpoints()) {
+            String domainModelName = capitalize(ep.toMethodName()) + "DomainModel";
             sb.append("    @Override\n");
-            sb.append("    public ").append(ep.toResponseDtoName()).append(" ").append(ep.toMethodName());
-            sb.append("(String crReferenceId, ").append(ep.toRequestDtoName()).append(" request) {\n");
+            sb.append("    public ").append(domainModelName).append(" ").append(ep.toMethodName());
+            sb.append("(String crReferenceId, ").append(domainModelName).append(" domainModel) {\n");
             sb.append("        log.info(\"[MOCK] ").append(ep.toMethodName()).append(" appele | crRef={}\", crReferenceId);\n");
-            sb.append("        ").append(ep.toResponseDtoName()).append(" response = new ").append(ep.toResponseDtoName()).append("();\n");
+            sb.append("        ").append(domainModelName).append(" response = new ").append(domainModelName).append("();\n");
 
-            // Mock values
-            for (FieldInfo f : ep.getResponseFields()) {
+            // Mock values — set all fields (request + response)
+            Map<String, FieldInfo> allFields = new LinkedHashMap<>();
+            for (FieldInfo f : ep.getRequestFields()) allFields.put(f.getName(), f);
+            for (FieldInfo f : ep.getResponseFields()) allFields.putIfAbsent(f.getName(), f);
+            for (Map.Entry<String, FieldInfo> entry : allFields.entrySet()) {
+                FieldInfo f = entry.getValue();
                 String setter = "set" + capitalize(f.getName());
                 String mockValue = getMockValue(f);
                 sb.append("        response.").append(setter).append("(").append(mockValue).append(");\n");
@@ -816,6 +1155,10 @@ public class AdapterWrapperGenerator {
         for (EndpointInfo ep : contract.getEndpoints()) {
             imports.add("import " + PKG_API_DTO_REQUEST + "." + ep.toRequestDtoName() + ";");
             imports.add("import " + PKG_API_DTO_RESPONSE + "." + ep.toResponseDtoName() + ";");
+            String domainModelName = capitalize(ep.toMethodName()) + "DomainModel";
+            String mapperName = capitalize(ep.toMethodName()) + "AclMapper";
+            imports.add("import " + PKG_DOMAIN_MODEL + "." + domainModelName + ";");
+            imports.add("import " + PKG_ACL_MAPPER + "." + mapperName + ";");
         }
         imports.add("import " + PKG_DOMAIN_SERVICE + "." + contract.toServiceName() + ";");
         imports.add("import " + PKG_API_DTO_ENVELOPE + ".ApiRequest;");
@@ -841,16 +1184,36 @@ public class AdapterWrapperGenerator {
         sb.append("public class ").append(controllerName).append(" {\n\n");
 
         sb.append("    private static final Logger log = LoggerFactory.getLogger(").append(controllerName).append(".class);\n");
-        sb.append("    private final ").append(contract.toServiceName()).append(" service;\n\n");
+        sb.append("    private final ").append(contract.toServiceName()).append(" service;\n");
+        // Injecter les ACL Mappers
+        for (EndpointInfo ep : contract.getEndpoints()) {
+            String mapperName = capitalize(ep.toMethodName()) + "AclMapper";
+            String mapperField = ep.toMethodName() + "Mapper";
+            sb.append("    private final ").append(mapperName).append(" ").append(mapperField).append(";\n");
+        }
+        sb.append("\n");
 
-        sb.append("    public ").append(controllerName).append("(").append(contract.toServiceName()).append(" service) {\n");
+        // Constructeur avec injection des mappers
+        sb.append("    public ").append(controllerName).append("(").append(contract.toServiceName()).append(" service");
+        for (EndpointInfo ep : contract.getEndpoints()) {
+            String mapperName = capitalize(ep.toMethodName()) + "AclMapper";
+            String mapperField = ep.toMethodName() + "Mapper";
+            sb.append(",\n            ").append(mapperName).append(" ").append(mapperField);
+        }
+        sb.append(") {\n");
         sb.append("        this.service = service;\n");
+        for (EndpointInfo ep : contract.getEndpoints()) {
+            String mapperField = ep.toMethodName() + "Mapper";
+            sb.append("        this.").append(mapperField).append(" = ").append(mapperField).append(";\n");
+        }
         sb.append("    }\n\n");
 
         for (EndpointInfo ep : contract.getEndpoints()) {
             String methodName = ep.toMethodName();
             String requestDto = ep.toRequestDtoName();
             String responseDto = ep.toResponseDtoName();
+            String domainModelName = capitalize(methodName) + "DomainModel";
+            String mapperField = methodName + "Mapper";
             String endpointPath = "/{cr-reference-id}/" + toKebabCase(ep.getOperation());
 
             sb.append("    @Operation(operationId = \"").append(methodName).append("\",\n");
@@ -864,8 +1227,13 @@ public class AdapterWrapperGenerator {
             sb.append("        log.info(\"[REST-IN] POST ").append(basePath).append("{} | request_id={} | source={}\",\n");
             sb.append("                \"").append(endpointPath).append("\", envelope.getRequestId(), envelope.getSourceSystem());\n");
             sb.append("        try {\n");
+            sb.append("            // ACL : API Request DTO -> Domain Model\n");
             sb.append("            ").append(requestDto).append(" payload = envelope.getPayload();\n");
-            sb.append("            ").append(responseDto).append(" result = service.").append(methodName).append("(crReferenceId, payload);\n");
+            sb.append("            ").append(domainModelName).append(" domainModel = ").append(mapperField).append(".toModel(payload);\n\n");
+            sb.append("            // Appel du service avec le Domain Model\n");
+            sb.append("            ").append(domainModelName).append(" resultModel = service.").append(methodName).append("(crReferenceId, domainModel);\n\n");
+            sb.append("            // ACL : Domain Model -> API Response DTO\n");
+            sb.append("            ").append(responseDto).append(" result = ").append(mapperField).append(".toApiResponse(resultModel);\n");
             sb.append("            ApiResponse<").append(responseDto).append("> apiResponse = ApiResponse.success(envelope.getRequestId(), result);\n");
             sb.append("            log.info(\"[REST-OUT] 200 OK | request_id={}\", envelope.getRequestId());\n");
             sb.append("            return ResponseEntity.ok(apiResponse);\n");
