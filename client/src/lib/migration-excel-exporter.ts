@@ -2,7 +2,7 @@
  * Export Excel du plan de migration Strangler Fig
  * Génère un classeur Excel multi-feuilles avec synthèse, phases, tâches, risques et timeline.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import * as XLSX from "xlsx";
@@ -103,7 +103,7 @@ export function exportMigrationPlanExcel(plan: StranglerFigPlan, projectName?: s
     ["Plan de Migration Strangler Fig"],
     [`Projet : ${projectName || "N/A"}`],
     [`Date : ${dateStr}`],
-    ["Auteur : Hamza NORDINE"],
+    ["Auteur : Compleo"],
     [],
     ["Indicateur", "Valeur"],
     ["Progression globale", `${plan.overallProgress}%`],

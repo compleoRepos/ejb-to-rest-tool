@@ -11,7 +11,7 @@
  *
  * Does NOT modify any existing module — purely additive.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { CrossModuleResolver } from "../CrossModuleResolver";

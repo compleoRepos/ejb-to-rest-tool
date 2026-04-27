@@ -4,7 +4,7 @@
  * GET  /api/architecture/export/:sessionId/:format — Export visualisation
  * GET  /api/architecture/result/:sessionId — Résultat complet
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { Router, Request, Response } from "express";

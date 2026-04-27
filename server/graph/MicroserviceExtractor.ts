@@ -3,7 +3,7 @@
  * Partitionnement basé sur les domaines, fusion si couplage > 0.7,
  * découpe si > 15 classes, nommage automatique.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type {

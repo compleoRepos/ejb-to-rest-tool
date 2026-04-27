@@ -1,6 +1,6 @@
 # Document d'Architecture — Java Legacy Modernizer Platform
 
-**Auteur** : Hamza NORDINE
+**Auteur** : Compleo
 **Version** : 3.0.0
 **Date** : Avril 2026
 **Audience** : CTO, DSI, Architectes Solutions, Comité d'Architecture
@@ -464,4 +464,4 @@ src/main/java/com/bank/modern/
 
 ---
 
-*Java Legacy Modernizer Platform v3.0 — Développé par Hamza NORDINE*
+*Java Legacy Modernizer Platform v3.0 — Développé par Compleo*

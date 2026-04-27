@@ -7,7 +7,7 @@
  * - Idempotence du seed
  * - Gestion des erreurs (DB indisponible, fichiers manquants)
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, expect, it, vi, beforeEach } from "vitest";

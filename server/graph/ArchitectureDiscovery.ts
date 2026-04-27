@@ -2,7 +2,7 @@
  * ArchitectureDiscovery — Découverte automatique de l'architecture.
  * Détecte entry/exit points, flux critiques, modules fonctionnels.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type {

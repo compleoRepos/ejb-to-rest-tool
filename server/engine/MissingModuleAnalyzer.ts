@@ -10,7 +10,7 @@
  *   4. Calculer la criticité (BLOCKING, HIGH, MEDIUM, LOW)
  *   5. Générer : Interface Java + Stub Spring Boot + Documentation
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { ProjectIR, UseCaseIR } from "../java-parser";

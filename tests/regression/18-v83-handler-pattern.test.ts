@@ -10,7 +10,7 @@
  *   STEP 6: envelope-replacer
  *   STEP 7: Exclusion façade Strategy
  *
- * @author Hamza NORDINE
+ * @author Compleo
  * @since v8.3
  */
 

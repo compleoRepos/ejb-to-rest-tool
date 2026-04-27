@@ -1,7 +1,7 @@
 /**
  * Pipeline multi-technologies Compleo v3.0.
  * Orchestre : scan fichiers → détection → génération → validation → rapport.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { registry } from "../registry";

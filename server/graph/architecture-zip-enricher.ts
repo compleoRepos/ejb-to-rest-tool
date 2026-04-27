@@ -11,7 +11,7 @@
  *   microservices/<service-name>/Dockerfile
  *   microservices/<service-name>/k8s/deployment.yaml
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { GraphBuilder } from "./GraphBuilder";

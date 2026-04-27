@@ -1,7 +1,7 @@
 /**
  * TechnologyRegistry — Registre central des détecteurs et générateurs.
  * Pattern Registry + Strategy : ajouter une technologie = enregistrer 1 detector + 1 generator.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type {

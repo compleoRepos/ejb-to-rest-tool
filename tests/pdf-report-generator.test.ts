@@ -2,7 +2,7 @@
  * Tests unitaires — PDF Report Generator.
  *
  * Vérifie le parsing Markdown et la structure du générateur PDF.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -147,12 +147,12 @@ public class Test {}
     it("les options par défaut sont correctes", () => {
       const defaultOptions = {
         projectName: "Projet",
-        author: "Hamza NORDINE",
+        author: "Compleo",
         reports: {},
       };
 
       expect(defaultOptions.projectName).toBe("Projet");
-      expect(defaultOptions.author).toBe("Hamza NORDINE");
+      expect(defaultOptions.author).toBe("Compleo");
       expect(defaultOptions.reports).toEqual({});
     });
 

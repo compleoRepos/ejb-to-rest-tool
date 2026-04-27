@@ -6,7 +6,7 @@
 |---|---|
 | **Version** | 4.0.0 (v1.0.0) |
 | **Date** | 08 avril 2026 |
-| **Auteur** | Hamza NORDINE |
+| **Auteur** | Compleo |
 | **Statut** | VALIDÉ — Production Ready |
 | **Tests** | 544 passés / 0 échoué / 21 suites |
 | **Durée totale** | 8.55s |
@@ -268,4 +268,4 @@ La plateforme Compleo v4.0 démontre une maturité production avec :
 ---
 
 *Rapport généré le 08 avril 2026 — EJB Client Modernizer v4.0.0*
-*© 2026 Hamza NORDINE — Tous droits réservés*
+*© 2026 Compleo — Tous droits réservés*

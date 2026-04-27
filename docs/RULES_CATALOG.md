@@ -1,6 +1,6 @@
 # Catalogue des Règles d'Analyse — Compleo v4.0
 
-> **Auteur :** Hamza NORDINE  
+> **Auteur :** Compleo  
 > **Version :** 1.0.0  
 > **Total des règles :** 816 règles uniques réparties en 20 catégories  
 > **Dernière mise à jour :** 2026-04-08

@@ -7,7 +7,7 @@
  * v5.5: Refactored from 2200-line monolith into 8 focused modules.
  * v5.9: DataSourceDetector + ConfigGenerator integration.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type {

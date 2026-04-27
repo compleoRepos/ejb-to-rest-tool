@@ -12,7 +12,7 @@ export type TrpcContext = {
 const DEMO_USER: User = {
   id: 1,
   openId: "demo-user",
-  name: "Hamza NORDINE",
+  name: "Compleo",
   email: "demo@compleo.dev",
   loginMethod: "demo",
   role: "admin",

@@ -4,7 +4,7 @@
  * Chaque test vérifie qu'une règle détecte correctement un pattern problématique
  * et ne produit pas de faux positif sur un code conforme.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect } from "vitest";
 import type { RuleContext, FieldContext, MethodContext } from "./knowledge/rules/RuleEngine";

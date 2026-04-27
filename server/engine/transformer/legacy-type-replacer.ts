@@ -9,7 +9,7 @@
  * Contextualisé par UseCase : chaque UseCase a ses propres RequestDTO/ResponseDTO.
  * Idempotent : si aucun type legacy n'est trouvé, le code passe sans modification.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ─── Types ──────────────────────────────────────────────────────────────────

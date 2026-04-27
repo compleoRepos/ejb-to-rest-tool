@@ -3,7 +3,7 @@
  * Validation des montants, devises, IBAN, transactions, etc.
  * 100% déterministe, 0 LLM.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { Rule, RuleContext, RuleHit } from "../RuleEngine";

@@ -9,7 +9,7 @@
  *   5. Fallback sans Ollama (3 tests)
  *   6. Anti-hallucination Saga (4 tests)
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

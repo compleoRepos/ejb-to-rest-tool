@@ -10,7 +10,7 @@
  *   - Hexagone : queue JMS (QUEUE)
  *   - Octogone : système de fichiers (FILE_SYSTEM)
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import type { AnalysisData, GraphNode, GraphEdge } from "../ArchitectureExplorer";

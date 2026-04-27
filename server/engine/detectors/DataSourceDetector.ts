@@ -12,7 +12,7 @@
  *   - JNDI name pattern    → +5 points
  *   - SQL keywords          → +3 points
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 export type DatabaseVendor =

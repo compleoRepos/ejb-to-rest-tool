@@ -13,7 +13,7 @@
  *
  * Score cible : 95+/100 sur projet complexe.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import { parseEjbProject, type ProjectIR } from "../../server/java-parser";

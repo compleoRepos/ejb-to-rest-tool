@@ -1,7 +1,7 @@
 # Dossier de Sécurité — Compleo EJB Client Modernizer v4.0
 
 > **Destinataire :** RSSI / Équipe Sécurité  
-> **Auteur :** Hamza NORDINE  
+> **Auteur :** Compleo  
 > **Version :** 1.0.0  
 > **Classification :** Confidentiel — Usage interne
 
@@ -367,6 +367,6 @@ trivy image compleo:latest
 
 Pour toute question relative à la sécurité de Compleo :
 
-- **Responsable technique :** Hamza NORDINE
+- **Responsable technique :** Compleo
 - **Email :** security@compleo.dev
 - **Processus de signalement :** Créer un ticket avec le label `security` dans le dépôt GitHub privé.

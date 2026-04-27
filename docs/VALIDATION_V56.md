@@ -1,6 +1,6 @@
 # Rapport de Validation v5.6 — EJB Client Modernizer
 
-**Auteur** : Hamza NORDINE  
+**Auteur** : Compleo  
 **Date** : 9 avril 2026  
 **Version** : v5.6.2 (post-audit)  
 **Score final** : 48/48 — 100%

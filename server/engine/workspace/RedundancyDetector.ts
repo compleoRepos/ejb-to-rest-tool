@@ -8,7 +8,7 @@
  *
  * Does NOT modify any existing module — reads ProjectIR data only.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { ProjectIR, UseCaseIR, ServiceIR, ServiceMethodIR } from "../../java-parser";

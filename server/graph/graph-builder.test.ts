@@ -2,7 +2,7 @@
  * Tests GraphBuilder — Validation sur sim-01-core-banking.
  * Vérifie : nœuds, arêtes JNDI, métriques, exports JGF/GraphML/Cytoscape.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect } from "vitest";
 import { GraphBuilder } from "./GraphBuilder";

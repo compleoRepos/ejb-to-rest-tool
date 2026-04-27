@@ -10,7 +10,7 @@
  * - Proposition de décomposition en microservices
  * - Estimation de complexité par microservice
  *
- * @author Hamza NORDINE
+ * @author Compleo
  * @version 2.0.0
  */
 

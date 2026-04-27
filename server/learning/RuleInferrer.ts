@@ -11,7 +11,7 @@
  *   - Pattern moyen (package + returnType + paramTypes)   : 0.65
  *   - Pattern faible (javadoc seul)                       : 0.40
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { Ambiguity, AmbiguityContext, UserChoice } from "../ambiguity-detector";

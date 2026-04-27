@@ -2,7 +2,7 @@
  * Tests de régression v8.4 — Support Framework EAI / UCStrategie / Handlers
  * 7 bugs systématiques corrigés sur tous les projets EAI BOA.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect } from "vitest";
 

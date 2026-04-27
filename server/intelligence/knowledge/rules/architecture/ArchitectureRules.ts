@@ -3,7 +3,7 @@
  * SOLID, layering, DI, naming, separation of concerns.
  * 100% déterministe, 0 LLM.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { Rule, RuleContext, RuleHit } from "../RuleEngine";

@@ -3,7 +3,7 @@
  * Mode AUTH_STRATEGY=local : JWT signé avec SESSION_SECRET.
  * Extensible pour OIDC et LDAP.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { Request, Response, NextFunction } from "express";

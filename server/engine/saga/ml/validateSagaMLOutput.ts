@@ -10,7 +10,7 @@
  *   5. Pas de classes inventées
  *   6. Compensation idempotente (pas d'INSERT sauf contre-passation)
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { StepContext, MLStepEnrichment } from "./prompts";

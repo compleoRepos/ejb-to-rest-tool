@@ -10,7 +10,7 @@
  *
  * Idempotent : si les noms sont déjà corrects, le code passe sans modification.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ─── Types ──────────────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@
  * Génère un rapport PDF professionnel côté client avec jsPDF.
  * Inclut : scores de qualité, anti-patterns, optimisations, suggestions.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import jsPDF from "jspdf";
@@ -94,7 +94,7 @@ function addFooter(doc: jsPDF, pageNum: number, totalPages: number) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
   doc.setTextColor(...COLORS.text);
-  doc.text("Hamza NORDINE — EJB Client Modernizer v3.0", 14, pageHeight - 10);
+  doc.text("Compleo — EJB Client Modernizer v3.0", 14, pageHeight - 10);
   doc.text(`Moteur IA v3.0 — 83+ regles (OWASP, SonarQube, SOLID, Clean Code, PMD, Couplage, Transactions)`, pageWidth / 2, pageHeight - 10, { align: "center" });
   doc.text(`Page ${pageNum} / ${totalPages}`, pageWidth - 14, pageHeight - 10, { align: "right" });
 }
@@ -206,7 +206,7 @@ export function exportAiReportPdf(aiResult: AiAnalysisResult, projectName?: stri
   doc.setFontSize(9);
   doc.setTextColor(150, 170, 190);
   const dateStr = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
-  doc.text(`Date : ${dateStr}  |  Auteur : Hamza NORDINE`, margin, 62);
+  doc.text(`Date : ${dateStr}  |  Auteur : Compleo`, margin, 62);
 
   y = 85;
 
@@ -667,4 +667,4 @@ export function exportAiReportPdf(aiResult: AiAnalysisResult, projectName?: stri
     : `rapport-ia-ejb-client-modernizer.pdf`;
   doc.save(fileName);
 }
-// PDF export v2.0 - Hamza NORDINE — Moteur IA v2.0 avec 55+ regles industrielles
+// PDF export v2.0 - Compleo — Moteur IA v2.0 avec 55+ regles industrielles

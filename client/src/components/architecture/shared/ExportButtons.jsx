@@ -5,7 +5,7 @@
  * Usage:
  *   <ExportButtons svgRef={svgRef} filename="mon-diagramme" />
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { C } from "./primitives";

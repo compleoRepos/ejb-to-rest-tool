@@ -3,7 +3,7 @@
  * Réutilise SemanticAnalyzer (rôle) et DomainInferrer (domaine).
  * 8 types d'arêtes, métriques par nœud et globales, exports JGF/GraphML/Cytoscape.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { ProjectIR, UseCaseIR, ServiceIR, DtoIR, Ejb2xBeanIR, BatchJobIR } from "../java-parser";

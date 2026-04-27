@@ -11,7 +11,7 @@
  *   3. Pour chaque entree du registre → appel SEPARE a generateOneSaga()
  *   4. Assertion finale : registre.size === fichiers generes
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { SagaCandidate } from "./saga-detector";

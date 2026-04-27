@@ -15,7 +15,7 @@
  *
  * Puis effectue 5 recherches sémantiques pour valider la pertinence.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, it, expect, beforeAll } from "vitest";

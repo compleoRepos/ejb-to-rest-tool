@@ -3,7 +3,7 @@
  * Affiche toutes les classes avec rôle, domaine, LOC, complexité, technologie, package.
  * Groupement par domaine ou par microservice. Filtres avancés.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { useState, useMemo } from "react";
 import type { AnalysisData, GraphNode, NodeMetric } from "../ArchitectureExplorer";

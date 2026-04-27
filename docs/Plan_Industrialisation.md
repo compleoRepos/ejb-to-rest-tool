@@ -1,6 +1,6 @@
 # Plan d'Industrialisation Bancaire — Migration EJB vers APIs REST
 
-**Auteur** : Hamza NORDINE
+**Auteur** : Compleo
 **Version** : 3.0.0
 **Date** : Avril 2026
 **Audience** : Direction des Systèmes d'Information, Comité de Pilotage, Architectes Solutions
@@ -577,4 +577,4 @@ L'économie annuelle estimée sur les licences WebSphere et l'infrastructure leg
 
 ---
 
-*Plan d'industrialisation rédigé par Hamza NORDINE — EJB Client Modernizer v2.0*
+*Plan d'industrialisation rédigé par Compleo — EJB Client Modernizer v2.0*

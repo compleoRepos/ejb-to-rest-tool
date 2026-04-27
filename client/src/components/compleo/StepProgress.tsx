@@ -2,7 +2,7 @@
  * StepProgress — Barre de progression cliquable pour les 5 états du pipeline.
  * Retour arrière seulement (pas de saut en avant).
  * v5.6.1 : ajout de l'étape "Dépendances" entre Analyse et Choix.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { CheckCircle2, Upload, BarChart3, HelpCircle, Code2, AlertTriangle } from "lucide-react";

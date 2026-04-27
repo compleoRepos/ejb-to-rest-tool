@@ -6,7 +6,7 @@
  *   1. Parser les commentaires "// ÉTAPE N —" dans le code migré
  *   2. Inférer depuis l'ordre des appels aux dépendances injectées
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { EjbDependency, SagaCandidate } from "./saga-detector";

@@ -3,7 +3,7 @@
  * Point d'entrée unique pour le moteur d'intelligence.
  * Total: 816 règles dans 18 catégories.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { Rule, RuleContext, RuleHit } from "./rules/RuleEngine";

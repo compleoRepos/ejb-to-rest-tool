@@ -2,7 +2,7 @@
  * ProjectDetail — Fiche de présentation d'un projet analysé.
  * Affiche le résumé, les technologies, les scores et les résultats d'analyse.
  * Redirige vers le pipeline Agent IA pour relancer l'analyse.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";

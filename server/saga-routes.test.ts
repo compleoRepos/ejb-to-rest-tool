@@ -7,7 +7,7 @@
  * - Extraction des détails depuis les événements SSE
  * - Session introuvable
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { AgentSessionStore, type AgentConfig } from "./agent/CompleoAgent";

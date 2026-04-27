@@ -1,7 +1,7 @@
 # Compleo — Rapport d'Audit Architecture Platform v5.1
 
 **Date :** 08 avril 2026
-**Auteur :** Hamza NORDINE — Équipe Architecture Compleo
+**Auteur :** Compleo — Équipe Architecture Compleo
 **Version :** 5.1.0
 **Classification :** Confidentiel — Usage interne
 

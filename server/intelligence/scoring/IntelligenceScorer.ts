@@ -3,7 +3,7 @@
  * Agrège les résultats des règles pour produire un score composite.
  * 100% déterministe, 0 LLM.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { RuleHit } from "../knowledge/rules/RuleEngine";

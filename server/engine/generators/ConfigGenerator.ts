@@ -5,7 +5,7 @@
  * Utilise les résultats du DataSourceDetector pour adapter automatiquement
  * la configuration au vendor détecté.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { ProjectIR } from "../../java-parser";

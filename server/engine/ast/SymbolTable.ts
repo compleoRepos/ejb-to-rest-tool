@@ -2,7 +2,7 @@
  * SymbolTable — Table de symboles pour la migration EJB → Spring Boot.
  * Classifie chaque variable/champ selon son rôle dans le pattern execute().
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import type { MethodNode, ClassNode } from "./JavaASTParser";
 

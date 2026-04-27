@@ -9,7 +9,7 @@
  *   3. Règle client bat règle globale si confiance équivalente
  *   4. Conflit non résolvable → présenter les deux options à l'utilisateur
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { LearningRule } from "../../drizzle/schema";

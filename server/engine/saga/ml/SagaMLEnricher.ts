@@ -12,7 +12,7 @@
  *
  * Fallback automatique vers le rule-based si Ollama est absent.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { SagaStep, IntermediateResult } from "../saga-step-extractor";

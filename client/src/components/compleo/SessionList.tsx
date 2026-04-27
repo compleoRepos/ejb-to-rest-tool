@@ -1,7 +1,7 @@
 /**
  * SessionList — Sessions récentes dans l'état IDLE.
  * Permet de restaurer une session précédente.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useState, useEffect } from "react";

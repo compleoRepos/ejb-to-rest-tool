@@ -7,7 +7,7 @@
  *   2. Compare with expected-output.json
  *   3. Verify 0 Object, 0 duplicate imports, correct type resolution
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, it, expect } from "vitest";

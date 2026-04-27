@@ -1,7 +1,7 @@
 /**
  * Types fondamentaux du moteur multi-technologies Compleo v3.0.
  * Pattern Registry + Strategy.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ─── Technology Types ──────────────────────────────────────────────────────

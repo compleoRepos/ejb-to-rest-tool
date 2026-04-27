@@ -11,7 +11,7 @@
  *
  * Ces fichiers sont générés UNE SEULE FOIS, partagés par toutes les Sagas du projet.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { SagaCandidate } from "./saga-detector";

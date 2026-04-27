@@ -3,7 +3,7 @@
  * EJB→CDI, Servlet→JAX-RS, JNDI→DI, javax→jakarta.
  * 100% déterministe, 0 LLM.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { Rule, RuleContext, RuleHit } from "../RuleEngine";

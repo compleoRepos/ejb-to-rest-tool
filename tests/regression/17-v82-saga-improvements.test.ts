@@ -7,7 +7,7 @@
  *   - STEP 3: compensation-mapper integration (T42.1–T42.4)
  *   - STEP 4: Context type + cleanup champs (T43.1–T43.3)
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect } from "vitest";
 import {

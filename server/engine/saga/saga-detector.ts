@@ -9,7 +9,7 @@
  *
  * Post-Audit: Itère sur useCases + ejb2xBeans + services pour ne rater aucun candidat.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { ProjectIR, UseCaseIR, InjectedService } from "../../java-parser";

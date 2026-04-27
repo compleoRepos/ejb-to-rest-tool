@@ -7,7 +7,7 @@
  * Chaque règle a une confiance initiale de 0.85 (seuil d'auto-résolution)
  * et un occurrenceCount de 5 (minimum pour auto-résolution).
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { InsertLearningRule } from "../../../drizzle/schema";

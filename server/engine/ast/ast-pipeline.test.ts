@@ -5,7 +5,7 @@
  *   - BusinessLogicTransformer (mode enrichi avec SymbolTable)
  *   - ServiceMethodGenerator
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import { JavaASTParser, type ClassNode } from "./JavaASTParser";

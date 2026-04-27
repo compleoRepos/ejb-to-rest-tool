@@ -3,7 +3,7 @@
  * FIX 1: Détection UseCase dans EJB directs @Stateless (stratégie 2 — >= 1 méthode business)
  * FIX 4b: Noms de méthodes Java valides depuis routes Servlet (sanitizeJavaMethodName)
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect } from "vitest";
 import { parseEjbProject } from "../java-parser";

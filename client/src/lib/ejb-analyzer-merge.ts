@@ -3,7 +3,7 @@
  * Permet de combiner les résultats d'analyse de plusieurs fichiers Java
  * en un seul rapport consolidé.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { AnalysisReport } from "./ejb-analyzer";
@@ -98,7 +98,7 @@ export function generateMultiFileMarkdownReport(
   mergedReport: AnalysisReport
 ): string {
   let md = `# Rapport d'Analyse Consolidé — ${reports.length} fichier(s)\n\n`;
-  md += `**Auteur de l'outil** : Hamza NORDINE\n\n`;
+  md += `**Auteur de l'outil** : Compleo\n\n`;
   md += `**Fichiers analysés** : ${reports.map((r) => "`" + r.fileName + "`").join(", ")}\n\n`;
 
   md += `## Résumé Global\n\n`;

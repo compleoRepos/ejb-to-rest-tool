@@ -15,7 +15,7 @@
  * 3. Générer les DTOs Request/Response correspondants
  * 4. Réécrire le corps de la méthode avec les DTOs
  *
- * @author Hamza NORDINE
+ * @author Compleo
  * @since v8.3
  */
 

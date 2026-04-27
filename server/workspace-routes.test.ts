@@ -1,7 +1,7 @@
 /**
  * Workspace Routes Tests — v5.6.0
  * Tests for workspace API endpoints.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 

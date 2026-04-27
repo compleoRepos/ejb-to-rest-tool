@@ -9,7 +9,7 @@
  * - DTOs du projet courant (Request/Response)
  * - Exceptions du projet courant
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { ProjectIR } from "../java-parser";

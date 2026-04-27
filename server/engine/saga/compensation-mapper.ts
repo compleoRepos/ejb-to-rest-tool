@@ -7,7 +7,7 @@
  * Chaque compensation doit etre IDEMPOTENTE : si elle est appelee
  * plusieurs fois (retry), le resultat doit etre identique.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ── Types ────────────────────────────────────────────────────────────────────

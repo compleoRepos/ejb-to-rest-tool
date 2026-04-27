@@ -1,7 +1,7 @@
 # Audit du moteur de parsing Compleo — 3 projets BOA
 
 **Date :** 2026-04-08
-**Auteur :** Hamza NORDINE
+**Auteur :** Compleo
 **Moteur :** Compleo v1.0 (avant corrections)
 
 ---

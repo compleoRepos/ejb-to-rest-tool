@@ -3,7 +3,7 @@
  * points d'entrée/sortie, facteurs de risque, profondeur, transactionnalité.
  * Visualisation des entry/exit points du projet et des modules fonctionnels.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { useState, useMemo } from "react";
 import type { AnalysisData, CriticalFlow, EntryPoint, ExitPoint, FunctionalModule } from "../ArchitectureExplorer";

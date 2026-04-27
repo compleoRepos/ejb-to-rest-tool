@@ -15,7 +15,7 @@
  *   - SagaStateStore, SagaStateRecord, SagaRecoveryScheduler, SagaRecoveryExecutor
  *   - V4__create_saga_state.sql
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { SagaCandidate } from "./saga-detector";

@@ -93,7 +93,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-muted-foreground/70 font-mono hidden md:inline">par Hamza NORDINE</span>
+          <span className="text-[10px] text-muted-foreground/70 font-mono hidden md:inline">par Compleo</span>
           {/* Mobile menu toggle */}
           <button
             className="sm:hidden p-1.5 rounded-md hover:bg-muted/50 text-muted-foreground"

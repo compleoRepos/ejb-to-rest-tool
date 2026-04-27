@@ -5,7 +5,7 @@
  * Calcule le hash SHA-256 de chaque fichier SQL pour le tracking.
  * Les CREATE TABLE sont rendus idempotents via IF NOT EXISTS.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import mysql from "mysql2/promise";

@@ -7,7 +7,7 @@
  * FIX E: SQL constants au niveau classe (pas méthode)
  * FIX F: Domaines → Reporting → reporting, Session → sessions
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect } from "vitest";
 import { parseEjbProject } from "../java-parser";

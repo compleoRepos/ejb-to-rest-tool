@@ -9,7 +9,7 @@
  * 3. Utilise ActionHandlerFactory.getHandler() pour dispatcher
  * 4. Le corps de la méthode ne contient PAS de logique métier propre
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ─── Types ──────────────────────────────────────────────────────────────────

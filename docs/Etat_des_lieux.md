@@ -1,6 +1,6 @@
 # État des lieux — Java Legacy Modernizer Platform v3.0
 
-**Auteur** : Hamza NORDINE
+**Auteur** : Compleo
 **Date** : Avril 2026
 
 ---
@@ -188,9 +188,9 @@ La plateforme Java Legacy Modernizer est passée de la v1.0 (outil CLI Java pour
 
 - **URL** : https://github.com/compleoRepos/ejb-client-modernizer
 - **Visibilité** : Privé
-- **Auteur des commits** : Hamza NORDINE
+- **Auteur des commits** : Compleo
 - **Nombre de commits** : 8
 
 ---
 
-*Java Legacy Modernizer Platform v3.0 — Hamza NORDINE*
+*Java Legacy Modernizer Platform v3.0 — Compleo*

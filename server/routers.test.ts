@@ -1,7 +1,7 @@
 /**
  * Tests vitest pour les routers tRPC v4.0
  * Couvre : projects, files, scans, comments, git, sharing
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { appRouter } from "./routers";
@@ -332,12 +332,12 @@ describe("comments router (collaboration)", () => {
     const project = await caller.projects.create({ name: "Comment Test" });
     const comment = await caller.comments.create({
       projectId: project.id,
-      authorName: "Hamza NORDINE",
+      authorName: "Compleo",
       content: "Les @EJB doivent etre remplacés par @Autowired",
       commentType: "review",
     });
     expect(comment).toBeDefined();
-    expect(comment.authorName).toBe("Hamza NORDINE");
+    expect(comment.authorName).toBe("Compleo");
     expect(comment.commentType).toBe("review");
     expect(comment.validationStatus).toBe("pending");
   });

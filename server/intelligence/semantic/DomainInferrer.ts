@@ -4,7 +4,7 @@
  * fieldNames, methodNames, javadoc, body, imports.
  * 100% déterministe, 0 LLM.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 export type BankingDomain =

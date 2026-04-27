@@ -9,7 +9,7 @@
  * - Observability (Prometheus, Grafana, ELK)
  * - Docker Compose pour le développement local
  *
- * @author Hamza NORDINE
+ * @author Compleo
  * @version 2.0.0
  */
 
@@ -103,7 +103,7 @@ function generateDockerfile(ms: MicroserviceProposal): CloudFile {
   let content = `# =============================================================\n`;
   content += `# Dockerfile - ${ms.name}\n`;
   content += `# Multi-stage build optimise pour Spring Boot 3\n`;
-  content += `# @author Hamza NORDINE\n`;
+  content += `# @author Compleo\n`;
   content += `# =============================================================\n\n`;
   content += `# Stage 1: Build\n`;
   content += `FROM eclipse-temurin:21-jdk-alpine AS builder\n`;
@@ -177,7 +177,7 @@ function generateK8sManifests(ms: MicroserviceProposal, namespace: string): Clou
 
   // Deployment
   let deployment = `# Kubernetes Deployment - ${ms.name}\n`;
-  deployment += `# @author Hamza NORDINE\n`;
+  deployment += `# @author Compleo\n`;
   deployment += `apiVersion: apps/v1\n`;
   deployment += `kind: Deployment\n`;
   deployment += `metadata:\n`;
@@ -260,7 +260,7 @@ function generateK8sManifests(ms: MicroserviceProposal, namespace: string): Clou
 
   // Service
   let service = `# Kubernetes Service - ${ms.name}\n`;
-  service += `# @author Hamza NORDINE\n`;
+  service += `# @author Compleo\n`;
   service += `apiVersion: v1\n`;
   service += `kind: Service\n`;
   service += `metadata:\n`;
@@ -288,7 +288,7 @@ function generateK8sManifests(ms: MicroserviceProposal, namespace: string): Clou
 
   // ConfigMap
   let configMap = `# Kubernetes ConfigMap - ${ms.name}\n`;
-  configMap += `# @author Hamza NORDINE\n`;
+  configMap += `# @author Compleo\n`;
   configMap += `apiVersion: v1\n`;
   configMap += `kind: ConfigMap\n`;
   configMap += `metadata:\n`;
@@ -316,7 +316,7 @@ function generateK8sManifests(ms: MicroserviceProposal, namespace: string): Clou
 
   // HPA
   let hpa = `# Kubernetes HPA - ${ms.name}\n`;
-  hpa += `# @author Hamza NORDINE\n`;
+  hpa += `# @author Compleo\n`;
   hpa += `apiVersion: autoscaling/v2\n`;
   hpa += `kind: HorizontalPodAutoscaler\n`;
   hpa += `metadata:\n`;
@@ -363,7 +363,7 @@ function generateHelmChart(proposals: MicroserviceProposal[], namespace: string)
 
   // Chart.yaml
   let chart = `# Helm Chart - Bank Modernized Platform\n`;
-  chart += `# @author Hamza NORDINE\n`;
+  chart += `# @author Compleo\n`;
   chart += `apiVersion: v2\n`;
   chart += `name: ${namespace}\n`;
   chart += `description: Plateforme bancaire modernisee - ${proposals.length} microservices\n`;
@@ -375,8 +375,8 @@ function generateHelmChart(proposals: MicroserviceProposal[], namespace: string)
   chart += `  - microservices\n`;
   chart += `  - spring-boot\n`;
   chart += `maintainers:\n`;
-  chart += `  - name: Hamza NORDINE\n`;
-  chart += `    email: hamza.nordine@compleo.com\n`;
+  chart += `  - name: Compleo\n`;
+  chart += `    email: contact@compleo.dev\n`;
 
   files.push({
     fileName: "Chart.yaml",
@@ -388,7 +388,7 @@ function generateHelmChart(proposals: MicroserviceProposal[], namespace: string)
 
   // values.yaml
   let values = `# Helm Values - ${namespace}\n`;
-  values += `# @author Hamza NORDINE\n\n`;
+  values += `# @author Compleo\n\n`;
   values += `global:\n`;
   values += `  namespace: ${namespace}\n`;
   values += `  registry: registry.bank.com\n`;
@@ -434,7 +434,7 @@ function generateHelmChart(proposals: MicroserviceProposal[], namespace: string)
 
 function generateApiGateway(proposals: MicroserviceProposal[], namespace: string): CloudFile {
   let content = `# API Gateway Configuration - Spring Cloud Gateway\n`;
-  content += `# @author Hamza NORDINE\n`;
+  content += `# @author Compleo\n`;
   content += `# Remplace le routage centralise du serveur d'applications legacy\n\n`;
   content += `server:\n`;
   content += `  port: \${PORT:8080}\n\n`;
@@ -505,7 +505,7 @@ function generateApiGateway(proposals: MicroserviceProposal[], namespace: string
 
 function generateApiGatewayK8s(namespace: string): CloudFile {
   let content = `# Kubernetes Ingress - API Gateway\n`;
-  content += `# @author Hamza NORDINE\n`;
+  content += `# @author Compleo\n`;
   content += `apiVersion: networking.k8s.io/v1\n`;
   content += `kind: Ingress\n`;
   content += `metadata:\n`;
@@ -565,7 +565,7 @@ function generateSecurityConfig(proposals: MicroserviceProposal[]): CloudFile {
   content += ` * Configuration OAuth2/JWT + OpenID Connect pour la securite des microservices.\n`;
   content += ` * Remplace la securite JAAS/container-managed du serveur d'applications legacy.\n`;
   content += ` *\n`;
-  content += ` * @author Hamza NORDINE\n`;
+  content += ` * @author Compleo\n`;
   content += ` */\n`;
   content += `@Configuration\n`;
   content += `@EnableWebSecurity\n`;
@@ -642,7 +642,7 @@ function generateObservability(proposals: MicroserviceProposal[], namespace: str
 
   // Prometheus config
   let promConfig = `# Prometheus Configuration\n`;
-  promConfig += `# @author Hamza NORDINE\n`;
+  promConfig += `# @author Compleo\n`;
   promConfig += `global:\n`;
   promConfig += `  scrape_interval: 15s\n`;
   promConfig += `  evaluation_interval: 15s\n\n`;
@@ -674,7 +674,7 @@ function generateObservability(proposals: MicroserviceProposal[], namespace: str
   let grafana = `{\n`;
   grafana += `  "dashboard": {\n`;
   grafana += `    "title": "${namespace} - Monitoring Dashboard",\n`;
-  grafana += `    "description": "Dashboard de monitoring genere par Java Legacy Modernizer - Hamza NORDINE",\n`;
+  grafana += `    "description": "Dashboard de monitoring genere par Java Legacy Modernizer - Compleo",\n`;
   grafana += `    "panels": [\n`;
 
   let panelId = 1;
@@ -709,7 +709,7 @@ function generateObservability(proposals: MicroserviceProposal[], namespace: str
 
   // ELK - Logstash config
   let logstash = `# Logstash Configuration\n`;
-  logstash += `# @author Hamza NORDINE\n`;
+  logstash += `# @author Compleo\n`;
   logstash += `input {\n`;
   logstash += `  beats {\n`;
   logstash += `    port => 5044\n`;
@@ -747,7 +747,7 @@ function generateObservability(proposals: MicroserviceProposal[], namespace: str
 
 function generateDockerCompose(proposals: MicroserviceProposal[]): CloudFile {
   let content = `# Docker Compose - Environnement de developpement local\n`;
-  content += `# @author Hamza NORDINE\n`;
+  content += `# @author Compleo\n`;
   content += `version: '3.9'\n\n`;
   content += `services:\n`;
 
@@ -840,7 +840,7 @@ function generateDockerCompose(proposals: MicroserviceProposal[]): CloudFile {
 
 function generateGitHubActions(proposals: MicroserviceProposal[]): CloudFile {
   let content = `# GitHub Actions CI/CD Pipeline\n`;
-  content += `# @author Hamza NORDINE\n`;
+  content += `# @author Compleo\n`;
   content += `name: Build & Deploy Microservices\n\n`;
   content += `on:\n`;
   content += `  push:\n`;

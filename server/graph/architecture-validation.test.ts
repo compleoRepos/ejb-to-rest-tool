@@ -3,7 +3,7 @@
  * Vérifie : GraphBuilder, DomainClusterer, ArchitectureDiscovery, MicroserviceExtractor,
  * VisualizationEngine, ZIP enricher, anti-décorrélation IHM/API.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, it, expect, beforeAll } from "vitest";

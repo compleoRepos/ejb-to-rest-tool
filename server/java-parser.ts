@@ -5,7 +5,7 @@
  * Produces a typed IR (Intermediate Representation) JSON.
  *
  * Designed for BOA EAI pattern: @UseCase + BaseUseCase.execute(ValueObject)
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { detectHandlerPattern, getMethodNameForHandler, getDomainForHandler } from "./engine/detectors/handler-pattern-detector";

@@ -7,7 +7,7 @@
  * Émet des AgentEvent via AsyncGenerator pour le streaming SSE temps réel.
  * Supporte la pause/reprise pour la résolution d'ambiguïtés.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { CompleoEngine, getEngine, type AnalysisResult, type GeneratedProject, type SourceFile } from "../engine/CompleoEngine";

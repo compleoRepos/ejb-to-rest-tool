@@ -4,7 +4,7 @@
  * Affiche la barre de progression, les statistiques live,
  * et le log de fichiers traités pendant l'analyse parallèle.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useMemo } from "react";

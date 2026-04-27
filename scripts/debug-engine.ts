@@ -7,7 +7,7 @@
  *   npx tsx scripts/debug-engine.ts generate <project-dir> [output-dir] [--verbose]
  *   npx tsx scripts/debug-engine.ts validate <project-dir> [--verbose]
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import * as fs from "fs";

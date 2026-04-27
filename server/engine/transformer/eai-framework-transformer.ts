@@ -9,7 +9,7 @@
  * Appliqué APRÈS la génération de chaque fichier .java.
  * Toutes les transformations sont idempotentes.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ═══ STEP 3 : Logging EAI → @Slf4j ═══

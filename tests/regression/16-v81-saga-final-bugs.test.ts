@@ -7,7 +7,7 @@
  *   - BUG-3: T_SAGA_LOG dans compensations (T32.1–T32.3)
  *   - STEP 4: Validateur BLOCKER (T33.1–T33.5)
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect } from "vitest";
 import {

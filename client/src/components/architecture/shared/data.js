@@ -5,7 +5,7 @@
  * FLUX[]   : relations inter-modules
  * RESOURCES[] : ressources partagées (DS, JMS, APIs)
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ─── LEGACY MODULES ────────────────────────────────────────────────────────

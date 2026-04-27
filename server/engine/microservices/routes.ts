@@ -9,7 +9,7 @@
  *
  * Feature-flaggé : activé uniquement si FEATURE_MS_ML=true
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { Router, Request, Response } from "express";

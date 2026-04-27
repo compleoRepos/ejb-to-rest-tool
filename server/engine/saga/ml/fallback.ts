@@ -17,7 +17,7 @@
  *   - BUG-3: No T_SAGA_LOG in compensations — compensations call real
  *            business services or update real business tables
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { StepContext, MLStepEnrichment } from "./prompts";

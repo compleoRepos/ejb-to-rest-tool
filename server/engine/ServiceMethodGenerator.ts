@@ -2,7 +2,7 @@
  * ServiceMethodGenerator — Génère le code des méthodes Service Spring Boot
  * à partir des résultats de transformation de la logique métier.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import type { TransformResult, TransformTodo } from "./BusinessLogicTransformer";
 import type { MethodNode } from "./ast/JavaASTParser";

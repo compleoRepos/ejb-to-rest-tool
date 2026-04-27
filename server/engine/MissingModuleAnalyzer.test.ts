@@ -1,7 +1,7 @@
 /**
  * Tests — MissingModuleAnalyzer v5.6.1
  * Détection proactive des dépendances manquantes + inférence de contrats.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, it, expect } from "vitest";

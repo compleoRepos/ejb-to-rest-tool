@@ -13,7 +13,7 @@
  *  8. Actions manuelles requises (P1/P2/P3)
  *  9. Prochaines étapes (guide 5 étapes)
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ── Types ──────────────────────────────────────────────────────

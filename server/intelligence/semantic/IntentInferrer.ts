@@ -3,7 +3,7 @@
  * Détermine le verbe HTTP, le niveau de sensibilité, et la pagination.
  * 100% déterministe, 0 LLM.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 export type HttpVerb = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";

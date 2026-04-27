@@ -1,6 +1,6 @@
 # Guide d'Utilisation — Java Legacy Modernizer Platform
 
-**Auteur** : Hamza NORDINE
+**Auteur** : Compleo
 **Version** : 3.0.0
 **Date** : Avril 2026
 
@@ -379,7 +379,7 @@ Chaque suggestion inclut :
 
 Le bouton **"Exporter le rapport IA en PDF"** (style amber) est disponible en bas de l'onglet IA Interne. Il génère un document PDF professionnel contenant :
 
-- En-tête avec le nom de l'auteur (Hamza NORDINE) et la date
+- En-tête avec le nom de l'auteur (Compleo) et la date
 - Résumé exécutif (fichiers analysés, services détectés, technologies)
 - Métriques du moteur de règles (total, déclenchées, conformes, par catégorie)
 - Scores de qualité (Legacy vs Modernisé) avec détail par critère
@@ -591,4 +591,4 @@ R : Cliquez sur le bouton "Exporter le rapport IA en PDF" dans l'onglet IA Inter
 
 ---
 
-*Java Legacy Modernizer Platform v3.0 — Développé par Hamza NORDINE*
+*Java Legacy Modernizer Platform v3.0 — Développé par Compleo*

@@ -5,7 +5,7 @@
  *
  * v1.1: Fix types to match backend WorkspaceIntelligenceEngine output.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useState, useEffect, useCallback } from "react";

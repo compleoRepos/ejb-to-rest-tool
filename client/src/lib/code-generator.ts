@@ -2,7 +2,7 @@
  * EJB Client Modernizer — Générateur de code API Client moderne.
  * Transforme les appels EJB détectés en clients REST utilisant Spring WebClient.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  * @version 1.0.0
  */
 
@@ -133,7 +133,7 @@ function generateApiClient(
   code += ` * Client API REST moderne remplaçant les appels EJB vers ${serviceName}.\n`;
   code += ` * Généré automatiquement par EJB Client Modernizer.\n`;
   code += ` *\n`;
-  code += ` * @author Hamza NORDINE\n`;
+  code += ` * @author Compleo\n`;
   code += ` */\n`;
   code += `@Service\n`;
   code += `@Slf4j\n`;
@@ -313,7 +313,7 @@ function generateWebClientConfig(basePackage: string, packagePath: string): Gene
   code += ` * Configuration centralisée du WebClient pour les appels API REST.\n`;
   code += ` * Remplace les connexions EJB/JNDI par des appels HTTP modernes.\n`;
   code += ` *\n`;
-  code += ` * @author Hamza NORDINE\n`;
+  code += ` * @author Compleo\n`;
   code += ` */\n`;
   code += `@Configuration\n`;
   code += `@Slf4j\n`;
@@ -366,7 +366,7 @@ function generateApiClientException(basePackage: string, packagePath: string): G
   code += `/**\n`;
   code += ` * Exception personnalisée pour les erreurs des clients API.\n`;
   code += ` *\n`;
-  code += ` * @author Hamza NORDINE\n`;
+  code += ` * @author Compleo\n`;
   code += ` */\n`;
   code += `public class ApiClientException extends RuntimeException {\n\n`;
   code += `    public ApiClientException(String message) {\n`;
@@ -393,7 +393,7 @@ function generateApiErrorHandler(basePackage: string, packagePath: string): Gene
   code += `/**\n`;
   code += ` * Utilitaire de gestion des erreurs pour les clients API.\n`;
   code += ` *\n`;
-  code += ` * @author Hamza NORDINE\n`;
+  code += ` * @author Compleo\n`;
   code += ` */\n`;
   code += `@Slf4j\n`;
   code += `public class ApiErrorHandler {\n\n`;
@@ -433,7 +433,7 @@ function generateRequestDto(
   code += `/**\n`;
   code += ` * DTO de requête pour ${serviceName}.${call.methodName}().\n`;
   code += ` *\n`;
-  code += ` * @author Hamza NORDINE\n`;
+  code += ` * @author Compleo\n`;
   code += ` */\n`;
   code += `@Data\n`;
   code += `@Builder\n`;
@@ -473,7 +473,7 @@ function generateResponseDto(
   code += `/**\n`;
   code += ` * DTO de réponse pour ${serviceName}.${call.methodName}().\n`;
   code += ` *\n`;
-  code += ` * @author Hamza NORDINE\n`;
+  code += ` * @author Compleo\n`;
   code += ` */\n`;
   code += `@Data\n`;
   code += `@Builder\n`;
@@ -512,7 +512,7 @@ function generateClientTest(
   code += `/**\n`;
   code += ` * Tests unitaires pour ${clientName}.\n`;
   code += ` *\n`;
-  code += ` * @author Hamza NORDINE\n`;
+  code += ` * @author Compleo\n`;
   code += ` */\n`;
   code += `@ExtendWith(MockitoExtension.class)\n`;
   code += `class ${clientName}Test {\n\n`;
@@ -561,7 +561,7 @@ function generatePom(basePackage: string): GeneratedFile {
     <artifactId>${artifactId}</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <name>API Client Modernized</name>
-    <description>Clients API REST modernes générés par EJB Client Modernizer — Hamza NORDINE</description>
+    <description>Clients API REST modernes générés par EJB Client Modernizer — Compleo</description>
 
     <properties>
         <java.version>21</java.version>
@@ -621,7 +621,7 @@ function generatePom(basePackage: string): GeneratedFile {
 
 function generateApplicationYml(): GeneratedFile {
   const code = `# Configuration de l'application API Client Modernized
-# Généré par EJB Client Modernizer — Hamza NORDINE
+# Généré par EJB Client Modernizer — Compleo
 
 api:
   base-url: \${API_BASE_URL:http://bank-api}

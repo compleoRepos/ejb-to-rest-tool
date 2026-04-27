@@ -2,7 +2,7 @@
  * VisualizationEngine — Génération de visualisations multi-formats.
  * Exports : SVG (inline), GraphML, JSON (Cytoscape), D2 diagram.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type {

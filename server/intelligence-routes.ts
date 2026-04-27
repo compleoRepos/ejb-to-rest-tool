@@ -4,7 +4,7 @@
  * GET  /api/intelligence/stats   — Statistiques de la knowledge base
  * POST /api/intelligence/report  — Génère un rapport Markdown/JSON
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { Router, Request, Response } from "express";

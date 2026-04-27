@@ -1,6 +1,6 @@
 /**
  * Saga Orchestration Module — Compleo v7.10 (Production-Ready)
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 export { detectSagaCandidates } from "./saga-detector";

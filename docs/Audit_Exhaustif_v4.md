@@ -1,6 +1,6 @@
 # Rapport d'Audit Exhaustif — Java Legacy Modernizer v4.0
 
-**Auteur** : Hamza NORDINE
+**Auteur** : Compleo
 **Date** : 8 avril 2026
 **Version** : 4.0.0 (checkpoint `74fa228c`)
 **Plateforme** : EJB Client Modernizer + Compleo v1.0
@@ -523,4 +523,4 @@ Les axes d'amélioration principaux sont la sécurité (authentification absente
 
 ---
 
-*Rapport généré le 8 avril 2026 — Hamza NORDINE*
+*Rapport généré le 8 avril 2026 — Compleo*

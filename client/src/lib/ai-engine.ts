@@ -14,7 +14,7 @@
  * - Refactoring Guru (bloaters, couplers, dispensables, change preventers)
  * - Spring Boot / Cloud Native best practices
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { AnalysisReport } from "./ejb-analyzer";

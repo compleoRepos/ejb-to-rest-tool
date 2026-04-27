@@ -1,6 +1,6 @@
 # Roadmap — Java Legacy Modernizer Platform
 
-**Auteur : Hamza NORDINE** | Version 3.0 | Avril 2026
+**Auteur : Compleo** | Version 3.0 | Avril 2026
 
 ---
 
@@ -124,4 +124,4 @@ Ce document présente la feuille de route des évolutions planifiées pour la pl
 
 ---
 
-**Auteur : Hamza NORDINE** | Compleo | Dernière mise à jour : Avril 2026
+**Auteur : Compleo** | Compleo | Dernière mise à jour : Avril 2026

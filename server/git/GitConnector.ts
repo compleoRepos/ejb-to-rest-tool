@@ -13,7 +13,7 @@
  *   push(dir)
  *   createPR(config)
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import * as fs from "fs";

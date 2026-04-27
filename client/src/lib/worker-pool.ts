@@ -11,7 +11,7 @@
  * - Les résultats sont agrégés sur le thread principal
  * - Fallback single-thread si Web Workers non disponibles
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type {

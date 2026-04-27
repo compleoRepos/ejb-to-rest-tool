@@ -30,7 +30,7 @@ export function useAuth(_options?: UseAuthOptions) {
     const user = meQuery.data ?? {
       id: 1,
       openId: "demo-user",
-      name: "Hamza NORDINE",
+      name: "Compleo",
       email: "demo@compleo.dev",
       role: "admin",
     };

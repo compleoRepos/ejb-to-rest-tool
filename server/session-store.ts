@@ -8,7 +8,7 @@
  * to the database asynchronously. SSE clients (non-serializable) are
  * managed in-memory only.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { getDb } from "./db";

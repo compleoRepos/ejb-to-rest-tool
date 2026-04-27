@@ -1,7 +1,7 @@
 /**
  * ZIP Exporter — Génère une archive ZIP avec structure Maven complète.
  * 
- * @author Hamza NORDINE
+ * @author Compleo
  * @description Exporte les fichiers générés par EJB Client Modernizer
  *              dans une archive ZIP prête à compiler avec Maven.
  */
@@ -71,7 +71,7 @@ Thumbs.db
 function generateReadme(projectName: string, serviceCount: number): string {
   return `# ${projectName}
 
-> Projet généré automatiquement par **EJB Client Modernizer** — Hamza NORDINE
+> Projet généré automatiquement par **EJB Client Modernizer** — Compleo
 
 ## Description
 
@@ -117,7 +117,7 @@ ${serviceCount} client(s) API REST ont été générés pour remplacer les appel
 
 ## Auteur
 
-**Hamza NORDINE** — EJB Client Modernizer
+**Compleo** — EJB Client Modernizer
 `;
 }
 

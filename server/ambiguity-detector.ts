@@ -11,7 +11,7 @@
  *   6. EXTERNAL_DEPENDENCY — injected bean not in the project
  *   7. DOMAIN_NAME_AMBIGUOUS — generic package name
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { ProjectIR, UseCaseIR, InjectedService } from "./java-parser";

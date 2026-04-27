@@ -4,7 +4,7 @@
  * Permet de visualiser les sagas de toutes les sessions agent terminées.
  * Sélection de session → SagaViewer.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useState, useEffect } from "react";

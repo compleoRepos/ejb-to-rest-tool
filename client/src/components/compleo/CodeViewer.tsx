@@ -1,7 +1,7 @@
 /**
  * CodeViewer — Affichage de code Java avec syntax highlighting.
  * Lignes TODO surlignées en orange, lignes migrées en vert subtil.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useMemo } from "react";

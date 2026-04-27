@@ -18,7 +18,7 @@
  * Le ML est optionnel. Si Ollama est indisponible, les rapports
  * originaux sont retournés sans modification (fallback gracieux).
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { ServiceCandidate, ParsedModule } from "../microservices/microservice-splitter";

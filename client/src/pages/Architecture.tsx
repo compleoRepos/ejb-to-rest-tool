@@ -3,7 +3,7 @@
  * Intègre le pipeline complet : GraphBuilder → DomainClusterer → ArchitectureDiscovery → MicroserviceExtractor.
  * Visualisation interactive Cytoscape.js 3 niveaux + exports multi-formats.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useState, useCallback, useMemo, useEffect } from "react";

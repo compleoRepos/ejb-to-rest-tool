@@ -11,7 +11,7 @@
  *   3. Generer chaque saga via un appel separe
  *   4. Assertion finale : registre.size === resultats.length
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { SagaCandidate } from "./saga-detector";

@@ -1,6 +1,6 @@
 /**
  * Collaboration — Commentaires, validation, partage de rapports.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";

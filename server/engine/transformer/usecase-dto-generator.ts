@@ -6,7 +6,7 @@
  * Analyse le rawSource du UseCase pour extraire les champs d'entrée/sortie
  * et inférer les types Java à partir des noms et des patterns d'accès.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { UseCaseIR, DtoIR, DtoFieldIR } from "../../java-parser";

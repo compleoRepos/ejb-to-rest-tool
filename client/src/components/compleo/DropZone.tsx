@@ -1,7 +1,7 @@
 /**
  * DropZone — Upload robuste pour projets Java (ZIP Maven, URL Git).
  * États visuels : idle, dragging, loading, success, error.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useState, useCallback, useRef } from "react";

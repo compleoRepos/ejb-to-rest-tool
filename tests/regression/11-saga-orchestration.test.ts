@@ -8,7 +8,7 @@
  *   - saga-generator.ts (génération Java)
  *   - quality-scorer.ts (check SAGA_COVERAGE)
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, it, expect } from "vitest";

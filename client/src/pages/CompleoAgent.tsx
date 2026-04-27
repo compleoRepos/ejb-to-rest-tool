@@ -1,7 +1,7 @@
 /**
  * Compleo Agent v4.0 — Mode Agent Autonome
  * Timeline SSE temps réel, résolution d'ambiguïtés, download résultat.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";

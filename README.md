@@ -1,6 +1,6 @@
 # Java Legacy Modernizer Platform
 
-**Auteur : Hamza NORDINE**
+**Auteur : Compleo**
 
 Plateforme web complète de modernisation de code Java legacy vers des architectures Spring Boot 3 / Cloud-Native / Microservices.
 
@@ -131,4 +131,4 @@ Pour un projet entier, utiliser le bouton **"Projet entier"** pour charger un do
 
 Projet propriétaire — Usage interne uniquement.
 
-**Auteur : Hamza NORDINE** | Compleo
+**Auteur : Compleo** | Compleo

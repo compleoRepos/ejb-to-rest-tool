@@ -5,7 +5,7 @@
  *   const svgRef = useRef<SVGSVGElement>(null);
  *   const { exportAsSVG, exportAsPNG } = useExportDiagram(svgRef, "mon-diagramme");
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useCallback, type RefObject } from "react";

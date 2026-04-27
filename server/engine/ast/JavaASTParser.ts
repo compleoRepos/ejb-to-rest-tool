@@ -3,7 +3,7 @@
  * Extrait les classes, champs, méthodes, annotations et corps de méthodes
  * depuis du code source Java pour la migration EJB → Spring Boot.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { parse as javaParse } from "java-parser";
 

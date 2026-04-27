@@ -4,7 +4,7 @@
  * Note: Les exports PDF/Excel sont côté client (jsPDF, xlsx), on teste ici
  * la logique métier et la validation des données du plan.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, expect, it } from "vitest";
 

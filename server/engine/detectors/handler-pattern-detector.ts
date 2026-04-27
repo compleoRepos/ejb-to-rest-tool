@@ -14,7 +14,7 @@
  * Le détecteur retourne null si le pattern n'est pas trouvé → le pipeline
  * continue sur le chemin classique. Zéro régression possible.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  * @since v8.3
  */
 

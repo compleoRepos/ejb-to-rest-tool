@@ -1,7 +1,7 @@
 /**
  * Home — Page d'accueil / Dashboard v4.0
  * Vue d'ensemble de la plateforme avec statistiques et accès rapide aux projets.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
@@ -205,7 +205,7 @@ export default function Home() {
         {/* Footer */}
         <div className="text-center py-4 border-t border-border">
           <p className="text-[10px] text-muted-foreground/60 font-mono">
-            Java Legacy Modernizer v4.0 Enterprise — par Hamza NORDINE — 10 technologies, 55+ règles IA, microservices DDD, cloud-native
+            Java Legacy Modernizer v4.0 Enterprise — par Compleo — 10 technologies, 55+ règles IA, microservices DDD, cloud-native
           </p>
         </div>
       </div>

@@ -5,7 +5,7 @@
  * CORRECTION 4: Réduction UNKNOWN dans DomainClusterer
  * CORRECTION 5: targetSystem renseigné sur ExitPoints
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect } from "vitest";
 import { parseEjbProject } from "../java-parser";

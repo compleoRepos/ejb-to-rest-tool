@@ -3,7 +3,7 @@
  * 6 onglets : Inventaire, Dépendances, Graphe, Flux critiques, Impact, Résumé migration.
  * Types enrichis avec graph.nodes, graph.edges, classDetails, endpoints, etc.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { useState } from "react";
 import ClassInventoryTab from "./tabs/ClassInventoryTab";

@@ -1,7 +1,7 @@
 /**
  * Projects — Gestion de projets v4.0
  * Liste des projets, création, suppression, navigation vers le détail.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";

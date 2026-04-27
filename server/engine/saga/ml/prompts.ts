@@ -7,7 +7,7 @@
  *
  * Modèle cible : qwen2.5:1.5b (Ollama local)
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ── Types ────────────────────────────────────────────────────────────────────

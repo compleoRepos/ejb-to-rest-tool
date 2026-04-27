@@ -1,6 +1,6 @@
 # Matrice de couverture technologique — Compleo v3.0
 
-> Auteur : Hamza NORDINE — Version 3.0.0
+> Auteur : Compleo — Version 3.0.0
 
 ## Vue d'ensemble
 

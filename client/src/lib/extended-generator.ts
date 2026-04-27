@@ -10,7 +10,7 @@
  * - Batch → Spring Batch
  * - EJB → Spring Services + WebClient
  *
- * @author Hamza NORDINE
+ * @author Compleo
  * @version 2.0.0
  */
 
@@ -215,7 +215,7 @@ function generateServletToRest(
     code += ` * REST Controller remplacant le Servlet ${servlet.className}.\n`;
     code += ` * URL pattern original : ${servlet.urlPattern}\n`;
     code += ` *\n`;
-    code += ` * @author Hamza NORDINE\n`;
+    code += ` * @author Compleo\n`;
     code += ` */\n`;
     code += `@RestController\n`;
     code += `@RequestMapping("${basePath}")\n`;
@@ -315,7 +315,7 @@ function generateStrutsToSpringMvc(
     code += ` * Spring MVC Controller remplacant l'Action Struts ${struts.className}.\n`;
     code += ` * Path original : ${struts.path || "N/A"}\n`;
     code += ` *\n`;
-    code += ` * @author Hamza NORDINE\n`;
+    code += ` * @author Compleo\n`;
     code += ` */\n`;
     code += `@RestController\n`;
     code += `@RequestMapping("${basePath}")\n`;
@@ -394,7 +394,7 @@ function generateSoapToRest(
     code += ` * REST Controller remplacant le Web Service SOAP ${serviceName}.\n`;
     code += ` * Les operations SOAP sont converties en endpoints REST.\n`;
     code += ` *\n`;
-    code += ` * @author Hamza NORDINE\n`;
+    code += ` * @author Compleo\n`;
     code += ` */\n`;
     code += `@RestController\n`;
     code += `@RequestMapping("${basePath}")\n`;
@@ -455,7 +455,7 @@ function generateOpenApiConfig(serviceName: string, basePath: string, basePackag
   code += `/**\n`;
   code += ` * Configuration OpenAPI/Swagger remplacant le WSDL de ${serviceName}.\n`;
   code += ` *\n`;
-  code += ` * @author Hamza NORDINE\n`;
+  code += ` * @author Compleo\n`;
   code += ` */\n`;
   code += `@Configuration\n`;
   code += `public class OpenApiConfig {\n\n`;
@@ -467,8 +467,8 @@ function generateOpenApiConfig(serviceName: string, basePath: string, basePackag
   code += `                        .version("1.0.0")\n`;
   code += `                        .description("API REST migree depuis le service SOAP ${serviceName}")\n`;
   code += `                        .contact(new Contact()\n`;
-  code += `                                .name("Hamza NORDINE")\n`;
-  code += `                                .email("hamza.nordine@compleo.com")));\n`;
+  code += `                                .name("Compleo")\n`;
+  code += `                                .email("contact@compleo.dev")));\n`;
   code += `    }\n`;
   code += `}\n`;
 
@@ -506,7 +506,7 @@ function generateJdbcToJpa(
   entityCode += `/**\n`;
   entityCode += ` * Entite JPA remplacant les requetes JDBC manuelles de ${className}.\n`;
   entityCode += ` *\n`;
-  entityCode += ` * @author Hamza NORDINE\n`;
+  entityCode += ` * @author Compleo\n`;
   entityCode += ` */\n`;
   entityCode += `@Entity\n`;
   entityCode += `@Table(name = "${camelToSnake(entityName)}")\n`;
@@ -555,7 +555,7 @@ function generateJdbcToJpa(
   repoCode += `/**\n`;
   repoCode += ` * Repository Spring Data JPA remplacant les requetes JDBC de ${className}.\n`;
   repoCode += ` *\n`;
-  repoCode += ` * @author Hamza NORDINE\n`;
+  repoCode += ` * @author Compleo\n`;
   repoCode += ` */\n`;
   repoCode += `@Repository\n`;
   repoCode += `public interface ${repoName} extends JpaRepository<${entityName}, Long>, JpaSpecificationExecutor<${entityName}> {\n\n`;
@@ -600,7 +600,7 @@ function generateJdbcToJpa(
   svcCode += `/**\n`;
   svcCode += ` * Service remplacant la couche JDBC de ${className}.\n`;
   svcCode += ` *\n`;
-  svcCode += ` * @author Hamza NORDINE\n`;
+  svcCode += ` * @author Compleo\n`;
   svcCode += ` */\n`;
   svcCode += `@Service\n`;
   svcCode += `@Slf4j\n`;
@@ -697,7 +697,7 @@ function generateHibernateToJpa(
   repoCode += ` * Les Criteria API sont remplacees par JpaSpecificationExecutor.\n`;
   repoCode += ` * Les HQL sont converties en @Query JPQL.\n`;
   repoCode += ` *\n`;
-  repoCode += ` * @author Hamza NORDINE\n`;
+  repoCode += ` * @author Compleo\n`;
   repoCode += ` */\n`;
   repoCode += `@Repository\n`;
   repoCode += `public interface ${repoName} extends JpaRepository<${entityName}, Long>, JpaSpecificationExecutor<${entityName}> {\n\n`;
@@ -738,7 +738,7 @@ function generateHibernateToJpa(
     specCode += `/**\n`;
     specCode += ` * Specifications remplacant les Criteria Hibernate de ${className}.\n`;
     specCode += ` *\n`;
-    specCode += ` * @author Hamza NORDINE\n`;
+    specCode += ` * @author Compleo\n`;
     specCode += ` */\n`;
     specCode += `public class ${entityName}Specifications {\n\n`;
     specCode += `    private ${entityName}Specifications() {}\n\n`;
@@ -788,7 +788,7 @@ function generateJmsToKafka(
   producerCode += ` * Kafka Producer remplacant les JMS/MQ producers de ${className}.\n`;
   producerCode += ` * Les Queues JMS sont remplacees par des Topics Kafka.\n`;
   producerCode += ` *\n`;
-  producerCode += ` * @author Hamza NORDINE\n`;
+  producerCode += ` * @author Compleo\n`;
   producerCode += ` */\n`;
   producerCode += `@Service\n`;
   producerCode += `@Slf4j\n`;
@@ -839,7 +839,7 @@ function generateJmsToKafka(
     consumerCode += ` * Kafka Consumer remplacant le MessageDrivenBean de ${className}.\n`;
     consumerCode += ` * Le @MessageDriven est remplace par @KafkaListener.\n`;
     consumerCode += ` *\n`;
-    consumerCode += ` * @author Hamza NORDINE\n`;
+    consumerCode += ` * @author Compleo\n`;
     consumerCode += ` */\n`;
     consumerCode += `@Service\n`;
     consumerCode += `@Slf4j\n`;
@@ -901,7 +901,7 @@ function generateJmsToKafka(
   kafkaConfigCode += `/**\n`;
   kafkaConfigCode += ` * Configuration Kafka remplacant la configuration JMS/MQ.\n`;
   kafkaConfigCode += ` *\n`;
-  kafkaConfigCode += ` * @author Hamza NORDINE\n`;
+  kafkaConfigCode += ` * @author Compleo\n`;
   kafkaConfigCode += ` */\n`;
   kafkaConfigCode += `@Configuration\n`;
   kafkaConfigCode += `public class KafkaConfig {\n\n`;
@@ -979,7 +979,7 @@ function generateBatchToSpringBatch(
   jobCode += `/**\n`;
   jobCode += ` * Configuration Spring Batch remplacant le job JSR-352 de ${className}.\n`;
   jobCode += ` *\n`;
-  jobCode += ` * @author Hamza NORDINE\n`;
+  jobCode += ` * @author Compleo\n`;
   jobCode += ` */\n`;
   jobCode += `@Configuration\n`;
   jobCode += `public class ${baseName}BatchConfig {\n\n`;
@@ -1021,7 +1021,7 @@ function generateBatchToSpringBatch(
   readerCode += `/**\n`;
   readerCode += ` * ItemReader Spring Batch remplacant le reader JSR-352 de ${className}.\n`;
   readerCode += ` *\n`;
-  readerCode += ` * @author Hamza NORDINE\n`;
+  readerCode += ` * @author Compleo\n`;
   readerCode += ` */\n`;
   readerCode += `@Component\n`;
   readerCode += `@Slf4j\n`;
@@ -1050,7 +1050,7 @@ function generateBatchToSpringBatch(
   procCode += `/**\n`;
   procCode += ` * ItemProcessor Spring Batch remplacant le processor JSR-352 de ${className}.\n`;
   procCode += ` *\n`;
-  procCode += ` * @author Hamza NORDINE\n`;
+  procCode += ` * @author Compleo\n`;
   procCode += ` */\n`;
   procCode += `@Component\n`;
   procCode += `@Slf4j\n`;
@@ -1080,7 +1080,7 @@ function generateBatchToSpringBatch(
   writerCode += `/**\n`;
   writerCode += ` * ItemWriter Spring Batch remplacant le writer JSR-352 de ${className}.\n`;
   writerCode += ` *\n`;
-  writerCode += ` * @author Hamza NORDINE\n`;
+  writerCode += ` * @author Compleo\n`;
   writerCode += ` */\n`;
   writerCode += `@Component\n`;
   writerCode += `@Slf4j\n`;
@@ -1142,7 +1142,7 @@ function generateEjbToSpring(
   clientCode += `/**\n`;
   clientCode += ` * Client API REST moderne remplacant les appels EJB de ${className}.\n`;
   clientCode += ` *\n`;
-  clientCode += ` * @author Hamza NORDINE\n`;
+  clientCode += ` * @author Compleo\n`;
   clientCode += ` */\n`;
   clientCode += `@Service\n`;
   clientCode += `@Slf4j\n`;
@@ -1200,7 +1200,7 @@ function generateInfrastructure(
   let exCode = `package ${basePackage}.exception;\n\n`;
   exCode += `/**\n`;
   exCode += ` * Exception personnalisee pour les erreurs API.\n`;
-  exCode += ` * @author Hamza NORDINE\n`;
+  exCode += ` * @author Compleo\n`;
   exCode += ` */\n`;
   exCode += `public class ApiClientException extends RuntimeException {\n`;
   exCode += `    public ApiClientException(String message) { super(message); }\n`;
@@ -1226,7 +1226,7 @@ function generateInfrastructure(
   handlerCode += `import java.util.Map;\n\n`;
   handlerCode += `/**\n`;
   handlerCode += ` * Gestionnaire global d'exceptions.\n`;
-  handlerCode += ` * @author Hamza NORDINE\n`;
+  handlerCode += ` * @author Compleo\n`;
   handlerCode += ` */\n`;
   handlerCode += `@RestControllerAdvice\n`;
   handlerCode += `@Slf4j\n`;
@@ -1261,7 +1261,7 @@ function generateInfrastructure(
 
   // application.yml
   let yml = `# Configuration generee par Java Legacy Modernizer Platform\n`;
-  yml += `# @author Hamza NORDINE\n\n`;
+  yml += `# @author Compleo\n\n`;
   yml += `spring:\n`;
   yml += `  application:\n`;
   yml += `    name: ${camelToKebab(report.className)}-service\n\n`;
@@ -1344,7 +1344,7 @@ function generateDomainEvent(
   code += ` * Utilise pour la communication asynchrone entre microservices\n`;
   code += ` * via Spring ApplicationEvent ou Kafka.\n`;
   code += ` *\n`;
-  code += ` * @author Hamza NORDINE\n`;
+  code += ` * @author Compleo\n`;
   code += ` */\n`;
   code += `public abstract class ${baseName}DomainEvent {\n\n`;
   code += `    private final String eventId;\n`;
@@ -1413,7 +1413,7 @@ function generateDomainEventPublisher(
   code += ` * Utilise Spring ApplicationEventPublisher pour la publication locale,\n`;
   code += ` * et peut etre etendu pour publier sur Kafka pour la communication inter-services.\n`;
   code += ` *\n`;
-  code += ` * @author Hamza NORDINE\n`;
+  code += ` * @author Compleo\n`;
   code += ` */\n`;
   code += `@Component\n`;
   code += `@Slf4j\n`;
@@ -1470,7 +1470,7 @@ function generateExtendedPom(basePackage: string, techs: LegacyTechnology[]): Ge
   pom += `    <artifactId>modernized-service</artifactId>\n`;
   pom += `    <version>1.0.0-SNAPSHOT</version>\n`;
   pom += `    <name>Modernized Service</name>\n`;
-  pom += `    <description>Service modernise par Java Legacy Modernizer Platform - Hamza NORDINE</description>\n\n`;
+  pom += `    <description>Service modernise par Java Legacy Modernizer Platform - Compleo</description>\n\n`;
   pom += `    <properties>\n`;
   pom += `        <java.version>21</java.version>\n`;
   pom += `    </properties>\n\n`;

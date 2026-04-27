@@ -7,7 +7,7 @@
  *   FIX 4: Panel détail, légende, contrôles
  *   FIX 5: Données API normalisées
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";

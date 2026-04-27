@@ -1,7 +1,7 @@
 /**
  * ApiDocs — Documentation de l'API publique REST.
  * Endpoints : scan, analyze, transform, architecture, report.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -122,7 +122,7 @@ const API_ENDPOINTS: ApiEndpoint[] = [
     description: "Ajoute un commentaire de revue, validation ou question sur un projet.", category: "Collaboration",
     requestBody: `{
   "projectId": 1,
-  "authorName": "Hamza NORDINE",
+  "authorName": "Compleo",
   "commentType": "review",
   "content": "La migration du PaymentService nécessite une attention particulière...",
   "filePath": "src/main/java/PaymentService.java",

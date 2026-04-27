@@ -1,7 +1,7 @@
 /**
  * Migration — Simulation de migration Strangler Fig Pattern
  * Plan de migration automatique avec phases, timeline, risques.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";

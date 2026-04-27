@@ -2,7 +2,7 @@
  * Export PDF du plan de migration Strangler Fig
  * Génère un rapport PDF professionnel avec timeline, risques et estimations.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import jsPDF from "jspdf";
@@ -145,7 +145,7 @@ function addFooter(doc: jsPDF, page: number, total: number) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
   doc.setTextColor(...C.text);
-  doc.text("Hamza NORDINE — Java Legacy Modernizer v4.0 Enterprise", 14, ph - 9);
+  doc.text("Compleo — Java Legacy Modernizer v4.0 Enterprise", 14, ph - 9);
   doc.text(`Page ${page} / ${total}`, pw - 14, ph - 9, { align: "right" });
 }
 
@@ -210,7 +210,7 @@ export function exportMigrationPlanPdf(plan: StranglerFigPlan, projectName?: str
     month: "long",
     year: "numeric",
   });
-  doc.text(`Date : ${dateStr}  |  Auteur : Hamza NORDINE`, margin, 67);
+  doc.text(`Date : ${dateStr}  |  Auteur : Compleo`, margin, 67);
 
   y = 90;
 

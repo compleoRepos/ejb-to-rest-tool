@@ -8,7 +8,7 @@
  * - POST /api/agent/:id/choices
  * - GET  /api/agent/:id/download
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AgentSessionStore, type AgentConfig, type AgentSession } from "./agent/CompleoAgent";

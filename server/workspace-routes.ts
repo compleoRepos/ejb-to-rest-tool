@@ -9,7 +9,7 @@
  *   DELETE /api/workspace/:id        → Delete a workspace
  *   POST   /api/workspace/:id/generate → Generate multi-module ZIP
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { Router, Request, Response } from "express";

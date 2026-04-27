@@ -3,7 +3,7 @@
  * N+1, caching, pagination, connection pooling, lazy loading.
  * 100% déterministe, 0 LLM.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { Rule, RuleContext, RuleHit } from "../RuleEngine";

@@ -7,7 +7,7 @@
  *   - Tableau détaillé des steps et compensations
  *   - Rapport Markdown téléchargeable
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef, forwardRef, useImperativeHandle } from "react";

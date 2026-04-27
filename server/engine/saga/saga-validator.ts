@@ -19,7 +19,7 @@
  * Integrated into the generation pipeline as a hard gate:
  * if validation fails, the file is NOT included in the output.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ── Types ────────────────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@
  *
  * Log détaillé : "starting table" / "completed table" / "skipped" (0 lignes).
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import mysql from "mysql2/promise";

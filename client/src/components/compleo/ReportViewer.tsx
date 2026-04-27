@@ -4,7 +4,7 @@
  * Affiche les 5 rapports enrichis dans un layout à onglets avec rendu Markdown.
  * Supporte le mode "avant/après" pour comparer les rapports originaux et enrichis.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";

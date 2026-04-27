@@ -12,7 +12,7 @@
  * sur 27 237 paires de transformation Java EE → Spring Boot, extraites de
  * 884 projets GitHub enterprise + 4 projets bancaires réels.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { invokeLLM } from "../../_core/llm";

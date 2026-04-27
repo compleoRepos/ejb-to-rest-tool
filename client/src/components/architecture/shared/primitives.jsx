@@ -1,7 +1,7 @@
 /**
  * primitives.jsx — Composants UI réutilisables pour Architecture Explorer.
  * Palette "Terminal Craft" cohérente avec le reste de l'app.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { useMemo } from "react";
 

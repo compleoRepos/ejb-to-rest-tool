@@ -8,7 +8,7 @@
  *   - BUG-4: Service injection completeness (T28.1–T28.3)
  *   - STEP 5: saga-validator.ts (T29.1–T29.5)
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, it, expect } from "vitest";

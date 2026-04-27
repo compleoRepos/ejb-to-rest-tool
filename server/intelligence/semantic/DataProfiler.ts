@@ -3,7 +3,7 @@
  * les contraintes de validation, le type OpenAPI, et les annotations Spring.
  * 100% déterministe, 0 LLM.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 export interface FieldProfile {

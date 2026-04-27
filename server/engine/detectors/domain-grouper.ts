@@ -15,7 +15,7 @@
  * Impact sur les projets existants : AUCUN.
  * Le grouper n'est appelé que si handlerPattern.detected === true.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  * @since v8.3
  */
 

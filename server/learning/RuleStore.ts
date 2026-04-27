@@ -6,7 +6,7 @@
  * - Requêtes filtrées par tenant, type, confiance
  * - Statistiques d'apprentissage
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { getDb } from "../db";

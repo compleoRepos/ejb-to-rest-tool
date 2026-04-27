@@ -3,7 +3,7 @@
  * Since Web Workers are browser-only, we test the data structures,
  * chunking logic, progress calculation, and configuration validation.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, expect, it } from "vitest";

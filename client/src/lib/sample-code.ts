@@ -1,7 +1,7 @@
 /**
  * Exemples de code Java legacy pour démonstration.
  * Couvre : EJB, JNDI, JMS, Servlets, SOAP, JDBC, Struts, Hibernate.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 export const SAMPLE_EJB_INJECTION = `package com.bank.legacy.client;

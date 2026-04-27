@@ -10,7 +10,7 @@
  * Le mode in-memory est toujours disponible et ne nécessite aucune
  * dépendance externe. Il est suffisant pour le RAG avec <100 exemples.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { RAG_SEED_EXAMPLES } from "./rag-seed-data";

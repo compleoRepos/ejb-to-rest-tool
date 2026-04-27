@@ -13,7 +13,7 @@
  * Pour les steps qui sont des operations LOCALES (calcul, validation),
  * le body est inline (pas d'appel service).
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ── Types ────────────────────────────────────────────────────────────────────

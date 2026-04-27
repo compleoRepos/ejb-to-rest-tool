@@ -3,7 +3,7 @@
  * Filtrer les fichiers de test AVANT le parsing.
  * Les tests ne doivent JAMAIS générer de services, controllers ou DTOs.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ─── Patterns de fichiers de test ───────────────────────────────────────────

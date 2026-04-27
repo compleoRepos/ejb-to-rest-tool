@@ -14,7 +14,7 @@
  *   - getRuleStats() : statistiques d'apprentissage
  *   - exportRules() / importRules() : export/import JSON
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { Ambiguity, UserChoice } from "../ambiguity-detector";

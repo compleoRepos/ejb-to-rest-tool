@@ -1,7 +1,7 @@
 /**
  * CrossModuleResolver Tests — v5.6.0
  * Tests for JNDI link resolution between workspace projects.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect } from "vitest";
 import { CrossModuleResolver, type WorkspaceProject } from "./CrossModuleResolver";

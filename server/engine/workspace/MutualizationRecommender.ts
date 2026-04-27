@@ -13,7 +13,7 @@
  *
  * Does NOT modify any existing module — read-only analysis.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { RedundancyMatch, RedundancyReport } from "./RedundancyDetector";

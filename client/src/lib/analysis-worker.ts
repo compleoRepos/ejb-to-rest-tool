@@ -12,7 +12,7 @@
  * - Worker → Main : { type: "batch-complete", batchId: number, results: FileAnalysisResult[] }
  * - Worker → Main : { type: "error", error: string, fileName: string, batchId: number }
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ============================================================

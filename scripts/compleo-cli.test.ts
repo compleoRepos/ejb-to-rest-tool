@@ -4,7 +4,7 @@
  * Vérifie le parsing des arguments, la lecture de fichiers,
  * et le pipeline complet en mode dry-run et migration.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";

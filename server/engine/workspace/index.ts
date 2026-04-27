@@ -6,7 +6,7 @@
  * - MutualizationRecommender: Proposes service consolidation strategies
  * - WorkspaceIntelligenceEngine: Orchestrates the full analysis pipeline
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 export { RedundancyDetector } from "./RedundancyDetector";

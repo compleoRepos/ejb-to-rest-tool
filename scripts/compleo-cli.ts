@@ -21,7 +21,7 @@
  *   --verbose          Logs détaillés
  *   --max-attempts <n> Nombre max de tentatives de compilation (défaut: 5)
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import * as fs from "fs";

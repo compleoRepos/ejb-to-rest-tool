@@ -10,7 +10,7 @@
  *   - hasLegacyTypes() v8.5 : détection du hasHashMapFallback
  *   - Intégration : les DTOs générés sont correctement enregistrés dans le dtoMap
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, it, expect } from "vitest";

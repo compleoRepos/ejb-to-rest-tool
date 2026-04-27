@@ -3,7 +3,7 @@
  * Exporte l'orchestrateur et les types nécessaires.
  * 100% déterministe, 0 LLM, 100% on-premises.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 export { IntelligenceOrchestrator } from "./IntelligenceOrchestrator";

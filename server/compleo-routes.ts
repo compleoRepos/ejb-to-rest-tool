@@ -5,7 +5,7 @@
  *
  * Pipeline: UPLOAD → PARSE → DETECT_AMBIGUITIES → WAITING_CHOICES → RESOLVE → GENERATE → DONE
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { Router, Request, Response } from "express";

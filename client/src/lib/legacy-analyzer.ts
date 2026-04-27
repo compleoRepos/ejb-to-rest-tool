@@ -4,7 +4,7 @@
  * EJB, Servlets, JSP, Struts, SOAP, JDBC, Hibernate, JMS, Batch, Transactions.
  * Produit un graphe de dépendances, une cartographie des services et une analyse du couplage.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  * @version 2.0.0
  */
 
@@ -1133,7 +1133,7 @@ function calculateRisk(detections: TechnologyDetection[], complexity: number): "
 
 export function generateExtendedMarkdownReport(report: ExtendedAnalysisReport): string {
   let md = `# Rapport d'Analyse Legacy — ${report.fileName}\n\n`;
-  md += `**Auteur de l'outil** : Hamza NORDINE\n`;
+  md += `**Auteur de l'outil** : Compleo\n`;
   md += `**Classe** : \`${report.className}\` | **Package** : \`${report.packageName}\`\n\n`;
   md += `---\n\n`;
 

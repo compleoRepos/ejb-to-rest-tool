@@ -13,7 +13,7 @@
  *   GET  /api/learning/rules/export   — Exporter les règles en JSON
  *   POST /api/learning/rules/import   — Importer des règles depuis JSON
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { Router } from "express";

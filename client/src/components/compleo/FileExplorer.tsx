@@ -1,7 +1,7 @@
 /**
  * FileExplorer — Arbre de fichiers générés avec indicateurs de qualité.
  * Vert = migré auto, Orange = contient TODOs, Gris = stub/config.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useState, useMemo } from "react";

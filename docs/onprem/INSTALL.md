@@ -1,6 +1,6 @@
 # Guide d'Installation On-Premises — Compleo EJB Client Modernizer v4.0
 
-> **Auteur :** Hamza NORDINE  
+> **Auteur :** Compleo  
 > **Version :** 2.0.0  
 > **Dernière mise à jour :** 2026-04-13  
 > **Classification :** Interne — Équipe Infrastructure

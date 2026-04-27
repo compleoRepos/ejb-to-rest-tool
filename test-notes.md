@@ -1,7 +1,7 @@
 # Test Notes
 
 ## Screenshot 1 - Initial State
-- Header: "EJB Client Modernizer par Hamza NORDINE" ✓
+- Header: "EJB Client Modernizer par Compleo" ✓
 - Left panel: "Code Java Legacy" with Monaco Editor loading ✓
 - Right panel: "Code Généré" and "Rapport" tabs ✓
 - Placeholder message visible ✓
@@ -21,7 +21,7 @@
 ## Screenshot 3 - After Transformation
 - Toast: "18 fichier(s) généré(s) avec succès" ✓
 - File tree shows CLIENT, CONFIG, DTO, EXCEPTION, UTIL, TEST categories ✓
-- AccountApiClient.java selected and code visible with @author Hamza NORDINE ✓
+- AccountApiClient.java selected and code visible with @author Compleo ✓
 - Télécharger button appeared ✓
 - Status bar shows "18 fichier(s) générés" ✓
 - All working correctly!

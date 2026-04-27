@@ -3,7 +3,7 @@
  * Coordonne : SemanticAnalyzer → KnowledgeBase → IntelligenceScorer → ReportBuilder.
  * 100% déterministe, 0 LLM.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { SemanticAnalyzer, type RoleInference, type ClassContext } from "./semantic/SemanticAnalyzer";

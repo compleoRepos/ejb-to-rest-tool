@@ -6,7 +6,7 @@
  * Format de stockage : JSON Graph Format (JGF)
  * Compatible : Cytoscape.js, Gephi, yEd, GraphML export
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ─── Edge Types & Weights ───────────────────────────────────────────────────

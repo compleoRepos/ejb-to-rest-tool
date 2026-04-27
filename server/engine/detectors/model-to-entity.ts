@@ -12,7 +12,7 @@
  *     (référencée dans HibernateDao, a des getters/setters, pas de pattern DTO)
  *   - DTO : classe dans un package DTO/, Request/, Response/, ou avec suffixe DTO/Request/Response
  *
- * @author Hamza NORDINE
+ * @author Compleo
  * @since v8.3
  */
 

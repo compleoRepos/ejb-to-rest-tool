@@ -3,7 +3,7 @@
  * 9 rôles possibles, classés par priorité décroissante.
  * 100% déterministe, 0 LLM.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 export type SemanticRole =

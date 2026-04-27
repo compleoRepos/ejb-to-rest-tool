@@ -3,7 +3,7 @@
  * Produit des rapports Markdown et JSON à partir des résultats d'analyse.
  * 100% déterministe, 0 LLM.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { IntelligenceReport } from "../IntelligenceOrchestrator";

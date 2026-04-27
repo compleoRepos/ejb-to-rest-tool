@@ -5,7 +5,7 @@
  *   PASSE 2 — Propagation par le graphe (voisins directs)
  *   PASSE 3 — Validation cohésion/couplage
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type {

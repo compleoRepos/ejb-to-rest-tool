@@ -8,7 +8,7 @@
  *   4. RuleConflictResolver — résolution de conflits entre règles
  *   5. LearningEngine — scénario complet sur 5 itérations
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

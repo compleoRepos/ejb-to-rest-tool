@@ -1,7 +1,7 @@
 /**
  * MiniGraph — Graphe d'architecture réduit avec modal plein écran.
  * Utilise le composant ArchitectureDiagram existant.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useState } from "react";

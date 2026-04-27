@@ -7,7 +7,7 @@
  * 3. Checks if existing projects had unresolved lookups to this new project
  * 4. Persists results as CrossModuleLink records
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { ProjectIR, UseCaseIR } from "../java-parser";

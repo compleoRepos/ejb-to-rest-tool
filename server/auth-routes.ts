@@ -3,7 +3,7 @@
  * POST /api/auth/login — Authentification par username/password.
  * GET  /api/auth/me     — Informations sur l'utilisateur connecté.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { Router, Request, Response } from "express";

@@ -3,7 +3,7 @@
  * OWASP, PCI-DSS, RGPD, authentification, autorisation.
  * 100% déterministe, 0 LLM.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { Rule, RuleContext, RuleHit } from "../RuleEngine";

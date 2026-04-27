@@ -2,7 +2,7 @@
  * Compleo v5.4 — Page unifiée de migration Java Legacy → Spring Boot
  * 4 états : idle → analyzing → choices → results
  * Persistance sessionId dans localStorage + DB.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useState, useCallback, useMemo, useEffect } from "react";

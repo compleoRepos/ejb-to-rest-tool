@@ -12,7 +12,7 @@
  *   - Envoi SWIFT/SEPA → Envoyer annulation PAIN.002
  *   - Mise à jour statut → Restaurer statut précédent
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 // ── Types ────────────────────────────────────────────────────────────────────

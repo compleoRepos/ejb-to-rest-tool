@@ -8,7 +8,7 @@
  *       Le modèle fine-tuné reçoit des prompts concis (il connaît déjà les patterns).
  *       Le modèle généraliste reçoit des prompts détaillés avec exemples et règles.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import type { MigrationPair } from "./embedding-service";
 import type { EJBSignature } from "./ml-enhancer";

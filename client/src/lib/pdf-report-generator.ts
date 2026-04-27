@@ -7,7 +7,7 @@
  * Utilise jsPDF côté client pour une génération directe sans serveur.
  * Aucune mention IA/agent dans le document final.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import jsPDF from "jspdf";
@@ -188,7 +188,7 @@ function cleanText(text: string): string {
 // ─── PDF Generator ──────────────────────────────────────────────────────────
 
 export async function generateReportPDF(options: PDFGeneratorOptions): Promise<void> {
-  const { projectName = "Projet", generatedAt, author = "Hamza NORDINE", reports, singleReport } = options;
+  const { projectName = "Projet", generatedAt, author = "Compleo", reports, singleReport } = options;
 
   const doc = new jsPDF({
     orientation: "portrait",

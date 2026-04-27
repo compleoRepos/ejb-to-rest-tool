@@ -8,7 +8,7 @@
  * Si DATABASE_URL n'est pas défini, le bootstrap est ignoré silencieusement
  * (mode sans DB, utile pour le dev frontend uniquement).
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { autoMigrate } from "./auto-migrate";

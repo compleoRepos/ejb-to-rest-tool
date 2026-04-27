@@ -11,7 +11,7 @@
  * Impact sur les projets existants : AUCUN.
  * Le splitter n'est appelé que si un God-class DAO est détecté.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  * @since v8.3
  */
 

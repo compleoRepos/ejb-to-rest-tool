@@ -1,6 +1,6 @@
 # Rapport d'Audit et de Tests — Java Legacy Modernizer v3.0
 
-**Auteur** : Hamza NORDINE  
+**Auteur** : Compleo  
 **Date** : 7 avril 2026  
 **Version** : 3.0  
 **Entreprise** : Compleo  
@@ -319,4 +319,4 @@ Les résultats complets de l'audit sont disponibles au format JSON dans le répe
 
 ---
 
-*Document rédigé par Hamza NORDINE — Compleo — Avril 2026*
+*Document rédigé par Compleo — Compleo — Avril 2026*

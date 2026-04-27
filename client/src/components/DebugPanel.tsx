@@ -3,7 +3,7 @@
  * Visible uniquement en mode développement (NODE_ENV=development).
  * Affiche les événements du pipeline Compleo en temps réel.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";

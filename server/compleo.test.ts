@@ -2,7 +2,7 @@
  * Compleo v1.0 — Tests for Java Parser and Spring Boot Generator.
  * Tests the core EJB-to-Spring Boot migration pipeline.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, expect, it } from "vitest";

@@ -12,7 +12,7 @@
  * Poids des patterns :
  *   className=3, methodName=3, annotations=2, package=1, returnType=2, paramTypes=2
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { LearningRule } from "../../drizzle/schema";

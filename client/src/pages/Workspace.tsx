@@ -3,7 +3,7 @@
  * Permet de créer des workspaces, y ajouter des projets Compleo analysés,
  * visualiser les liens cross-module, détecter les redondances et
  * proposer des mutualisations de services.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";

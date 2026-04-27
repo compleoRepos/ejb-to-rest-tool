@@ -2,7 +2,7 @@
  * Générateur Spring Boot depuis ServletComponent.
  * v5.10.0: Multi-route support — génère un endpoint par sous-route détectée.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import type { CodeGenerator, DetectedComponent, ServletComponent, GeneratedFile, ValidationResult, DetectedMethod } from "../registry/types";
 

@@ -3,7 +3,7 @@
  * Détecte les appels EJB (@EJB injection, JNDI lookup, InitialContext),
  * les transactions, les dépendances JMS/MQ/Batch et génère un rapport d'analyse.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  * @version 1.0.0
  */
 
@@ -453,7 +453,7 @@ function buildDependencyGraph(
 
 export function generateMarkdownReport(report: AnalysisReport): string {
   let md = `# Rapport d'Analyse — ${report.fileName}\n\n`;
-  md += `**Auteur de l'outil** : Hamza NORDINE\n\n`;
+  md += `**Auteur de l'outil** : Compleo\n\n`;
   md += `**Classe** : \`${report.className}\`\n`;
   md += `**Package** : \`${report.packageName}\`\n\n`;
   md += `---\n\n`;

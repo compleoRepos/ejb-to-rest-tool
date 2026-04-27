@@ -11,7 +11,7 @@
  *   STEP 7 : Résultats intermédiaires dans SagaContext
  *   STEP 8 : Compensations concrètes + SQL Oracle + QUALITY_SCORE statique
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, it, expect, beforeAll } from "vitest";

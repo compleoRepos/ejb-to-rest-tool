@@ -8,7 +8,7 @@
  *   4. Compensation avec retry dédié
  *   5. Dead Letter + Saga Recovery
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, it, expect } from "vitest";

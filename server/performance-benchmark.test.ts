@@ -1,7 +1,7 @@
 /**
  * Tests de performance — Compleo Engine v4.0
  * Benchmarks : 100 fichiers (<10s), 500 fichiers, 10 projets simultanés.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, expect, it } from "vitest";
 

@@ -14,7 +14,7 @@
  *   10 confirmations → 0.95
  *   Correction user  → -0.30
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import type { LearningRule } from "../../drizzle/schema";

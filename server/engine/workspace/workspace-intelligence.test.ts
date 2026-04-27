@@ -6,7 +6,7 @@
  * - MutualizationRecommender: recommendation generation
  * - WorkspaceIntelligenceEngine: full orchestration
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, it, expect } from "vitest";

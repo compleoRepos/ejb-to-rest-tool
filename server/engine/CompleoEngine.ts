@@ -11,7 +11,7 @@
  * Les endpoints REST existants (/api/compleo/*) délèguent à cette classe.
  * L'IHM ne change pas. Zéro régression.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { parseEjbProject, type ProjectIR } from "../java-parser";

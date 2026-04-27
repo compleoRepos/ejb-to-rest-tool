@@ -1,7 +1,7 @@
 /**
  * TDD Tests — CORRECTION 1 : Regex JNDI étendu @EJB lookup
  * Tests écrits AVANT la correction pour valider le bug puis la correction.
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import { GraphBuilder } from "./GraphBuilder";

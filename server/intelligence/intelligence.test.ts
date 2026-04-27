@@ -3,7 +3,7 @@
  * Couvre : SemanticAnalyzer, DomainInferrer, IntentInferrer, DataProfiler,
  *          KnowledgeBase, IntelligenceScorer, IntelligenceOrchestrator, ReportBuilder.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 
 import { describe, it, expect } from "vitest";

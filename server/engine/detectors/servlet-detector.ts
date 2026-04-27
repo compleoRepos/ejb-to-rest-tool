@@ -5,7 +5,7 @@
  * v5.10.0: Multi-route detection — analyse les if/switch sur
  * getServletPath()/getPathInfo() pour extraire les sous-routes.
  *
- * @author Hamza NORDINE
+ * @author Compleo
  */
 import type {
   TechnologyDetector,
