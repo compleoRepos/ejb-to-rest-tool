@@ -22,13 +22,28 @@ Ce package contient tout le nécessaire pour créer un LLM spécialisé dans la 
 | Fichier | Description |
 |---------|-------------|
 | `finetuning-dataset.jsonl` | Dataset de **27 237 paires** legacy → Spring Boot (format OpenAI) — voir `DOWNLOAD.md` |
-| `train.py` | Script de fine-tuning Unsloth/LoRA (GPU requis) |
+| `train.py` | Script de fine-tuning Unsloth/LoRA **v2.0** (GPU requis) |
 | `Modelfile` | Configuration Ollama avec system prompt enrichi (pas de GPU requis) |
 | `dataset-stats.json` | Statistiques détaillées du dataset |
 | `repos-catalog.json` | Catalogue des 1000 repos GitHub sélectionnés — voir `DOWNLOAD.md` |
 | `DOWNLOAD.md` | Liens de téléchargement des fichiers volumineux (S3) |
 
 Le dataset a été construit à partir de **884 projets GitHub open source** (sélectionnés parmi 5 779 candidats via 128 requêtes ciblées) et **4 projets bancaires réels** (BOA/BMCE Direct), couvrant **8 catégories** de technologies legacy et **187 814 fichiers Java** analysés.
+
+### Nouveautés train.py v2.0
+
+| Fonctionnalité | v1.0 | v2.0 |
+|----------------|------|------|
+| Modèle recommandé | CodeLlama 13B | **Qwen2.5-Coder 32B** (meilleur pour Java) |
+| `max_seq_length` | Fixe 4096 | **Dynamique** selon modèle + VRAM |
+| Validation split | Aucun | **Stratifié 95/5** par catégorie |
+| Early stopping | Non | **Oui** (patience=3, eval tous les 100 steps) |
+| Métriques qualité | Non | **Compilation, BLEU, annotations Spring, overlap** |
+| WandB | Non | **Optionnel** (ne crash pas si absent) |
+| Mode dry-run | Non | **`--dry-run`** valide le dataset sans GPU |
+| Gestion VRAM | Manuelle | **Automatique** (détection GPU, recommandation modèle) |
+| Rapport final | Basique | **JSON complet** avec métriques + recommandations |
+| Batch size | Fixe 2 | **Adaptatif** par modèle (1 pour 32B, 4 pour 7B) |
 
 ### Distribution du dataset
 
@@ -43,17 +58,6 @@ Le dataset a été construit à partir de **884 projets GitHub open source** (s�
 | EJB → Spring Service | 1 897 | 7.0% | @Stateless, @Stateful, @Singleton |
 | Spring Legacy → Spring Boot | 505 | 1.9% | XML config, JdbcTemplate |
 | **Total** | **27 237** | **100%** | **310 MB, 764 repos uniques** |
-
-### Comparaison avec la version précédente
-
-| Métrique | v1 (50 repos) | v2 (884 repos) | Facteur |
-|----------|---------------|-----------------|---------|
-| Repos analysés | 50 | 884 | **x17.7** |
-| Fichiers Java scannés | ~2 000 | 187 814 | **x94** |
-| Paires d'entraînement | 364 | 27 237 | **x74.8** |
-| Catégories couvertes | 7 | 8 | +1 |
-| Taille du dataset | 2.2 MB | 310 MB | **x141** |
-| Domaines métier | ~5 | Banking, ERP, CRM, E-commerce, Healthcare, Insurance, Logistics, Telecom, Education... | **x10+** |
 
 ---
 
@@ -82,15 +86,19 @@ Un GPU NVIDIA avec au moins 16 Go de VRAM est recommandé pour un dataset de cet
 
 | GPU | VRAM | Modèle recommandé | Temps estimé (27K entrées) |
 |-----|------|--------------------|----------------------------|
-| RTX 4070 | 12 Go | Mistral 7B | ~4-6 heures |
+| RTX 4070 | 12 Go | Mistral 7B / DeepSeek 6.7B | ~4-6 heures |
 | RTX 3090/4080 | 24 Go | CodeLlama 13B | ~3-4 heures |
-| A100 | 40-80 Go | CodeLlama 13B | ~1-2 heures |
-| H100 | 80 Go | CodeLlama 13B | ~30-45 min |
+| **L40S** | **48 Go** | **Qwen2.5-Coder 32B** | **~3-4 heures** |
+| A100 | 40-80 Go | Qwen2.5-Coder 32B | ~1-2 heures |
+| H100 | 80 Go | Qwen2.5-Coder 32B | ~30-45 min |
 
 ```bash
 # Installer les dépendances Python
 pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
 pip install --no-deps trl peft accelerate bitsandbytes transformers datasets
+
+# Optionnel : métriques BLEU et tracking
+pip install sacrebleu wandb
 
 # Vérifier CUDA
 python -c "import torch; print(torch.cuda.is_available())"
@@ -120,25 +128,19 @@ Le fichier `finetuning-dataset.jsonl` contient des entrées au format OpenAI Mes
 }
 ```
 
-### Vérifier le dataset
+### Vérifier le dataset (mode dry-run)
 
 ```bash
-# Compter les entrées
-wc -l finetuning-dataset.jsonl
-
-# Voir la distribution par catégorie
-python3 -c "
-import json, collections
-cats = collections.Counter()
-with open('finetuning-dataset.jsonl') as f:
-    for line in f:
-        entry = json.loads(line)
-        cats[entry['metadata']['category']] += 1
-for cat, count in cats.most_common():
-    print(f'  {cat}: {count}')
-print(f'  TOTAL: {sum(cats.values())}')
-"
+# Validation complète sans GPU : stats, split, preview, estimation temps
+python train.py --dry-run --dataset ./finetuning-dataset.jsonl --model qwen-coder
 ```
+
+Le mode `--dry-run` affiche :
+- Statistiques du dataset (catégories, méthodes, tokens)
+- Split stratifié 95/5 avec distribution par catégorie
+- Preview de 3 exemples aléatoires
+- Vérification GPU/VRAM et compatibilité modèle
+- Estimation du temps d'entraînement
 
 ---
 
@@ -180,40 +182,76 @@ curl http://localhost:11434/api/generate -d '{
 
 Cette option entraîne réellement le modèle sur les 27 237 paires, produisant un modèle spécialisé avec des résultats nettement supérieurs.
 
-### Étape 1 : Entraîner le modèle
+### Étape 0 : Valider le dataset (dry-run)
 
 ```bash
 cd server/engine/ml/finetuning/
 
-# Option recommandée : CodeLlama 13B
+# Vérifier le dataset, la compatibilité GPU et estimer le temps
+python train.py --dry-run --dataset ./finetuning-dataset.jsonl --model qwen-coder
+```
+
+### Étape 1 : Entraîner le modèle
+
+```bash
+# Recommandé pour L40S 48GB : Qwen2.5-Coder 32B
+python train.py \
+  --model qwen-coder \
+  --dataset ./finetuning-dataset.jsonl \
+  --epochs 3 \
+  --output ./outputs
+
+# Alternative : CodeLlama 13B (24GB VRAM minimum)
 python train.py \
   --model codellama \
   --dataset ./finetuning-dataset.jsonl \
   --epochs 3 \
   --output ./outputs
 
-# Alternative : Mistral 7B (plus rapide, moins de VRAM)
+# Alternative rapide : Mistral 7B (12GB VRAM minimum)
 python train.py \
   --model mistral \
   --dataset ./finetuning-dataset.jsonl \
-  --epochs 3 \
+  --epochs 5 \
   --output ./outputs
 
-# Alternative : DeepSeek Coder
+# Sans évaluation post-training (plus rapide)
 python train.py \
-  --model deepseek \
+  --model qwen-coder \
   --dataset ./finetuning-dataset.jsonl \
-  --epochs 3 \
+  --skip-eval \
   --output ./outputs
 ```
 
-### Étape 2 : Convertir en GGUF pour Ollama
+Le script v2.0 gère automatiquement :
+- **Détection GPU** et recommandation du modèle optimal
+- **max_seq_length dynamique** adapté à la VRAM disponible
+- **Split stratifié 95/5** pour la validation
+- **Early stopping** (patience=3) pour éviter le surapprentissage
+- **WandB** si installé (tracking des métriques en temps réel)
+- **Évaluation post-training** (compilation, BLEU, annotations Spring)
+- **Rapport JSON complet** dans `outputs/training_report.json`
+
+### Étape 2 : Consulter le rapport
+
+```bash
+# Le rapport est généré automatiquement
+cat outputs/training_report.json | python -m json.tool
+```
+
+Le rapport contient :
+- Configuration complète (modèle, hyperparamètres, dataset)
+- Résultats (loss, durée, VRAM peak)
+- Métriques qualité (compilation rate, BLEU, annotations Spring)
+- Recommandations pour le prochain run
+
+### Étape 3 : Convertir en GGUF pour Ollama
 
 ```bash
 python train.py --export-gguf --output ./outputs
 ```
 
-### Étape 3 : Créer le modèle Ollama
+### Étape 4 : Créer le modèle Ollama
 
 ```bash
 # Modifier le Modelfile : remplacer "FROM codellama:13b-instruct" par :
@@ -222,7 +260,7 @@ python train.py --export-gguf --output ./outputs
 ollama create ejb-modernizer -f Modelfile
 ```
 
-### Étape 4 : Tester
+### Étape 5 : Tester
 
 ```bash
 ollama run ejb-modernizer
@@ -232,10 +270,11 @@ ollama run ejb-modernizer
 
 ## Intégration dans l'application
 
-Le fichier `server/engine/ml/llm-adapter.ts` gère automatiquement le routage entre les différents backends LLM :
+Le fichier `server/engine/ml/llm-adapter.ts` gère automatiquement le routage entre les différents backends LLM avec une chaîne de priorité à 3 niveaux :
 
-1. **Ollama local** (modèle fine-tuné `ejb-modernizer`) — priorité si disponible
+1. **Ollama fine-tuné** (`ejb-modernizer`) — priorité maximale si disponible, boost de confiance +10%
 2. **Manus invokeLLM** (cloud) — fallback automatique
+3. **Ollama générique** (`qwen2.5-coder:1.5b`) — dernier recours
 
 ### Configuration
 
@@ -250,34 +289,42 @@ OLLAMA_MODEL=ejb-modernizer
 Requête utilisateur
     │
     ▼
-llm-adapter.ts
+llm-adapter.ts (v9.0)
     │
-    ├── Ollama disponible ? ──► ejb-modernizer (fine-tuné sur 27K paires)
-    │                              │
-    │                              ▼
-    │                          Réponse rapide (~5s)
+    ├── [1] Ollama ejb-modernizer ? ──► Modèle fine-tuné (27K paires)
+    │                                      │ Confiance: +10% boost
+    │                                      ▼
+    │                                  Réponse rapide (~3-5s)
     │
-    └── Ollama indisponible ? ──► Manus invokeLLM (cloud)
-                                   │
-                                   ▼
-                               Réponse cloud (~10s)
+    ├── [2] Manus invokeLLM ? ──► Cloud LLM (généraliste)
+    │                                │
+    │                                ▼
+    │                            Réponse cloud (~8-12s)
+    │
+    └── [3] Ollama generic ? ──► qwen2.5-coder:1.5b (fallback)
+                                    │
+                                    ▼
+                                Réponse basique (~5s)
 ```
 
 ---
 
 ## Évaluation du modèle
 
-### Métriques de qualité
+### Métriques automatiques (v2.0)
 
-| Critère | Description | Poids |
-|---------|-------------|-------|
-| Compilation | Le code généré compile sans erreur | 30% |
-| Annotations | Les annotations Spring sont correctes | 25% |
-| Logique métier | La logique métier est préservée | 25% |
-| Conventions | Respect des conventions Spring Boot | 10% |
-| Imports | Les imports sont corrects et complets | 10% |
+Le script `train.py` évalue automatiquement le modèle après l'entraînement sur 100 exemples de validation :
 
-### Script de test rapide
+| Métrique | Description | Cible |
+|----------|-------------|-------|
+| Compilation rate | % de code généré qui compile avec `javac` | > 60% |
+| Spring annotations | % d'annotations Spring correctement présentes | > 80% |
+| BLEU score | Similarité textuelle avec la référence (0-1) | > 0.4 |
+| Token overlap | Jaccard similarity des tokens (0-100%) | > 50% |
+
+Les résultats sont ventilés par catégorie dans le rapport JSON.
+
+### Script de test manuel
 
 ```bash
 python3 -c "
@@ -304,15 +351,17 @@ for i, entry in enumerate(samples):
 
 ### Erreur "out of memory" pendant le fine-tuning
 
-Avec un dataset de 27K entrées, le fine-tuning nécessite plus de mémoire :
+Le script v2.0 détecte automatiquement la VRAM et recommande un modèle compatible. Si l'OOM survient quand même :
 
 ```bash
-# Utiliser Mistral 7B au lieu de CodeLlama 13B
+# Le script recommande automatiquement un modèle plus petit
+# Mais vous pouvez forcer manuellement :
+
+# Utiliser Mistral 7B au lieu de Qwen 32B
 python train.py --model mistral --dataset ./finetuning-dataset.jsonl
 
-# Ou réduire le batch size dans train.py :
-# TRAINING_CONFIG["per_device_train_batch_size"] = 1
-# TRAINING_CONFIG["gradient_accumulation_steps"] = 8
+# Ou utiliser CodeLlama 7B (le plus léger)
+python train.py --model codellama-7b --dataset ./finetuning-dataset.jsonl
 ```
 
 ### Le dataset est trop volumineux pour la RAM
@@ -335,6 +384,22 @@ curl http://localhost:11434/api/generate -d '{
   "prompt": "...",
   "options": {"temperature": 0.1}
 }'
+```
+
+### WandB ne fonctionne pas
+
+WandB est optionnel. Si l'initialisation échoue, le training continue normalement sans tracking. Pour désactiver explicitement :
+
+```bash
+WANDB_DISABLED=true python train.py --model qwen-coder --dataset ./finetuning-dataset.jsonl
+```
+
+### L'évaluation post-training est trop lente
+
+Utiliser `--skip-eval` pour sauter l'évaluation :
+
+```bash
+python train.py --model qwen-coder --dataset ./finetuning-dataset.jsonl --skip-eval
 ```
 
 ---
