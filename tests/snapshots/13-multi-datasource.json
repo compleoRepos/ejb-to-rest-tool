@@ -1,11 +1,11 @@
 {
   "fixtureId": "13-multi-datasource",
-  "timestamp": "2026-04-28T01:18:07.614Z",
+  "timestamp": "2026-04-28T13:10:09.748Z",
   "useCaseCount": 1,
   "dtoCount": 2,
   "enumCount": 0,
   "exceptionCount": 0,
-  "generatedFileCount": 18,
+  "generatedFileCount": 21,
   "generatedFilePaths": [
     "src/main/java/com/bank/ejbmultids/EjbMultiDsApplication.java",
     "src/main/java/com/bank/ejbmultids/dto/CompteRequestDTO.java",
@@ -24,7 +24,10 @@
     "k8s/service.yaml",
     "pom.xml",
     "MIGRATION_REPORT.md",
-    "QUALITY_SCORE.md"
+    "QUALITY_SCORE.md",
+    "BIAN_MAPPING.md",
+    "ARCHITECTURE.md",
+    "MIGRATION_SUMMARY.md"
   ],
   "score": 82,
   "status": "PASS"

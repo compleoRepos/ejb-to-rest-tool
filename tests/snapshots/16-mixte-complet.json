@@ -1,11 +1,11 @@
 {
   "fixtureId": "16-mixte-complet",
-  "timestamp": "2026-04-28T01:18:07.655Z",
+  "timestamp": "2026-04-28T13:10:09.819Z",
   "useCaseCount": 3,
   "dtoCount": 2,
   "enumCount": 1,
   "exceptionCount": 1,
-  "generatedFileCount": 23,
+  "generatedFileCount": 26,
   "generatedFilePaths": [
     "src/main/java/com/bank/ejbproject/EjbProjectApplication.java",
     "src/main/java/com/bank/ejbproject/dto/ConsulterSoldeRequestDTO.java",
@@ -29,7 +29,10 @@
     "k8s/service.yaml",
     "pom.xml",
     "MIGRATION_REPORT.md",
-    "QUALITY_SCORE.md"
+    "QUALITY_SCORE.md",
+    "BIAN_MAPPING.md",
+    "ARCHITECTURE.md",
+    "MIGRATION_SUMMARY.md"
   ],
   "score": 81,
   "status": "PASS"

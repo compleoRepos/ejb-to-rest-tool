@@ -30,6 +30,7 @@ import { ReportEnhancer, type ReportEnhancerConfig, type ReportContext, type Enh
 import type { QualityReport } from "../engine/quality-scorer";
 import type { PipelineResult } from "../engine/pipeline/index";
 import { detectSagaCandidates, generateAllSagas, generateAllSagasWithML, SagaMLEnricher, type SagaGenerationResult } from "../engine/saga";
+import { enrichZipWithArchitecture } from "../graph/architecture-zip-enricher";
 
 // ─── Types publics ────────────────────────────────────────────────────────────
 
@@ -922,11 +923,35 @@ export class CompleoAgent {
       }
     }
 
+     // v10.1: Enrich with architecture files (SVG, GraphML, D2, roadmap, microservice dirs)
+    try {
+      const archResult = enrichZipWithArchitecture(session.ir!);
+      if (archResult.files.length > 0) {
+        for (const archFile of archResult.files) {
+          session.generatedProject!.files.push({
+            path: archFile.path,
+            content: archFile.content,
+            category: "report",
+          });
+        }
+        yield this.event("LOG", {
+          level: "success",
+          message: `${archResult.files.length} fichiers architecture ajoutés (${archResult.microserviceCount} microservices, ${archResult.domainCount} domaines)`,
+          phase: "GENERATING",
+        });
+      }
+    } catch (archErr: any) {
+      yield this.event("LOG", {
+        level: "warn",
+        message: `Enrichissement architecture ignoré : ${archErr.message}`,
+        phase: "GENERATING",
+      });
+    }
+
     yield this.event("PHASE_END", {
       phase: "GENERATING",
       message: `Génération terminée (${Date.now() - startTime}ms)`,
     });
-
     // ─── Persist to CompleoSession DB ──────────────────────────────────
     try {
       this.syncToCompleoSession(session, "generated");

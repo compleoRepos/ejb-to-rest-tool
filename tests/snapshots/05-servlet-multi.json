@@ -1,11 +1,11 @@
 {
   "fixtureId": "05-servlet-multi",
-  "timestamp": "2026-04-28T01:18:07.425Z",
+  "timestamp": "2026-04-28T13:10:09.532Z",
   "useCaseCount": 0,
   "dtoCount": 0,
   "enumCount": 0,
   "exceptionCount": 0,
-  "generatedFileCount": 13,
+  "generatedFileCount": 16,
   "generatedFilePaths": [
     "src/main/java/com/example/ejbproject/EjbProjectApplication.java",
     "src/main/java/com/example/ejbproject/exception/GlobalExceptionHandler.java",
@@ -19,7 +19,10 @@
     "k8s/service.yaml",
     "pom.xml",
     "MIGRATION_REPORT.md",
-    "QUALITY_SCORE.md"
+    "QUALITY_SCORE.md",
+    "BIAN_MAPPING.md",
+    "ARCHITECTURE.md",
+    "MIGRATION_SUMMARY.md"
   ],
   "score": 75,
   "status": "WARN"

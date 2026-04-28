@@ -1,11 +1,11 @@
 {
   "fixtureId": "02-ejb-direct",
-  "timestamp": "2026-04-28T01:18:07.371Z",
+  "timestamp": "2026-04-28T13:10:09.439Z",
   "useCaseCount": 2,
   "dtoCount": 0,
   "enumCount": 0,
   "exceptionCount": 0,
-  "generatedFileCount": 16,
+  "generatedFileCount": 19,
   "generatedFilePaths": [
     "src/main/java/com/bank/ejbproject/EjbProjectApplication.java",
     "src/main/java/com/bank/ejbproject/exception/GlobalExceptionHandler.java",
@@ -22,7 +22,10 @@
     "k8s/service.yaml",
     "pom.xml",
     "MIGRATION_REPORT.md",
-    "QUALITY_SCORE.md"
+    "QUALITY_SCORE.md",
+    "BIAN_MAPPING.md",
+    "ARCHITECTURE.md",
+    "MIGRATION_SUMMARY.md"
   ],
   "score": 79,
   "status": "WARN"

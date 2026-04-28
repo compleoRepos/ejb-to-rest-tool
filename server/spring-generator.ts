@@ -61,6 +61,7 @@ import {
   generateMigrationReport,
 } from "./spring/infra-gen";
 import { scoreGeneration, generateQualitySection, type QualityReport } from "./engine/quality-scorer";
+import { generateBianMappingReport, generateArchitectureReport, generateMigrationSummaryReport } from "./spring/report-gen";
 
 // --- Main Generator (Orchestrator) ---
 
@@ -426,6 +427,12 @@ public class BusinessRuleException extends RuntimeException {
   };
   files.push(qualityFile);
 
+  // 15. BIAN Mapping Report
+  files.push(generateBianMappingReport(ir));
+
+  // 16. Architecture Report
+  files.push(generateArchitectureReport(ir));
+
   // Compute stats
   const stats: GenerationStats = {
     totalFiles: files.length,
@@ -443,6 +450,13 @@ public class BusinessRuleException extends RuntimeException {
 
   // Step 4.2 -- Syntax verification
   const compilationResult = verifySyntax(files);
+
+  // 17. Migration Summary Report (needs stats + quality)
+  const scoreMatch = qualityFile.content.match(/(\d+)\/(\d+)\s+\(([A-F][+]?)\)/);
+  const qGrade = scoreMatch ? scoreMatch[3] : undefined;
+  const qScore = scoreMatch ? parseInt(scoreMatch[1], 10) : undefined;
+  const qMax = scoreMatch ? parseInt(scoreMatch[2], 10) : undefined;
+  files.push(generateMigrationSummaryReport(ir, stats, warnings, qGrade, qScore, qMax));
 
   return { files, stats, warnings, compilationResult, dsInfo };
 }
