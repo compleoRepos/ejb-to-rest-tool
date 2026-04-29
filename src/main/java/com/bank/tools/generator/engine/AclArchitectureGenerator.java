@@ -1965,6 +1965,7 @@ public class AclArchitectureGenerator {
         imports.add("import " + PKG_DOMAIN_SERVICE + "." + group.serviceInterfaceName + ";");
         imports.add("import io.swagger.v3.oas.annotations.Operation;");
         imports.add("import io.swagger.v3.oas.annotations.Parameter;");
+        imports.add("import io.swagger.v3.oas.annotations.responses.ApiResponses;");
         imports.add("import io.swagger.v3.oas.annotations.tags.Tag;");
         imports.add("import org.springframework.validation.annotation.Validated;");
         imports.add("import jakarta.validation.Valid;");
@@ -2029,14 +2030,14 @@ public class AclArchitectureGenerator {
             // @ApiResponses Swagger — documentation des codes de reponse
             sb.append("    @ApiResponses(value = {\n");
             if (httpStatus == 201) {
-                sb.append("        @ApiResponse(responseCode = \"201\", description = \"Ressource creee avec succes\"),\n");
+                sb.append("        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = \"201\", description = \"Ressource creee avec succes\"),\n");
             } else {
-                sb.append("        @ApiResponse(responseCode = \"200\", description = \"Operation reussie\"),\n");
+                sb.append("        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = \"200\", description = \"Operation reussie\"),\n");
             }
-            sb.append("        @ApiResponse(responseCode = \"400\", description = \"Requete invalide\"),\n");
-            sb.append("        @ApiResponse(responseCode = \"401\", description = \"Non authentifie\"),\n");
-            sb.append("        @ApiResponse(responseCode = \"403\", description = \"Acces refuse\"),\n");
-            sb.append("        @ApiResponse(responseCode = \"500\", description = \"Erreur interne du serveur\")\n");
+            sb.append("        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = \"400\", description = \"Requete invalide\"),\n");
+            sb.append("        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = \"401\", description = \"Non authentifie\"),\n");
+            sb.append("        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = \"403\", description = \"Acces refuse\"),\n");
+            sb.append("        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = \"500\", description = \"Erreur interne du serveur\")\n");
             sb.append("    })\n");
 
             // BUG 4: @PreAuthorize si @RolesAllowed detecte sur le UseCase

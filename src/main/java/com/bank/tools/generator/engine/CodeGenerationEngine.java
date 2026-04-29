@@ -847,8 +847,11 @@ public class CodeGenerationEngine {
                 import org.springframework.beans.factory.annotation.Value;
                 import org.springframework.boot.actuate.health.Health;
                 import org.springframework.boot.actuate.health.HealthIndicator;
+                import org.springframework.boot.web.client.RestTemplateBuilder;
                 import org.springframework.stereotype.Component;
                 import org.springframework.web.client.RestTemplate;
+                
+                import java.time.Duration;
                 
                 /**
                  * Health Indicator REST pour verifier la connectivite avec le backend adapter.
@@ -868,8 +871,11 @@ public class CodeGenerationEngine {
                 
                     private final RestTemplate restTemplate;
                 
-                    public AdapterHealthIndicator(RestTemplate restTemplate) {
-                        this.restTemplate = restTemplate;
+                    public AdapterHealthIndicator(RestTemplateBuilder restTemplateBuilder) {
+                        this.restTemplate = restTemplateBuilder
+                                .setConnectTimeout(Duration.ofSeconds(5))
+                                .setReadTimeout(Duration.ofSeconds(5))
+                                .build();
                     }
                 
                     @Override
