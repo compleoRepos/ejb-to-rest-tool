@@ -436,6 +436,7 @@ public class ImpactAnalysisReport {
             case MULTI_METHOD_SERVICE -> 2;
             case ACTION_HANDLER -> 3;
             case INLINE_ACTION -> 3;
+            case JSON_ADAPTER -> 0;
         };
     }
 

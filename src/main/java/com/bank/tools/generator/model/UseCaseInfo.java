@@ -45,7 +45,8 @@ public class UseCaseInfo {
         DAO_REPOSITORY("DAO/Repository (CRUD)"),
         ACTION_HANDLER("ActionHandler via SynchroneService (handle(Envelope))"),
         INLINE_ACTION("Action inline via switch/case dans SynchroneService"),
-        MULTI_METHOD_SERVICE("Service multi-methodes");
+        MULTI_METHOD_SERVICE("Service multi-methodes"),
+        JSON_ADAPTER("JSON Adapter Contract");
         private final String label;
         EjbPattern(String label) { this.label = label; }
         public String getLabel() { return label; }
@@ -123,6 +124,9 @@ public class UseCaseInfo {
     /** BIAN: Mapping vers le Service Domain BIAN */
     private BianMapping bianMapping;
 
+    /** JSON_ADAPTER: Reference vers le BackendEndpoint du contrat JSON */
+    private AdapterDescriptor.BackendEndpoint backendEndpoint;
+
     // ==================== CONSTRUCTORS ====================
 
     public UseCaseInfo() {}
@@ -131,6 +135,12 @@ public class UseCaseInfo {
 
     public BianMapping getBianMapping() { return bianMapping; }
     public void setBianMapping(BianMapping bianMapping) { this.bianMapping = bianMapping; }
+
+    public AdapterDescriptor.BackendEndpoint getBackendEndpoint() { return backendEndpoint; }
+    public void setBackendEndpoint(AdapterDescriptor.BackendEndpoint backendEndpoint) { this.backendEndpoint = backendEndpoint; }
+
+    /** Raccourci : ce UseCase provient d'un contrat JSON adapter */
+    public boolean isJsonAdapter() { return ejbPattern == EjbPattern.JSON_ADAPTER; }
 
     // ==================== GETTERS/SETTERS ====================
 

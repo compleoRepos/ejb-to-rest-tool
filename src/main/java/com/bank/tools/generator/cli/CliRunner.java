@@ -4,9 +4,11 @@ import com.bank.tools.generator.ai.EnhancementReport;
 import com.bank.tools.generator.ai.SmartCodeEnhancer;
 import com.bank.tools.generator.bian.BianMapping;
 import com.bank.tools.generator.engine.CodeGenerationEngine;
+import com.bank.tools.generator.model.InputMode;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
 import com.bank.tools.generator.model.UseCaseInfo;
 import com.bank.tools.generator.parser.EjbProjectParser;
+import com.bank.tools.generator.parser.JsonAdapterParser;
 import com.bank.tools.generator.report.ReportPdfGenerator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,15 +29,24 @@ import java.util.zip.ZipInputStream;
  * Mode CLI du generateur EJB-to-REST.
  * Active par le flag --cli sur la ligne de commande.
  *
+ * <p>Supporte deux modes d'entree :</p>
+ * <ul>
+ *   <li><b>ZIP (EJB)</b> : Archive ZIP contenant le code source EJB legacy</li>
+ *   <li><b>JSON (Adapter Contract)</b> : Fichier JSON decrivant un adapter REST backend</li>
+ * </ul>
+ *
+ * <p>Le mode est auto-detecte a partir de l'extension du fichier d'entree (.zip ou .json).</p>
+ *
  * Usage :
- *   java -jar ejb-to-rest-tool.jar --cli --input /path/to/ejb.zip --output /path/to/output [--bian] [--bian-mapping mapping.yaml] [--pdf]
+ *   java -jar ejb-to-rest-tool.jar --cli --input /path/to/file.zip --output /path/to/output [--bian] [--bian-mapping mapping.yaml] [--pdf]
+ *   java -jar ejb-to-rest-tool.jar --cli --input /path/to/contract.json --output /path/to/output [--pdf]
  *
  * Options :
  *   --cli                  Active le mode ligne de commande (obligatoire)
- *   --input PATH           Chemin vers le ZIP du projet EJB source (obligatoire)
+ *   --input PATH           Chemin vers le ZIP EJB ou le contrat JSON (obligatoire)
  *   --output PATH          Repertoire de sortie (defaut : ./output)
- *   --bian                 Active le mode BIAN
- *   --bian-mapping PATH    Fichier YAML de mapping BIAN (optionnel, implique --bian)
+ *   --bian                 Active le mode BIAN (ZIP uniquement, implicite pour JSON)
+ *   --bian-mapping PATH    Fichier YAML de mapping BIAN (ZIP uniquement, implique --bian)
  *   --pdf                  Genere un rapport PDF
  */
 @Component
@@ -48,15 +59,18 @@ public class CliRunner implements CommandLineRunner {
     private final CodeGenerationEngine engine;
     private final SmartCodeEnhancer enhancer;
     private final ReportPdfGenerator pdfGenerator;
+    private final JsonAdapterParser jsonAdapterParser;
 
     public CliRunner(EjbProjectParser parser,
                      CodeGenerationEngine engine,
                      SmartCodeEnhancer enhancer,
-                     ReportPdfGenerator pdfGenerator) {
+                     ReportPdfGenerator pdfGenerator,
+                     JsonAdapterParser jsonAdapterParser) {
         this.parser = parser;
         this.engine = engine;
         this.enhancer = enhancer;
         this.pdfGenerator = pdfGenerator;
+        this.jsonAdapterParser = jsonAdapterParser;
     }
 
     @Override
@@ -90,12 +104,7 @@ public class CliRunner implements CommandLineRunner {
         }
 
         if (inputPath == null) {
-            log.error("Usage: java -jar ejb-to-rest-tool.jar --cli --input <path.zip> [--output <dir>] [--bian] [--bian-mapping <file.yaml>] [--pdf]");
-            log.error("  --input          Chemin vers le ZIP du projet EJB source (obligatoire)");
-            log.error("  --output         Repertoire de sortie (defaut: ./output)");
-            log.error("  --bian           Active le mode BIAN");
-            log.error("  --bian-mapping   Fichier YAML de mapping BIAN (implique --bian)");
-            log.error("  --pdf            Genere un rapport PDF");
+            printUsage();
             System.exit(1);
             return;
         }
@@ -110,9 +119,72 @@ public class CliRunner implements CommandLineRunner {
         Path outputDir = Path.of(outputPath);
         Files.createDirectories(outputDir);
 
+        // Auto-detection du mode d'entree
+        InputMode inputMode = InputMode.detectFromFilename(inputFile.getFileName().toString());
+
         log.info("=== EJB-to-REST Generator — Mode CLI ===");
-        log.info("Input  : {}", inputFile.toAbsolutePath());
+        log.info("Input  : {} (mode={})", inputFile.toAbsolutePath(), inputMode.getLabel());
         log.info("Output : {}", outputDir.toAbsolutePath());
+
+        if (inputMode == InputMode.JSON_ADAPTER) {
+            runJsonPipeline(inputFile, outputDir, generatePdf);
+        } else {
+            runZipPipeline(inputFile, outputDir, bianMode, bianMappingPath, generatePdf);
+        }
+    }
+
+    // ============================================================
+    // Pipeline JSON (Adapter Contract -> Main Pipeline)
+    // ============================================================
+
+    private void runJsonPipeline(Path inputFile, Path outputDir, boolean generatePdf) throws Exception {
+        log.info("[CLI] Mode JSON Adapter : pipeline principal (BIAN + ACL)");
+
+        // Etape 1 : Lecture du contrat JSON
+        log.info("[CLI] Etape 1/4 : Lecture du contrat JSON...");
+        String jsonContent = Files.readString(inputFile);
+        log.info("[CLI] Contrat JSON lu : {} octets", jsonContent.length());
+
+        // Etape 2 : Parsing du contrat JSON en ProjectAnalysisResult
+        log.info("[CLI] Etape 2/4 : Parsing du contrat JSON...");
+        ProjectAnalysisResult analysis = jsonAdapterParser.parseFromString(jsonContent);
+        analysis.setInputMode(InputMode.JSON_ADAPTER);
+        log.info("[CLI] Contrat parse : {} UseCases, {} DTOs",
+                analysis.getUseCases().size(), analysis.getDtos().size());
+
+        // Etape 3 : Generation via le pipeline principal (bianMode=true, transport=rest)
+        log.info("[CLI] Etape 3/4 : Generation du projet Spring Boot (BIAN + ACL + REST)...");
+        Path generatedProject = engine.generateProject(analysis, outputDir, true, "rest");
+        log.info("[CLI] Projet genere dans : {}", generatedProject);
+
+        // Etape 4 : Enhancement IA
+        log.info("[CLI] Etape 4/4 : Amelioration SmartCodeEnhancer...");
+        EnhancementReport report = enhancer.enhance(generatedProject, analysis);
+        log.info("[CLI] Score qualite : {}/{} ({} regles appliquees sur {} verifiees)",
+                report.getQualityScore(), report.getTotalRulesChecked(),
+                report.getTotalRulesApplied(), report.getTotalRulesChecked());
+
+        // Rapport PDF (optionnel)
+        if (generatePdf) {
+            log.info("[CLI] Generation du rapport PDF...");
+            Path pdfPath = generatedProject.resolve("TRANSFORMATION_REPORT.pdf");
+            pdfGenerator.generateReport(pdfPath, analysis, report);
+            log.info("[CLI] Rapport PDF genere : {}", pdfPath);
+        }
+
+        log.info("=== Generation terminee avec succes (JSON Adapter -> Main Pipeline) ===");
+        log.info("Projet genere : {}", generatedProject.toAbsolutePath());
+        log.info("Score qualite : {}/{}", report.getTotalRulesApplied(), report.getTotalRulesChecked());
+
+        System.exit(0);
+    }
+
+    // ============================================================
+    // Pipeline ZIP (EJB -> Main Pipeline)
+    // ============================================================
+
+    private void runZipPipeline(Path inputFile, Path outputDir, boolean bianMode,
+                                String bianMappingPath, boolean generatePdf) throws Exception {
         log.info("BIAN   : {}", bianMode);
         log.info("BIAN Mapping : {}", bianMappingPath != null ? bianMappingPath : "(auto-detect)");
         log.info("PDF    : {}", generatePdf);
@@ -169,9 +241,29 @@ public class CliRunner implements CommandLineRunner {
         log.info("Projet genere : {}", generatedProject.toAbsolutePath());
         log.info("Score qualite : {}/{}", report.getTotalRulesApplied(), report.getTotalRulesChecked());
 
-        // Quitter proprement
         System.exit(0);
     }
+
+    // ============================================================
+    // Usage
+    // ============================================================
+
+    private void printUsage() {
+        log.error("Usage: java -jar ejb-to-rest-tool.jar --cli --input <path.zip|path.json> [--output <dir>] [--bian] [--bian-mapping <file.yaml>] [--pdf]");
+        log.error("");
+        log.error("  --input          Chemin vers le ZIP du projet EJB ou le contrat JSON adapter (obligatoire)");
+        log.error("                   L'extension du fichier determine le mode :");
+        log.error("                     .zip  -> Pipeline EJB (analyse + generation)");
+        log.error("                     .json -> Pipeline JSON Adapter (contrat -> BIAN ACL)");
+        log.error("  --output         Repertoire de sortie (defaut: ./output)");
+        log.error("  --bian           Active le mode BIAN (ZIP uniquement, implicite pour JSON)");
+        log.error("  --bian-mapping   Fichier YAML de mapping BIAN (ZIP uniquement, implique --bian)");
+        log.error("  --pdf            Genere un rapport PDF");
+    }
+
+    // ============================================================
+    // BIAN YAML Mapping
+    // ============================================================
 
     /**
      * Applique un mapping BIAN depuis un fichier YAML aux UseCases de l'analyse.

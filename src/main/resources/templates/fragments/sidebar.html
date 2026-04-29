@@ -52,6 +52,9 @@
         <a th:href="@{/adapter-wrapper}" class="sidebar-link" th:classappend="${activePage == 'adapter-wrapper' ? 'active' : ''}">
             <i class="fas fa-layer-group"></i><span>Wrapper BIAN</span>
         </a>
+        <a th:href="@{/json-import}" class="sidebar-link" th:classappend="${activePage == 'json-import' ? 'active' : ''}">
+            <i class="fas fa-file-code"></i><span>JSON &rarr; Pipeline</span>
+        </a>
 
         <div class="sidebar-section">Systeme</div>
         <a th:href="@{/logs}" class="sidebar-link" th:classappend="${activePage == 'logs' ? 'active' : ''}">

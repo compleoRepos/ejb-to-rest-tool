@@ -8,11 +8,13 @@ import com.bank.tools.generator.engine.OpenApiClientGenerator;
 import com.bank.tools.generator.engine.AdapterWrapperGenerator;
 import com.bank.tools.generator.engine.WsdlClientGenerator;
 import com.bank.tools.generator.model.AdapterContractInfo;
+import com.bank.tools.generator.model.InputMode;
 import com.bank.tools.generator.model.OpenApiContractInfo;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
 import com.bank.tools.generator.model.WsdlContractInfo;
 import com.bank.tools.generator.parser.AdapterContractParser;
 import com.bank.tools.generator.parser.EjbProjectParser;
+import com.bank.tools.generator.parser.JsonAdapterParser;
 import com.bank.tools.generator.parser.OpenApiContractParser;
 import com.bank.tools.generator.parser.WsdlContractParser;
 import org.slf4j.Logger;
@@ -63,12 +65,14 @@ public class GeneratorService {
     private final WsdlClientGenerator wsdlGenerator;
     private final AdapterContractParser adapterContractParser;
     private final AdapterWrapperGenerator adapterWrapperGenerator;
+    private final JsonAdapterParser jsonAdapterParser;
 
     public GeneratorService(AppConfig appConfig, EjbProjectParser parser,
                             CodeGenerationEngine engine, SmartCodeEnhancer enhancer,
                             OpenApiContractParser openApiParser, OpenApiClientGenerator openApiGenerator,
                             WsdlContractParser wsdlParser, WsdlClientGenerator wsdlGenerator,
-                            AdapterContractParser adapterContractParser, AdapterWrapperGenerator adapterWrapperGenerator) {
+                            AdapterContractParser adapterContractParser, AdapterWrapperGenerator adapterWrapperGenerator,
+                            JsonAdapterParser jsonAdapterParser) {
         this.appConfig = appConfig;
         this.parser = parser;
         this.engine = engine;
@@ -79,6 +83,7 @@ public class GeneratorService {
         this.wsdlGenerator = wsdlGenerator;
         this.adapterContractParser = adapterContractParser;
         this.adapterWrapperGenerator = adapterWrapperGenerator;
+        this.jsonAdapterParser = jsonAdapterParser;
     }
 
     // ============================================================
@@ -454,6 +459,64 @@ public class GeneratorService {
      */
     public Path createWrapperZip(Path wrapperProjectDir) throws IOException {
         return createPartnerClientZip(wrapperProjectDir);
+    }
+
+    // ============================================================
+    // JSON Adapter -> Main Pipeline (BIAN ACL)
+    // ============================================================
+
+    /**
+     * Genere un Wrapper BIAN via le pipeline principal (CodeGenerationEngine + AclArchitectureGenerator)
+     * a partir d'un contrat JSON adapter.
+     *
+     * <p>Contrairement a {@link #generateAdapterWrapper(MultipartFile)} qui utilise le pipeline
+     * standalone {@link AdapterWrapperGenerator}, cette methode reutilise le meme pipeline
+     * que le mode ZIP/EJB : JsonAdapterParser -> ProjectAnalysisResult -> CodeGenerationEngine
+     * -> AclArchitectureGenerator -> SmartCodeEnhancer.</p>
+     *
+     * @param jsonContent contenu JSON du contrat adapter
+     * @return chemin du projet wrapper genere
+     * @throws IOException si une erreur d'ecriture survient
+     */
+    public Path generateFromJsonContract(String jsonContent) throws IOException {
+        String projectId = "json-adapter-" + UUID.randomUUID().toString().substring(0, 8);
+
+        // 1. Parser le contrat JSON en ProjectAnalysisResult standard
+        ProjectAnalysisResult result = jsonAdapterParser.parseFromString(jsonContent);
+        result.setInputMode(InputMode.JSON_ADAPTER);
+
+        log.info("[JSON-MAIN-PIPELINE] Contrat JSON parse : {} UseCases, {} DTOs (mode={})",
+                result.getUseCases().size(), result.getDtos().size(), result.getInputMode());
+
+        // 2. Generer via le pipeline principal (meme que ZIP/EJB)
+        Path outputDir = Path.of(appConfig.getOutputDir(), projectId);
+        Files.createDirectories(outputDir);
+
+        // bianMode=true, transport=rest (les endpoints JSON sont toujours REST)
+        Path projectRoot = engine.generateProject(result, outputDir, true, "rest");
+        log.info("[JSON-MAIN-PIPELINE] Etape 1/2 : Code de base genere dans {}", projectRoot);
+
+        // 3. Amelioration IA
+        EnhancementReport report = enhancer.enhance(projectRoot, result);
+        log.info("[JSON-MAIN-PIPELINE] Etape 2/2 : Ameliorations IA - Score: {}/100, Regles: {}/{}",
+                report.getQualityScore(), report.getTotalRulesApplied(), report.getTotalRulesChecked());
+
+        generateEnhancementReportFile(projectRoot, report);
+        this.lastEnhancementReport = report;
+
+        return projectRoot;
+    }
+
+    /**
+     * Genere un Wrapper BIAN via le pipeline principal a partir d'un fichier JSON uploade.
+     *
+     * @param file fichier JSON du contrat adapter
+     * @return chemin du projet wrapper genere
+     * @throws IOException si une erreur d'ecriture survient
+     */
+    public Path generateFromJsonContractFile(MultipartFile file) throws IOException {
+        String jsonContent = new String(file.getBytes());
+        return generateFromJsonContract(jsonContent);
     }
 
     // ============================================================

@@ -88,6 +88,14 @@ public class ProjectAnalysisResult {
     /** Classes Model detectees comme sub-DTOs */
     private List<String> detectedModelClasses = new ArrayList<>();
 
+    // ==================== INPUT MODE ====================
+
+    /** Mode d'entree du pipeline (ZIP_EJB ou JSON_ADAPTER) */
+    private InputMode inputMode = InputMode.ZIP_EJB;
+
+    /** Descripteur de l'adapter backend (uniquement en mode JSON_ADAPTER) */
+    private AdapterDescriptor adapterDescriptor;
+
     // ==================== BOA/EAI FRAMEWORK SUPPORT ====================
 
     /** Parent POM framework (groupId:artifactId:version) */
@@ -392,4 +400,15 @@ public class ProjectAnalysisResult {
 
     public String getSourceJavaVersion() { return sourceJavaVersion; }
     public void setSourceJavaVersion(String sourceJavaVersion) { this.sourceJavaVersion = sourceJavaVersion; }
+
+    // ==================== INPUT MODE GETTERS/SETTERS ====================
+
+    public InputMode getInputMode() { return inputMode; }
+    public void setInputMode(InputMode inputMode) { this.inputMode = inputMode; }
+
+    public AdapterDescriptor getAdapterDescriptor() { return adapterDescriptor; }
+    public void setAdapterDescriptor(AdapterDescriptor adapterDescriptor) { this.adapterDescriptor = adapterDescriptor; }
+
+    /** Raccourci : le mode d'entree est JSON_ADAPTER */
+    public boolean isJsonAdapterMode() { return inputMode == InputMode.JSON_ADAPTER; }
 }

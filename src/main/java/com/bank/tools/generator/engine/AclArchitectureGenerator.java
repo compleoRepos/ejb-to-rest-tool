@@ -2,6 +2,8 @@ package com.bank.tools.generator.engine;
 
 import com.bank.tools.generator.bian.BianMapping;
 import com.bank.tools.generator.model.DtoInfo;
+import com.bank.tools.generator.model.AdapterDescriptor;
+import com.bank.tools.generator.model.InputMode;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
 import com.bank.tools.generator.model.UseCaseInfo;
 import org.slf4j.Logger;
@@ -3133,6 +3135,10 @@ public class AclArchitectureGenerator {
         Path dir = resolvePackagePath(srcMain, PKG_INFRA_REST_ADAPTER);
         Path file = dir.resolve(adapterName + ".java");
 
+        // Detecter si le groupe contient des endpoints JSON_ADAPTER
+        boolean isJsonAdapterMode = analysis.isJsonAdapterMode();
+        AdapterDescriptor adapterDescriptor = analysis.getAdapterDescriptor();
+
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(PKG_INFRA_REST_ADAPTER).append(";\n\n");
 
@@ -3155,6 +3161,7 @@ public class AclArchitectureGenerator {
         imports.add("import org.springframework.web.client.ResourceAccessException;");
         imports.add("import org.springframework.http.HttpEntity;");
         imports.add("import org.springframework.http.HttpHeaders;");
+        imports.add("import org.springframework.http.HttpMethod;");
         imports.add("import org.springframework.http.MediaType;");
         imports.add("import org.springframework.http.ResponseEntity;");
         imports.add("import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;");
@@ -3164,9 +3171,19 @@ public class AclArchitectureGenerator {
         for (String imp : imports) sb.append(imp).append("\n");
         sb.append("\n");
 
+        // Determiner l'URL par defaut de l'adapter
+        String defaultBaseUrl = "http://localhost:8090";
+        if (isJsonAdapterMode && adapterDescriptor != null && adapterDescriptor.getAdapterBaseUrl() != null) {
+            defaultBaseUrl = adapterDescriptor.getAdapterBaseUrl();
+        }
+
         sb.append("/**\n");
         sb.append(" * Adapter REST pour le domaine BIAN ").append(group.serviceDomainTitle).append(".\n");
-        sb.append(" * Appelle l'adapter WebSphere via HTTP/REST au lieu de l'EJB via JNDI.\n");
+        if (isJsonAdapterMode) {
+            sb.append(" * Appelle le backend REST via HTTP en utilisant les URLs du contrat JSON.\n");
+        } else {
+            sb.append(" * Appelle l'adapter WebSphere via HTTP/REST au lieu de l'EJB via JNDI.\n");
+        }
         sb.append(" *\n");
         sb.append(" * Activer ce profil avec : spring.profiles.active=rest\n");
         sb.append(" * Configurer l'URL de l'adapter dans application-rest.properties\n");
@@ -3179,7 +3196,8 @@ public class AclArchitectureGenerator {
 
         // Champs
         sb.append("    private final RestTemplate restTemplate;\n\n");
-        sb.append("    @Value(\"${adapter.websphere.base-url:http://localhost:8090}\")\n");
+        sb.append("    @Value(\"${adapter.websphere.base-url:").append(defaultBaseUrl).append("}\")");
+        sb.append("\n");
         sb.append("    private String adapterBaseUrl;\n\n");
 
         // Constructeur
@@ -3193,8 +3211,20 @@ public class AclArchitectureGenerator {
             boolean hasReturn = ep.responseDtoName != null;
             boolean hasCrRef = ep.bianMapping.getUrl() != null && ep.bianMapping.getUrl().contains("{cr-reference-id}");
 
-            // Construire le path REST vers l'adapter WebSphere
-            String adapterPath = "/api/" + toKebabCase(group.serviceDomain) + "/" + toKebabCase(ep.useCaseName);
+            // ===== JSON_ADAPTER : utiliser l'URL backend reelle du contrat JSON =====
+            boolean isJsonEndpoint = ep.useCaseInfo != null && ep.useCaseInfo.isJsonAdapter();
+            String adapterPath;
+            String backendHttpMethod;
+
+            if (isJsonEndpoint && ep.useCaseInfo.getBackendEndpoint() != null) {
+                AdapterDescriptor.BackendEndpoint backendEp = ep.useCaseInfo.getBackendEndpoint();
+                adapterPath = backendEp.getPath();
+                backendHttpMethod = backendEp.getHttpMethod() != null ? backendEp.getHttpMethod().toUpperCase() : "POST";
+            } else {
+                // Mode EJB classique : construire le path
+                adapterPath = "/api/" + toKebabCase(group.serviceDomain) + "/" + toKebabCase(ep.useCaseName);
+                backendHttpMethod = "POST";
+            }
 
             // Resilience4j annotations
             String fallbackName = ep.methodName + "Fallback";
@@ -3210,7 +3240,7 @@ public class AclArchitectureGenerator {
             sb.append(String.join(", ", params));
             sb.append(") {\n");
 
-            sb.append("        log.info(\"[REST-CALL] ").append(ep.useCaseName).append(" -> {}\", adapterBaseUrl);\n");
+            sb.append("        log.info(\"[REST-CALL] ").append(ep.useCaseName).append(" -> {} [").append(backendHttpMethod).append("]\", adapterBaseUrl);\n");
 
             // Construire l'URL
             sb.append("        String url = adapterBaseUrl + \"").append(adapterPath).append("\";\n");
@@ -3230,24 +3260,68 @@ public class AclArchitectureGenerator {
 
             sb.append("            long start = System.currentTimeMillis();\n");
 
-            if (hasReturn) {
-                sb.append("            ResponseEntity<").append(returnType).append("> response = restTemplate.postForEntity(url, entity, ").append(returnType).append(".class);\n");
-                sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.useCaseName).append(" en {}ms — HTTP {}\", System.currentTimeMillis() - start, response.getStatusCode());\n");
-                sb.append("            return response.getBody();\n");
+            // ===== Utiliser la bonne methode HTTP =====
+            if ("GET".equals(backendHttpMethod)) {
+                // GET : utiliser exchange avec HttpMethod.GET
+                if (hasReturn) {
+                    sb.append("            ResponseEntity<").append(returnType).append("> response = restTemplate.exchange(url, HttpMethod.GET, entity, ").append(returnType).append(".class);\n");
+                    sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.useCaseName).append(" en {}ms — HTTP {}\", System.currentTimeMillis() - start, response.getStatusCode());\n");
+                    sb.append("            return response.getBody();\n");
+                } else {
+                    sb.append("            restTemplate.exchange(url, HttpMethod.GET, entity, Void.class);\n");
+                    sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.useCaseName).append(" en {}ms\", System.currentTimeMillis() - start);\n");
+                }
+            } else if ("DELETE".equals(backendHttpMethod)) {
+                // DELETE : utiliser exchange avec HttpMethod.DELETE
+                if (hasReturn) {
+                    sb.append("            ResponseEntity<").append(returnType).append("> response = restTemplate.exchange(url, HttpMethod.DELETE, entity, ").append(returnType).append(".class);\n");
+                    sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.useCaseName).append(" en {}ms — HTTP {}\", System.currentTimeMillis() - start, response.getStatusCode());\n");
+                    sb.append("            return response.getBody();\n");
+                } else {
+                    sb.append("            restTemplate.exchange(url, HttpMethod.DELETE, entity, Void.class);\n");
+                    sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.useCaseName).append(" en {}ms\", System.currentTimeMillis() - start);\n");
+                }
+            } else if ("PUT".equals(backendHttpMethod)) {
+                // PUT : utiliser exchange avec HttpMethod.PUT
+                if (hasReturn) {
+                    sb.append("            ResponseEntity<").append(returnType).append("> response = restTemplate.exchange(url, HttpMethod.PUT, entity, ").append(returnType).append(".class);\n");
+                    sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.useCaseName).append(" en {}ms — HTTP {}\", System.currentTimeMillis() - start, response.getStatusCode());\n");
+                    sb.append("            return response.getBody();\n");
+                } else {
+                    sb.append("            restTemplate.exchange(url, HttpMethod.PUT, entity, Void.class);\n");
+                    sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.useCaseName).append(" en {}ms\", System.currentTimeMillis() - start);\n");
+                }
+            } else if ("PATCH".equals(backendHttpMethod)) {
+                // PATCH : utiliser exchange avec HttpMethod.PATCH
+                if (hasReturn) {
+                    sb.append("            ResponseEntity<").append(returnType).append("> response = restTemplate.exchange(url, HttpMethod.PATCH, entity, ").append(returnType).append(".class);\n");
+                    sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.useCaseName).append(" en {}ms — HTTP {}\", System.currentTimeMillis() - start, response.getStatusCode());\n");
+                    sb.append("            return response.getBody();\n");
+                } else {
+                    sb.append("            restTemplate.exchange(url, HttpMethod.PATCH, entity, Void.class);\n");
+                    sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.useCaseName).append(" en {}ms\", System.currentTimeMillis() - start);\n");
+                }
             } else {
-                sb.append("            restTemplate.postForEntity(url, entity, Void.class);\n");
-                sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.useCaseName).append(" en {}ms\", System.currentTimeMillis() - start);\n");
+                // POST (defaut)
+                if (hasReturn) {
+                    sb.append("            ResponseEntity<").append(returnType).append("> response = restTemplate.postForEntity(url, entity, ").append(returnType).append(".class);\n");
+                    sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.useCaseName).append(" en {}ms — HTTP {}\", System.currentTimeMillis() - start, response.getStatusCode());\n");
+                    sb.append("            return response.getBody();\n");
+                } else {
+                    sb.append("            restTemplate.postForEntity(url, entity, Void.class);\n");
+                    sb.append("            log.info(\"[REST-RESPONSE] ").append(ep.useCaseName).append(" en {}ms\", System.currentTimeMillis() - start);\n");
+                }
             }
 
             sb.append("        } catch (HttpClientErrorException e) {\n");
             sb.append("            log.error(\"[REST-ERROR] Erreur client HTTP {} pour ").append(ep.useCaseName).append(" : {}\", e.getStatusCode(), e.getResponseBodyAsString());\n");
-            sb.append("            throw new ApiException(\"ADAPTER_CLIENT_ERROR\", \"Erreur client adapter WebSphere : \" + e.getMessage(), e.getStatusCode().value(), e);\n");
+            sb.append("            throw new ApiException(\"ADAPTER_CLIENT_ERROR\", \"Erreur client adapter : \" + e.getMessage(), e.getStatusCode().value(), e);\n");
             sb.append("        } catch (HttpServerErrorException e) {\n");
             sb.append("            log.error(\"[REST-ERROR] Erreur serveur HTTP {} pour ").append(ep.useCaseName).append(" : {}\", e.getStatusCode(), e.getResponseBodyAsString());\n");
-            sb.append("            throw new ApiException(\"ADAPTER_SERVER_ERROR\", \"Erreur serveur adapter WebSphere : \" + e.getMessage(), e.getStatusCode().value(), e);\n");
+            sb.append("            throw new ApiException(\"ADAPTER_SERVER_ERROR\", \"Erreur serveur adapter : \" + e.getMessage(), e.getStatusCode().value(), e);\n");
             sb.append("        } catch (ResourceAccessException e) {\n");
-            sb.append("            log.error(\"[REST-ERROR] Adapter WebSphere inaccessible pour ").append(ep.useCaseName).append(" : {}\", e.getMessage());\n");
-            sb.append("            throw new ApiException(\"ADAPTER_UNREACHABLE\", \"Adapter WebSphere inaccessible : \" + e.getMessage(), 503, e);\n");
+            sb.append("            log.error(\"[REST-ERROR] Adapter inaccessible pour ").append(ep.useCaseName).append(" : {}\", e.getMessage());\n");
+            sb.append("            throw new ApiException(\"ADAPTER_UNREACHABLE\", \"Adapter backend inaccessible : \" + e.getMessage(), 503, e);\n");
             sb.append("        }\n");
             sb.append("    }\n\n");
 
@@ -3257,8 +3331,8 @@ public class AclArchitectureGenerator {
             fallbackParams.add("Throwable t");
             sb.append(String.join(", ", fallbackParams));
             sb.append(") {\n");
-            sb.append("        log.error(\"[RESILIENCE-FALLBACK] Adapter WebSphere indisponible pour ").append(ep.useCaseName).append(" — cause : {}\", t.getMessage());\n");
-            sb.append("        throw new RuntimeException(\"Adapter WebSphere temporairement indisponible (").append(ep.useCaseName).append("). Veuillez reessayer plus tard.\", t);\n");
+            sb.append("        log.error(\"[RESILIENCE-FALLBACK] Adapter backend indisponible pour ").append(ep.useCaseName).append(" — cause : {}\", t.getMessage());\n");
+            sb.append("        throw new RuntimeException(\"Adapter backend temporairement indisponible (").append(ep.useCaseName).append("). Veuillez reessayer plus tard.\", t);\n");
             sb.append("    }\n\n");
 
             // Methode Bytes supplementaire pour les endpoints byte[]

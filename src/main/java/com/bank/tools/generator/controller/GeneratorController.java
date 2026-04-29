@@ -737,6 +737,135 @@ public class GeneratorController {
     }
 
     // ============================================================
+    // JSON Adapter -> Main Pipeline (BIAN ACL)
+    // ============================================================
+
+    /**
+     * Page IHM : Import d'un contrat JSON adapter via le pipeline principal.
+     */
+    @GetMapping("/json-import")
+    public String jsonImportPage(Model model, HttpSession session) {
+        populateCommon(model, session);
+        return "json-import";
+    }
+
+    /**
+     * API : Generer un Wrapper BIAN via le pipeline principal a partir d'un fichier JSON.
+     * Utilise le meme CodeGenerationEngine + AclArchitectureGenerator que le mode ZIP/EJB.
+     */
+    @PostMapping("/api/generate-from-json-contract")
+    @ResponseBody
+    public ResponseEntity<Map<String, Object>> generateFromJsonContract(
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            @RequestBody(required = false) String jsonBody,
+            HttpSession session) {
+
+        Map<String, Object> response = new HashMap<>();
+
+        try {
+            String jsonContent;
+            if (file != null && !file.isEmpty()) {
+                jsonContent = new String(file.getBytes());
+                log.info("[API] Generation JSON Main Pipeline depuis fichier : {}", file.getOriginalFilename());
+            } else if (jsonBody != null && !jsonBody.isBlank()) {
+                jsonContent = jsonBody;
+                log.info("[API] Generation JSON Main Pipeline depuis body JSON");
+            } else {
+                response.put("success", false);
+                response.put("error", "Veuillez fournir un fichier JSON ou un contrat JSON dans le body.");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            Path wrapperProject = generatorService.generateFromJsonContract(jsonContent);
+
+            session.setAttribute("adapterWrapperPath", wrapperProject.toString());
+
+            response.put("success", true);
+            response.put("projectPath", wrapperProject.toString());
+            response.put("message", "Wrapper BIAN genere via le pipeline principal");
+            response.put("pipeline", "main");
+
+            // Lister les fichiers generes
+            try (Stream<Path> walk = Files.walk(wrapperProject)) {
+                List<String> files = walk.filter(Files::isRegularFile)
+                        .map(p -> wrapperProject.relativize(p).toString())
+                        .sorted()
+                        .collect(Collectors.toList());
+                response.put("generatedFiles", files);
+                response.put("fileCount", files.size());
+            }
+
+            // Rapport d'amelioration IA
+            EnhancementReport report = generatorService.getLastEnhancementReport();
+            if (report != null) {
+                response.put("qualityScore", report.getQualityScore());
+                response.put("rulesApplied", report.getTotalRulesApplied());
+                response.put("rulesChecked", report.getTotalRulesChecked());
+            }
+
+            return ResponseEntity.ok(response);
+        } catch (IOException | RuntimeException e) {
+            log.error("[API] Erreur generation JSON Main Pipeline", e);
+            response.put("success", false);
+            response.put("error", "Erreur lors de la generation : " + e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
+    /**
+     * API : Generer un Wrapper BIAN via le pipeline principal a partir d'un JSON brut.
+     */
+    @PostMapping("/api/generate-from-json-contract-raw")
+    @ResponseBody
+    public ResponseEntity<Map<String, Object>> generateFromJsonContractRaw(
+            @RequestBody String jsonContent,
+            HttpSession session) {
+
+        Map<String, Object> response = new HashMap<>();
+
+        if (jsonContent == null || jsonContent.isBlank()) {
+            response.put("success", false);
+            response.put("error", "Le contrat JSON est vide.");
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        try {
+            log.info("[API] Generation JSON Main Pipeline depuis JSON brut");
+            Path wrapperProject = generatorService.generateFromJsonContract(jsonContent);
+
+            session.setAttribute("adapterWrapperPath", wrapperProject.toString());
+
+            response.put("success", true);
+            response.put("projectPath", wrapperProject.toString());
+            response.put("message", "Wrapper BIAN genere via le pipeline principal");
+            response.put("pipeline", "main");
+
+            try (Stream<Path> walk = Files.walk(wrapperProject)) {
+                List<String> files = walk.filter(Files::isRegularFile)
+                        .map(p -> wrapperProject.relativize(p).toString())
+                        .sorted()
+                        .collect(Collectors.toList());
+                response.put("generatedFiles", files);
+                response.put("fileCount", files.size());
+            }
+
+            EnhancementReport report = generatorService.getLastEnhancementReport();
+            if (report != null) {
+                response.put("qualityScore", report.getQualityScore());
+                response.put("rulesApplied", report.getTotalRulesApplied());
+                response.put("rulesChecked", report.getTotalRulesChecked());
+            }
+
+            return ResponseEntity.ok(response);
+        } catch (IOException | RuntimeException e) {
+            log.error("[API] Erreur generation JSON Main Pipeline depuis JSON brut", e);
+            response.put("success", false);
+            response.put("error", "Erreur lors de la generation : " + e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
+    // ============================================================
     // Reset
     // ============================================================
     @PostMapping("/reset")
