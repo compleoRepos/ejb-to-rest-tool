@@ -31,6 +31,8 @@ import type { QualityReport } from "../engine/quality-scorer";
 import type { PipelineResult } from "../engine/pipeline/index";
 import { detectSagaCandidates, generateAllSagas, generateAllSagasWithML, SagaMLEnricher, type SagaGenerationResult } from "../engine/saga";
 import { enrichZipWithArchitecture } from "../graph/architecture-zip-enricher";
+import archiver from "archiver";
+import { storagePut } from "../storage";
 
 // ─── Types publics ────────────────────────────────────────────────────────────
 
@@ -1635,16 +1637,70 @@ export class CompleoAgent {
         }
       }
     } else {
-      // ZIP output — mark as downloadable
-      session.downloadUrl = `/api/agent/${session.id}/download`;
-      this.sessionStore.update(session.id, { downloadUrl: session.downloadUrl });
-
-      yield this.event("LOG", {
-        level: "success",
-        message: "Résultat disponible en téléchargement",
-        phase: "PUSHING",
-        data: { downloadUrl: session.downloadUrl },
-      });
+      // ZIP output — build ZIP and upload to S3 immediately for persistence
+      const projectName = session.config.options.projectName || "migration";
+      try {
+        const zipEntries = new Map<string, string>();
+        if (session.generatedProject) {
+          for (const file of session.generatedProject.files) zipEntries.set(file.path, file.content);
+          for (const file of session.generatedProject.multiTechFiles) {
+            if (!zipEntries.has(file.path)) zipEntries.set(file.path, file.content);
+          }
+        }
+        if (session.migrationReport && !zipEntries.has("MIGRATION_REPORT.md")) {
+          zipEntries.set("MIGRATION_REPORT.md", session.migrationReport);
+        }
+        if (session.microserviceResult) {
+          if (session.microserviceResult.report && !zipEntries.has("MICROSERVICES_REPORT.md")) {
+            zipEntries.set("MICROSERVICES_REPORT.md", session.microserviceResult.report);
+          }
+          if (session.microserviceResult.generatedFiles) {
+            for (const file of session.microserviceResult.generatedFiles) {
+              if (!zipEntries.has(file.path)) zipEntries.set(file.path, file.content);
+            }
+          }
+        }
+        if (session.enhancedReports?.enhanced) {
+          const reportMap: Record<string, string> = {
+            MIGRATION_REPORT: "MIGRATION_REPORT.md", MICROSERVICES_REPORT: "MICROSERVICES_REPORT.md",
+            DATASOURCE_MIGRATION: "DATASOURCE_MIGRATION.md", QUALITY_SCORE: "QUALITY_SCORE.md",
+            EXECUTIVE_SUMMARY: "EXECUTIVE_SUMMARY.md",
+          };
+          for (const [key, fileName] of Object.entries(reportMap)) {
+            const content = session.enhancedReports.reports[key];
+            if (content) zipEntries.set(fileName, content);
+          }
+        }
+        const archive = archiver("zip", { zlib: { level: 9 } });
+        const chunks: Buffer[] = [];
+        archive.on("data", (chunk: Buffer) => chunks.push(chunk));
+        for (const [filePath, content] of zipEntries) archive.append(content, { name: filePath });
+        await archive.finalize();
+        const zipBuffer = Buffer.concat(chunks);
+        const suffix = Math.random().toString(36).slice(2, 8);
+        const s3Key = `agent-artifacts/${projectName}-${suffix}.zip`;
+        const { url } = await storagePut(s3Key, zipBuffer, "application/zip");
+        session.downloadUrl = url;
+        this.sessionStore.update(session.id, { downloadUrl: url });
+        console.log(`[Agent] ZIP uploaded to S3 immediately: ${url} (${zipBuffer.length} bytes)`);
+        yield this.event("LOG", {
+          level: "success",
+          message: `ZIP persisté en S3 (${(zipBuffer.length / 1024).toFixed(0)} KB) — disponible en téléchargement`,
+          phase: "PUSHING",
+          data: { downloadUrl: url },
+        });
+      } catch (s3Err) {
+        // Fallback: mark as downloadable from memory
+        console.warn("[Agent] S3 upload failed, falling back to in-memory:", s3Err);
+        session.downloadUrl = `/api/agent/${session.id}/download`;
+        this.sessionStore.update(session.id, { downloadUrl: session.downloadUrl });
+        yield this.event("LOG", {
+          level: "warn",
+          message: "ZIP disponible en téléchargement (non persisté en S3)",
+          phase: "PUSHING",
+          data: { downloadUrl: session.downloadUrl },
+        });
+      }
     }
 
     yield this.event("PHASE_END", {

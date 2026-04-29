@@ -15,10 +15,13 @@
 import { Router, type Express, type Request, type Response } from "express";
 import { getAgent, getAgentStore, type AgentConfig, type AgentEvent } from "./agent/CompleoAgent";
 import * as db from "./db";
+import { getDb } from "./db";
 import archiver from "archiver";
 import { LearningEngine } from "./learning/LearningEngine";
 import type { ChoiceWithAutoResolve } from "./learning/ConfidenceScorer";
 import { storagePut } from "./storage";
+import { agentSessions } from "../drizzle/schema";
+import { eq, desc } from "drizzle-orm";
 
 const learningEngine = new LearningEngine();
 
@@ -239,10 +242,23 @@ export function registerAgentRoutes(app: Express) {
   router.get("/:id/download", async (req: Request, res: Response) => {
     const { id } = req.params;
     const store = getAgentStore();
-    const session = store.get(id);
+    let session = store.get(id);
 
+    // ─── v10.2: If session not in memory, try to find ZIP URL in DB ───────
     if (!session) {
-      return res.status(404).json({ error: "Session introuvable" });
+      try {
+        const database = await getDb();
+        if (database) {
+          const [row] = await database.select().from(agentSessions).where(eq(agentSessions.id, id)).limit(1);
+          if (row?.zipUrl && row.zipUrl.startsWith("http")) {
+            console.log(`[Agent] Download from DB-persisted S3 URL: ${row.zipUrl}`);
+            return res.redirect(row.zipUrl);
+          }
+        }
+      } catch (dbErr) {
+        console.warn("[Agent] DB lookup for download failed:", dbErr);
+      }
+      return res.status(404).json({ error: "Session introuvable — le ZIP n'est plus disponible. Veuillez relancer l'analyse." });
     }
 
     if (session.state !== "COMPLETED") {
@@ -251,15 +267,30 @@ export function registerAgentRoutes(app: Express) {
 
     const projectName = session.config.options.projectName || "migration";
 
-    // ─── v10.0: Check if ZIP is already persisted in S3 ─────────────────
+    // ─── v10.2: Check if ZIP is already persisted in S3 ─────────────────
     // If downloadUrl is an S3 URL (starts with http), redirect to it
     if (session.downloadUrl && session.downloadUrl.startsWith("http")) {
       return res.redirect(session.downloadUrl);
     }
+    // Also check DB for S3 URL in case in-memory session lost it after restart
+    try {
+      const database = await getDb();
+      if (database) {
+        const [row] = await database.select().from(agentSessions).where(eq(agentSessions.id, id)).limit(1);
+        if (row?.zipUrl && row.zipUrl.startsWith("http")) {
+          session.downloadUrl = row.zipUrl;
+          store.update(id, { downloadUrl: row.zipUrl });
+          console.log(`[Agent] Download restored from DB: ${row.zipUrl}`);
+          return res.redirect(row.zipUrl);
+        }
+      }
+    } catch (dbErr) {
+      console.warn("[Agent] DB fallback lookup failed:", dbErr);
+    }
 
     // ─── Build ZIP from in-memory data ──────────────────────────────────
     if (!session.generatedProject) {
-      return res.status(400).json({ error: "Aucun projet généré" });
+      return res.status(400).json({ error: "Aucun projet généré — les données en mémoire ont été perdues. Veuillez relancer l'analyse." });
     }
 
     // FIX v5.8.1: Deduplicate ALL files in the ZIP using a Map (path → content)
@@ -504,27 +535,66 @@ export function registerAgentRoutes(app: Express) {
   });
 
   // ─── GET /api/agent/sessions ────────────────────────────────────────────────
-  // v10.0: Return artifact availability info so the frontend knows what's downloadable
-  router.get("/sessions", (_req: Request, res: Response) => {
+  // v10.2: Merge in-memory sessions + DB-persisted sessions for full artifact visibility
+  router.get("/sessions", async (_req: Request, res: Response) => {
     const store = getAgentStore();
-    const sessions = store.list().map((s) => ({
+    // 1. In-memory sessions (highest priority — most up-to-date)
+    const memorySessions = store.list().map((s) => ({
       id: s.id,
       state: s.state,
       currentPhase: s.currentPhase,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
       eventCount: s.events.length,
-      projectName: s.config.options.projectName,
+      projectName: s.config.options.projectName || null,
+      gitUrl: s.config.source.type === "git" ? (s.config.source as any).url : null,
       sourceType: s.config.source.type,
       outputType: s.config.output.type,
-      // v10.0: Artifact availability
       hasZip: !!(s.downloadUrl),
+      downloadUrl: s.downloadUrl || null,
       hasReports: !!(s.enhancedReports?.enhanced),
       hasMicroservices: !!(s.microserviceResult),
       hasSagas: !!(s.sagaResult),
       qualityGrade: s.qualityScore?.grade ?? null,
     }));
-
+    // 2. DB sessions (fallback for sessions lost after server restart)
+    let dbSessions: typeof memorySessions = [];
+    try {
+      const database = await getDb();
+      if (database) {
+        const memoryIds = new Set(memorySessions.map((s) => s.id));
+        const rows = await database.select().from(agentSessions)
+          .orderBy(desc(agentSessions.updatedAt))
+          .limit(100);
+        dbSessions = rows
+          .filter((row) => !memoryIds.has(row.id))
+          .map((row) => {
+            const config = row.configData as AgentConfig | null;
+            return {
+              id: row.id,
+              state: row.state as any,
+              currentPhase: row.currentPhase as any,
+              createdAt: row.createdAt ? new Date(row.createdAt).getTime() : 0,
+              updatedAt: row.updatedAt ? new Date(row.updatedAt).getTime() : 0,
+              eventCount: (row.eventsData as any[] | null)?.length ?? 0,
+              projectName: row.projectName || null,
+              gitUrl: config?.source?.type === "git" ? (config.source as any).url : null,
+              sourceType: config?.source?.type || "zip",
+              outputType: config?.output?.type || "zip",
+              hasZip: !!(row.zipUrl),
+              downloadUrl: row.zipUrl || null,
+              hasReports: !!(row.enhancedReportsData as any)?.enhanced,
+              hasMicroservices: !!(row.microserviceResultData),
+              hasSagas: !!(row.sagaResultData),
+              qualityGrade: (row.qualityScoreData as any)?.grade ?? null,
+            };
+          });
+      }
+    } catch (dbErr) {
+      console.warn("[Agent] Failed to load DB sessions:", dbErr);
+    }
+    // 3. Merge: memory first, then DB-only sessions
+    const sessions = [...memorySessions, ...dbSessions];
     res.json({ sessions });
   });
 

@@ -160,6 +160,7 @@ interface AgentArtifact {
   createdAt: number;
   updatedAt: number;
   projectName: string;
+  gitUrl: string | null;
   hasZip: boolean;
   hasReports: boolean;
   hasMicroservices: boolean;
@@ -167,12 +168,12 @@ interface AgentArtifact {
   qualityGrade: string | null;
 }
 
-function useAgentArtifacts(projectName: string | undefined): { artifacts: AgentArtifact[]; loading: boolean } {
+function useAgentArtifacts(projectName: string | undefined, gitUrl?: string | null): { artifacts: AgentArtifact[]; loading: boolean } {
   const [artifacts, setArtifacts] = useState<AgentArtifact[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!projectName) return;
+    if (!projectName && !gitUrl) return;
     let cancelled = false;
     const fetchArtifacts = async () => {
       setLoading(true);
@@ -180,10 +181,18 @@ function useAgentArtifacts(projectName: string | undefined): { artifacts: AgentA
         const res = await fetch("/api/agent/sessions");
         if (!res.ok) { setLoading(false); return; }
         const json = await res.json();
-        const sessions = (json.sessions || []) as AgentArtifact[];
-        // Filter completed sessions for this project
+        const sessions = ((json.sessions || []) as any[]).map((s: any) => ({
+          ...s,
+          sessionId: s.id || s.sessionId,
+        })) as AgentArtifact[];
+        // v10.2: Match by projectName OR gitUrl for robust artifact discovery
         const matching = sessions
-          .filter((s) => s.state === "COMPLETED" && s.projectName === projectName)
+          .filter((s) => {
+            if (s.state !== "COMPLETED" || !s.hasZip) return false;
+            if (projectName && s.projectName === projectName) return true;
+            if (gitUrl && s.gitUrl && s.gitUrl === gitUrl) return true;
+            return false;
+          })
           .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
         if (!cancelled) setArtifacts(matching);
       } catch {
@@ -194,7 +203,7 @@ function useAgentArtifacts(projectName: string | undefined): { artifacts: AgentA
     };
     fetchArtifacts();
     return () => { cancelled = true; };
-  }, [projectName]);
+  }, [projectName, gitUrl]);
 
   return { artifacts, loading };
 }
@@ -539,7 +548,7 @@ export default function ProjectDetail({ id }: { id: number }) {
   const { data: project, isLoading: projectLoading } = trpc.projects.getById.useQuery({ id });
   const { data: scans, isLoading: scansLoading } = trpc.scans.list.useQuery({ projectId: id });
   const { sagaInfo, loading: sagaLoading } = useSagaInfo(project?.name);
-  const { artifacts, loading: artifactsLoading } = useAgentArtifacts(project?.name);
+  const { artifacts, loading: artifactsLoading } = useAgentArtifacts(project?.name, project?.gitUrl);
 
   if (projectLoading || scansLoading) return <ProjectDetailSkeleton />;
 

@@ -259,7 +259,8 @@ public class App {
   // ─── Test: maxIterations respecté ─────────────────────────────────
 
   it("should respect maxIterations limit", async () => {
-    // Create a project with an unfixable error
+    // Disable LLM to avoid timeout in test env (LLM not available)
+    const noLlmLoop = new CompilationLoop({ enableLLM: false });
     const project: GeneratedFile[] = [
       {
         path: "src/main/java/com/example/service/BrokenService.java",
@@ -276,7 +277,7 @@ public class BrokenService {
       },
     ];
 
-    const result = await loop.run(project, 3);
+    const result = await noLlmLoop.run(project, 3);
     expect(result.totalAttempts).toBeLessThanOrEqual(3);
   });
 });
