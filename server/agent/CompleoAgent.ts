@@ -1516,6 +1516,22 @@ export class CompleoAgent {
           data: { file: fix.file },
         });
       }
+      // Emit LLM self-healing events
+      for (const llmFix of iteration.llmFixes) {
+        yield this.event("AUTO_FIX", {
+          phase: "COMPILING",
+          message: `[LLM Self-Healing] ${llmFix.description} (confiance: ${llmFix.confidence})`,
+          data: { file: llmFix.file, backend: llmFix.backend, confidence: llmFix.confidence },
+        });
+      }
+    }
+    // Emit LLM stats summary if LLM was used
+    if (loopResult.llmStats.totalCalls > 0) {
+      yield this.event("LOG", {
+        level: "info",
+        message: `LLM Self-Healing: ${loopResult.llmStats.successfulFixes}/${loopResult.llmStats.totalCalls} corrections réussies (backend: ${loopResult.llmStats.backend})`,
+        phase: "COMPILING",
+      });
     }
 
     const statusMsg = {

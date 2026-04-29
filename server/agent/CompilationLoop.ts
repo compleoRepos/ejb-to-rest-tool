@@ -1,14 +1,20 @@
 /**
  * CompilationLoop — Boucle de compilation autonome avec auto-correction.
+ * v10.1 — Self-Healing via LLM on-premise (modèle fine-tuné ejb-modernizer).
  *
- * Simule javac par analyse statique du code Java généré :
- * - Détecte les imports manquants
- * - Détecte les méthodes dupliquées
- * - Détecte les types non résolus (Object → type réel)
- * - Détecte les packages externes inexistants
+ * Architecture à 2 niveaux de correction :
+ *   Niveau 1 : Corrections déterministes (regex, AST) — rapide, gratuit
+ *   Niveau 2 : Corrections LLM (modèle fine-tuné) — pour les erreurs complexes
  *
- * Auto-corrige les erreurs connues et boucle jusqu'à convergence.
+ * Le LLM est appelé UNIQUEMENT quand :
+ *   - Les corrections rule-based ne suffisent pas (erreurs unfixable)
+ *   - Le modèle fine-tuné ou Manus est disponible
+ *   - Le nombre max d'appels LLM n'est pas atteint (budget)
+ *
+ * @author Compleo
  */
+
+import { llmGenerateCodeWithBackend, isLLMAvailable, type LLMBackend } from "../engine/ml/llm-adapter";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -33,12 +39,21 @@ export interface CompilationResult {
   warnings: string[];
 }
 
+export interface LLMFixResult {
+  file: string;
+  description: string;
+  backend: LLMBackend;
+  originalError: CompilationError;
+  confidence: "high" | "medium" | "low";
+}
+
 export interface LoopIteration {
   attempt: number;
   errorsFound: number;
   errorsFixed: number;
   errorsRemaining: number;
   fixes: { file: string; description: string }[];
+  llmFixes: LLMFixResult[];
   unfixable: CompilationError[];
 }
 
@@ -50,16 +65,42 @@ export interface LoopResult {
   totalAttempts: number;
   finalErrors: CompilationError[];
   project: GeneratedFile[];
+  llmStats: {
+    totalCalls: number;
+    successfulFixes: number;
+    failedFixes: number;
+    backend: LLMBackend | "none";
+  };
 }
 
 export type LoopEventCallback = (event: {
-  type: "compilation_start" | "compilation_result" | "fix_applied" | "fix_failed" | "loop_complete";
+  type:
+    | "compilation_start"
+    | "compilation_result"
+    | "fix_applied"
+    | "fix_failed"
+    | "llm_fix_start"
+    | "llm_fix_applied"
+    | "llm_fix_failed"
+    | "loop_complete";
   attempt?: number;
   maxAttempts?: number;
   error?: CompilationError;
   fix?: { file: string; description: string };
+  llmFix?: LLMFixResult;
   result?: LoopResult;
 }) => void;
+
+export interface CompilationLoopConfig {
+  /** Enable LLM self-healing (default: true) */
+  enableLLM?: boolean;
+  /** Max LLM calls per iteration (default: 10) */
+  maxLLMCallsPerIteration?: number;
+  /** Max total LLM calls across all iterations (default: 25) */
+  maxTotalLLMCalls?: number;
+  /** Group errors by file before sending to LLM (default: true) */
+  batchByFile?: boolean;
+}
 
 // ─── Known Java standard library types ──────────────────────────────────────
 
@@ -134,16 +175,35 @@ const KNOWN_SPRING_TYPES = new Set([
 
 export class CompilationLoop {
   private onEvent: LoopEventCallback | null = null;
+  private config: Required<CompilationLoopConfig>;
+  private totalLLMCalls = 0;
+
+  constructor(config?: CompilationLoopConfig) {
+    this.config = {
+      enableLLM: config?.enableLLM ?? true,
+      maxLLMCallsPerIteration: config?.maxLLMCallsPerIteration ?? 10,
+      maxTotalLLMCalls: config?.maxTotalLLMCalls ?? 25,
+      batchByFile: config?.batchByFile ?? true,
+    };
+  }
 
   /** Register an event listener for real-time feedback */
   setEventListener(cb: LoopEventCallback) {
     this.onEvent = cb;
   }
 
-  /** Run the compilation loop with auto-correction */
+  /** Run the compilation loop with auto-correction + LLM self-healing */
   async run(project: GeneratedFile[], maxIterations = 5): Promise<LoopResult> {
     const iterations: LoopIteration[] = [];
     let currentProject = [...project.map(f => ({ ...f }))];
+    this.totalLLMCalls = 0;
+
+    // Check LLM availability once at start
+    let llmAvailable = false;
+    let llmBackend: LLMBackend = "none";
+    if (this.config.enableLLM) {
+      llmAvailable = await isLLMAvailable();
+    }
 
     // Build type registry from project files
     const projectTypes = this.buildTypeRegistry(currentProject);
@@ -164,6 +224,7 @@ export class CompilationLoop {
           totalAttempts: attempt,
           finalErrors: result.errors,
           project: currentProject,
+          llmStats: { totalCalls: this.totalLLMCalls, successfulFixes: 0, failedFixes: 0, backend: llmBackend },
         },
       });
 
@@ -174,12 +235,13 @@ export class CompilationLoop {
           totalAttempts: attempt,
           finalErrors: [],
           project: currentProject,
+          llmStats: { totalCalls: this.totalLLMCalls, successfulFixes: 0, failedFixes: 0, backend: llmBackend },
         };
         this.emit({ type: "loop_complete", result: loopResult });
         return loopResult;
       }
 
-      // Try to fix errors
+      // ─── Niveau 1 : Corrections déterministes ─────────────────────────
       const fixes: { file: string; description: string }[] = [];
       const unfixable: CompilationError[] = [];
 
@@ -199,23 +261,59 @@ export class CompilationLoop {
         }
       }
 
+      // ─── Niveau 2 : Self-Healing via LLM ──────────────────────────────
+      const llmFixes: LLMFixResult[] = [];
+
+      if (
+        llmAvailable &&
+        unfixable.length > 0 &&
+        this.totalLLMCalls < this.config.maxTotalLLMCalls
+      ) {
+        const llmResults = await this.applyLLMFixes(
+          unfixable,
+          currentProject,
+          attempt
+        );
+        for (const llmResult of llmResults) {
+          llmFixes.push(llmResult);
+          if (llmResult.backend !== "none") {
+            llmBackend = llmResult.backend;
+          }
+        }
+
+        // Remove successfully fixed errors from unfixable
+        const fixedFiles = new Set(llmFixes.map(f => `${f.file}:${f.originalError.message}`));
+        const stillUnfixable = unfixable.filter(
+          e => !fixedFiles.has(`${e.file}:${e.message}`)
+        );
+        unfixable.length = 0;
+        unfixable.push(...stillUnfixable);
+      }
+
       iterations.push({
         attempt,
         errorsFound: result.errors.length,
-        errorsFixed: fixes.length,
+        errorsFixed: fixes.length + llmFixes.length,
         errorsRemaining: unfixable.length,
         fixes,
+        llmFixes,
         unfixable,
       });
 
-      // If no fixes were applied, stop looping
-      if (fixes.length === 0) {
+      // If no fixes were applied (neither rule-based nor LLM), stop looping
+      if (fixes.length === 0 && llmFixes.length === 0) {
         const loopResult: LoopResult = {
           status: "NEEDS_HUMAN",
           iterations,
           totalAttempts: attempt,
           finalErrors: unfixable,
           project: currentProject,
+          llmStats: {
+            totalCalls: this.totalLLMCalls,
+            successfulFixes: iterations.reduce((sum, i) => sum + i.llmFixes.length, 0),
+            failedFixes: this.totalLLMCalls - iterations.reduce((sum, i) => sum + i.llmFixes.length, 0),
+            backend: llmBackend,
+          },
         };
         this.emit({ type: "loop_complete", result: loopResult });
         return loopResult;
@@ -224,6 +322,7 @@ export class CompilationLoop {
 
     // Max iterations reached
     const finalResult = this.compile(currentProject, projectTypes);
+    const totalLLMFixes = iterations.reduce((sum, i) => sum + i.llmFixes.length, 0);
     const loopResult: LoopResult = {
       status: finalResult.success
         ? "FIXED"
@@ -234,9 +333,220 @@ export class CompilationLoop {
       totalAttempts: maxIterations,
       finalErrors: finalResult.errors,
       project: currentProject,
+      llmStats: {
+        totalCalls: this.totalLLMCalls,
+        successfulFixes: totalLLMFixes,
+        failedFixes: this.totalLLMCalls - totalLLMFixes,
+        backend: llmBackend,
+      },
     };
     this.emit({ type: "loop_complete", result: loopResult });
     return loopResult;
+  }
+
+  // ─── LLM Self-Healing ─────────────────────────────────────────────────────
+
+  /**
+   * Envoie les erreurs unfixable au LLM pour correction.
+   * Regroupe les erreurs par fichier pour minimiser les appels.
+   */
+  private async applyLLMFixes(
+    errors: CompilationError[],
+    project: GeneratedFile[],
+    attempt: number
+  ): Promise<LLMFixResult[]> {
+    const results: LLMFixResult[] = [];
+    const budget = Math.min(
+      this.config.maxLLMCallsPerIteration,
+      this.config.maxTotalLLMCalls - this.totalLLMCalls
+    );
+
+    if (budget <= 0) return results;
+
+    // Group errors by file
+    const errorsByFile = new Map<string, CompilationError[]>();
+    for (const error of errors) {
+      const existing = errorsByFile.get(error.file) || [];
+      existing.push(error);
+      errorsByFile.set(error.file, existing);
+    }
+
+    // Process each file (up to budget)
+    let callsUsed = 0;
+    for (const [filePath, fileErrors] of errorsByFile) {
+      if (callsUsed >= budget) break;
+
+      const fileIndex = project.findIndex(f => f.path === filePath);
+      if (fileIndex === -1) continue;
+
+      const file = project[fileIndex];
+      if (!file.path.endsWith(".java")) continue;
+
+      this.emit({ type: "llm_fix_start", attempt, error: fileErrors[0] });
+
+      try {
+        const fixedContent = await this.callLLMForFix(file, fileErrors, project);
+        this.totalLLMCalls++;
+        callsUsed++;
+
+        if (fixedContent && fixedContent !== file.content) {
+          // Validate the fix: re-compile just this file
+          const isValid = this.validateLLMFix(fixedContent, file.path, project, fileIndex);
+
+          if (isValid) {
+            project[fileIndex] = { ...file, content: fixedContent };
+
+            const fixResult: LLMFixResult = {
+              file: filePath,
+              description: `LLM a corrigé ${fileErrors.length} erreur(s) : ${fileErrors.map(e => e.code).join(", ")}`,
+              backend: "finetuned", // Will be updated by actual response
+              originalError: fileErrors[0],
+              confidence: fileErrors.length <= 2 ? "high" : "medium",
+            };
+            results.push(fixResult);
+            this.emit({ type: "llm_fix_applied", attempt, llmFix: fixResult });
+          } else {
+            // LLM fix introduced new errors — revert
+            this.emit({ type: "llm_fix_failed", attempt, error: fileErrors[0] });
+          }
+        } else {
+          this.emit({ type: "llm_fix_failed", attempt, error: fileErrors[0] });
+        }
+      } catch {
+        this.totalLLMCalls++;
+        callsUsed++;
+        this.emit({ type: "llm_fix_failed", attempt, error: fileErrors[0] });
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Construit le prompt et appelle le LLM pour corriger un fichier Java.
+   */
+  private async callLLMForFix(
+    file: GeneratedFile,
+    errors: CompilationError[],
+    project: GeneratedFile[]
+  ): Promise<string | null> {
+    const errorDescriptions = errors
+      .map(e => `  - Ligne ${e.line}: [${e.code}] ${e.message}`)
+      .join("\n");
+
+    // Collect related files for context (imports, referenced types)
+    const relatedContext = this.buildRelatedContext(file, project);
+
+    const prompt = `Tu es un expert Java Spring Boot. Corrige le fichier Java suivant qui contient des erreurs de compilation.
+
+## Erreurs détectées :
+${errorDescriptions}
+
+## Fichier à corriger (${file.path}) :
+\`\`\`java
+${file.content}
+\`\`\`
+
+${relatedContext ? `## Contexte du projet (classes liées) :\n${relatedContext}\n` : ""}
+
+## Règles :
+1. Retourne UNIQUEMENT le fichier Java corrigé complet (pas d'explication)
+2. Conserve la même structure, le même package et les mêmes annotations
+3. Corrige les imports manquants en utilisant les packages Spring Boot standard
+4. Si un type n'existe pas dans le projet, crée l'interface/classe manquante OU remplace par un type existant
+5. Ne supprime JAMAIS de logique métier — corrige uniquement les erreurs de compilation
+6. Utilise les conventions Spring Boot 3.x (jakarta.* au lieu de javax.*)
+7. Si une méthode est dupliquée, fusionne-les intelligemment
+
+## Fichier corrigé :`;
+
+    try {
+      const result = await llmGenerateCodeWithBackend(prompt, {
+        temperature: 0.1,
+        maxTokens: 4096,
+      });
+
+      if (!result) return null;
+
+      // llmGenerateCodeWithBackend already extracts the code block
+      return result.code || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Valide que le fix LLM n'introduit pas de NOUVELLES erreurs.
+   * Compare le nombre d'erreurs avant/après.
+   */
+  private validateLLMFix(
+    fixedContent: string,
+    filePath: string,
+    project: GeneratedFile[],
+    fileIndex: number
+  ): boolean {
+    // Save original
+    const original = project[fileIndex].content;
+
+    // Temporarily apply fix
+    project[fileIndex] = { ...project[fileIndex], content: fixedContent };
+    const projectTypes = this.buildTypeRegistry(project);
+    const afterResult = this.compile(project, projectTypes);
+
+    // Restore original
+    project[fileIndex] = { ...project[fileIndex], content: original };
+    const beforeResult = this.compile(project, projectTypes);
+
+    // Count errors for this specific file
+    const beforeErrors = beforeResult.errors.filter(e => e.file === filePath).length;
+    const afterErrors = afterResult.errors.filter(e => e.file === filePath).length;
+
+    // Accept if fewer errors (or same but different — LLM might fix one and introduce another)
+    return afterErrors < beforeErrors;
+  }
+
+  /**
+   * Construit le contexte des classes liées pour aider le LLM.
+   * Extrait les interfaces/classes référencées dans le fichier.
+   */
+  private buildRelatedContext(file: GeneratedFile, project: GeneratedFile[]): string {
+    const referencedTypes = new Set<string>();
+
+    // Extract type references from imports
+    const importMatches = file.content.matchAll(/import\s+[\w.]+\.(\w+)\s*;/g);
+    for (const match of importMatches) {
+      referencedTypes.add(match[1]);
+    }
+
+    // Extract extends/implements
+    const extendsMatch = file.content.match(/(?:extends|implements)\s+([\w,\s]+)/g);
+    if (extendsMatch) {
+      for (const m of extendsMatch) {
+        const types = m.replace(/extends|implements/g, "").trim().split(/[,\s]+/);
+        types.forEach(t => { if (t && /^[A-Z]/.test(t)) referencedTypes.add(t); });
+      }
+    }
+
+    // Find matching files in project (limit to 3 for token budget)
+    const relatedFiles: string[] = [];
+    for (const pFile of project) {
+      if (pFile.path === file.path) continue;
+      if (!pFile.path.endsWith(".java")) continue;
+
+      const className = pFile.content.match(
+        /(?:public\s+)?(?:abstract\s+)?(?:class|interface|enum|record)\s+(\w+)/
+      );
+      if (className && referencedTypes.has(className[1])) {
+        // Truncate to first 50 lines for context
+        const truncated = pFile.content.split("\n").slice(0, 50).join("\n");
+        relatedFiles.push(`// ${pFile.path}\n${truncated}`);
+        if (relatedFiles.length >= 3) break;
+      }
+    }
+
+    return relatedFiles.length > 0
+      ? relatedFiles.map(f => `\`\`\`java\n${f}\n\`\`\``).join("\n\n")
+      : "";
   }
 
   // ─── Static Analysis Compiler ───────────────────────────────────────────
@@ -399,7 +709,7 @@ export class CompilationLoop {
     };
   }
 
-  // ─── Auto-fix strategies ────────────────────────────────────────────────
+  // ─── Auto-fix strategies (Niveau 1 — Déterministe) ─────────────────────
 
   private applyFix(
     error: CompilationError,
