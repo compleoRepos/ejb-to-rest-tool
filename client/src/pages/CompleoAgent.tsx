@@ -28,7 +28,7 @@ import SagaViewer from "@/components/compleo/SagaViewer";
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface AgentEvent {
-  type: "PHASE_START" | "PHASE_END" | "LOG" | "AMBIGUITY_DETECTED" | "AWAITING_INPUT" | "SUCCESS" | "FAILURE" | "CANCELLED";
+  type: "PHASE_START" | "PHASE_END" | "LOG" | "AUTO_FIX" | "COMPILATION_ATTEMPT" | "AMBIGUITY_DETECTED" | "AWAITING_INPUT" | "SUCCESS" | "FAILURE" | "CANCELLED";
   timestamp: number;
   level?: "info" | "warning" | "error" | "success";
   message?: string;
@@ -451,6 +451,12 @@ export default function CompleoAgentPage() {
   const logEvents = events.filter((e) => e.type === "LOG");
   const errorCount = logEvents.filter((e) => e.level === "error").length;
   const warningCount = logEvents.filter((e) => e.level === "warning").length;
+
+  // v10.3: Count LLM AI corrections
+  const autoFixEvents = events.filter((e) => e.type === "AUTO_FIX");
+  const llmFixCount = autoFixEvents.filter((e) => e.message?.includes("[LLM Self-Healing]")).length;
+  const ruleFixCount = autoFixEvents.length - llmFixCount;
+  const totalFixCount = autoFixEvents.length;
 
   const canStart = queryProjectId
     ? !!projectFromDb
@@ -881,6 +887,22 @@ export default function CompleoAgentPage() {
                         <span>Agent Output</span>
                         {isRunning && <Radio className="w-3 h-3 text-emerald-400 animate-pulse" />}
                       </div>
+                      {/* v10.3: Badge corrections IA */}
+                      {totalFixCount > 0 && (
+                        <div className="flex items-center gap-2">
+                          {llmFixCount > 0 && (
+                            <Badge variant="secondary" className="bg-purple-500/20 text-purple-300 border-purple-500/30 text-[10px] font-mono">
+                              <Zap className="w-3 h-3 mr-1" />
+                              {llmFixCount} correction{llmFixCount > 1 ? "s" : ""} IA
+                            </Badge>
+                          )}
+                          {ruleFixCount > 0 && (
+                            <Badge variant="secondary" className="bg-cyan-500/20 text-cyan-300 border-cyan-500/30 text-[10px] font-mono">
+                              {ruleFixCount} auto-fix
+                            </Badge>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <ScrollArea className="h-[500px]">
                       <div className="p-3 space-y-0.5 font-mono text-xs">
@@ -900,6 +922,30 @@ export default function CompleoAgentPage() {
                             return (
                               <div key={i} className="flex items-center gap-2 py-0.5 text-muted-foreground">
                                 <span className="ml-5">✓ {event.phase} terminé</span>
+                              </div>
+                            );
+                          }
+                          if (event.type === "AUTO_FIX") {
+                            const isLLM = event.message?.includes("[LLM Self-Healing]");
+                            return (
+                              <div key={i} className="flex items-start gap-2 py-0.5">
+                                <Zap className={`w-3.5 h-3.5 ${isLLM ? "text-purple-400" : "text-cyan-400"}`} />
+                                <span className={isLLM ? "text-purple-300" : "text-cyan-300"}>
+                                  {event.message}
+                                </span>
+                                {event.data?.confidence ? (
+                                  <Badge variant="outline" className="text-[9px] px-1 py-0 border-purple-500/30 text-purple-300">
+                                    {String(event.data.confidence)}
+                                  </Badge>
+                                ) : null}
+                              </div>
+                            );
+                          }
+                          if (event.type === "COMPILATION_ATTEMPT") {
+                            return (
+                              <div key={i} className="flex items-start gap-2 py-0.5">
+                                <Terminal className="w-3.5 h-3.5 text-amber-400" />
+                                <span className="text-amber-300">{event.message}</span>
                               </div>
                             );
                           }

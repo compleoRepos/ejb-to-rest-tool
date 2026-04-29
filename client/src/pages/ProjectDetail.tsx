@@ -166,6 +166,7 @@ interface AgentArtifact {
   hasMicroservices: boolean;
   hasSagas: boolean;
   qualityGrade: string | null;
+  llmStats: { totalCalls: number; successfulFixes: number; failedFixes: number; backend: string } | null;
 }
 
 function useAgentArtifacts(projectName: string | undefined, gitUrl?: string | null): { artifacts: AgentArtifact[]; loading: boolean } {
@@ -277,6 +278,12 @@ function ArtifactsCard({ artifacts, loading, onNavigate }: {
             {latest.hasSagas && (
               <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/20 gap-1">
                 <Workflow className="w-3 h-3" /> Sagas
+              </Badge>
+            )}
+            {/* v10.3: Badge corrections IA */}
+            {latest.llmStats && latest.llmStats.successfulFixes > 0 && (
+              <Badge variant="outline" className="bg-purple-500/10 text-purple-400 border-purple-500/20 gap-1">
+                <Activity className="w-3 h-3" /> {latest.llmStats.successfulFixes} correction{latest.llmStats.successfulFixes > 1 ? "s" : ""} IA
               </Badge>
             )}
           </div>

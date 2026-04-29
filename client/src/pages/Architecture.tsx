@@ -140,6 +140,7 @@ export default function ArchitecturePage({ projectId }: { projectId?: number }) 
   const [activeTab, setActiveTab] = useState("overview");
 
   // Load available sessions and pre-select from URL query param
+  // v10.3: Filter sessions by project.name when navigating from /architecture/:projectId
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const sessionIdFromUrl = urlParams.get("sessionId");
@@ -152,16 +153,20 @@ export default function ArchitecturePage({ projectId }: { projectId?: number }) 
         const analyzed = sessionList.filter(
           (s: any) => s.status === "analyzed" || s.status === "generated" || s.status === "waiting_choices" || s.status === "missing_deps"
         );
-        setSessions(analyzed);
+        // v10.3: Filter by project name when accessed from a specific project
+        const projectFiltered = project?.name
+          ? analyzed.filter((s: any) => s.projectName === project.name)
+          : analyzed;
+        setSessions(projectFiltered);
         // Pre-select session from URL param, or fall back to first session
-        if (sessionIdFromUrl && analyzed.some((s: any) => s.id === sessionIdFromUrl)) {
+        if (sessionIdFromUrl && projectFiltered.some((s: any) => s.id === sessionIdFromUrl)) {
           setSelectedSessionId(sessionIdFromUrl);
-        } else if (analyzed.length > 0 && !selectedSessionId) {
-          setSelectedSessionId(analyzed[0].id);
+        } else if (projectFiltered.length > 0 && !selectedSessionId) {
+          setSelectedSessionId(projectFiltered[0].id);
         }
       })
       .catch(() => {});
-  }, []);
+  }, [project?.name]);
 
   // Run architecture analysis
   const handleAnalyze = useCallback(async () => {

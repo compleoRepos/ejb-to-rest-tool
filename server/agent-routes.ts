@@ -556,6 +556,7 @@ export function registerAgentRoutes(app: Express) {
       hasMicroservices: !!(s.microserviceResult),
       hasSagas: !!(s.sagaResult),
       qualityGrade: s.qualityScore?.grade ?? null,
+      llmStats: s.compilationResult?.llmStats ?? null,
     }));
     // 2. DB sessions (fallback for sessions lost after server restart)
     let dbSessions: typeof memorySessions = [];
@@ -587,6 +588,7 @@ export function registerAgentRoutes(app: Express) {
               hasMicroservices: !!(row.microserviceResultData),
               hasSagas: !!(row.sagaResultData),
               qualityGrade: (row.qualityScoreData as any)?.grade ?? null,
+              llmStats: (row.compilationResultData as any)?.llmStats ?? null,
             };
           });
       }
