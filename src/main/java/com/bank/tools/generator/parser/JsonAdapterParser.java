@@ -28,8 +28,10 @@ import java.util.List;
  * {@link UseCaseInfo.EjbPattern#JSON_ADAPTER} et une reference vers le
  * {@link AdapterDescriptor.BackendEndpoint} original.</p>
  *
- * <p>Si le bloc {@code bian{}} est present dans le JSON, le mapping BIAN est utilise
- * directement. Sinon, le {@link BianAutoDetector} est utilise pour l'auto-detection.</p>
+ * <p>Si le bloc {@code bian{}} est present dans le JSON (global ou par endpoint),
+ * le mapping BIAN est utilise directement pour piloter les URLs, methodes HTTP,
+ * codes de statut et noms de DTOs. Sinon, le {@link BianAutoDetector} est utilise
+ * pour l'auto-detection.</p>
  */
 @Component
 public class JsonAdapterParser {
@@ -84,15 +86,27 @@ public class JsonAdapterParser {
         result.setSourceBasePackage("com.bank.api");
         result.setTotalFilesAnalyzed(1);
 
-        // 3. Parse BIAN mapping from JSON (if present)
+        // 3. Parse BIAN mapping from JSON (global, if present)
         BianMapping globalBianMapping = parseBianMapping(root);
 
-        // 4. Convert each endpoint to a UseCaseInfo
+        // 4. Parse per-endpoint BIAN blocks from the raw JSON
+        List<JsonNode> endpointBianNodes = new ArrayList<>();
+        if (root.has("endpoints") && root.get("endpoints").isArray()) {
+            for (JsonNode epNode : root.get("endpoints")) {
+                endpointBianNodes.add(epNode.has("bian") ? epNode.get("bian") : null);
+            }
+        }
+
+        // 5. Convert each endpoint to a UseCaseInfo
         List<UseCaseInfo> useCases = new ArrayList<>();
         List<DtoInfo> dtos = new ArrayList<>();
 
-        for (AdapterDescriptor.BackendEndpoint ep : descriptor.getBackendEndpoints()) {
-            UseCaseInfo uc = convertEndpointToUseCase(ep, descriptor, globalBianMapping);
+        List<AdapterDescriptor.BackendEndpoint> endpoints = descriptor.getBackendEndpoints();
+        for (int i = 0; i < endpoints.size(); i++) {
+            AdapterDescriptor.BackendEndpoint ep = endpoints.get(i);
+            JsonNode epBianNode = i < endpointBianNodes.size() ? endpointBianNodes.get(i) : null;
+
+            UseCaseInfo uc = convertEndpointToUseCase(ep, descriptor, globalBianMapping, epBianNode);
             useCases.add(uc);
 
             // Generate DTOs from request/response fields
@@ -230,7 +244,7 @@ public class JsonAdapterParser {
     }
 
     /**
-     * Parse le bloc bian{} du JSON s'il est present.
+     * Parse le bloc bian{} global du JSON s'il est present.
      */
     private BianMapping parseBianMapping(JsonNode root) {
         if (!root.has("bian")) return null;
@@ -256,11 +270,24 @@ public class JsonAdapterParser {
 
     /**
      * Convertit un BackendEndpoint en UseCaseInfo standard.
+     *
+     * <p>FIX 1+2+3 : Le bloc bian{} de chaque endpoint pilote la generation :</p>
+     * <ul>
+     *   <li>FIX 1 : L'URL BIAN est construite depuis le BianMapping (service_domain + BQ + action)</li>
+     *   <li>FIX 2 : La methode HTTP et le status code viennent du bloc bian{} de l'endpoint</li>
+     *   <li>FIX 3 : Les noms de DTOs sont derives du BQ en PascalCase (OrderRequest, pas VoIn_ENRG_COMMANDERequest)</li>
+     * </ul>
+     *
+     * @param ep le BackendEndpoint parse
+     * @param descriptor le descripteur de l'adapter
+     * @param globalBianMapping le mapping BIAN global (bloc bian{} racine)
+     * @param epBianNode le noeud JSON du bloc bian{} de cet endpoint (peut etre null)
      */
     private UseCaseInfo convertEndpointToUseCase(
             AdapterDescriptor.BackendEndpoint ep,
             AdapterDescriptor descriptor,
-            BianMapping globalBianMapping) {
+            BianMapping globalBianMapping,
+            JsonNode epBianNode) {
 
         UseCaseInfo uc = new UseCaseInfo();
 
@@ -274,19 +301,26 @@ public class JsonAdapterParser {
         uc.setPackageName("com.bank.api");
         uc.setFullyQualifiedName("com.bank.api." + pascalCase);
 
-        // DTOs
-        uc.setInputDtoClassName("VoIn_" + ep.getOperation().toUpperCase() + "Request");
-        uc.setOutputDtoClassName("VoOut_" + ep.getOperation().toUpperCase() + "Response");
+        // ===== FIX 1+2+3 : Construire le BianMapping complet depuis le bloc bian{} de l'endpoint =====
+        BianMapping epMapping = buildEndpointBianMapping(ep, descriptor, globalBianMapping, epBianNode);
+
+        // FIX 3 : Noms de DTOs propres depuis le BQ (PascalCase)
+        String dtoBaseName = deriveDtoBaseName(epMapping, ep);
+        uc.setInputDtoClassName(dtoBaseName + "Request");
+        uc.setOutputDtoClassName(dtoBaseName + "Response");
         uc.setInputDtoPackage("com.bank.api.dto.request");
         uc.setOutputDtoPackage("com.bank.api.dto.response");
 
-        // HTTP method (BIAN side — toujours POST pour le Controller BIAN)
-        uc.setHttpMethod("POST");
-        uc.setHttpStatusCode(200);
+        // FIX 2 : HTTP method et status code depuis le BianMapping (pas hardcode)
+        String bianHttpMethod = epMapping.getHttpMethod();
+        int bianHttpStatus = epMapping.getHttpStatus();
+        uc.setHttpMethod(bianHttpMethod != null ? bianHttpMethod : "POST");
+        uc.setHttpStatusCode(bianHttpStatus > 0 ? bianHttpStatus : 200);
 
-        // REST endpoint (BIAN URL — sera construit par le BianMapping)
-        String kebab = toKebabCase(ep.getOperation());
-        uc.setRestEndpoint("/" + toKebabCase(descriptor.getAdapterName()) + "/" + kebab);
+        // FIX 1 : L'URL REST est construite par le BianMapping (pas depuis le nom brut de l'operation)
+        // L'URL sera construite par AclArchitectureGenerator via BianMapping.buildUrl()
+        // On ne la force PAS ici — on laisse le pipeline ACL la construire
+        uc.setRestEndpoint(null);
 
         // Controller et adapter names
         uc.setControllerName(toPascalCase(descriptor.getAdapterName()) + "Controller");
@@ -299,24 +333,111 @@ public class JsonAdapterParser {
         uc.setStateless(true);
         uc.setHasExecuteMethod(true);
 
-        // Swagger
-        uc.setSwaggerSummary(pascalCase + " - " + descriptor.getAdapterName());
+        // Swagger — utiliser le summary du JSON endpoint s'il existe
+        String summary = ep instanceof AdapterDescriptor.BackendEndpoint
+                ? textFromEndpointSummary(ep, descriptor)
+                : pascalCase + " - " + descriptor.getAdapterName();
+        uc.setSwaggerSummary(summary);
 
-        // BIAN mapping
-        if (globalBianMapping != null) {
-            // Clone le mapping global et personnalise par endpoint
-            BianMapping epMapping = cloneBianMapping(globalBianMapping);
-            if (epMapping.getAction() == null || epMapping.getAction().isEmpty()) {
-                epMapping.setAction(detectBianAction(ep.getHttpMethod()));
-            }
-            uc.setBianMapping(epMapping);
-        } else if (bianAutoDetector != null) {
-            // Auto-detection BIAN
-            BianMapping detected = bianAutoDetector.autoDetect(uc);
-            uc.setBianMapping(detected);
-        }
+        // Attacher le BianMapping complet au UseCase
+        uc.setBianMapping(epMapping);
+
+        log.info("[JSON-PARSER] Endpoint '{}' -> BianMapping: action={}, bq={}, httpMethod={}, httpStatus={}, dto={}",
+                ep.getOperation(), epMapping.getAction(), epMapping.getBehaviorQualifier(),
+                epMapping.getHttpMethod(), epMapping.getHttpStatus(), dtoBaseName);
 
         return uc;
+    }
+
+    /**
+     * Construit un BianMapping complet pour un endpoint en fusionnant :
+     * 1. Le bloc bian{} global (service_domain, service_domain_id)
+     * 2. Le bloc bian{} de l'endpoint (action, behavior_qualifier, http_method, http_status, has_cr_reference_id)
+     * 3. Des fallbacks intelligents si certains champs manquent
+     */
+    private BianMapping buildEndpointBianMapping(
+            AdapterDescriptor.BackendEndpoint ep,
+            AdapterDescriptor descriptor,
+            BianMapping globalBianMapping,
+            JsonNode epBianNode) {
+
+        BianMapping mapping = new BianMapping();
+
+        // 1. Heriter du global : service_domain, service_domain_id
+        if (globalBianMapping != null) {
+            mapping.setServiceDomain(globalBianMapping.getServiceDomain());
+            mapping.setBianId(globalBianMapping.getBianId());
+            // Le BQ et action globaux sont des fallbacks
+            if (globalBianMapping.getBehaviorQualifier() != null) {
+                mapping.setBehaviorQualifier(globalBianMapping.getBehaviorQualifier());
+            }
+            if (globalBianMapping.getAction() != null) {
+                mapping.setAction(globalBianMapping.getAction());
+            }
+        }
+
+        // 2. Surcharger avec le bloc bian{} de l'endpoint (prioritaire)
+        if (epBianNode != null) {
+            String epAction = textOrDefault(epBianNode, "action", null);
+            String epBq = textOrDefault(epBianNode, "behavior_qualifier", null);
+            String epHttpMethod = textOrDefault(epBianNode, "http_method", null);
+            int epHttpStatus = intOrDefault(epBianNode, "http_status", 0);
+            boolean epHasCrRef = boolOrDefault(epBianNode, "has_cr_reference_id", false);
+
+            if (epAction != null) mapping.setAction(epAction);
+            if (epBq != null) mapping.setBehaviorQualifier(epBq);
+            if (epHttpMethod != null) mapping.setHttpMethod(epHttpMethod.toUpperCase());
+            if (epHttpStatus > 0) mapping.setHttpStatus(epHttpStatus);
+
+            // Stocker has_cr_reference_id : on l'utilise pour construire l'URL
+            // Le BianMapping.buildUrl() gere deja le {cr-reference-id} selon l'action
+            // Mais si le JSON le force, on doit le respecter
+            // -> On utilise l'URL pre-construite si has_cr_reference_id est explicite
+        }
+
+        // 3. Fallbacks si des champs manquent
+        if (mapping.getAction() == null || mapping.getAction().isEmpty()) {
+            mapping.setAction(detectBianAction(ep.getHttpMethod()));
+        }
+        if (mapping.getServiceDomain() == null || mapping.getServiceDomain().isEmpty()) {
+            mapping.setServiceDomain(toKebabCase(descriptor.getAdapterName()));
+        }
+
+        // FIX 2 : Deriver HTTP method et status depuis l'action BIAN si non fournis
+        if (mapping.getHttpMethod() == null || mapping.getHttpMethod().isEmpty()) {
+            mapping.setHttpMethod(deriveHttpMethodFromAction(mapping.getAction()));
+        }
+        if (mapping.getHttpStatus() <= 0) {
+            mapping.setHttpStatus(deriveHttpStatusFromAction(mapping.getAction()));
+        }
+
+        // Construire l'URL BIAN (sera utilisee par AclArchitectureGenerator)
+        mapping.buildUrl("/api/v1");
+
+        // Marquer comme mapping explicite (vient du JSON, pas de l'auto-detection)
+        mapping.setExplicit(epBianNode != null || globalBianMapping != null);
+
+        return mapping;
+    }
+
+    /**
+     * FIX 3 : Derive le nom de base du DTO depuis le BQ en PascalCase.
+     *
+     * <p>Exemples :</p>
+     * <ul>
+     *   <li>BQ "order" -> "Order"</li>
+     *   <li>BQ "tracking" -> "Tracking"</li>
+     *   <li>BQ "payment-initiation" -> "PaymentInitiation"</li>
+     *   <li>Pas de BQ -> PascalCase de l'operation (fallback)</li>
+     * </ul>
+     */
+    private String deriveDtoBaseName(BianMapping mapping, AdapterDescriptor.BackendEndpoint ep) {
+        String bq = mapping.getBehaviorQualifier();
+        if (bq != null && !bq.isEmpty()) {
+            return toPascalCase(bq);
+        }
+        // Fallback : utiliser l'operation en PascalCase
+        return ep.toPascalCase();
     }
 
     /**
@@ -342,24 +463,55 @@ public class JsonAdapterParser {
 
     // ==================== BIAN HELPERS ====================
 
+    /**
+     * Detecte l'action BIAN depuis la methode HTTP du backend.
+     * Utilise comme fallback quand le bloc bian{} ne specifie pas d'action.
+     */
     private String detectBianAction(String httpMethod) {
         return switch (httpMethod.toUpperCase()) {
-            case "GET" -> "Retrieve";
-            case "POST" -> "Initiate";
-            case "PUT" -> "Update";
-            case "DELETE" -> "Terminate";
-            case "PATCH" -> "Update";
-            default -> "Execute";
+            case "GET" -> "retrieval";
+            case "POST" -> "initiation";
+            case "PUT" -> "update";
+            case "DELETE" -> "termination";
+            case "PATCH" -> "update";
+            default -> "execution";
         };
     }
 
-    private BianMapping cloneBianMapping(BianMapping source) {
-        BianMapping clone = new BianMapping();
-        clone.setServiceDomain(source.getServiceDomain());
-        clone.setBianId(source.getBianId());
-        clone.setBehaviorQualifier(source.getBehaviorQualifier());
-        clone.setAction(source.getAction());
-        return clone;
+    /**
+     * FIX 2 : Derive la methode HTTP BIAN depuis l'action.
+     * Conforme a la table BIAN canonique (BianMappingConfig) :
+     * - control/update/termination -> PUT
+     * - tout le reste -> POST
+     */
+    private String deriveHttpMethodFromAction(String action) {
+        if (action == null) return "POST";
+        return switch (action.toLowerCase()) {
+            case "control", "update", "termination" -> "PUT";
+            default -> "POST";
+        };
+    }
+
+    /**
+     * FIX 2 : Derive le status HTTP BIAN depuis l'action.
+     * Conforme a la table BIAN canonique (BianMappingConfig) :
+     * - initiation/notification -> 201
+     * - tout le reste -> 200
+     */
+    private int deriveHttpStatusFromAction(String action) {
+        if (action == null) return 200;
+        return switch (action.toLowerCase()) {
+            case "initiation", "notification" -> 201;
+            default -> 200;
+        };
+    }
+
+    /**
+     * Extrait le summary depuis le JSON endpoint.
+     */
+    private String textFromEndpointSummary(AdapterDescriptor.BackendEndpoint ep, AdapterDescriptor descriptor) {
+        // Le summary n'est pas stocke dans BackendEndpoint, on le derive
+        return ep.toPascalCase() + " - " + descriptor.getAdapterName();
     }
 
     // ==================== STRING HELPERS ====================

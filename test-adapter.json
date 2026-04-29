@@ -1,0 +1,63 @@
+{
+  "adapter_name": "CommandChequier",
+  "adapter_base_url": "http://websphere-host:9080/api/adapter",
+  "description": "Adapter pour la commande de chequiers",
+  "version": "1.0.0",
+  "bian": {
+    "service_domain": "payment-order",
+    "service_domain_id": "SD0250"
+  },
+  "endpoints": [
+    {
+      "operation": "enrg_commande",
+      "method": "POST",
+      "path": "/command-chequier/enrg-commande",
+      "summary": "Enregistrer une commande de chequier",
+      "idempotent": true,
+      "timeout_seconds": 30,
+      "max_retries": 3,
+      "bian": {
+        "action": "initiation",
+        "behavior_qualifier": "order",
+        "http_method": "POST",
+        "http_status": 201,
+        "has_cr_reference_id": false
+      },
+      "request_fields": [
+        { "name": "numeroCarte", "type": "String", "required": true, "description": "Numero de carte bancaire" },
+        { "name": "quantite", "type": "Integer", "required": true, "description": "Nombre de chequiers" },
+        { "name": "adresseLivraison", "type": "String", "required": false, "description": "Adresse de livraison" }
+      ],
+      "response_fields": [
+        { "name": "code", "type": "String", "description": "Code retour (OK, KO)" },
+        { "name": "message", "type": "String", "description": "Message descriptif" },
+        { "name": "reference", "type": "String", "description": "Reference de la commande" }
+      ]
+    },
+    {
+      "operation": "consult_commande",
+      "method": "GET",
+      "path": "/command-chequier/consult/{reference}",
+      "summary": "Consulter le statut d'une commande",
+      "idempotent": false,
+      "timeout_seconds": 15,
+      "max_retries": 2,
+      "bian": {
+        "action": "retrieval",
+        "behavior_qualifier": "tracking",
+        "http_method": "POST",
+        "http_status": 200,
+        "has_cr_reference_id": true
+      },
+      "request_fields": [
+        { "name": "reference", "type": "String", "required": true, "description": "Reference de la commande" }
+      ],
+      "response_fields": [
+        { "name": "reference", "type": "String", "description": "Reference de la commande" },
+        { "name": "statut", "type": "String", "description": "Statut (EN_COURS, LIVRE, ANNULE)" },
+        { "name": "dateCreation", "type": "LocalDate", "description": "Date de creation" },
+        { "name": "dateLivraison", "type": "LocalDate", "description": "Date de livraison prevue" }
+      ]
+    }
+  ]
+}

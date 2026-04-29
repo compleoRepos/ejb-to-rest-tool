@@ -174,7 +174,12 @@ public class CodeGenerationEngine {
         generateServletInitializer(srcMain);
         generateApplicationProperties(resourcesDir);
         generateLibertyProfile(srcMain, resourcesDir);
-        generateJndiHealthIndicator(srcMain);
+        // FIX 4 : HealthIndicator adapte au mode de transport
+        if ("rest".equalsIgnoreCase(transportMode) || analysisResult.isJsonAdapterMode()) {
+            generateAdapterHealthIndicator(srcMain, analysisResult);
+        } else {
+            generateJndiHealthIndicator(srcMain);
+        }
 
         if (!aclActive) {
             // Mode legacy uniquement
@@ -810,6 +815,91 @@ public class CodeGenerationEngine {
 
         Files.writeString(healthDir.resolve("JndiHealthIndicator.java"), code);
         log.info("JndiHealthIndicator genere dans le package health");
+    }
+
+    /**
+     * FIX 4 : Genere un AdapterHealthIndicator REST qui verifie la connectivite
+     * avec le backend REST via HTTP GET /health.
+     * Utilise a la place de JndiHealthIndicator quand le transport est REST.
+     */
+    private void generateAdapterHealthIndicator(Path srcMain, ProjectAnalysisResult analysisResult) throws IOException {
+        Path healthDir = srcMain.resolve("health");
+        Files.createDirectories(healthDir);
+
+        // Determiner l'URL par defaut du backend
+        String defaultBaseUrl = "http://localhost:9080";
+        if (analysisResult.getAdapterDescriptor() != null
+                && analysisResult.getAdapterDescriptor().getAdapterBaseUrl() != null) {
+            defaultBaseUrl = analysisResult.getAdapterDescriptor().getAdapterBaseUrl();
+        }
+
+        String adapterName = "REST Backend";
+        if (analysisResult.getAdapterDescriptor() != null
+                && analysisResult.getAdapterDescriptor().getAdapterName() != null) {
+            adapterName = analysisResult.getAdapterDescriptor().getAdapterName();
+        }
+
+        String code = """
+                package %s.health;
+                
+                import org.slf4j.Logger;
+                import org.slf4j.LoggerFactory;
+                import org.springframework.beans.factory.annotation.Value;
+                import org.springframework.boot.actuate.health.Health;
+                import org.springframework.boot.actuate.health.HealthIndicator;
+                import org.springframework.stereotype.Component;
+                import org.springframework.web.client.RestTemplate;
+                
+                /**
+                 * Health Indicator REST pour verifier la connectivite avec le backend adapter.
+                 * Expose via /actuator/health sous la cle "adapter".
+                 *
+                 * Etats possibles :
+                 * - UP : le backend REST est accessible
+                 * - DOWN : le backend REST est inaccessible (timeout, connexion refusee, etc.)
+                 */
+                @Component
+                public class AdapterHealthIndicator implements HealthIndicator {
+                
+                    private static final Logger log = LoggerFactory.getLogger(AdapterHealthIndicator.class);
+                
+                    @Value("${adapter.websphere.base-url:%s}")
+                    private String adapterBaseUrl;
+                
+                    private final RestTemplate restTemplate;
+                
+                    public AdapterHealthIndicator(RestTemplate restTemplate) {
+                        this.restTemplate = restTemplate;
+                    }
+                
+                    @Override
+                    public Health health() {
+                        long start = System.currentTimeMillis();
+                        try {
+                            restTemplate.getForEntity(adapterBaseUrl + "/health", String.class);
+                            long duration = System.currentTimeMillis() - start;
+                            log.debug("[HEALTH-REST] Backend accessible en {}ms", duration);
+                            return Health.up()
+                                    .withDetail("adapterBaseUrl", adapterBaseUrl)
+                                    .withDetail("adapterName", "%s")
+                                    .withDetail("responseTime", duration + "ms")
+                                    .build();
+                        } catch (Exception e) {
+                            long duration = System.currentTimeMillis() - start;
+                            log.warn("[HEALTH-REST] Backend inaccessible en {}ms : {}", duration, e.getMessage());
+                            return Health.down()
+                                    .withDetail("adapterBaseUrl", adapterBaseUrl)
+                                    .withDetail("adapterName", "%s")
+                                    .withDetail("error", e.getMessage())
+                                    .withDetail("responseTime", duration + "ms")
+                                    .build();
+                        }
+                    }
+                }
+                """.formatted(BASE_PACKAGE, defaultBaseUrl, adapterName, adapterName);
+
+        Files.writeString(healthDir.resolve("AdapterHealthIndicator.java"), code);
+        log.info("[FIX-4] AdapterHealthIndicator REST genere (base-url={}, adapter={})", defaultBaseUrl, adapterName);
     }
 
     // ===================== BASE INTERFACES =====================

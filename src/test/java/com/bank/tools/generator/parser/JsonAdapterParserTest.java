@@ -1,6 +1,7 @@
 package com.bank.tools.generator.parser;
 
 import com.bank.tools.generator.bian.BianAutoDetector;
+import com.bank.tools.generator.bian.BianMapping;
 import com.bank.tools.generator.model.InputMode;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
 import com.bank.tools.generator.model.UseCaseInfo;
@@ -13,6 +14,13 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Tests unitaires pour le parseur de contrats JSON adapter
  * qui produit un ProjectAnalysisResult standard pour le pipeline principal.
+ *
+ * Couvre les 5 fixes :
+ * - FIX 1 : Le bloc bian{} pilote les URLs BIAN
+ * - FIX 2 : HTTP method et status depuis l'action BIAN
+ * - FIX 3 : Noms de DTOs propres (PascalCase depuis BQ)
+ * - FIX 4 : (teste dans JsonGenerationE2ETest)
+ * - FIX 5 : (teste dans JsonGenerationE2ETest)
  */
 @DisplayName("JsonAdapterParser")
 class JsonAdapterParserTest {
@@ -186,14 +194,11 @@ class JsonAdapterParserTest {
         @Test
         @DisplayName("Gere un JSON vide gracieusement (retourne resultat vide ou exception)")
         void shouldHandleEmptyJson() {
-            // Le parser peut soit lancer une exception soit retourner un resultat vide
             try {
                 ProjectAnalysisResult result = parser.parseFromString("");
-                // Si pas d'exception, le resultat doit etre vide ou avoir 0 usecases
                 assertTrue(result == null || result.getUseCases().isEmpty(),
                         "Un JSON vide doit produire un resultat vide ou null");
             } catch (Exception e) {
-                // Exception acceptable aussi
                 assertNotNull(e.getMessage());
             }
         }
@@ -213,7 +218,6 @@ class JsonAdapterParserTest {
                   "adapter_base_url": "http://localhost:8080"
                 }
                 """;
-            // Le parser peut soit lancer une exception soit retourner un resultat vide
             try {
                 ProjectAnalysisResult result = parser.parseFromString(json);
                 assertTrue(result == null || result.getUseCases().isEmpty(),
@@ -260,7 +264,6 @@ class JsonAdapterParserTest {
             ProjectAnalysisResult result = parser.parseFromString(json);
             UseCaseInfo uc = result.getUseCases().get(0);
 
-            // Le BianAutoDetector devrait avoir detecte un mapping
             assertNotNull(uc.getBianMapping(), "Le mapping BIAN doit etre detecte par BianAutoDetector");
         }
 
@@ -277,11 +280,6 @@ class JsonAdapterParserTest {
                       "method": "POST",
                       "path": "/savings/open",
                       "summary": "Ouvrir un compte epargne",
-                      "bian": {
-                        "service_domain": "savings-account",
-                        "behavior_qualifier": "account-opening",
-                        "action": "initiation"
-                      },
                       "request_fields": [
                         { "name": "clientId", "type": "String", "required": true }
                       ],
@@ -297,11 +295,461 @@ class JsonAdapterParserTest {
             UseCaseInfo uc = result.getUseCases().get(0);
 
             assertNotNull(uc.getBianMapping(), "Le mapping BIAN doit etre present");
-            // Le mapping peut etre explicite (savings-account) ou auto-detecte
             assertNotNull(uc.getBianMapping().getServiceDomain(),
                     "Le service domain doit etre detecte");
             assertFalse(uc.getBianMapping().getServiceDomain().isEmpty(),
                     "Le service domain ne doit pas etre vide");
+        }
+    }
+
+    // ============================================================
+    // FIX 1 : Le bloc bian{} du JSON pilote les URLs BIAN
+    // ============================================================
+
+    @Nested
+    @DisplayName("FIX 1 - Bloc bian{} pilote les URLs BIAN")
+    class Fix1BianUrls {
+
+        @Test
+        @DisplayName("Le bloc bian{} global fournit le service_domain et le bianId")
+        void shouldUseGlobalBianBlock() {
+            String json = """
+                {
+                  "adapter_name": "PaymentAdapter",
+                  "adapter_base_url": "http://backend:8080",
+                  "bian": {
+                    "service_domain": "payment-order",
+                    "service_domain_id": "SD0250"
+                  },
+                  "endpoints": [
+                    {
+                      "operation": "create_payment",
+                      "method": "POST",
+                      "path": "/payments/create",
+                      "request_fields": [
+                        { "name": "amount", "type": "BigDecimal", "required": true }
+                      ],
+                      "response_fields": [
+                        { "name": "paymentId", "type": "String" }
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+            ProjectAnalysisResult result = parser.parseFromString(json);
+            UseCaseInfo uc = result.getUseCases().get(0);
+            BianMapping mapping = uc.getBianMapping();
+
+            assertNotNull(mapping);
+            assertEquals("payment-order", mapping.getServiceDomain(),
+                    "Le service_domain doit venir du bloc bian{} global");
+            assertEquals("SD0250", mapping.getBianId(),
+                    "Le bianId doit venir du bloc bian{} global");
+        }
+
+        @Test
+        @DisplayName("Le bloc bian{} par endpoint surcharge le global")
+        void shouldOverrideGlobalWithEndpointBian() {
+            String json = """
+                {
+                  "adapter_name": "PaymentAdapter",
+                  "adapter_base_url": "http://backend:8080",
+                  "bian": {
+                    "service_domain": "payment-order",
+                    "service_domain_id": "SD0250"
+                  },
+                  "endpoints": [
+                    {
+                      "operation": "enrg_commande",
+                      "method": "POST",
+                      "path": "/payments/create",
+                      "bian": {
+                        "action": "initiation",
+                        "behavior_qualifier": "order",
+                        "http_method": "POST",
+                        "http_status": 201
+                      },
+                      "request_fields": [
+                        { "name": "amount", "type": "BigDecimal", "required": true }
+                      ],
+                      "response_fields": [
+                        { "name": "paymentId", "type": "String" }
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+            ProjectAnalysisResult result = parser.parseFromString(json);
+            UseCaseInfo uc = result.getUseCases().get(0);
+            BianMapping mapping = uc.getBianMapping();
+
+            assertNotNull(mapping);
+            assertEquals("payment-order", mapping.getServiceDomain(),
+                    "Le service_domain doit venir du global");
+            assertEquals("initiation", mapping.getAction(),
+                    "L'action doit venir du bloc bian{} de l'endpoint");
+            assertEquals("order", mapping.getBehaviorQualifier(),
+                    "Le BQ doit venir du bloc bian{} de l'endpoint");
+        }
+
+        @Test
+        @DisplayName("L'URL BIAN est construite depuis le BianMapping, pas depuis le nom brut")
+        void shouldBuildBianUrlFromMapping() {
+            String json = """
+                {
+                  "adapter_name": "PaymentAdapter",
+                  "adapter_base_url": "http://backend:8080",
+                  "bian": {
+                    "service_domain": "payment-order",
+                    "service_domain_id": "SD0250"
+                  },
+                  "endpoints": [
+                    {
+                      "operation": "enrg_commande",
+                      "method": "POST",
+                      "path": "/payments/create",
+                      "bian": {
+                        "action": "initiation",
+                        "behavior_qualifier": "order"
+                      },
+                      "request_fields": [
+                        { "name": "amount", "type": "BigDecimal", "required": true }
+                      ],
+                      "response_fields": [
+                        { "name": "paymentId", "type": "String" }
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+            ProjectAnalysisResult result = parser.parseFromString(json);
+            UseCaseInfo uc = result.getUseCases().get(0);
+            BianMapping mapping = uc.getBianMapping();
+
+            // L'URL BIAN doit contenir le service_domain et l'action, pas le nom brut
+            String bianUrl = mapping.getUrl();
+            assertNotNull(bianUrl, "L'URL BIAN doit etre construite");
+            assertTrue(bianUrl.contains("payment-order"), "L'URL doit contenir le service_domain");
+            assertTrue(bianUrl.contains("initiation"), "L'URL doit contenir l'action");
+            assertFalse(bianUrl.contains("enrg-commande"), "L'URL ne doit PAS contenir le nom brut");
+        }
+    }
+
+    // ============================================================
+    // FIX 2 : HTTP method et status selon l'action BIAN
+    // ============================================================
+
+    @Nested
+    @DisplayName("FIX 2 - HTTP method et status depuis le bloc bian{}")
+    class Fix2HttpMethodStatus {
+
+        @Test
+        @DisplayName("initiation -> POST 201")
+        void shouldSetInitiationTo201() {
+            String json = """
+                {
+                  "adapter_name": "TestAdapter",
+                  "adapter_base_url": "http://backend:8080",
+                  "endpoints": [
+                    {
+                      "operation": "create_order",
+                      "method": "POST",
+                      "path": "/orders/create",
+                      "bian": {
+                        "action": "initiation",
+                        "behavior_qualifier": "order",
+                        "http_method": "POST",
+                        "http_status": 201
+                      },
+                      "request_fields": [
+                        { "name": "item", "type": "String", "required": true }
+                      ],
+                      "response_fields": [
+                        { "name": "orderId", "type": "String" }
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+            ProjectAnalysisResult result = parser.parseFromString(json);
+            UseCaseInfo uc = result.getUseCases().get(0);
+
+            assertEquals("POST", uc.getHttpMethod(), "initiation -> POST");
+            assertEquals(201, uc.getHttpStatusCode(), "initiation -> 201");
+        }
+
+        @Test
+        @DisplayName("retrieval -> POST 200")
+        void shouldSetRetrievalTo200() {
+            String json = """
+                {
+                  "adapter_name": "TestAdapter",
+                  "adapter_base_url": "http://backend:8080",
+                  "endpoints": [
+                    {
+                      "operation": "get_order",
+                      "method": "GET",
+                      "path": "/orders/{id}",
+                      "bian": {
+                        "action": "retrieval",
+                        "behavior_qualifier": "tracking",
+                        "http_method": "POST",
+                        "http_status": 200
+                      },
+                      "request_fields": [
+                        { "name": "id", "type": "String", "required": true }
+                      ],
+                      "response_fields": [
+                        { "name": "status", "type": "String" }
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+            ProjectAnalysisResult result = parser.parseFromString(json);
+            UseCaseInfo uc = result.getUseCases().get(0);
+
+            assertEquals("POST", uc.getHttpMethod(), "retrieval -> POST (BIAN)");
+            assertEquals(200, uc.getHttpStatusCode(), "retrieval -> 200");
+        }
+
+        @Test
+        @DisplayName("Fallback : action sans bloc bian{} derive la methode et le status")
+        void shouldDeriveMethodAndStatusFromAction() {
+            String json = """
+                {
+                  "adapter_name": "TestAdapter",
+                  "adapter_base_url": "http://backend:8080",
+                  "endpoints": [
+                    {
+                      "operation": "create_item",
+                      "method": "POST",
+                      "path": "/items/create",
+                      "request_fields": [
+                        { "name": "name", "type": "String", "required": true }
+                      ],
+                      "response_fields": [
+                        { "name": "itemId", "type": "String" }
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+            ProjectAnalysisResult result = parser.parseFromString(json);
+            UseCaseInfo uc = result.getUseCases().get(0);
+
+            // Sans bloc bian{}, POST -> initiation -> POST 201
+            assertEquals("POST", uc.getHttpMethod());
+            assertEquals(201, uc.getHttpStatusCode(),
+                    "POST sans bloc bian{} -> initiation -> 201");
+        }
+
+        @Test
+        @DisplayName("Fallback : GET sans bloc bian{} -> retrieval -> POST 200")
+        void shouldDeriveRetrievalFromGet() {
+            String json = """
+                {
+                  "adapter_name": "TestAdapter",
+                  "adapter_base_url": "http://backend:8080",
+                  "endpoints": [
+                    {
+                      "operation": "get_item",
+                      "method": "GET",
+                      "path": "/items/{id}",
+                      "request_fields": [
+                        { "name": "id", "type": "String", "required": true }
+                      ],
+                      "response_fields": [
+                        { "name": "name", "type": "String" }
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+            ProjectAnalysisResult result = parser.parseFromString(json);
+            UseCaseInfo uc = result.getUseCases().get(0);
+
+            // GET -> retrieval -> POST 200
+            assertEquals("POST", uc.getHttpMethod(),
+                    "GET sans bloc bian{} -> retrieval -> POST (BIAN)");
+            assertEquals(200, uc.getHttpStatusCode(),
+                    "GET sans bloc bian{} -> retrieval -> 200");
+        }
+    }
+
+    // ============================================================
+    // FIX 3 : Noms de DTOs propres (PascalCase depuis BQ)
+    // ============================================================
+
+    @Nested
+    @DisplayName("FIX 3 - Noms de DTOs propres depuis le BQ")
+    class Fix3DtoNames {
+
+        @Test
+        @DisplayName("BQ 'order' -> OrderRequest / OrderResponse")
+        void shouldNameDtosFromBq() {
+            String json = """
+                {
+                  "adapter_name": "TestAdapter",
+                  "adapter_base_url": "http://backend:8080",
+                  "endpoints": [
+                    {
+                      "operation": "enrg_commande",
+                      "method": "POST",
+                      "path": "/orders/create",
+                      "bian": {
+                        "action": "initiation",
+                        "behavior_qualifier": "order"
+                      },
+                      "request_fields": [
+                        { "name": "item", "type": "String", "required": true }
+                      ],
+                      "response_fields": [
+                        { "name": "orderId", "type": "String" }
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+            ProjectAnalysisResult result = parser.parseFromString(json);
+            UseCaseInfo uc = result.getUseCases().get(0);
+
+            assertEquals("OrderRequest", uc.getInputDtoClassName(),
+                    "Le DTO doit etre OrderRequest, pas VoIn_ENRG_COMMANDERequest");
+            assertEquals("OrderResponse", uc.getOutputDtoClassName(),
+                    "Le DTO doit etre OrderResponse, pas VoOut_ENRG_COMMANDEResponse");
+        }
+
+        @Test
+        @DisplayName("BQ 'payment-initiation' -> PaymentInitiationRequest")
+        void shouldHandleKebabCaseBq() {
+            String json = """
+                {
+                  "adapter_name": "TestAdapter",
+                  "adapter_base_url": "http://backend:8080",
+                  "endpoints": [
+                    {
+                      "operation": "init_payment",
+                      "method": "POST",
+                      "path": "/payments/init",
+                      "bian": {
+                        "action": "initiation",
+                        "behavior_qualifier": "payment-initiation"
+                      },
+                      "request_fields": [
+                        { "name": "amount", "type": "BigDecimal", "required": true }
+                      ],
+                      "response_fields": [
+                        { "name": "paymentId", "type": "String" }
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+            ProjectAnalysisResult result = parser.parseFromString(json);
+            UseCaseInfo uc = result.getUseCases().get(0);
+
+            assertEquals("PaymentInitiationRequest", uc.getInputDtoClassName(),
+                    "Le BQ kebab-case doit etre converti en PascalCase");
+            assertEquals("PaymentInitiationResponse", uc.getOutputDtoClassName());
+        }
+
+        @Test
+        @DisplayName("Sans BQ, le nom de l'operation en PascalCase est utilise (fallback)")
+        void shouldFallbackToOperationName() {
+            String json = """
+                {
+                  "adapter_name": "TestAdapter",
+                  "adapter_base_url": "http://backend:8080",
+                  "endpoints": [
+                    {
+                      "operation": "check_status",
+                      "method": "GET",
+                      "path": "/status",
+                      "request_fields": [],
+                      "response_fields": [
+                        { "name": "status", "type": "String" }
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+            ProjectAnalysisResult result = parser.parseFromString(json);
+            UseCaseInfo uc = result.getUseCases().get(0);
+
+            assertEquals("CheckStatusRequest", uc.getInputDtoClassName(),
+                    "Sans BQ, le nom de l'operation en PascalCase est utilise");
+            assertEquals("CheckStatusResponse", uc.getOutputDtoClassName());
+        }
+
+        @Test
+        @DisplayName("Les noms de DTOs ne contiennent jamais VoIn_ ou VoOut_ ou underscores")
+        void shouldNeverContainVoInOrVoOut() {
+            String json = """
+                {
+                  "adapter_name": "TestAdapter",
+                  "adapter_base_url": "http://backend:8080",
+                  "bian": {
+                    "service_domain": "payment-order",
+                    "service_domain_id": "SD0250"
+                  },
+                  "endpoints": [
+                    {
+                      "operation": "enrg_commande",
+                      "method": "POST",
+                      "path": "/orders/create",
+                      "bian": {
+                        "action": "initiation",
+                        "behavior_qualifier": "order"
+                      },
+                      "request_fields": [
+                        { "name": "item", "type": "String", "required": true }
+                      ],
+                      "response_fields": [
+                        { "name": "orderId", "type": "String" }
+                      ]
+                    },
+                    {
+                      "operation": "consult_commande",
+                      "method": "GET",
+                      "path": "/orders/{id}",
+                      "bian": {
+                        "action": "retrieval",
+                        "behavior_qualifier": "tracking"
+                      },
+                      "request_fields": [
+                        { "name": "id", "type": "String", "required": true }
+                      ],
+                      "response_fields": [
+                        { "name": "status", "type": "String" }
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+            ProjectAnalysisResult result = parser.parseFromString(json);
+
+            for (UseCaseInfo uc : result.getUseCases()) {
+                assertFalse(uc.getInputDtoClassName().contains("VoIn_"),
+                        "Le DTO input ne doit jamais contenir VoIn_: " + uc.getInputDtoClassName());
+                assertFalse(uc.getOutputDtoClassName().contains("VoOut_"),
+                        "Le DTO output ne doit jamais contenir VoOut_: " + uc.getOutputDtoClassName());
+                assertFalse(uc.getInputDtoClassName().contains("_"),
+                        "Le DTO input ne doit pas contenir d'underscores: " + uc.getInputDtoClassName());
+                assertFalse(uc.getOutputDtoClassName().contains("_"),
+                        "Le DTO output ne doit pas contenir d'underscores: " + uc.getOutputDtoClassName());
+            }
         }
     }
 }
