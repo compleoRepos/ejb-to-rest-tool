@@ -33,6 +33,7 @@ import { detectSagaCandidates, generateAllSagas, generateAllSagasWithML, SagaMLE
 import { enrichZipWithArchitecture } from "../graph/architecture-zip-enricher";
 import archiver from "archiver";
 import { storagePut } from "../storage";
+import { withRetry, isRetryableError, type RetryResult, type RetryEvent } from "./pipeline-retry";
 
 // ─── Types publics ────────────────────────────────────────────────────────────
 
@@ -78,6 +79,7 @@ export type AgentEventType =
   | "AUTO_FIX"
   | "AWAITING_INPUT"
   | "COMPILATION_ATTEMPT"
+  | "RETRY_ATTEMPT"
   | "SUCCESS"
   | "FAILURE"
   | "CANCELLED";
@@ -372,8 +374,8 @@ export class CompleoAgent {
     this.sessionStore.update(session.id, { state: "RUNNING" });
 
     try {
-      // ─── Phase 1: CLONING ─────────────────────────────────────────────
-      yield* this.phaseCloning(session);
+      // ─── Phase 1: CLONING (with retry) ────────────────────────────────
+      yield* this.withPhaseRetry(session, "CLONING", () => this.phaseCloning(session));
 
       // ─── Phase 2: ANALYZING ───────────────────────────────────────────
       yield* this.phaseAnalyzing(session);
@@ -472,14 +474,14 @@ export class CompleoAgent {
 
       // ─── Phase 4d: ENHANCING_REPORTS (optional, v7.4) ─────────────
       if (session.config.options.enableReportEnhancer) {
-        yield* this.phaseEnhancingReports(session);
+        yield* this.withPhaseRetry(session, "ENHANCING_REPORTS", () => this.phaseEnhancingReports(session));
       }
 
       // ─── Phase 5: COMPILING ───────────────────────────────────────────
       yield* this.phaseCompiling(session);
 
-      // ─── Phase 6: PUSHING ─────────────────────────────────────────────
-      yield* this.phasePushing(session);
+      // ─── Phase 6: PUSHING (with retry) ────────────────────────────────
+      yield* this.withPhaseRetry(session, "PUSHING", () => this.phasePushing(session));
 
       // ─── SUCCESS ──────────────────────────────────────────────────────
       this.sessionStore.update(session.id, { state: "COMPLETED", currentPhase: "DONE" });
@@ -1730,8 +1732,68 @@ export class CompleoAgent {
     });
   }
 
-  // ─── Helpers ────────────────────────────────────────────────────────────────
+  // ─── Pipeline Retry ──────────────────────────────────────────────────────────
 
+  /**
+   * Enveloppe une phase du pipeline avec retry automatique.
+   * Si la phase échoue avec une erreur retryable (timeout, réseau, etc.),
+   * elle est relancée avec un backoff exponentiel.
+   * Émet des événements RETRY_ATTEMPT pour le SSE.
+   */
+  private async *withPhaseRetry(
+    session: AgentSession,
+    phase: string,
+    phaseFactory: () => AsyncGenerator<AgentEvent>,
+  ): AsyncGenerator<AgentEvent> {
+    let attempt = 0;
+    const maxAttempts = phase === "CLONING" || phase === "PUSHING" ? 3 : 2;
+    const baseDelay = phase === "ENHANCING_REPORTS" ? 5000 : 3000;
+
+    while (attempt < maxAttempts) {
+      try {
+        // Exécuter la phase et collecter les events
+        const gen = phaseFactory();
+        for await (const event of gen) {
+          yield event;
+        }
+        // Succès — sortir de la boucle
+        return;
+      } catch (error) {
+        attempt++;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const retryable = isRetryableError(error);
+
+        // Si pas retryable ou dernière tentative → propager
+        if (!retryable || attempt >= maxAttempts) {
+          throw error;
+        }
+
+        // Calculer le délai avec backoff exponentiel + jitter
+        const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), 30_000);
+        const jitter = delay * 0.2 * (Math.random() * 2 - 1);
+        const nextDelay = Math.round(delay + jitter);
+
+        // Émettre l'événement RETRY_ATTEMPT
+        yield this.event("RETRY_ATTEMPT", {
+          level: "warn",
+          phase: phase as AgentPhase,
+          message: `Phase ${phase} échouée (tentative ${attempt}/${maxAttempts}). Retry dans ${Math.round(nextDelay / 1000)}s... Erreur: ${errorMessage}`,
+          data: {
+            attempt,
+            maxAttempts,
+            error: errorMessage,
+            nextDelayMs: nextDelay,
+            retryable: true,
+          },
+        });
+
+        // Attendre avant la prochaine tentative
+        await new Promise(resolve => setTimeout(resolve, nextDelay));
+      }
+    }
+  }
+
+  // ─── Helpers ─────────────────────────────────────────────────────────────────
   private event(type: AgentEventType, opts: Partial<AgentEvent> = {}): AgentEvent {
     return {
       type,
