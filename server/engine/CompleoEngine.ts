@@ -190,20 +190,32 @@ export class CompleoEngine {
       },
     };
 
-    // v10.5b: Enrichissement IA (non bloquant) + validation anti-hallucination
+    // v10.6: Cache des insights IA (hash-based) + enrichissement + validation
     try {
-      const { AnalysisLLMEnricher } = await import("./analysis/AnalysisLLMEnricher");
-      const { validateInsights } = await import("./analysis/AnalysisInsightValidator");
-      const enricher = new AnalysisLLMEnricher();
-      const rawInsights = await enricher.enrich(result, ir);
-      if (rawInsights) {
-        const { validated, report } = validateInsights(rawInsights as any, ir);
-        result.aiInsights = validated as any;
-        if (report.corrections.length > 0) {
-          console.log(`[CompleoEngine] AI insights validated: ${report.passedChecks}/${report.totalChecks} checks passed, ${report.corrections.length} corrections applied`);
-        }
+      const { getInsightsCache } = await import("./analysis/InsightsCache");
+      const cache = getInsightsCache();
+      const sourceHash = cache.computeHash(files);
+
+      // Check cache first
+      const cached = cache.get(sourceHash);
+      if (cached) {
+        console.log(`[CompleoEngine] AI insights cache HIT for ${projectName} (hash: ${sourceHash.slice(0, 8)}...)`);
+        result.aiInsights = cached;
       } else {
-        result.aiInsights = null;
+        // Cache miss → appeler le LLM
+        const { AnalysisLLMEnricher } = await import("./analysis/AnalysisLLMEnricher");
+        const { validateInsights } = await import("./analysis/AnalysisInsightValidator");
+        const enricher = new AnalysisLLMEnricher();
+        const rawInsights = await enricher.enrich(result, ir);
+        if (rawInsights) {
+          const { validated, report } = validateInsights(rawInsights as any, ir);
+          result.aiInsights = validated as any;
+          // Stocker dans le cache
+          cache.set(sourceHash, result.aiInsights as any, projectName);
+          console.log(`[CompleoEngine] AI insights cache MISS for ${projectName} — stored (hash: ${sourceHash.slice(0, 8)}..., ${report.passedChecks}/${report.totalChecks} checks passed)`);
+        } else {
+          result.aiInsights = null;
+        }
       }
     } catch (err) {
       console.warn("[CompleoEngine] AI enrichment failed (non-blocking):", err);
