@@ -85,6 +85,8 @@ export interface CompleoSession {
   maturityScore?: MaturityScore;
   technologiesDetected?: TechnologyType[];
   missingDeps?: import("./engine/MissingModuleAnalyzer").MissingModule[];
+  // v10.5b: Full analysis result (populated by CompleoAgent pipeline)
+  analysisResult?: AnalysisResult;
 }
 
 // Persistent session store (survives HMR restarts)

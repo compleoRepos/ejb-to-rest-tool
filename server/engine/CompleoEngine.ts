@@ -64,6 +64,8 @@ export interface AnalysisResult {
     hasAmbiguities: boolean;
     ambiguityCount: number;
   };
+  /** v10.5b: Insights IA (null si LLM non disponible) */
+  aiInsights?: import("./analysis/AnalysisLLMEnricher").AIAnalysisInsights | null;
 }
 
 export interface GeneratedProject {
@@ -165,7 +167,7 @@ export class CompleoEngine {
       projectName,
     });
 
-    return {
+    const result: AnalysisResult = {
       ir,
       ambiguities,
       multiTech: {
@@ -187,6 +189,28 @@ export class CompleoEngine {
         ambiguityCount: ambiguities.length,
       },
     };
+
+    // v10.5b: Enrichissement IA (non bloquant) + validation anti-hallucination
+    try {
+      const { AnalysisLLMEnricher } = await import("./analysis/AnalysisLLMEnricher");
+      const { validateInsights } = await import("./analysis/AnalysisInsightValidator");
+      const enricher = new AnalysisLLMEnricher();
+      const rawInsights = await enricher.enrich(result, ir);
+      if (rawInsights) {
+        const { validated, report } = validateInsights(rawInsights as any, ir);
+        result.aiInsights = validated as any;
+        if (report.corrections.length > 0) {
+          console.log(`[CompleoEngine] AI insights validated: ${report.passedChecks}/${report.totalChecks} checks passed, ${report.corrections.length} corrections applied`);
+        }
+      } else {
+        result.aiInsights = null;
+      }
+    } catch (err) {
+      console.warn("[CompleoEngine] AI enrichment failed (non-blocking):", err);
+      result.aiInsights = null;
+    }
+
+    return result;
   }
 
   // ─── generate ─────────────────────────────────────────────────────────────

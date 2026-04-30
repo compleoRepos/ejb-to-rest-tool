@@ -807,6 +807,8 @@ export class CompleoAgent {
       }
       if (session.downloadUrl) existing.zipUrl = session.downloadUrl;
       if (session.errorMessage) existing.error = session.errorMessage;
+      // v10.5b: Sync full analysisResult (includes aiInsights)
+      if (session.analysisResult) existing.analysisResult = session.analysisResult;
       sessionStore.persist(compleoId);
     } else {
       // Create new CompleoSession
@@ -836,6 +838,8 @@ export class CompleoAgent {
         multiTechGeneration: session.analysisResult?.multiTech?.generatedFiles as any,
         maturityScore: session.analysisResult?.multiTech?.maturityScore as any,
         technologiesDetected: session.analysisResult?.multiTech?.technologiesDetected as any,
+        // v10.5b: Full analysis result (includes aiInsights)
+        analysisResult: session.analysisResult,
       };
       sessionStore.set(compleoId, compleoSession);
     }

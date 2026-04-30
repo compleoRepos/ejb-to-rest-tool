@@ -229,8 +229,7 @@ router.post("/analyze", async (req: Request, res: Response) => {
         pathLength: f.path.length,
         entryPoint: f.entryPoint,
         exitPoints: f.exitPoints,
-      })),
-      // ── Functional modules complets ───────────────────────────────────
+      })),      // ── Functional modules complets ───────────────────────────────────────
       functionalModules: archReport.functionalModules.map((m) => ({
         id: m.id,
         name: m.name,
@@ -244,8 +243,9 @@ router.post("/analyze", async (req: Request, res: Response) => {
         cohesion: m.cohesion,
         coupling: m.coupling,
       })),
-    });
-  } catch (error: any) {
+      // ── v10.5b: AI Insights (si disponibles) ───────────────────────────
+      aiInsights: session.analysisResult?.aiInsights || null,
+    });} catch (error: any) {
     console.error("[Architecture] Analyze error:", error);
     return res.status(500).json({ error: error.message || "Erreur d'analyse architecture" });
   }

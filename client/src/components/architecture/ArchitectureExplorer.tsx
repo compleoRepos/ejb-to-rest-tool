@@ -12,6 +12,7 @@ import DynamicGraphTab from "./tabs/DynamicGraphTab";
 import CriticalFlowsTab from "./tabs/CriticalFlowsTab";
 import DynamicImpactTab from "./tabs/DynamicImpactTab";
 import MigrationSummaryTab from "./tabs/MigrationSummaryTab";
+import AIInsightsTab from "./tabs/AIInsightsTab";
 
 const TABS = [
   { id: "inventory", label: "Inventaire classes", icon: "📦", shortcut: "F1" },
@@ -20,6 +21,7 @@ const TABS = [
   { id: "flows", label: "Flux critiques", icon: "⚡", shortcut: "F4" },
   { id: "impact", label: "Impact Analysis", icon: "🎯", shortcut: "F5" },
   { id: "migration", label: "Résumé migration", icon: "🔄", shortcut: "F6" },
+  { id: "ai-insights", label: "Insights IA", icon: "🧠", shortcut: "F7" },
 ];
 
 const C = {
@@ -207,6 +209,14 @@ export interface AnalysisData {
   exitPoints: ExitPoint[];
   criticalFlows: CriticalFlow[];
   functionalModules?: FunctionalModule[];
+  // v10.5b: AI Insights
+  aiInsights?: {
+    architectureAssessment?: { summary: string; patterns: string[]; antiPatterns: string[]; recommendations: string[] };
+    migrationRisks?: { summary: string; risks: Array<{ risk: string; severity: string; mitigation: string }> };
+    domainBoundaries?: { summary: string; suggestedDomains: Array<{ name: string; classes: string[]; rationale: string }> };
+    modernizationStrategy?: { summary: string; phases: Array<{ phase: string; description: string; effort: string }> };
+    codeQualityInsights?: { summary: string; hotspots: Array<{ className: string; issue: string; suggestion: string }> };
+  } | null;
 }
 
 interface Props {
@@ -303,6 +313,9 @@ export default function ArchitectureExplorer({ analysisResult, sessionId }: Prop
         )}
         {activeTab === "migration" && (
           <MigrationSummaryTab data={analysisResult} sessionId={sessionId} />
+        )}
+        {activeTab === "ai-insights" && (
+          <AIInsightsTab aiInsights={analysisResult.aiInsights} />
         )}
       </div>
     </div>
