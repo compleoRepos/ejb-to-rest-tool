@@ -243,9 +243,36 @@ export default function CompleoAgentPage() {
       };
 
       es.onerror = () => {
-        // SSE connection closed
-        setIsRunning(false);
-        if (timerRef.current) clearInterval(timerRef.current);
+        // SSE connection error — attempt reconnection with exponential backoff
+        es.close();
+        eventSourceRef.current = null;
+        let retryCount = 0;
+        const maxRetries = 8;
+        const reconnect = () => {
+          if (retryCount >= maxRetries) {
+            setIsRunning(false);
+            if (timerRef.current) clearInterval(timerRef.current);
+            toast.error("Connexion SSE perdue après plusieurs tentatives");
+            return;
+          }
+          retryCount++;
+          const delay = Math.min(1000 * Math.pow(2, retryCount), 30_000);
+          console.log(`[SSE] Reconnexion dans ${delay / 1000}s (tentative ${retryCount}/${maxRetries})`);
+          setTimeout(() => {
+            const newEs = new EventSource(`/api/agent/${data.sessionId}/events`);
+            eventSourceRef.current = newEs;
+            newEs.onmessage = es.onmessage;
+            newEs.onerror = () => {
+              newEs.close();
+              reconnect();
+            };
+            newEs.onopen = () => {
+              retryCount = 0;
+              console.log("[SSE] Reconnecté");
+            };
+          }, delay);
+        };
+        reconnect();
       };
 
       toast.success("Agent démarré");

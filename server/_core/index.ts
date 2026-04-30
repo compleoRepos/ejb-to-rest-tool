@@ -12,6 +12,8 @@ import { authRoutes } from "../auth-routes";
 import { registerArchitectureRoutes } from "../architecture-routes";
 import { registerWorkspaceRoutes } from "../workspace-routes";
 import { authMiddleware } from "../middleware/auth-middleware";
+import { globalErrorHandler } from "../middleware/error-handler";
+import { getDb } from "../db";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -48,7 +50,33 @@ async function startServer() {
 
   // ── Health endpoint (public, pas d'auth) ────────────────────
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString(), version: "1.0.0" });
+    res.json({ status: "ok", timestamp: new Date().toISOString(), version: "10.4", uptime: process.uptime() });
+  });
+
+  // ── Readiness probe ──────────────────────────────────────
+  app.get("/ready", async (_req, res) => {
+    const checks: Record<string, boolean> = {};
+    try {
+      const database = await getDb();
+      checks.database = !!database;
+    } catch { checks.database = false; }
+    const allReady = Object.values(checks).every(Boolean);
+    res.status(allReady ? 200 : 503).json({ ready: allReady, checks });
+  });
+
+  // ── Status endpoint (monitoring) ─────────────────────────
+  app.get("/api/status", async (_req, res) => {
+    const { checkLLMHealth } = await import("../engine/ml/llm-health");
+    const llmHealth = await checkLLMHealth();
+    res.json({
+      version: "10.4",
+      uptime: process.uptime(),
+      llm: llmHealth,
+      memory: {
+        heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+      },
+    });
   });
 
   // OAuth callback under /api/oauth/callback
@@ -86,6 +114,10 @@ async function startServer() {
       createContext,
     })
   );
+
+  // ── Global error handler (MUST be after all routes) ──
+  app.use(globalErrorHandler);
+
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
@@ -102,6 +134,26 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+  });
+
+  // ── Graceful shutdown ──
+  async function gracefulShutdown(signal: string) {
+    console.log(`\n[SERVER] ${signal} reçu — arrêt gracieux...`);
+    server.close();
+    console.log("[SERVER] Arrêt terminé");
+    process.exit(0);
+  }
+
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+  process.on("uncaughtException", (error) => {
+    console.error("[FATAL] Uncaught exception:", error);
+    gracefulShutdown("uncaughtException");
+  });
+
+  process.on("unhandledRejection", (reason) => {
+    console.error("[FATAL] Unhandled rejection:", reason);
   });
 }
 

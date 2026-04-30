@@ -417,6 +417,20 @@ public class BusinessRuleException extends RuntimeException {
     }
   }
 
+  // v10.4b STEP 4: Eliminate duplicate stubs (same class generated multiple times)
+  const seenPaths = new Set<string>();
+  const deduplicatedFiles: GeneratedFile[] = [];
+  for (const file of files) {
+    if (seenPaths.has(file.path)) {
+      warnings.push(`[v10.4b] Deduplicated: ${file.path}`);
+      continue;
+    }
+    seenPaths.add(file.path);
+    deduplicatedFiles.push(file);
+  }
+  files.length = 0;
+  files.push(...deduplicatedFiles);
+
   // 14. Quality Score — v7.3
   const legacyMethodCount = ir.useCases.length;
   const qualityReport = scoreGeneration(files, undefined, undefined, legacyMethodCount);

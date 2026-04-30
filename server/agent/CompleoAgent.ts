@@ -293,13 +293,34 @@ export class AgentSessionStore {
     }
   }
 
+  private persistTimers = new Map<string, NodeJS.Timeout>();
+
   addEvent(id: string, event: AgentEvent): void {
     const session = this.sessions.get(id);
     if (session) {
       session.events.push(event);
       session.updatedAt = Date.now();
-      // Don't persist on every event to avoid DB spam — persist on phase changes
+      // Persist immediately on phase changes or terminal states
+      const isPhaseChange = event.type === "PHASE_START" || event.type === "PHASE_END";
+      const isTerminal = event.type === "SUCCESS" || event.type === "FAILURE" || event.type === "CANCELLED";
+      if (isPhaseChange || isTerminal) {
+        this.saveToDB(session).catch(err => console.warn("[AgentSessionStore] Persist failed:", err));
+      } else {
+        // Debounced persist: save at most every 5 seconds during active events
+        this.debouncedPersist(id);
+      }
     }
+  }
+
+  private debouncedPersist(id: string): void {
+    if (this.persistTimers.has(id)) return;
+    this.persistTimers.set(id, setTimeout(() => {
+      this.persistTimers.delete(id);
+      const session = this.sessions.get(id);
+      if (session) {
+        this.saveToDB(session).catch(err => console.warn("[AgentSessionStore] Debounced persist failed:", err));
+      }
+    }, 5000));
   }
 
   list(): AgentSession[] {

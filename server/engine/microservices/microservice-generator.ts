@@ -347,6 +347,11 @@ public class ${pascal}Application {
 
     // Post-Audit STEP 3: Use real method parameters
     const methods = (mod.useCases ?? []).map(uc => {
+      // v10.4b STEP 7: Clean EJB prefixes from method names
+      const cleanMethodName = uc.methodName
+        .replace(/^[A-Z]\w+EJB_/, '')     // CreditOctroiEJB_getXxx → getXxx
+        .replace(/^[A-Z]\w+Bean_/, '')    // XxxBean_method → method
+        .replace(/^[A-Z]\w+Impl_/, '');   // XxxImpl_method → method
       // Build parameter list from real params or fallback to voInType
       const params = (uc.methodParameters && uc.methodParameters.length > 0)
         ? uc.methodParameters.map(p => `${p.type} ${p.name}`).join(", ")
@@ -356,8 +361,8 @@ public class ${pascal}Application {
         : (uc.voInType ? "request" : '""');
       return `
     @Transactional${uc.tx === "SUPPORTS" ? "(readOnly = true)" : ""}
-    public ${uc.voOutType ?? "void"} ${uc.methodName}(${params}) {
-        log.info("${uc.methodName}: {}", ${paramLog});
+    public ${uc.voOutType ?? "void"} ${cleanMethodName}(${params}) {
+        log.info("${cleanMethodName}: {}", ${paramLog});
         // TODO: Migrer la logique depuis ${this.cleanModuleNameFull(mod.id)}.${uc.methodName}
         // SQL original préservé dans les commentaires ci-dessous
         ${(uc.sqlConstants ?? []).map(sql =>
@@ -400,13 +405,18 @@ ${methods}
   ): string {
     // Post-Audit STEP 3: Use real method parameters in controller
     const endpoints = (mod.useCases ?? []).map(uc => {
-      const verb   = uc.httpVerb ?? (uc.methodName.startsWith("get") ||
-                     uc.methodName.startsWith("list") ||
-                     uc.methodName.startsWith("find") ||
-                     uc.methodName.startsWith("consulter") ||
-                     uc.methodName.startsWith("rechercher")
+      // v10.4b STEP 7: Clean EJB prefixes from method names in controller
+      const cleanMethodName = uc.methodName
+        .replace(/^[A-Z]\w+EJB_/, '')
+        .replace(/^[A-Z]\w+Bean_/, '')
+        .replace(/^[A-Z]\w+Impl_/, '');
+      const verb   = uc.httpVerb ?? (cleanMethodName.startsWith("get") ||
+                     cleanMethodName.startsWith("list") ||
+                     cleanMethodName.startsWith("find") ||
+                     cleanMethodName.startsWith("consulter") ||
+                     cleanMethodName.startsWith("rechercher")
                      ? "Get" : "Post");
-      const pathStr = this.toPath(uc.methodName);
+      const pathStr = this.toPath(cleanMethodName);
       const status = verb === "Post" ? "HttpStatus.CREATED" : "";
 
       // Build real parameter annotations
@@ -441,14 +451,14 @@ ${methods}
       }
 
       return `
-    @Operation(summary = "${uc.methodName}")
+    @Operation(summary = "${cleanMethodName}")
     @${verb}Mapping("${pathStr}")
-    public ResponseEntity<${uc.voOutType ?? "Void"}> ${uc.methodName}(${controllerParams}) {
+    public ResponseEntity<${uc.voOutType ?? "Void"}> ${cleanMethodName}(${controllerParams}) {
         ${uc.voOutType
           ? (status
-            ? `return ResponseEntity.status(${status}).body(service.${uc.methodName}(${serviceCallArgs}));`
-            : `return ResponseEntity.ok(service.${uc.methodName}(${serviceCallArgs}));`)
-          : `service.${uc.methodName}(${serviceCallArgs}); return ResponseEntity.ok().build();`
+            ? `return ResponseEntity.status(${status}).body(service.${cleanMethodName}(${serviceCallArgs}));`
+            : `return ResponseEntity.ok(service.${cleanMethodName}(${serviceCallArgs}));`)
+          : `service.${cleanMethodName}(${serviceCallArgs}); return ResponseEntity.ok().build();`
         }
     }`;
     }).join("\n");

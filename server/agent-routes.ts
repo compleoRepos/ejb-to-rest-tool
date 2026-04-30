@@ -110,11 +110,28 @@ export function registerAgentRoutes(app: Express) {
       lastIndex++;
     }
 
+    // Send session state for reconnection
+    res.write(`event: session_state\ndata: ${JSON.stringify({
+      status: session.state,
+      progress: session.currentPhase,
+      eventsCount: session.events.length,
+    })}\n\n`);
+
+    // Heartbeat every 15 seconds to keep connection alive
+    const heartbeatTimer = setInterval(() => {
+      try {
+        res.write(`event: heartbeat\ndata: ${JSON.stringify({ timestamp: Date.now() })}\n\n`);
+      } catch {
+        // Client disconnected
+      }
+    }, 15_000);
+
     // Poll for new events
     const interval = setInterval(() => {
       const currentSession = store.get(id);
       if (!currentSession) {
         clearInterval(interval);
+        clearInterval(heartbeatTimer);
         res.end();
         return;
       }
@@ -134,6 +151,7 @@ export function registerAgentRoutes(app: Express) {
         // Give a small delay to ensure all events are sent
         setTimeout(() => {
           clearInterval(interval);
+          clearInterval(heartbeatTimer);
           res.end();
         }, 1000);
       }
@@ -142,6 +160,7 @@ export function registerAgentRoutes(app: Express) {
     // Cleanup on client disconnect
     req.on("close", () => {
       clearInterval(interval);
+      clearInterval(heartbeatTimer);
     });
   });
 

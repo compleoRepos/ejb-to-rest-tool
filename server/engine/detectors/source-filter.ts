@@ -26,6 +26,17 @@ const TEST_DIRECTORIES = [
   "/src/test/",
   "/test/java/",
   "/tests/",
+  "/generated/",
+  "/target/",
+  "/build/",
+];
+
+// ─── Patterns de fichiers non-migrables (config, IDE, générés) ──────────────
+const NON_MIGRABLE_PATTERNS = [
+  /package-info\.java$/,
+  /module-info\.java$/,
+  /_\w+\.java$/,              // Fichiers préfixés underscore
+  /TestData\.java$/,
 ];
 
 // ─── API publique ───────────────────────────────────────────────────────────
@@ -39,11 +50,14 @@ const TEST_DIRECTORIES = [
 export function isTestFile(filePath: string, fileName?: string): boolean {
   const name = fileName ?? filePath.split("/").pop() ?? "";
 
-  // Répertoire de test
+  // Répertoire de test ou non-migrable
   if (TEST_DIRECTORIES.some(dir => filePath.includes(dir))) return true;
 
   // Nom de fichier de test
   if (TEST_CLASS_PATTERNS.some(pattern => pattern.test(name))) return true;
+
+  // Fichiers non-migrables (config, IDE, générés)
+  if (NON_MIGRABLE_PATTERNS.some(pattern => pattern.test(name))) return true;
 
   return false;
 }
