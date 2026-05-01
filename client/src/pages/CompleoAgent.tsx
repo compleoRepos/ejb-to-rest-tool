@@ -7,6 +7,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import PostMigrationChecklistScreen from "@/components/compleo/PostMigrationChecklistScreen";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -24,6 +25,7 @@ import {
 import { Link, useLocation, useSearch } from "wouter";
 import ReportViewer from "@/components/compleo/ReportViewer";
 import SagaViewer from "@/components/compleo/SagaViewer";
+import AnalysisReviewScreen from "@/components/compleo/AnalysisReviewScreen";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -74,6 +76,7 @@ const PHASES = [
   { id: "ANALYZING", label: "Analyse", icon: Eye, color: "text-cyan-400" },
   { id: "AWAITING_INPUT", label: "Choix", icon: Pause, color: "text-yellow-400" },
   { id: "GENERATING", label: "Génération", icon: FileCode2, color: "text-emerald-400" },
+  { id: "FRONTEND_GENERATION", label: "Frontend", icon: Globe, color: "text-blue-400" },
   { id: "MICROSERVICES", label: "Microservices", icon: Layers, color: "text-pink-400" },
   { id: "ENHANCING_REPORTS", label: "Rapports IA", icon: Star, color: "text-amber-400" },
   { id: "COMPILING", label: "Compilation", icon: Terminal, color: "text-purple-400" },
@@ -124,6 +127,12 @@ export default function CompleoAgentPage() {
   const [enableML, setEnableML] = useState(false);
   const [enableReportEnhancer, setEnableReportEnhancer] = useState(false);
   const [enableSaga, setEnableSaga] = useState(false);
+  // v10.8: Dynamic options + Frontend generation
+  const [enableFrontend, setEnableFrontend] = useState(false);
+  const [frontendFramework, setFrontendFramework] = useState<"react" | "angular" | "vue">("react");
+  const [enableIndustryStandard, setEnableIndustryStandard] = useState(false);
+  const [dynamicOptions, setDynamicOptions] = useState<any>(null);
+  const [isLoadingOptions, setIsLoadingOptions] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [projectFromDb, setProjectFromDb] = useState<{ id: number; name: string; fileCount: number } | null>(null);
   const [isLoadingProject, setIsLoadingProject] = useState(false);
@@ -139,6 +148,12 @@ export default function CompleoAgentPage() {
   const [isStarting, setIsStarting] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
+
+  // v10.7: Analysis Review workflow — analyse d'abord, options ensuite
+  const [postMigrationChecklist, setPostMigrationChecklist] = useState<any>(null);
+  const [showAnalysisReview, setShowAnalysisReview] = useState(false);
+  const [analysisData, setAnalysisData] = useState<any>(null);
+  const [analysisPhaseComplete, setAnalysisPhaseComplete] = useState(false);
 
   // File upload
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -175,6 +190,7 @@ export default function CompleoAgentPage() {
   const handleStart = useCallback(async () => {
     setIsStarting(true);
     try {
+      // v10.7: Démarrer l'agent en mode analyse seule (options envoyées après review)
       const config: Record<string, unknown> = {
         source: sourceMode === "zip"
           ? { type: "zip", sessionId: uploadSessionId }
@@ -182,12 +198,12 @@ export default function CompleoAgentPage() {
         output: { type: "zip" },
         options: {
           projectName: projectName || "migration",
-          autoResolveAmbiguities: autoResolve,
+          autoResolveAmbiguities: false, // Toujours false pour forcer la pause après analyse
           maxCompilationAttempts: 5,
-          enableMicroservices,
-          enableML: enableMicroservices && enableML,
-          enableReportEnhancer,
-          enableSaga: enableMicroservices && enableSaga,
+          enableMicroservices: false,
+          enableML: false,
+          enableReportEnhancer: false,
+          enableSaga: false,
         },
       };
 
@@ -224,11 +240,48 @@ export default function CompleoAgentPage() {
           const event: AgentEvent = JSON.parse(e.data);
           setEvents((prev) => [...prev, event]);
 
+          // v10.7: Capturer la fin de la phase ANALYZING pour afficher l'écran de review
+          if (event.type === "PHASE_END" && event.phase === "ANALYZING" && event.data) {
+            setAnalysisData(event.data);
+            setAnalysisPhaseComplete(true);
+          }
+
           // Handle ambiguity detection (from both AMBIGUITY_DETECTED and AWAITING_INPUT events)
           if ((event.type === "AMBIGUITY_DETECTED" || event.type === "AWAITING_INPUT") && event.data?.ambiguities) {
             setAmbiguities(event.data.ambiguities as AgentAmbiguity[]);
-            // Auto-switch to ambiguities tab so user sees the choices immediately
-            setActiveTab("ambiguities");
+            // v10.7: Afficher l'écran de review au lieu de switcher directement aux ambiguités
+            if (!showAnalysisReview) {
+              setShowAnalysisReview(true);
+            }
+          }
+
+          // v10.7: Si la phase ANALYZING est terminée, afficher le review + charger les options dynamiques
+          if (event.type === "PHASE_END" && event.phase === "ANALYZING") {
+            setShowAnalysisReview(true);
+            // v10.8: Charger les options dynamiques basées sur l'analyse
+            if (data.sessionId) {
+              setIsLoadingOptions(true);
+              fetch(`/api/agent/${data.sessionId}/dynamic-options`)
+                .then(r => r.ok ? r.json() : null)
+                .then(opts => {
+                  if (opts) {
+                    setDynamicOptions(opts);
+                    // Auto-activer les options recommandées
+                    const optList = opts.options || [];
+                    for (const opt of optList) {
+                      if (opt.recommended) {
+                        if (opt.id === "frontend") setEnableFrontend(true);
+                        if (opt.id === "microservices") setEnableMicroservices(true);
+                        if (opt.id === "saga") setEnableSaga(true);
+                        if (opt.id === "reports") setEnableReportEnhancer(true);
+                        if (opt.id === "industryStandard") setEnableIndustryStandard(true);
+                      }
+                    }
+                  }
+                })
+                .catch(() => {})
+                .finally(() => setIsLoadingOptions(false));
+            }
           }
 
           // Handle completion/failure
@@ -236,6 +289,19 @@ export default function CompleoAgentPage() {
             setIsRunning(false);
             if (timerRef.current) clearInterval(timerRef.current);
             es.close();
+
+            // v10.8: Load post-migration checklist on success
+            if (event.type === "SUCCESS" && sessionId) {
+              fetch(`/api/agent/${sessionId}/post-migration-checklist`)
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                  if (data) {
+                    setPostMigrationChecklist(data);
+                    setActiveTab("checklist");
+                  }
+                })
+                .catch(() => {});
+            }
           }
         } catch {
           // Ignore parse errors
@@ -329,6 +395,67 @@ export default function CompleoAgentPage() {
     setChoices(recs);
   }, [ambiguities]);
 
+  // ─── v10.7: Continue to Generation after Analysis Review ─────────────
+
+  const handleContinueGeneration = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      // 1. Mettre à jour les options de génération via PATCH
+      const patchRes = await fetch(`/api/agent/${sessionId}/options`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          autoResolveAmbiguities: autoResolve,
+          enableMicroservices,
+          enableML: enableMicroservices && enableML,
+          enableReportEnhancer,
+          enableSaga: enableMicroservices && enableSaga,
+          // v10.8: Frontend generation options
+          enableFrontend,
+          frontendFramework: enableFrontend ? frontendFramework : undefined,
+          enableIndustryStandard,
+          industryStandard: enableIndustryStandard && dynamicOptions?.detectedDomain?.primary
+            ? dynamicOptions.detectedDomain.primary : undefined,
+        }),
+      });
+      if (!patchRes.ok) {
+        const err = await patchRes.json();
+        throw new Error(err.error || "Erreur de mise à jour des options");
+      }
+
+      // 2. Fermer l'écran de review
+      setShowAnalysisReview(false);
+
+      // 3. Si des ambiguités existent et autoResolve est activé, les résoudre automatiquement
+      if (ambiguities.length > 0 && autoResolve) {
+        const recs: Record<string, string> = {};
+        for (const a of ambiguities) {
+          recs[a.id] = a.recommendation;
+        }
+        setChoices(recs);
+        // Auto-resolve
+        const choiceArray = Object.entries(recs).map(([ambiguityId, choiceId]) => ({
+          ambiguityId,
+          choiceId,
+        }));
+        await fetch(`/api/agent/${sessionId}/choices`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ choices: choiceArray }),
+        });
+        toast.success("Options configurées, ambiguités résolues automatiquement");
+      } else if (ambiguities.length > 0) {
+        // Afficher les ambiguités pour que l'utilisateur choisisse
+        setActiveTab("ambiguities");
+        toast.info("Options configurées. Veuillez résoudre les ambiguités pour continuer.");
+      } else {
+        toast.success("Options configurées, génération en cours...");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erreur de configuration");
+    }
+  }, [sessionId, autoResolve, enableMicroservices, enableML, enableReportEnhancer, enableSaga, enableFrontend, frontendFramework, enableIndustryStandard, dynamicOptions, ambiguities]);
+
   // ─── Download ───────────────────────────────────────────────────────────
 
   const handleDownload = useCallback(() => {
@@ -350,6 +477,10 @@ export default function CompleoAgentPage() {
     setElapsedMs(0);
     setUploadedFile(null);
     setUploadSessionId(null);
+    // v10.7: Reset analysis review states
+    setShowAnalysisReview(false);
+    setAnalysisData(null);
+    setAnalysisPhaseComplete(false);
   }, []);
 
   // ─── Auto-start from project DB ─────────────────────────────────────
@@ -357,17 +488,18 @@ export default function CompleoAgentPage() {
   const handleStartFromProject = useCallback(async (pid: number) => {
     setIsStarting(true);
     try {
+      // v10.7: Démarrer sans options (analyse seule)
       const res = await fetch("/api/agent/start-from-project", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId: pid,
           options: {
-            autoResolveAmbiguities: autoResolve,
-            enableMicroservices,
-            enableML: enableMicroservices && enableML,
-            enableReportEnhancer,
-            enableSaga: enableMicroservices && enableSaga,
+            autoResolveAmbiguities: false,
+            enableMicroservices: false,
+            enableML: false,
+            enableReportEnhancer: false,
+            enableSaga: false,
           },
         }),
       });
@@ -396,9 +528,19 @@ export default function CompleoAgentPage() {
         try {
           const event: AgentEvent = JSON.parse(e.data);
           setEvents((prev) => [...prev, event]);
+
+          // v10.7: Capturer la fin de la phase ANALYZING
+          if (event.type === "PHASE_END" && event.phase === "ANALYZING" && event.data) {
+            setAnalysisData(event.data);
+            setAnalysisPhaseComplete(true);
+            setShowAnalysisReview(true);
+          }
+
           if ((event.type === "AMBIGUITY_DETECTED" || event.type === "AWAITING_INPUT") && event.data?.ambiguities) {
             setAmbiguities(event.data.ambiguities as AgentAmbiguity[]);
-            setActiveTab("ambiguities");
+            if (!showAnalysisReview) {
+              setShowAnalysisReview(true);
+            }
           }
           if (event.type === "SUCCESS" || event.type === "FAILURE" || event.type === "CANCELLED") {
             setIsRunning(false);
@@ -666,11 +808,11 @@ export default function CompleoAgentPage() {
               )}
             </div>
 
-            {/* Options */}
+            {/* v10.7: Nom du projet seulement (options après analyse) */}
             <div className="border border-border/50 rounded-lg p-6 bg-card/30 space-y-4">
               <h3 className="font-semibold flex items-center gap-2">
                 <Zap className="w-4 h-4 text-yellow-400" />
-                Options
+                Projet
               </h3>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Nom du projet</label>
@@ -681,59 +823,13 @@ export default function CompleoAgentPage() {
                   className="font-mono text-sm"
                 />
               </div>
-              <label className="flex items-center gap-3 cursor-pointer group">
-                <Checkbox
-                  checked={autoResolve}
-                  onCheckedChange={(v) => setAutoResolve(v === true)}
-                  className="data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-500"
-                />
-                <span className="text-sm group-hover:text-foreground transition-colors">Auto-résoudre les ambiguïtés (utiliser les recommandations du moteur)</span>
-              </label>
-              <div className="border-t border-border/30 pt-3 mt-2 space-y-2">
-                <label className="flex items-center gap-3 cursor-pointer group">
-                  <Checkbox
-                    checked={enableMicroservices}
-                    onCheckedChange={(v) => setEnableMicroservices(v === true)}
-                    className="data-[state=checked]:bg-pink-500 data-[state=checked]:border-pink-500"
-                  />
-                  <Layers className="w-4 h-4 text-pink-400" />
-                  <span className="text-sm group-hover:text-foreground transition-colors">Découpage Microservices (Splitter + Générateur)</span>
-                </label>
-                {enableMicroservices && (
-                  <label className="flex items-center gap-3 cursor-pointer ml-6 group">
-                    <Checkbox
-                      checked={enableML}
-                      onCheckedChange={(v) => setEnableML(v === true)}
-                      className="data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
-                    />
-                    <Zap className="w-4 h-4 text-amber-400" />
-                    <span className="text-sm group-hover:text-foreground transition-colors">Amélioration ML (IA intégrée)</span>
-                  </label>
-                )}
-                <label className="flex items-center gap-3 cursor-pointer group">
-                  <Checkbox
-                    checked={enableReportEnhancer}
-                    onCheckedChange={(v) => setEnableReportEnhancer(v === true)}
-                    className="data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
-                  />
-                  <Star className="w-4 h-4 text-amber-400" />
-                  <span className="text-sm group-hover:text-foreground transition-colors">Rapports IA enrichis (IA intégrée)</span>
-                </label>
-                {enableMicroservices && (
-                  <label className="flex items-center gap-3 cursor-pointer ml-6 group">
-                    <Checkbox
-                      checked={enableSaga}
-                      onCheckedChange={(v) => setEnableSaga(v === true)}
-                      className="data-[state=checked]:bg-violet-500 data-[state=checked]:border-violet-500"
-                    />
-                    <GitBranch className="w-4 h-4 text-violet-400" />
-                    <span className="text-sm group-hover:text-foreground transition-colors">Saga Orchestration (compensation automatique)</span>
-                  </label>
-                )}
-              </div>
+              <p className="text-xs text-muted-foreground flex items-center gap-2">
+                <Info className="w-3.5 h-3.5" />
+                Les options de génération (microservices, rapports IA, saga) seront proposées après l'analyse.
+              </p>
             </div>
 
-            {/* Start button */}
+            {/* Start button — v10.7: Analyser d'abord */}
             <Button
               size="lg"
               className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700"
@@ -743,18 +839,202 @@ export default function CompleoAgentPage() {
               {isStarting ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  Démarrage...
+                  Analyse en cours...
                 </>
               ) : (
                 <>
-                  <Play className="w-5 h-5" />
-                  Lancer l'agent
+                  <Eye className="w-5 h-5" />
+                  Analyser le projet
                 </>
               )}
             </Button>
           </div>
+        ) : showAnalysisReview ? (
+          /* ─── v10.7: Analysis Review + Options de Génération ────────────── */
+          <div className="space-y-6">
+            {/* Afficher les résultats d'analyse IA */}
+            <AnalysisReviewScreen
+              projectName={projectName || "migration"}
+              stats={analysisData?.stats || analysisData?.analysisResult?.multiTech?.stats || { totalFiles: 0, totalClasses: 0, totalMethods: 0, totalLines: 0 }}
+              technologiesDetected={analysisData?.technologiesDetected || analysisData?.analysisResult?.multiTech?.technologiesDetected || []}
+              maturityScore={analysisData?.maturityScore || analysisData?.analysisResult?.multiTech?.maturityScore || null}
+              aiInsights={analysisData?.aiInsights || analysisData?.analysisResult?.aiInsights || null}
+              ambiguityCount={ambiguities.length}
+              missingDepsCount={0}
+              onContinueToGeneration={handleContinueGeneration}
+            />
+
+            {/* v10.8: Options de génération DYNAMIQUES (basées sur l'analyse) */}
+            <div className="border border-border/50 rounded-lg p-6 bg-card/30 space-y-4">
+              <h3 className="font-semibold flex items-center gap-2">
+                <Zap className="w-4 h-4 text-yellow-400" />
+                Options de génération
+                {dynamicOptions?.detectedDomain && (
+                  <Badge variant="outline" className="ml-2 text-xs">
+                    {dynamicOptions.detectedDomain.label}
+                  </Badge>
+                )}
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Options proposées selon l'analyse de votre projet. Seules les options pertinentes sont affichées.
+              </p>
+
+              {/* Auto-résolution (toujours affiché) */}
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <Checkbox
+                  checked={autoResolve}
+                  onCheckedChange={(v) => setAutoResolve(v === true)}
+                  className="data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-500"
+                />
+                <span className="text-sm group-hover:text-foreground transition-colors">Auto-résoudre les ambiguïtés (utiliser les recommandations du moteur)</span>
+              </label>
+
+              {isLoadingOptions ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Analyse des options disponibles...
+                </div>
+              ) : (
+                <div className="border-t border-border/30 pt-3 mt-2 space-y-3">
+                  {/* Options dynamiques générées par DynamicOptionsResolver */}
+                  {(dynamicOptions?.options || []).map((opt: any) => {
+                    // Map option ID to state setter
+                    const getChecked = () => {
+                      switch (opt.id) {
+                        case "frontend": return enableFrontend;
+                        case "microservices": return enableMicroservices;
+                        case "saga": return enableSaga;
+                        case "reports": return enableReportEnhancer;
+                        case "industryStandard": return enableIndustryStandard;
+                        case "ml": return enableML;
+                        default: return false;
+                      }
+                    };
+                    const setChecked = (v: boolean) => {
+                      switch (opt.id) {
+                        case "frontend": setEnableFrontend(v); break;
+                        case "microservices": setEnableMicroservices(v); break;
+                        case "saga": setEnableSaga(v); break;
+                        case "reports": setEnableReportEnhancer(v); break;
+                        case "industryStandard": setEnableIndustryStandard(v); break;
+                        case "ml": setEnableML(v); break;
+                      }
+                    };
+                    const iconMap: Record<string, any> = {
+                      frontend: Globe,
+                      microservices: Layers,
+                      saga: GitBranch,
+                      reports: Star,
+                      industryStandard: Shield,
+                      ml: Zap,
+                    };
+                    const colorMap: Record<string, string> = {
+                      frontend: "text-blue-400",
+                      microservices: "text-pink-400",
+                      saga: "text-violet-400",
+                      reports: "text-amber-400",
+                      industryStandard: "text-cyan-400",
+                      ml: "text-amber-400",
+                    };
+                    const checkboxColorMap: Record<string, string> = {
+                      frontend: "data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500",
+                      microservices: "data-[state=checked]:bg-pink-500 data-[state=checked]:border-pink-500",
+                      saga: "data-[state=checked]:bg-violet-500 data-[state=checked]:border-violet-500",
+                      reports: "data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500",
+                      industryStandard: "data-[state=checked]:bg-cyan-500 data-[state=checked]:border-cyan-500",
+                      ml: "data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500",
+                    };
+                    const IconComp = iconMap[opt.id] || Zap;
+                    const iconColor = colorMap[opt.id] || "text-yellow-400";
+                    const cbColor = checkboxColorMap[opt.id] || "";
+
+                    return (
+                      <div key={opt.id} className="space-y-2">
+                        <label className="flex items-center gap-3 cursor-pointer group">
+                          <Checkbox
+                            checked={getChecked()}
+                            onCheckedChange={(v) => setChecked(v === true)}
+                            className={cbColor}
+                          />
+                          <IconComp className={`w-4 h-4 ${iconColor}`} />
+                          <div className="flex-1">
+                            <span className="text-sm group-hover:text-foreground transition-colors">{opt.label}</span>
+                            {opt.reason && (
+                              <p className="text-xs text-muted-foreground mt-0.5">{opt.reason}</p>
+                            )}
+                          </div>
+                          {opt.recommended && (
+                            <Badge className="bg-emerald-500/20 text-emerald-400 text-[10px] border-emerald-500/30">Recommandé</Badge>
+                          )}
+                        </label>
+
+                        {/* Sub-options : choix du framework frontend */}
+                        {opt.id === "frontend" && enableFrontend && opt.subOptions && (
+                          <div className="ml-8 space-y-2">
+                            <p className="text-xs text-muted-foreground">Choisissez le framework frontend :</p>
+                            <div className="flex gap-2">
+                              {(opt.subOptions || []).map((sub: any) => (
+                                <Button
+                                  key={sub.id}
+                                  variant={frontendFramework === sub.id ? "default" : "outline"}
+                                  size="sm"
+                                  className={frontendFramework === sub.id
+                                    ? "bg-blue-500 hover:bg-blue-600 text-white"
+                                    : "hover:border-blue-400"}
+                                  onClick={() => setFrontendFramework(sub.id as any)}
+                                >
+                                  {sub.label}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Sub-options : ML enhancement (sous microservices) */}
+                        {opt.id === "microservices" && enableMicroservices && (
+                          <label className="flex items-center gap-3 cursor-pointer ml-8 group">
+                            <Checkbox
+                              checked={enableML}
+                              onCheckedChange={(v) => setEnableML(v === true)}
+                              className="data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
+                            />
+                            <Zap className="w-4 h-4 text-amber-400" />
+                            <span className="text-sm group-hover:text-foreground transition-colors">Amélioration ML (IA intégrée)</span>
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Fallback si pas d'options dynamiques */}
+                  {(!dynamicOptions?.options || dynamicOptions.options.length === 0) && (
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-3 cursor-pointer group">
+                        <Checkbox
+                          checked={enableReportEnhancer}
+                          onCheckedChange={(v) => setEnableReportEnhancer(v === true)}
+                          className="data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
+                        />
+                        <Star className="w-4 h-4 text-amber-400" />
+                        <span className="text-sm group-hover:text-foreground transition-colors">Rapports IA enrichis</span>
+                      </label>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <Button
+                size="lg"
+                className="w-full gap-2 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 mt-4"
+                onClick={handleContinueGeneration}
+              >
+                <Play className="w-5 h-5" />
+                Lancer la génération
+              </Button>
+            </div>
+          </div>
         ) : (
-          /* ─── Agent Running / Completed Panel ──────────────────────────── */
+          /* ─── Agent Running / Completed Panel ────────────────────────── */
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Left: Timeline */}
             <div className="lg:col-span-1 space-y-4">
@@ -901,6 +1181,15 @@ export default function CompleoAgentPage() {
                     <TabsTrigger value="reports" className="gap-1.5">
                       <Star className="w-3.5 h-3.5 text-amber-400" />
                       Rapports IA
+                    </TabsTrigger>
+                  )}
+                  {sessionId && isCompleted && postMigrationChecklist && (
+                    <TabsTrigger value="checklist" className="gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      Checklist
+                      <Badge variant="secondary" className="text-[10px] ml-1 bg-emerald-500/20 text-emerald-400">
+                        {postMigrationChecklist.summary.total}
+                      </Badge>
                     </TabsTrigger>
                   )}
                 </TabsList>
@@ -1143,6 +1432,14 @@ export default function CompleoAgentPage() {
                 {sessionId && isCompleted && (
                   <TabsContent value="reports" className="mt-3">
                     <ReportViewer sessionId={sessionId} compact />
+                  </TabsContent>
+                )}
+                {sessionId && isCompleted && postMigrationChecklist && (
+                  <TabsContent value="checklist" className="mt-3">
+                    <PostMigrationChecklistScreen
+                      checklist={postMigrationChecklist}
+                      projectName={projectName || "project"}
+                    />
                   </TabsContent>
                 )}
               </Tabs>

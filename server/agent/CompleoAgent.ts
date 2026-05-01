@@ -34,6 +34,15 @@ import { enrichZipWithArchitecture } from "../graph/architecture-zip-enricher";
 import archiver from "archiver";
 import { storagePut } from "../storage";
 import { withRetry, isRetryableError, type RetryResult, type RetryEvent } from "./pipeline-retry";
+import {
+  DynamicOptionsResolver,
+  FrontendGenerator,
+  PostMigrationChecklist,
+  type FrontendGeneratorInput,
+  type FrontendGeneratorOutput,
+  type ResolvedOptions,
+  type ChecklistInput,
+} from "../engine/frontend";
 
 // ─── Types publics ────────────────────────────────────────────────────────────
 
@@ -42,6 +51,7 @@ export type AgentPhase =
   | "CLONING"
   | "ANALYZING"
   | "GENERATING"
+  | "FRONTEND_GENERATION"
   | "MICROSERVICES"
   | "ENHANCING_REPORTS"
   | "COMPILING"
@@ -69,6 +79,14 @@ export interface AgentConfig {
     enableML?: boolean;
     enableReportEnhancer?: boolean;
     enableSaga?: boolean;
+    /** v10.8: Frontend generation (only proposed if IHM detected) */
+    enableFrontend?: boolean;
+    /** v10.8: Chosen frontend framework (react | angular | vue) */
+    frontendFramework?: "react" | "angular" | "vue";
+    /** v10.8: Industry standard mapping */
+    enableIndustryStandard?: boolean;
+    /** v10.8: Detected industry standard */
+    industryStandard?: string;
   };
 }
 
@@ -142,12 +160,31 @@ export interface AgentSession {
   qualityScore?: { totalScore: number; maxScore: number; grade: string; summary: string };
   /** Enhanced reports (available after ENHANCING_REPORTS phase) — v7.4 */
   enhancedReports?: EnhancedReports;
-  /** Saga orchestration result (available after MICROSERVICES phase) — v7.9 */
+  /** Saga orchestration result (available after MICROSERVICES phase) -- v7.9 */
   sagaResult?: {
     candidates: Array<{ className: string; domain: string; stepsCount: number; compensableCount: number }>;
     filesGenerated: number;
     report: string;
   };
+  /** v10.8: Frontend generation result */
+  frontendResult?: {
+    framework: string;
+    filesCount: number;
+    components: number;
+    services: number;
+    pages: number;
+    warnings: string[];
+  };
+  /** v10.8: Post-migration checklist */
+  postMigrationChecklist?: {
+    total: number;
+    critical: number;
+    high: number;
+    estimatedDays: number;
+    markdownContent: string;
+  };
+  /** v10.8: Dynamic options resolved from analysis */
+  dynamicOptions?: Record<string, unknown>;
   /** Error message if failed */
   errorMessage?: string;
   /** Promise resolver for ambiguity resolution */
@@ -461,6 +498,11 @@ export class CompleoAgent {
 
       // ─── Phase 4: GENERATING ──────────────────────────────────────────
       yield* this.phaseGenerating(session);
+
+      // ─── Phase 4a-bis: FRONTEND GENERATION (optional, v10.8) ────────
+      if (session.config.options.enableFrontend) {
+        yield* this.phaseFrontendGeneration(session);
+      }
 
       // ─── Phase 4b: MICROSERVICES (optional) ───────────────────────────
       if (session.config.options.enableMicroservices) {
@@ -989,9 +1031,192 @@ export class CompleoAgent {
     }
   }
 
-  // ─── Phase 4b: MICROSERVICES (optional) ──────────────────────────────────────
-  private async *phaseMicroservices(session: AgentSession): AsyncGenerator<AgentEvent> {
+  // ─── Phase 4a-bis: FRONTEND GENERATION (optional, v10.8) ──────────────────────────
+  /**
+   * Phase de generation frontend (React/Angular/Vue) connecte au backend Spring Boot.
+   * Utilise le modele IA ejb-modernizer pour generer des composants intelligents
+   * adaptes au domaine metier detecte.
+   *
+   * Declenchee UNIQUEMENT si l'analyse a detecte une couche IHM legacy
+   * (JSP, Struts, Servlet HTML, JSF).
+   */
+  private async *phaseFrontendGeneration(session: AgentSession): AsyncGenerator<AgentEvent> {
     yield this.event("PHASE_START", {
+      phase: "FRONTEND_GENERATION",
+      message: `Generation du frontend ${session.config.options.frontendFramework || "react"}...`,
+    });
+    this.sessionStore.update(session.id, { currentPhase: "FRONTEND_GENERATION" });
+
+    const startTime = Date.now();
+    const framework = session.config.options.frontendFramework || "react";
+
+    try {
+      // 1. Resolve dynamic options to get detected domain
+      const resolver = new DynamicOptionsResolver();
+      const analysisMultiTech = session.analysisResult?.multiTech;
+      const resolvedOptions = resolver.resolve({
+        technologiesDetected: (analysisMultiTech?.technologiesDetected || []) as any,
+        detectedComponents: (analysisMultiTech?.detectedComponents || []) as any,
+        aiInsights: session.analysisResult?.aiInsights || null,
+        sourceFiles: (session as any)._sourceFiles || [],
+        classNames: session.ir?.useCases?.map((uc: any) => uc.className) || [],
+        domainCount: session.analysisResult?.aiInsights?.domainInsights?.length || 0,
+      });
+
+      yield this.event("LOG", {
+        level: "info",
+        message: `Domaine detecte : ${resolvedOptions.detectedDomain.label} (${resolvedOptions.detectedDomain.confidence})`,
+        phase: "FRONTEND_GENERATION",
+      });
+
+      // 2. Collect backend files (controllers, DTOs, services)
+      const backendFiles = [
+        ...(session.generatedProject?.files || []),
+        ...(session.generatedProject?.multiTechFiles || []),
+      ];
+
+      // 3. Extract legacy UI files for context
+      const sourceFiles: Array<{ path: string; content: string }> = (session as any)._sourceFiles || [];
+      const legacyUIFiles = sourceFiles.filter(f =>
+        /\.(jsp|jspx|jsf|xhtml|tag|tld)$/i.test(f.path) ||
+        /struts-config\.xml$/i.test(f.path) ||
+        /faces-config\.xml$/i.test(f.path)
+      );
+
+      yield this.event("LOG", {
+        level: "info",
+        message: `${backendFiles.length} fichiers backend, ${legacyUIFiles.length} fichiers IHM legacy extraits`,
+        phase: "FRONTEND_GENERATION",
+      });
+
+      // 4. Build input for FrontendGenerator
+      const basePackage = session.ir?.useCases?.[0]?.packageName?.split(".").slice(0, 3).join(".") || "com.example.app";
+
+      const frontendInput: FrontendGeneratorInput = {
+        backendFiles: backendFiles as any,
+        framework,
+        projectName: session.config.options.projectName || "migration",
+        basePackage,
+        detectedDomain: resolvedOptions.detectedDomain,
+        aiInsights: session.analysisResult?.aiInsights || null,
+        technologiesDetected: (analysisMultiTech?.technologiesDetected || []) as any,
+        legacyUIFiles,
+      };
+
+      // 5. Generate frontend with IA pipeline
+      const generator = new FrontendGenerator();
+      const frontendOutput: FrontendGeneratorOutput = await generator.generate(frontendInput);
+
+      // 6. Add frontend files to the generated project
+      if (session.generatedProject) {
+        for (const file of frontendOutput.files) {
+          session.generatedProject.files.push(file as any);
+        }
+      }
+
+      // 7. Store frontend result in session
+      session.frontendResult = {
+        framework,
+        filesCount: frontendOutput.stats.totalFiles,
+        components: frontendOutput.stats.components,
+        services: frontendOutput.stats.services,
+        pages: frontendOutput.stats.pages,
+        warnings: frontendOutput.warnings,
+      };
+
+      this.sessionStore.update(session.id, {
+        frontendResult: session.frontendResult,
+        generatedProject: session.generatedProject,
+      });
+
+      yield this.event("LOG", {
+        level: "success",
+        message: `Frontend ${framework} genere : ${frontendOutput.stats.totalFiles} fichiers (${frontendOutput.stats.pages} pages, ${frontendOutput.stats.components} composants, ${frontendOutput.stats.services} services)`,
+        phase: "FRONTEND_GENERATION",
+        data: {
+          framework,
+          stats: frontendOutput.stats,
+          llmCalls: frontendOutput.stats.llmCalls,
+          llmEnhanced: frontendOutput.stats.llmEnhancedFiles,
+        },
+      });
+
+      // 8. Log warnings
+      for (const warning of frontendOutput.warnings.slice(0, 5)) {
+        yield this.event("LOG", {
+          level: "warn",
+          message: warning,
+          phase: "FRONTEND_GENERATION",
+        });
+      }
+
+      // 9. Generate post-migration checklist
+      const checklist = new PostMigrationChecklist();
+      const checklistInput: ChecklistInput = {
+        projectName: session.config.options.projectName || "migration",
+        technologiesDetected: (analysisMultiTech?.technologiesDetected || []) as any,
+        detectedDomain: resolvedOptions.detectedDomain,
+        hasFrontend: true,
+        frontendFramework: framework,
+        hasMicroservices: !!session.config.options.enableMicroservices,
+        hasSaga: !!session.config.options.enableSaga,
+        hasMessaging: (analysisMultiTech?.technologiesDetected || []).includes("JMS" as any),
+        hasBatch: (analysisMultiTech?.technologiesDetected || []).includes("BATCH" as any),
+        hasSOAP: (analysisMultiTech?.technologiesDetected || []).includes("SOAP" as any),
+        industryStandard: resolvedOptions.detectedDomain.primary !== "NONE" ? resolvedOptions.detectedDomain.primary : undefined,
+        generatedBackendFiles: backendFiles.length,
+        generatedFrontendFiles: frontendOutput.stats.totalFiles,
+        frontendTodos: frontendOutput.todos,
+        compilationErrors: 0,
+      };
+
+      const checklistResult = checklist.generate(checklistInput);
+
+      // Add checklist to generated files
+      if (session.generatedProject) {
+        session.generatedProject.files.push({
+          path: "POST_MIGRATION_CHECKLIST.md",
+          content: checklistResult.markdownContent,
+          category: "report",
+        } as any);
+      }
+
+      session.postMigrationChecklist = {
+        total: checklistResult.summary.total,
+        critical: checklistResult.summary.critical,
+        high: checklistResult.summary.high,
+        estimatedDays: checklistResult.summary.estimatedTotalDays,
+        markdownContent: checklistResult.markdownContent,
+      };
+
+      this.sessionStore.update(session.id, {
+        postMigrationChecklist: session.postMigrationChecklist,
+      });
+
+      yield this.event("LOG", {
+        level: "success",
+        message: `Checklist post-migration generee : ${checklistResult.summary.total} taches (${checklistResult.summary.critical} critiques, ~${checklistResult.summary.estimatedTotalDays} jours)`,
+        phase: "FRONTEND_GENERATION",
+      });
+
+    } catch (err: any) {
+      yield this.event("LOG", {
+        level: "error",
+        message: `Erreur generation frontend : ${err.message}`,
+        phase: "FRONTEND_GENERATION",
+      });
+      // Non-blocking: frontend generation failure should not stop the pipeline
+      console.error("[Agent] Frontend generation failed:", err);
+    }
+
+    yield this.event("PHASE_END", {
+      phase: "FRONTEND_GENERATION",
+      message: `Generation frontend terminee (${Date.now() - startTime}ms)`,
+    });
+  }
+
+  // ─── Phase 4b: MICROSERVICES (optional) ──────────────────────────────────────────
+  private async *phaseMicroservices(session: AgentSession): AsyncGenerator<AgentEvent> {    yield this.event("PHASE_START", {
       phase: "MICROSERVICES",
       message: "Découpage en microservices...",
     });

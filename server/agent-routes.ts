@@ -242,6 +242,94 @@ export function registerAgentRoutes(app: Express) {
     });
   });
 
+  // ─── PATCH /api/agent/:id/options ──────────────────────────────────────────
+  // v10.7: Update session options mid-flight (before generation starts)
+  router.patch("/:id/options", (req: Request, res: Response) => {
+    const { id } = req.params;
+    const store = getAgentStore();
+    const session = store.get(id);
+
+    if (!session) {
+      return res.status(404).json({ error: "Session introuvable" });
+    }
+
+    const opts = req.body as Partial<AgentConfig["options"]>;
+    if (!opts || typeof opts !== "object") {
+      return res.status(400).json({ error: "Body doit contenir les options à mettre à jour" });
+    }
+
+    // Merge new options into existing config
+    session.config.options = { ...session.config.options, ...opts };
+    store.update(id, { config: session.config } as any);
+
+    console.log(`[Agent] Options updated for session ${id}:`, opts);
+
+    return res.json({
+      message: "Options mises à jour",
+      options: session.config.options,
+    });
+  });
+
+  // --- GET /api/agent/:id/post-migration-checklist (v10.8) ---
+  // Returns the post-migration checklist generated after the pipeline completes.
+  router.get("/:id/post-migration-checklist", (req: Request, res: Response) => {
+    const { id } = req.params;
+    const store = getAgentStore();
+    const session = store.get(id);
+
+    if (!session) {
+      return res.status(404).json({ error: "Session introuvable" });
+    }
+
+    if (!session.postMigrationChecklist) {
+      return res.status(400).json({ error: "La checklist post-migration n'a pas encore ete generee" });
+    }
+
+    return res.json(session.postMigrationChecklist);
+  });
+
+  // --- GET /api/agent/:id/dynamic-options (v10.8) ---
+  // Resolve dynamic generation options based on analysis results.
+  // Returns only the options relevant to what was detected.
+  router.get("/:id/dynamic-options", (req: Request, res: Response) => {
+    const { id } = req.params;
+    const store = getAgentStore();
+    const session = store.get(id);
+
+    if (!session) {
+      return res.status(404).json({ error: "Session introuvable" });
+    }
+
+    if (!session.analysisResult) {
+      return res.status(400).json({ error: "L'analyse n'a pas encore ete effectuee" });
+    }
+
+    try {
+      const { DynamicOptionsResolver } = require("../engine/frontend");
+      const resolver = new DynamicOptionsResolver();
+      const multiTech = session.analysisResult?.multiTech;
+      const sourceFiles: Array<{ path: string; content: string }> = (session as any)._sourceFiles || [];
+
+      const resolved = resolver.resolve({
+        technologiesDetected: multiTech?.technologiesDetected || [],
+        detectedComponents: multiTech?.detectedComponents || [],
+        aiInsights: session.analysisResult?.aiInsights || null,
+        sourceFiles,
+        classNames: session.ir?.useCases?.map((uc: any) => uc.className) || [],
+        domainCount: session.analysisResult?.aiInsights?.domainInsights?.length || 0,
+      });
+
+      // Store resolved options in session for later use
+      session.dynamicOptions = resolved as any;
+      store.update(id, { dynamicOptions: resolved as any });
+
+      return res.json(resolved);
+    } catch (err: any) {
+      console.error("[Agent] Dynamic options resolution failed:", err);
+      return res.status(500).json({ error: `Erreur resolution options : ${err.message}` });
+    }
+  });
+
   // ─── POST /api/agent/:id/cancel ─────────────────────────────────────────────
   router.post("/:id/cancel", (req: Request, res: Response) => {
     const { id } = req.params;

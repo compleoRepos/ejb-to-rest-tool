@@ -16,7 +16,7 @@
 
 import { llmGenerateCodeWithBackend, isLLMAvailable, type LLMBackend } from "../engine/ml/llm-adapter";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// --- Types ------------------------------------------------------------------
 
 export interface GeneratedFile {
   path: string;
@@ -102,7 +102,7 @@ export interface CompilationLoopConfig {
   batchByFile?: boolean;
 }
 
-// ─── Known Java standard library types ──────────────────────────────────────
+// --- Known Java standard library types --------------------------------------
 
 const JAVA_STANDARD_TYPES = new Set([
   // java.lang (auto-imported)
@@ -171,7 +171,7 @@ const KNOWN_SPRING_TYPES = new Set([
   "Logger", "LoggerFactory",
 ]);
 
-// ─── CompilationLoop ────────────────────────────────────────────────────────
+// --- CompilationLoop --------------------------------------------------------
 
 export class CompilationLoop {
   private onEvent: LoopEventCallback | null = null;
@@ -193,7 +193,7 @@ export class CompilationLoop {
   }
 
   /** Run the compilation loop with auto-correction + LLM self-healing */
-  async run(project: GeneratedFile[], maxIterations = 5): Promise<LoopResult> {
+  async run(project: GeneratedFile[], maxIterations = 8): Promise<LoopResult> {
     const iterations: LoopIteration[] = [];
     let currentProject = [...project.map(f => ({ ...f }))];
     this.totalLLMCalls = 0;
@@ -241,7 +241,7 @@ export class CompilationLoop {
         return loopResult;
       }
 
-      // ─── Niveau 1 : Corrections déterministes ─────────────────────────
+      // --- Niveau 1 : Corrections déterministes -------------------------
       const fixes: { file: string; description: string }[] = [];
       const unfixable: CompilationError[] = [];
 
@@ -261,7 +261,7 @@ export class CompilationLoop {
         }
       }
 
-      // ─── Niveau 2 : Self-Healing via LLM ──────────────────────────────
+      // --- Niveau 2 : Self-Healing via LLM ------------------------------
       const llmFixes: LLMFixResult[] = [];
 
       if (
@@ -288,6 +288,13 @@ export class CompilationLoop {
         );
         unfixable.length = 0;
         unfixable.push(...stillUnfixable);
+      }
+
+      // --- Niveau 3 : Cross-File Analysis & Auto-Correction ------------
+      const crossFileFixes = this.applyCrossFileFixes(currentProject, projectTypes);
+      for (const cf of crossFileFixes) {
+        fixes.push(cf);
+        this.emit({ type: "fix_applied", attempt, fix: cf });
       }
 
       iterations.push({
@@ -344,7 +351,7 @@ export class CompilationLoop {
     return loopResult;
   }
 
-  // ─── LLM Self-Healing ─────────────────────────────────────────────────────
+  // --- LLM Self-Healing -----------------------------------------------------
 
   /**
    * Envoie les erreurs unfixable au LLM pour correction.
@@ -549,7 +556,7 @@ ${relatedContext ? `## Contexte du projet (classes liées) :\n${relatedContext}\
       : "";
   }
 
-  // ─── Static Analysis Compiler ───────────────────────────────────────────
+  // --- Static Analysis Compiler -------------------------------------------
 
   compile(project: GeneratedFile[], projectTypes?: Set<string>): CompilationResult {
     const types = projectTypes || this.buildTypeRegistry(project);
@@ -709,7 +716,7 @@ ${relatedContext ? `## Contexte du projet (classes liées) :\n${relatedContext}\
     };
   }
 
-  // ─── Auto-fix strategies (Niveau 1 — Déterministe) ─────────────────────
+  // --- Auto-fix strategies (Niveau 1 — Déterministe) ---------------------
 
   private applyFix(
     error: CompilationError,
@@ -830,13 +837,259 @@ ${relatedContext ? `## Contexte du projet (classes liées) :\n${relatedContext}\
     return null;
   }
 
-  // ─── Utility methods ──────────────────────────────────────────────────
+  // --- Niveau 3 : Cross-File Analysis & Auto-Correction ---------------
+
+  /**
+   * Analyse cross-fichier : détecte et corrige les incohérences entre fichiers générés.
+   * - Interfaces déclarées mais non implémentées
+   * - Méthodes de repository référencées mais non définies
+   * - javax.* → jakarta.* migration
+   * - Annotations @Autowired → constructor injection
+   * - Génération de classes/interfaces manquantes
+   */
+  private applyCrossFileFixes(
+    project: GeneratedFile[],
+    projectTypes: Set<string>
+  ): { file: string; description: string }[] {
+    const fixes: { file: string; description: string }[] = [];
+
+    // 3a. javax.* → jakarta.* migration (Spring Boot 3.x)
+    for (let i = 0; i < project.length; i++) {
+      const file = project[i];
+      if (!file.path.endsWith(".java")) continue;
+
+      const javaxImports = file.content.match(/import\s+javax\.(persistence|servlet|validation|inject|annotation|transaction|ws|xml\.bind)\./g);
+      if (javaxImports && javaxImports.length > 0) {
+        let newContent = file.content;
+        newContent = newContent.replace(/import\s+javax\.persistence\./g, "import jakarta.persistence.");
+        newContent = newContent.replace(/import\s+javax\.servlet\./g, "import jakarta.servlet.");
+        newContent = newContent.replace(/import\s+javax\.validation\./g, "import jakarta.validation.");
+        newContent = newContent.replace(/import\s+javax\.inject\./g, "import jakarta.inject.");
+        newContent = newContent.replace(/import\s+javax\.annotation\./g, "import jakarta.annotation.");
+        newContent = newContent.replace(/import\s+javax\.transaction\./g, "import jakarta.transaction.");
+        newContent = newContent.replace(/import\s+javax\.ws\./g, "import jakarta.ws.");
+        newContent = newContent.replace(/import\s+javax\.xml\.bind\./g, "import jakarta.xml.bind.");
+        if (newContent !== file.content) {
+          project[i] = { ...file, content: newContent };
+          fixes.push({
+            file: file.path,
+            description: `Migration javax.* → jakarta.* (${javaxImports.length} imports corrigés)`,
+          });
+        }
+      }
+    }
+
+    // 3b. @Autowired field injection → constructor injection
+    for (let i = 0; i < project.length; i++) {
+      const file = project[i];
+      if (!file.path.endsWith(".java")) continue;
+
+      const autowiredFields = file.content.match(/@Autowired\s+(?:private|protected)\s+\w+\s+\w+;/g);
+      if (autowiredFields && autowiredFields.length >= 2) {
+        // Extract field info
+        const fields: { type: string; name: string }[] = [];
+        for (const af of autowiredFields) {
+          const m = af.match(/@Autowired\s+(?:private|protected)\s+(\w+)\s+(\w+);/);
+          if (m) fields.push({ type: m[1], name: m[2] });
+        }
+
+        if (fields.length > 0) {
+          let newContent = file.content;
+          // Remove @Autowired annotations from fields
+          newContent = newContent.replace(/@Autowired\s*\n\s*((?:private|protected)\s+)/g, "$1final ");
+          // Add @RequiredArgsConstructor if not present
+          if (!newContent.includes("@RequiredArgsConstructor")) {
+            newContent = newContent.replace(
+              /(@Service|@Component|@RestController|@Controller|@Repository)/,
+              "@RequiredArgsConstructor\n$1"
+            );
+            // Add import if needed
+            if (!newContent.includes("import lombok.RequiredArgsConstructor")) {
+              newContent = newContent.replace(
+                /(import\s+[\w.]+;\s*\n)/,
+                "$1import lombok.RequiredArgsConstructor;\n"
+              );
+            }
+          }
+          if (newContent !== file.content) {
+            project[i] = { ...file, content: newContent };
+            fixes.push({
+              file: file.path,
+              description: `@Autowired → constructor injection via @RequiredArgsConstructor (${fields.length} champs)`,
+            });
+          }
+        }
+      }
+    }
+
+    // 3c. Détecter les interfaces référencées mais non définies dans le projet
+    const definedTypes = new Map<string, string>(); // typeName → filePath
+    for (const file of project) {
+      if (!file.path.endsWith(".java")) continue;
+      const classMatch = file.content.match(
+        /(?:public\s+)?(?:abstract\s+)?(?:class|interface|enum|record)\s+(\w+)/
+      );
+      if (classMatch) definedTypes.set(classMatch[1], file.path);
+    }
+
+    const referencedButMissing = new Set<string>();
+    for (const file of project) {
+      if (!file.path.endsWith(".java")) continue;
+
+      // Check implements/extends
+      const extendsMatch = file.content.match(/(?:extends|implements)\s+([\w,\s]+?)\s*\{/);
+      if (extendsMatch) {
+        const types = extendsMatch[1].split(/[,\s]+/).filter(t => /^[A-Z]/.test(t));
+        for (const t of types) {
+          if (!definedTypes.has(t) && !JAVA_STANDARD_TYPES.has(t) && !KNOWN_SPRING_TYPES.has(t)) {
+            referencedButMissing.add(t);
+          }
+        }
+      }
+
+      // Check field types (Repository, Service interfaces)
+      const fieldTypes = file.content.matchAll(/(?:private|protected)\s+(?:final\s+)?(\w+)\s+\w+;/g);
+      for (const m of fieldTypes) {
+        const t = m[1];
+        if (/^[A-Z]/.test(t) && !definedTypes.has(t) && !JAVA_STANDARD_TYPES.has(t) && !KNOWN_SPRING_TYPES.has(t)) {
+          // Check if it looks like a Repository or Service
+          if (t.endsWith("Repository") || t.endsWith("Service") || t.endsWith("Mapper")) {
+            referencedButMissing.add(t);
+          }
+        }
+      }
+    }
+
+    // Generate missing interfaces/classes
+    for (const missingType of referencedButMissing) {
+      const basePackage = this.findMostCommonPackage(project);
+      let generatedContent = "";
+
+      if (missingType.endsWith("Repository")) {
+        // Generate a JPA Repository interface
+        const entityName = missingType.replace("Repository", "");
+        generatedContent = `package ${basePackage}.repository;\n\nimport ${basePackage}.entity.${entityName};\nimport org.springframework.data.jpa.repository.JpaRepository;\nimport org.springframework.stereotype.Repository;\n\n@Repository\npublic interface ${missingType} extends JpaRepository<${entityName}, Long> {\n}\n`;
+      } else if (missingType.endsWith("Service")) {
+        // Generate a Service interface
+        generatedContent = `package ${basePackage}.service;\n\n/**\n * Interface de service générée automatiquement.\n * TODO: Ajouter les méthodes métier nécessaires.\n */\npublic interface ${missingType} {\n}\n`;
+      } else if (missingType.endsWith("Mapper")) {
+        // Generate a MapStruct Mapper
+        generatedContent = `package ${basePackage}.mapper;\n\nimport org.mapstruct.Mapper;\nimport org.mapstruct.MappingConstants;\n\n@Mapper(componentModel = MappingConstants.ComponentModel.SPRING)\npublic interface ${missingType} {\n}\n`;
+      } else {
+        // Generate a basic interface
+        generatedContent = `package ${basePackage}.common;\n\n/**\n * Interface générée automatiquement.\n * TODO: Implémenter les méthodes nécessaires.\n */\npublic interface ${missingType} {\n}\n`;
+      }
+
+      if (generatedContent) {
+        const subDir = missingType.endsWith("Repository") ? "repository"
+          : missingType.endsWith("Service") ? "service"
+          : missingType.endsWith("Mapper") ? "mapper" : "common";
+        const newPath = `src/main/java/${basePackage.replace(/\./g, "/")}/${subDir}/${missingType}.java`;
+
+        project.push({
+          path: newPath,
+          content: generatedContent,
+          category: "generated-stub",
+        });
+        projectTypes.add(missingType);
+        definedTypes.set(missingType, newPath);
+
+        fixes.push({
+          file: newPath,
+          description: `Interface/classe manquante générée : ${missingType} (stub)`,
+        });
+      }
+    }
+
+    // 3d. Vérifier la cohérence des annotations Spring Boot
+    for (let i = 0; i < project.length; i++) {
+      const file = project[i];
+      if (!file.path.endsWith(".java")) continue;
+
+      let newContent = file.content;
+      let changed = false;
+
+      // Ajouter @Transactional sur les méthodes de service qui modifient des données
+      if (file.path.includes("/service/") && file.content.includes("@Service")) {
+        const methodPattern = /(?:public\s+)(?!.*@Transactional)(void|\w+)\s+(save|update|delete|create|remove|modify|process|execute|transfer|withdraw|deposit)\w*\s*\(/g;
+        let match;
+        while ((match = methodPattern.exec(newContent)) !== null) {
+          const methodLine = newContent.lastIndexOf("\n", match.index) + 1;
+          const lineContent = newContent.substring(methodLine, match.index);
+          if (!lineContent.includes("@Transactional")) {
+            newContent = newContent.substring(0, methodLine) + "    @Transactional\n" + newContent.substring(methodLine);
+            changed = true;
+          }
+        }
+        // Add import if @Transactional was added
+        if (changed && !newContent.includes("import org.springframework.transaction.annotation.Transactional")) {
+          newContent = newContent.replace(
+            /(import\s+[\w.]+;\s*\n)/,
+            "$1import org.springframework.transaction.annotation.Transactional;\n"
+          );
+        }
+      }
+
+      // Ajouter @Slf4j sur les classes de service sans logger
+      if ((file.path.includes("/service/") || file.path.includes("/controller/")) &&
+          !newContent.includes("@Slf4j") && !newContent.includes("Logger") &&
+          (newContent.includes("@Service") || newContent.includes("@RestController"))) {
+        newContent = newContent.replace(
+          /(@Service|@RestController|@Controller)/,
+          "@Slf4j\n$1"
+        );
+        if (!newContent.includes("import lombok.extern.slf4j.Slf4j")) {
+          newContent = newContent.replace(
+            /(import\s+[\w.]+;\s*\n)/,
+            "$1import lombok.extern.slf4j.Slf4j;\n"
+          );
+        }
+        changed = true;
+      }
+
+      if (changed && newContent !== file.content) {
+        project[i] = { ...file, content: newContent };
+        fixes.push({
+          file: file.path,
+          description: `Annotations Spring Boot ajoutées (@Transactional, @Slf4j)`,
+        });
+      }
+    }
+
+    return fixes;
+  }
+
+  /**
+   * Trouve le package le plus commun dans le projet pour générer des stubs cohérents.
+   */
+  private findMostCommonPackage(project: GeneratedFile[]): string {
+    const packages = new Map<string, number>();
+    for (const file of project) {
+      if (!file.path.endsWith(".java")) continue;
+      const pkg = this.extractPackage(file.content);
+      if (pkg) {
+        // Get base package (first 3 segments)
+        const base = pkg.split(".").slice(0, 3).join(".");
+        packages.set(base, (packages.get(base) || 0) + 1);
+      }
+    }
+    let maxPkg = "com.example.app";
+    let maxCount = 0;
+    for (const [pkg, count] of packages) {
+      if (count > maxCount) {
+        maxPkg = pkg;
+        maxCount = count;
+      }
+    }
+    return maxPkg;
+  }
+
+  // --- Utility methods ---
 
   private buildTypeRegistry(project: GeneratedFile[]): Set<string> {
     const types = new Set<string>();
     for (const file of project) {
       if (!file.path.endsWith(".java")) continue;
-      // Extract class/interface/enum names
       const classMatch = file.content.match(
         /(?:public\s+)?(?:abstract\s+)?(?:class|interface|enum|record)\s+(\w+)/
       );
