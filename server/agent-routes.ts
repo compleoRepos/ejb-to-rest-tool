@@ -22,6 +22,7 @@ import type { ChoiceWithAutoResolve } from "./learning/ConfidenceScorer";
 import { storagePut } from "./storage";
 import { agentSessions } from "../drizzle/schema";
 import { eq, desc } from "drizzle-orm";
+import { DynamicOptionsResolver } from "./engine/frontend";
 
 const learningEngine = new LearningEngine();
 
@@ -305,14 +306,13 @@ export function registerAgentRoutes(app: Express) {
     }
 
     try {
-      const { DynamicOptionsResolver } = require("../engine/frontend");
       const resolver = new DynamicOptionsResolver();
       const multiTech = session.analysisResult?.multiTech;
       const sourceFiles: Array<{ path: string; content: string }> = (session as any)._sourceFiles || [];
 
       const resolved = resolver.resolve({
         technologiesDetected: multiTech?.technologiesDetected || [],
-        detectedComponents: multiTech?.detectedComponents || [],
+        detectedComponents: (multiTech?.detectedComponents || []) as any[],
         aiInsights: session.analysisResult?.aiInsights || null,
         sourceFiles,
         classNames: session.ir?.useCases?.map((uc: any) => uc.className) || [],

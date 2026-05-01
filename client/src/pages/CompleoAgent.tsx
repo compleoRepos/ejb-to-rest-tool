@@ -567,7 +567,7 @@ export default function CompleoAgentPage() {
   useEffect(() => {
     if (!queryProjectId) return;
     setIsLoadingProject(true);
-    fetch(`/api/trpc/projects.getById?batch=1&input=${encodeURIComponent(JSON.stringify({ "0": { json: queryProjectId } }))}`)
+    fetch(`/api/trpc/projects.getById?batch=1&input=${encodeURIComponent(JSON.stringify({ "0": { json: { id: queryProjectId } } }))}`)
       .then((r) => r.json())
       .then((data) => {
         const result = data?.[0]?.result?.data?.json;
