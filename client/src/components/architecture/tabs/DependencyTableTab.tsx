@@ -90,17 +90,6 @@ export default function DependencyTableTab({ data }: { data: AnalysisData }) {
     return { total: rows.length, byType };
   }, [rows]);
 
-  // Coupling matrix (simplified)
-  const couplingData = useMemo(() => {
-    const services = data.microservices.map(ms => ms.name);
-    const matrix: Record<string, Record<string, number>> = {};
-    for (const s of services) matrix[s] = {};
-    for (const r of rows) {
-      matrix[r.source] = matrix[r.source] || {};
-      matrix[r.source][r.target] = (matrix[r.source][r.target] || 0) + 1;
-    }
-    return { services, matrix };
-  }, [data.microservices, rows]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, height: "100%" }}>

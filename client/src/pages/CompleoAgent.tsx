@@ -449,6 +449,12 @@ export default function CompleoAgentPage() {
         setActiveTab("ambiguities");
         toast.info("Options configurées. Veuillez résoudre les ambiguités pour continuer.");
       } else {
+        // v10.9: Send empty choices to unblock the pipeline (it waits for user input even with 0 ambiguities)
+        await fetch(`/api/agent/${sessionId}/choices`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ choices: [] }),
+        });
         toast.success("Options configurées, génération en cours...");
       }
     } catch (err) {

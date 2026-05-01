@@ -493,6 +493,13 @@ export class CompleoAgent {
             message: `Toutes les ambiguïtés ont été résolues par l'apprentissage automatique`,
             phase: "ANALYZING",
           });
+          // v10.9: Even if all ambiguities are auto-resolved by learning,
+          // still wait for user to configure generation options (Frontend, BIAN, etc.)
+          // unless autoResolveAmbiguities was explicitly set from the start
+          if (!config.options.autoResolveAmbiguities) {
+            session.pendingAmbiguities = []; // No ambiguities to show
+            yield* this.phaseAwaitingInput(session);
+          }
         }
       }
 
@@ -782,9 +789,40 @@ export class CompleoAgent {
       });
     }
 
+    // v10.9: Inclure les données d'analyse dans PHASE_END pour que le frontend affiche les stats
+    const totalLinesCount = files.reduce((sum: number, f: SourceFile) => sum + (f.content?.split("\n").length || 0), 0);
+
     yield this.event("PHASE_END", {
       phase: "ANALYZING",
       message: `Analyse terminée (${Date.now() - startTime}ms)`,
+      data: {
+        stats: {
+          totalFiles: files.length,
+          totalLines: totalLinesCount,
+          totalClasses: analysisResult.ir.stats.useCaseCount + analysisResult.ir.stats.dtoCount + analysisResult.ir.stats.serviceCount + analysisResult.ir.stats.enumCount,
+          totalMethods: 0,
+          useCaseCount: analysisResult.ir.stats.useCaseCount,
+          dtoCount: analysisResult.ir.stats.dtoCount,
+          serviceCount: analysisResult.ir.stats.serviceCount,
+          enumCount: analysisResult.ir.stats.enumCount,
+          exceptionCount: analysisResult.ir.stats.exceptionCount,
+          validatorCount: analysisResult.ir.stats.validatorCount,
+          remoteInterfaceCount: analysisResult.ir.stats.remoteInterfaceCount,
+          domainCount: analysisResult.ir.stats.domainCount,
+          domains: analysisResult.ir.stats.domains,
+        },
+        technologiesDetected: analysisResult.multiTech.technologiesDetected,
+        maturityScore: analysisResult.multiTech.maturityScore || null,
+        aiInsights: analysisResult.aiInsights || null,
+        analysisResult: {
+          multiTech: {
+            stats: analysisResult.multiTech.stats,
+            technologiesDetected: analysisResult.multiTech.technologiesDetected,
+            maturityScore: analysisResult.multiTech.maturityScore,
+          },
+          aiInsights: analysisResult.aiInsights || null,
+        },
+      },
     });
 
     // ─── Persist to CompleoSession DB ──────────────────────────────────
@@ -894,9 +932,14 @@ export class CompleoAgent {
       currentPhase: "AWAITING_INPUT",
     });
 
+    const ambCount = session.pendingAmbiguities?.length || 0;
+    const awaitMsg = ambCount > 0
+      ? `L'agent est en pause — ${ambCount} ambiguïté(s) nécessitent votre décision`
+      : `L'agent est en pause — configurez les options de génération puis lancez`;
+
     yield this.event("AWAITING_INPUT", {
       phase: "AWAITING_INPUT",
-      message: `L'agent est en pause — ${session.pendingAmbiguities?.length} ambiguïtés nécessitent votre décision`,
+      message: awaitMsg,
       data: {
         ambiguities: session.pendingAmbiguities?.map((a) => ({
           id: a.id,
@@ -925,9 +968,12 @@ export class CompleoAgent {
       currentPhase: "GENERATING",
     });
 
+    const resumeMsg = (session.userChoices?.length || 0) > 0
+      ? `${session.userChoices!.length} ambiguïté(s) résolues — l'agent reprend`
+      : `Options configurées — l'agent reprend la génération`;
     yield this.event("LOG", {
       level: "success",
-      message: `${session.userChoices?.length || 0} ambiguïtés résolues — l'agent reprend`,
+      message: resumeMsg,
       phase: "ANALYZING",
     });
   }

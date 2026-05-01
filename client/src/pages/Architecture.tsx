@@ -168,7 +168,48 @@ export default function ArchitecturePage({ projectId }: { projectId?: number }) 
       .catch(() => {});
   }, [project?.name]);
 
-  // Run architecture analysis
+  // v10.9: Reset analysis when session changes & auto-analyze
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    setAnalysisResult(null);
+    setActiveTab("overview");
+    // Auto-launch analysis when session is selected
+    const autoAnalyze = async () => {
+      setIsAnalyzing(true);
+      try {
+        const res = await fetch("/api/architecture/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: selectedSessionId }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Erreur d'analyse");
+        }
+        const data = await res.json();
+        // Normalize cytoscapeData
+        if (data.visualizations?.cytoscapeData) {
+          const cd = data.visualizations.cytoscapeData;
+          if (cd.elements && !cd.nodes) {
+            const elems = Array.isArray(cd.elements) ? cd.elements : [];
+            cd.nodes = elems.filter((e: any) => e.group === "nodes").map((e: any) => ({ data: e.data }));
+            cd.edges = elems.filter((e: any) => e.group === "edges").map((e: any) => ({ data: e.data }));
+          }
+          cd.nodes = cd.nodes || [];
+          cd.edges = cd.edges || [];
+        }
+        setAnalysisResult(data);
+        toast.success(`Analyse terminée en ${data.duration}ms — ${data.microservices?.length ?? 0} microservices identifiés`);
+      } catch (error: any) {
+        toast.error(error.message || "Erreur lors de l'analyse d'architecture");
+      } finally {
+        setIsAnalyzing(false);
+      }
+    };
+    autoAnalyze();
+  }, [selectedSessionId]);
+
+  // Run architecture analysis (manual trigger)
   const handleAnalyze = useCallback(async () => {
     if (!selectedSessionId) {
       toast.error("Sélectionnez une session Compleo");
