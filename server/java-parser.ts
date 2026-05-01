@@ -43,6 +43,8 @@ export interface ProjectIR {
   _rawFiles?: { path: string; content: string }[];
   /** v8.3: Handler pattern detection result (null if not detected) */
   handlerPattern?: import("./engine/detectors/handler-pattern-detector").HandlerPatternDetection | null;
+  /** v10.12: Standard métier choisi par l'utilisateur (BIAN, ACORD, HL7_FHIR, TMFORUM, DDD, TOGAF) */
+  industryStandard?: string;
 }
 
 export interface MavenDependency {

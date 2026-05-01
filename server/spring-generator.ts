@@ -62,6 +62,7 @@ import {
 } from "./spring/infra-gen";
 import { scoreGeneration, generateQualitySection, type QualityReport } from "./engine/quality-scorer";
 import { generateBianMappingReport, generateArchitectureReport, generateMigrationSummaryReport } from "./spring/report-gen";
+import { generateStandardMappingReport } from "./spring/report-gen-standard";
 
 // --- Main Generator (Orchestrator) ---
 
@@ -441,8 +442,15 @@ public class BusinessRuleException extends RuntimeException {
   };
   files.push(qualityFile);
 
-  // 15. BIAN Mapping Report
-  files.push(generateBianMappingReport(ir));
+  // 15. Standard Mapping Report (BIAN, ACORD, HL7/FHIR, TMForum, DDD, TOGAF)
+  // Détecter le standard utilisé depuis les métadonnées de l'IR (industryStandard)
+  const detectedStandard = (ir as any).industryStandard as string | undefined;
+  if (detectedStandard && detectedStandard !== "NONE") {
+    files.push(generateStandardMappingReport(ir, detectedStandard));
+  } else {
+    // Fallback : rapport BIAN classique (rétrocompatibilité)
+    files.push(generateBianMappingReport(ir));
+  }
 
   // 16. Architecture Report
   files.push(generateArchitectureReport(ir));

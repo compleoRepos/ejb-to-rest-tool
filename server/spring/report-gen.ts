@@ -566,22 +566,28 @@ export function generateMigrationSummaryReport(
   }
   lines.push("");
 
-  // ── Section 5: BIAN ──
+  // ── Section 5: Standard métier (BIAN, ACORD, HL7/FHIR, TMForum, DDD, TOGAF) ──
+  const stdName = ir.industryStandard || "BIAN";
+  const stdFileNames: Record<string, string> = {
+    BIAN: "BIAN_MAPPING.md", ACORD: "ACORD_MAPPING.md", HL7_FHIR: "HL7_FHIR_MAPPING.md",
+    TMFORUM: "TMFORUM_MAPPING.md", DDD: "DDD_MAPPING.md", TOGAF: "TOGAF_MAPPING.md",
+  };
+  const stdFileName = stdFileNames[stdName] || "BIAN_MAPPING.md";
   const bianUseCasesS = ucListS.filter(
     (uc) => uc.bianDomain && uc.bianDomain.trim() !== ""
   );
   if (bianUseCasesS.length > 0 || bianMappingsS.length > 0) {
-    lines.push("## 5. Conformité BIAN");
+    lines.push(`## 5. Conformité ${stdName}`);
     lines.push("");
     const coverage = ucListS.length > 0
       ? Math.round((bianUseCasesS.length / ucListS.length) * 100)
       : 0;
     lines.push(
-      `**${bianUseCasesS.length}/${ucListS.length}** use cases mappés vers des domaines BIAN (couverture : ${coverage}%).`
+      `**${bianUseCasesS.length}/${ucListS.length}** use cases mappés vers des domaines ${stdName} (couverture : ${coverage}%).`
     );
     lines.push("");
     lines.push(
-      "> Voir le rapport détaillé dans **BIAN_MAPPING.md**."
+      `> Voir le rapport détaillé dans **${stdFileName}**.`
     );
     lines.push("");
   }
@@ -617,7 +623,7 @@ export function generateMigrationSummaryReport(
   lines.push("| `MIGRATION_SUMMARY.md` | Ce document — résumé global de la migration |");
   lines.push("| `MIGRATION_REPORT.md` | Rapport détaillé de migration (mapping fichier par fichier) |");
   lines.push("| `ARCHITECTURE.md` | Architecture cible Spring Boot (composants, couches, flux) |");
-  lines.push("| `BIAN_MAPPING.md` | Mapping des use cases vers les domaines BIAN |");
+  lines.push(`| \`${stdFileName}\` | Mapping des use cases vers les domaines ${stdName} |`);
   lines.push("| `DATASOURCE_MIGRATION.md` | Guide de migration des datasources |");
   lines.push("| `QUALITY_SCORE.md` | Score de qualité du code généré |");
   lines.push("| `MICROSERVICES_REPORT.md` | Rapport de découpage en microservices (si applicable) |");

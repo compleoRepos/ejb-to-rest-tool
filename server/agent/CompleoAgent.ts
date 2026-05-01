@@ -992,6 +992,58 @@ export class CompleoAgent {
 
     if (!session.ir) throw new Error("IR non disponible — l'analyse n'a pas été effectuée");
 
+    // v10.12: Mapping standard métier conditionnel au choix IHM
+    const chosenStandard = session.config.options.industryStandard;
+    const enableStandard = session.config.options.enableIndustryStandard;
+    if (enableStandard && chosenStandard) {
+      try {
+        const { IndustryStandardMapper } = await import("../engine/bian/IndustryStandardMapper");
+        const mapper = new IndustryStandardMapper();
+        yield this.event("LOG", {
+          level: "info",
+          message: `Mapping standard métier : ${chosenStandard} via LLM...`,
+          phase: "GENERATING",
+        });
+        const mappingResult = await mapper.mapUseCases(session.ir.useCases, chosenStandard as any);
+        // Mettre à jour l'IR avec les résultats du mapping
+        for (const res of mappingResult.results) {
+          if (res.standardDomain) {
+            // Mettre à jour le use case
+            const uc = session.ir.useCases.find(u => u.className === res.className);
+            if (uc) {
+              uc.bianDomain = res.standardDomain;
+              uc.bianAction = res.standardAction;
+            }
+            // Ajouter au bianMapping de l'IR (utilisé par le report-gen)
+            if (!session.ir.bianMapping.find(m => m.useCase === res.className)) {
+              session.ir.bianMapping.push({
+                useCase: res.className,
+                serviceDomain: res.standardDomain,
+                sdCode: res.standardCode || "",
+                action: res.standardAction,
+              });
+            }
+          }
+        }
+        yield this.event("LOG", {
+          level: "success",
+          message: `Mapping ${chosenStandard} : ${mappingResult.mappedCount}/${session.ir.useCases.length} use cases mappés (source: ${mappingResult.source})`,
+          phase: "GENERATING",
+        });
+      } catch (err) {
+        yield this.event("LOG", {
+          level: "warn",
+          message: `Mapping ${chosenStandard} échoué (non bloquant) : ${err instanceof Error ? err.message : String(err)}`,
+          phase: "GENERATING",
+        });
+      }
+    }
+
+    // v10.12: Stocker le standard choisi dans l'IR pour le report-gen
+    if (enableStandard && chosenStandard) {
+      session.ir.industryStandard = chosenStandard;
+    }
+
     const generatedProject = await this.engine.generate(
       session.ir,
       session.userChoices ? { choices: session.userChoices } : undefined,

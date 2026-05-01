@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import PostMigrationChecklistScreen from "@/components/compleo/PostMigrationChecklistScreen";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
@@ -131,6 +132,7 @@ export default function CompleoAgentPage() {
   const [enableFrontend, setEnableFrontend] = useState(false);
   const [frontendFramework, setFrontendFramework] = useState<"react" | "angular" | "vue">("react");
   const [enableIndustryStandard, setEnableIndustryStandard] = useState(false);
+  const [selectedStandard, setSelectedStandard] = useState<string>("");
   const [dynamicOptions, setDynamicOptions] = useState<any>(null);
   const [isLoadingOptions, setIsLoadingOptions] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -274,7 +276,12 @@ export default function CompleoAgentPage() {
                         if (opt.id === "microservices") setEnableMicroservices(true);
                         if (opt.id === "saga") setEnableSaga(true);
                         if (opt.id === "reports") setEnableReportEnhancer(true);
-                        if (opt.id === "industryStandard") setEnableIndustryStandard(true);
+                        if (opt.id === "industryStandard") {
+                          setEnableIndustryStandard(true);
+                          if (opts.detectedDomain?.primary && opts.detectedDomain.primary !== "NONE") {
+                            setSelectedStandard(opts.detectedDomain.primary);
+                          }
+                        }
                       }
                     }
                   }
@@ -414,8 +421,8 @@ export default function CompleoAgentPage() {
           enableFrontend,
           frontendFramework: enableFrontend ? frontendFramework : undefined,
           enableIndustryStandard,
-          industryStandard: enableIndustryStandard && dynamicOptions?.detectedDomain?.primary
-            ? dynamicOptions.detectedDomain.primary : undefined,
+          industryStandard: enableIndustryStandard && selectedStandard
+            ? selectedStandard : undefined,
         }),
       });
       if (!patchRes.ok) {
@@ -460,7 +467,7 @@ export default function CompleoAgentPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erreur de configuration");
     }
-  }, [sessionId, autoResolve, enableMicroservices, enableML, enableReportEnhancer, enableSaga, enableFrontend, frontendFramework, enableIndustryStandard, dynamicOptions, ambiguities]);
+  }, [sessionId, autoResolve, enableMicroservices, enableML, enableReportEnhancer, enableSaga, enableFrontend, frontendFramework, enableIndustryStandard, selectedStandard, dynamicOptions, ambiguities]);
 
   // ─── Download ───────────────────────────────────────────────────────────
 
@@ -996,6 +1003,28 @@ export default function CompleoAgentPage() {
                           </div>
                         )}
 
+                        {/* Sub-options : Sélecteur de standard métier */}
+                        {opt.id === "industryStandard" && enableIndustryStandard && (
+                          <div className="ml-8 space-y-2">
+                            <p className="text-xs text-muted-foreground">Choisissez le standard métier :</p>
+                            <Select value={selectedStandard} onValueChange={setSelectedStandard}>
+                              <SelectTrigger className="w-full max-w-xs h-8 text-xs">
+                                <SelectValue placeholder="Standard auto-détecté" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="BIAN">BIAN — Banking (Banque)</SelectItem>
+                                <SelectItem value="ACORD">ACORD — Insurance (Assurance)</SelectItem>
+                                <SelectItem value="HL7_FHIR">HL7/FHIR — Healthcare (Santé)</SelectItem>
+                                <SelectItem value="TMFORUM">TMForum — Telecom</SelectItem>
+                                <SelectItem value="DDD">DDD — Domain-Driven Design</SelectItem>
+                                <SelectItem value="TOGAF">TOGAF — Enterprise Architecture</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {dynamicOptions?.detectedDomain?.primary && dynamicOptions.detectedDomain.primary !== "NONE" && selectedStandard !== dynamicOptions.detectedDomain.primary && (
+                              <p className="text-[10px] text-amber-400">⚠ Standard auto-détecté : {dynamicOptions.detectedDomain.label}</p>
+                            )}
+                          </div>
+                        )}
                         {/* Sub-options : ML enhancement (sous microservices) */}
                         {opt.id === "microservices" && enableMicroservices && (
                           <label className="flex items-center gap-3 cursor-pointer ml-8 group">
