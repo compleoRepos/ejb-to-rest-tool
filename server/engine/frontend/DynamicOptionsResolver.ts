@@ -390,12 +390,10 @@ export class DynamicOptionsResolver {
       });
     }
 
-    // Option: Industry standard mapping (based on detected domain)
-    if (detectedDomain.primary !== "NONE") {
-      const standardOption = this.buildIndustryStandardOption(detectedDomain);
-      if (standardOption) {
-        options.push(standardOption);
-      }
+    // Option: Industry standard mapping (always show with detected domain pre-selected)
+    const standardOption = this.buildIndustryStandardOption(detectedDomain);
+    if (standardOption) {
+      options.push(standardOption);
     }
 
     // Option: SOAP to REST adapter (if SOAP detected)
@@ -770,82 +768,33 @@ export class DynamicOptionsResolver {
   // --- Industry Standard Option Builder ---
 
   private buildIndustryStandardOption(domain: DetectedDomain): DynamicOption | null {
-    switch (domain.primary) {
-      case "BIAN":
-        return {
-          id: "bian_mapping",
-          label: "Mapping BIAN (Banking)",
-          description: `Domaine bancaire detecte (${domain.confidence}). Alignement des services sur le referentiel BIAN v12.`,
-          category: "standard",
-          defaultEnabled: true,
-          confidence: domain.confidence,
-          icon: "Building2",
-          color: "blue",
-          triggeredBy: domain.indicators.slice(0, 3),
-        };
-      case "ACORD":
-        return {
-          id: "acord_mapping",
-          label: "Mapping ACORD (Assurance)",
-          description: `Domaine assurance detecte (${domain.confidence}). Alignement sur le standard ACORD.`,
-          category: "standard",
-          defaultEnabled: true,
-          confidence: domain.confidence,
-          icon: "Shield",
-          color: "green",
-          triggeredBy: domain.indicators.slice(0, 3),
-        };
-      case "HL7_FHIR":
-        return {
-          id: "hl7_mapping",
-          label: "Mapping HL7/FHIR (Sante)",
-          description: `Domaine sante detecte (${domain.confidence}). Alignement sur les standards HL7 FHIR.`,
-          category: "standard",
-          defaultEnabled: true,
-          confidence: domain.confidence,
-          icon: "Heart",
-          color: "red",
-          triggeredBy: domain.indicators.slice(0, 3),
-        };
-      case "TMFORUM":
-        return {
-          id: "tmforum_mapping",
-          label: "Mapping TMForum/eTOM (Telecom)",
-          description: `Domaine telecom detecte (${domain.confidence}). Alignement sur le referentiel TMForum.`,
-          category: "standard",
-          defaultEnabled: true,
-          confidence: domain.confidence,
-          icon: "Wifi",
-          color: "purple",
-          triggeredBy: domain.indicators.slice(0, 3),
-        };
-      case "DDD":
-        return {
-          id: "ddd_mapping",
-          label: "Mapping DDD (E-Commerce)",
-          description: `Domaine e-commerce detecte (${domain.confidence}). Structuration DDD avec aggregats et bounded contexts.`,
-          category: "standard",
-          defaultEnabled: true,
-          confidence: domain.confidence,
-          icon: "ShoppingCart",
-          color: "orange",
-          triggeredBy: domain.indicators.slice(0, 3),
-        };
-      case "TOGAF":
-        return {
-          id: "togaf_mapping",
-          label: "Architecture TOGAF (Enterprise)",
-          description: `Architecture enterprise detectee (${domain.confidence}). Alignement sur le framework TOGAF.`,
-          category: "standard",
-          defaultEnabled: true,
-          confidence: domain.confidence,
-          icon: "Building",
-          color: "slate",
-          triggeredBy: domain.indicators.slice(0, 3),
-        };
-      default:
-        return null;
-    }
+    // Always propose the standard mapping option with all standards as sub-options
+    // The detected domain is pre-selected
+    const allStandards: SubOption[] = [
+      { id: "BIAN", label: "BIAN (Banque / Finance)", description: "Banking Industry Architecture Network v12 — referentiel bancaire international", defaultSelected: domain.primary === "BIAN" },
+      { id: "ACORD", label: "ACORD (Assurance)", description: "Standard ACORD — referentiel assurance et gestion des risques", defaultSelected: domain.primary === "ACORD" },
+      { id: "HL7_FHIR", label: "HL7/FHIR (Sante)", description: "Standards HL7 FHIR — interoperabilite des systemes de sante", defaultSelected: domain.primary === "HL7_FHIR" },
+      { id: "TMFORUM", label: "TMForum/eTOM (Telecom)", description: "TM Forum Open APIs — referentiel telecom et operations", defaultSelected: domain.primary === "TMFORUM" },
+      { id: "DDD", label: "DDD (E-Commerce / Retail)", description: "Domain-Driven Design — structuration par aggregats et bounded contexts", defaultSelected: domain.primary === "DDD" },
+      { id: "TOGAF", label: "TOGAF (Enterprise / ERP)", description: "The Open Group Architecture Framework — architecture enterprise", defaultSelected: domain.primary === "TOGAF" },
+    ];
+
+    const detectedLabel = domain.primary !== "NONE"
+      ? `Domaine detecte : ${domain.label} (${domain.confidence}). `
+      : "Aucun domaine detecte automatiquement. ";
+
+    return {
+      id: "industry_standard",
+      label: "Mapping Standard Metier",
+      description: `${detectedLabel}Alignement sur un referentiel metier reconnu.`,
+      category: "standard",
+      defaultEnabled: domain.primary !== "NONE",
+      confidence: domain.primary !== "NONE" ? domain.confidence : "low",
+      icon: "Building2",
+      color: "blue",
+      triggeredBy: domain.indicators.slice(0, 3),
+      subOptions: allStandards,
+    };
   }
 
   // --- Summary Builder ---

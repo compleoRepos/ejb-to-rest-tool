@@ -131,6 +131,7 @@ export default function CompleoAgentPage() {
   const [enableFrontend, setEnableFrontend] = useState(false);
   const [frontendFramework, setFrontendFramework] = useState<"react" | "angular" | "vue">("react");
   const [enableIndustryStandard, setEnableIndustryStandard] = useState(false);
+  const [selectedStandard, setSelectedStandard] = useState<string>("BIAN");
   const [dynamicOptions, setDynamicOptions] = useState<any>(null);
   const [isLoadingOptions, setIsLoadingOptions] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -274,7 +275,12 @@ export default function CompleoAgentPage() {
                         if (opt.id === "microservices") setEnableMicroservices(true);
                         if (opt.id === "saga") setEnableSaga(true);
                         if (opt.id === "reports") setEnableReportEnhancer(true);
-                        if (opt.id === "industryStandard") setEnableIndustryStandard(true);
+                        if (opt.id === "industry_standard" || opt.id === "industryStandard") {
+                          setEnableIndustryStandard(true);
+                          // Pre-select the detected standard
+                          const defaultSub = (opt.subOptions || []).find((s: any) => s.defaultSelected);
+                          if (defaultSub) setSelectedStandard(defaultSub.id);
+                        }
                       }
                     }
                   }
@@ -414,8 +420,7 @@ export default function CompleoAgentPage() {
           enableFrontend,
           frontendFramework: enableFrontend ? frontendFramework : undefined,
           enableIndustryStandard,
-          industryStandard: enableIndustryStandard && dynamicOptions?.detectedDomain?.primary
-            ? dynamicOptions.detectedDomain.primary : undefined,
+          industryStandard: enableIndustryStandard ? selectedStandard : undefined,
         }),
       });
       if (!patchRes.ok) {
@@ -910,9 +915,11 @@ export default function CompleoAgentPage() {
                         case "frontend": return enableFrontend;
                         case "microservices": return enableMicroservices;
                         case "saga": return enableSaga;
-                        case "reports": return enableReportEnhancer;
-                        case "industryStandard": return enableIndustryStandard;
+                        case "reports": case "ai_reports": return enableReportEnhancer;
+                        case "industry_standard": case "industryStandard": case "bian_mapping": return enableIndustryStandard;
                         case "ml": return enableML;
+                        case "messaging": return enableSaga; // reuse saga state for messaging
+                        case "auto_resolve": return autoResolve;
                         default: return false;
                       }
                     };
@@ -921,9 +928,11 @@ export default function CompleoAgentPage() {
                         case "frontend": setEnableFrontend(v); break;
                         case "microservices": setEnableMicroservices(v); break;
                         case "saga": setEnableSaga(v); break;
-                        case "reports": setEnableReportEnhancer(v); break;
-                        case "industryStandard": setEnableIndustryStandard(v); break;
+                        case "reports": case "ai_reports": setEnableReportEnhancer(v); break;
+                        case "industry_standard": case "industryStandard": case "bian_mapping": setEnableIndustryStandard(v); break;
                         case "ml": setEnableML(v); break;
+                        case "messaging": setEnableSaga(v); break;
+                        case "auto_resolve": setAutoResolve(v); break;
                       }
                     };
                     const iconMap: Record<string, any> = {
@@ -931,24 +940,39 @@ export default function CompleoAgentPage() {
                       microservices: Layers,
                       saga: GitBranch,
                       reports: Star,
+                      ai_reports: Star,
+                      industry_standard: Shield,
                       industryStandard: Shield,
+                      bian_mapping: Shield,
                       ml: Zap,
+                      messaging: Radio,
+                      auto_resolve: Zap,
                     };
                     const colorMap: Record<string, string> = {
                       frontend: "text-blue-400",
                       microservices: "text-pink-400",
                       saga: "text-violet-400",
                       reports: "text-amber-400",
+                      ai_reports: "text-amber-400",
+                      industry_standard: "text-cyan-400",
                       industryStandard: "text-cyan-400",
+                      bian_mapping: "text-cyan-400",
                       ml: "text-amber-400",
+                      messaging: "text-orange-400",
+                      auto_resolve: "text-emerald-400",
                     };
                     const checkboxColorMap: Record<string, string> = {
                       frontend: "data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500",
                       microservices: "data-[state=checked]:bg-pink-500 data-[state=checked]:border-pink-500",
                       saga: "data-[state=checked]:bg-violet-500 data-[state=checked]:border-violet-500",
                       reports: "data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500",
+                      ai_reports: "data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500",
+                      industry_standard: "data-[state=checked]:bg-cyan-500 data-[state=checked]:border-cyan-500",
                       industryStandard: "data-[state=checked]:bg-cyan-500 data-[state=checked]:border-cyan-500",
+                      bian_mapping: "data-[state=checked]:bg-cyan-500 data-[state=checked]:border-cyan-500",
                       ml: "data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500",
+                      messaging: "data-[state=checked]:bg-orange-500 data-[state=checked]:border-orange-500",
+                      auto_resolve: "data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-500",
                     };
                     const IconComp = iconMap[opt.id] || Zap;
                     const iconColor = colorMap[opt.id] || "text-yellow-400";
@@ -988,6 +1012,29 @@ export default function CompleoAgentPage() {
                                     ? "bg-blue-500 hover:bg-blue-600 text-white"
                                     : "hover:border-blue-400"}
                                   onClick={() => setFrontendFramework(sub.id as any)}
+                                >
+                                  {sub.label}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Sub-options : choix du standard métier */}
+                        {(opt.id === "industry_standard" || opt.id === "industryStandard" || opt.id === "bian_mapping") && enableIndustryStandard && opt.subOptions && (
+                          <div className="ml-8 space-y-2">
+                            <p className="text-xs text-muted-foreground">Choisissez le standard métier :</p>
+                            <div className="flex flex-wrap gap-2">
+                              {(opt.subOptions || []).map((sub: any) => (
+                                <Button
+                                  key={sub.id}
+                                  variant={selectedStandard === sub.id ? "default" : "outline"}
+                                  size="sm"
+                                  className={selectedStandard === sub.id
+                                    ? "bg-cyan-500 hover:bg-cyan-600 text-white"
+                                    : "hover:border-cyan-400"}
+                                  onClick={() => setSelectedStandard(sub.id)}
+                                  title={sub.description}
                                 >
                                   {sub.label}
                                 </Button>
