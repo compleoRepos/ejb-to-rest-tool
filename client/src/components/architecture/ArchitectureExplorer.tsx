@@ -13,6 +13,7 @@ import CriticalFlowsTab from "./tabs/CriticalFlowsTab";
 import DynamicImpactTab from "./tabs/DynamicImpactTab";
 import MigrationSummaryTab from "./tabs/MigrationSummaryTab";
 import AIInsightsTab from "./tabs/AIInsightsTab";
+import ComplianceTab from "./tabs/ComplianceTab";
 
 const TABS = [
   { id: "inventory", label: "Inventaire classes", icon: "📦", shortcut: "F1" },
@@ -22,6 +23,7 @@ const TABS = [
   { id: "impact", label: "Impact Analysis", icon: "🎯", shortcut: "F5" },
   { id: "migration", label: "Résumé migration", icon: "🔄", shortcut: "F6" },
   { id: "ai-insights", label: "Insights IA", icon: "🧠", shortcut: "F7" },
+  { id: "compliance", label: "Conformité", icon: "🔐", shortcut: "F8" },
 ];
 
 const C = {
@@ -316,6 +318,9 @@ export default function ArchitectureExplorer({ analysisResult, sessionId }: Prop
         )}
         {activeTab === "ai-insights" && (
           <AIInsightsTab aiInsights={analysisResult.aiInsights} />
+        )}
+        {activeTab === "compliance" && (
+          <ComplianceTab sessionId={sessionId} />
         )}
       </div>
     </div>

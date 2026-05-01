@@ -9,6 +9,7 @@
  * GET    /api/agent/:id/download   → Télécharger le ZIP résultat
  * GET    /api/agent/:id/reports    → Rapports enrichis
  * GET    /api/agent/:id/sagas      → Données Saga Orchestration
+ * GET    /api/agent/:id/compliance → Fichiers SOC 2 Compliance
  * GET    /api/agent/sessions       → Lister les sessions
  */
 
@@ -501,6 +502,90 @@ export function registerAgentRoutes(app: Express) {
     }
 
     return res.json(session.enhancedReports);
+  });
+
+  // ─── GET /api/agent/:id/compliance — v10.13 SOC 2 Compliance ────────────────
+  router.get("/:id/compliance", (req: Request, res: Response) => {
+    const { id } = req.params;
+    const store = getAgentStore();
+    const session = store.get(id);
+
+    if (!session) {
+      return res.status(404).json({ error: "Session introuvable" });
+    }
+
+    if (!session.generatedProject?.files) {
+      return res.json({
+        enabled: false,
+        files: [],
+        report: null,
+        summary: null,
+      });
+    }
+
+    // Extraire les fichiers SOC 2 du projet généré
+    const complianceFiles = session.generatedProject.files.filter(
+      (f) =>
+        f.path.includes("/compliance/") ||
+        f.path.includes("SOC2_COMPLIANCE") ||
+        f.path.includes("application-soc2")
+    );
+
+    if (complianceFiles.length === 0) {
+      return res.json({
+        enabled: false,
+        files: [],
+        report: null,
+        summary: null,
+      });
+    }
+
+    // Séparer le rapport des fichiers de code
+    const reportFile = complianceFiles.find((f) => f.path.includes("SOC2_COMPLIANCE.md"));
+    const codeFiles = complianceFiles.filter((f) => !f.path.includes("SOC2_COMPLIANCE.md"));
+
+    // Catégoriser les fichiers
+    const categorizedFiles = codeFiles.map((f) => {
+      let category = "config";
+      let tsc = "";
+      if (f.path.includes("/audit/")) { category = "audit"; tsc = "CC7, CC8"; }
+      else if (f.path.includes("/security/")) { category = "security"; tsc = "CC6"; }
+      else if (f.path.includes("/validation/")) { category = "validation"; tsc = "CC5, PI1"; }
+      else if (f.path.includes("/monitoring/")) { category = "monitoring"; tsc = "A1, CC7"; }
+      else if (f.path.includes("/error/")) { category = "error"; tsc = "CC3, CC9"; }
+      else if (f.path.includes("application-soc2")) { category = "config"; tsc = "CC6, CC7"; }
+      return {
+        path: f.path,
+        content: f.content,
+        category,
+        tsc,
+        fileName: f.path.split("/").pop() || f.path,
+      };
+    });
+
+    // Construire le résumé
+    const tscSet = new Set<string>();
+    categorizedFiles.forEach((f) => {
+      f.tsc.split(", ").filter(Boolean).forEach((t) => tscSet.add(t));
+    });
+
+    return res.json({
+      enabled: true,
+      files: categorizedFiles,
+      report: reportFile ? reportFile.content : null,
+      summary: {
+        totalFiles: categorizedFiles.length,
+        criteriasCovered: Array.from(tscSet).sort(),
+        categories: {
+          audit: categorizedFiles.filter((f) => f.category === "audit").length,
+          security: categorizedFiles.filter((f) => f.category === "security").length,
+          validation: categorizedFiles.filter((f) => f.category === "validation").length,
+          monitoring: categorizedFiles.filter((f) => f.category === "monitoring").length,
+          error: categorizedFiles.filter((f) => f.category === "error").length,
+          config: categorizedFiles.filter((f) => f.category === "config").length,
+        },
+      },
+    });
   });
 
   // ─── GET /api/agent/:id/sagas — v7.9 Saga Orchestration ──────────────────
