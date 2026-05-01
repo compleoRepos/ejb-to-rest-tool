@@ -462,6 +462,25 @@ export class DynamicOptionsResolver {
       });
     }
 
+    // Option: SOC 2 Compliance (always available)
+    options.push({
+      id: "soc2_compliance",
+      label: "Conformite SOC 2",
+      description: "Generer le code avec les patterns de securite SOC 2 Type II : audit trails, chiffrement AES-256, controle d'acces, headers securises, monitoring.",
+      category: "security" as any,
+      defaultEnabled: false,
+      confidence: "high",
+      icon: "Shield",
+      color: "red",
+      triggeredBy: ["always_available"],
+      subOptions: [
+        { id: "audit_trail", label: "Audit Trail complet", description: "Enregistrement automatique de chaque action utilisateur/systeme", defaultSelected: true },
+        { id: "encryption", label: "Chiffrement donnees sensibles", description: "AES-256-GCM pour les champs annotes @EncryptedField", defaultSelected: true },
+        { id: "input_validation", label: "Validation des entrees", description: "Protection XSS, SQL Injection, Path Traversal via AOP", defaultSelected: true },
+        { id: "security_headers", label: "Headers de securite HTTP", description: "CSP, HSTS, X-Frame-Options, Referrer-Policy", defaultSelected: true },
+      ],
+    });
+
     // Always add: auto-resolve ambiguities
     options.unshift({
       id: "auto_resolve",

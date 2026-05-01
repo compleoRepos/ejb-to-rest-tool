@@ -90,6 +90,8 @@ export interface AgentConfig {
     enableIndustryStandard?: boolean;
     /** v10.8: Detected industry standard */
     industryStandard?: string;
+    /** v10.13: SOC 2 Compliance generation */
+    enableSoc2Compliance?: boolean;
   };
 }
 
@@ -1121,6 +1123,48 @@ export class CompleoAgent {
         message: `Enrichissement architecture ignoré : ${archErr.message}`,
         phase: "GENERATING",
       });
+    }
+
+    // ─── v10.13: SOC 2 Compliance Generation ──────────────────────────────────
+    if (session.config.options.enableSoc2Compliance) {
+      try {
+        const { generateSOC2Compliance } = await import("../engine/compliance/SOC2ComplianceGenerator");
+        const ir = session.ir!;
+        const hasDb = ir.useCases.some(uc => uc.injectedServices.some(s => /DAO|Repository|DataSource/i.test(s.type)));
+        const hasRest = true; // Spring Boot REST is always generated
+        const hasSensitive = ir.useCases.some(uc =>
+          /password|secret|token|credit|card|ssn|iban/i.test(uc.className + " " + (uc.useCaseDescription || ""))
+        );
+        // Derive basePackage from first use case packageName
+        const basePackage = ir.useCases.length > 0
+          ? ir.useCases[0].packageName.replace(/\.usecase.*$|\.service.*$|\.ejb.*$/i, "")
+          : "com.migration";
+        const soc2Result = generateSOC2Compliance(
+          basePackage,
+          session.config.options.projectName || ir.projectName || "migration",
+          hasDb,
+          hasRest,
+          hasSensitive
+        );
+        for (const f of soc2Result.files) {
+          session.generatedProject!.files.push({
+            path: f.path,
+            content: f.content,
+            category: "config",
+          });
+        }
+        yield this.event("LOG", {
+          level: "success",
+          message: `SOC 2 Compliance : ${soc2Result.files.length} fichiers de sécurité générés (${soc2Result.summary.criteriasCovered.length} critères TSC couverts)`,
+          phase: "GENERATING",
+        });
+      } catch (soc2Err: any) {
+        yield this.event("LOG", {
+          level: "warn",
+          message: `SOC 2 Compliance partiel : ${soc2Err.message}`,
+          phase: "GENERATING",
+        });
+      }
     }
 
     yield this.event("PHASE_END", {

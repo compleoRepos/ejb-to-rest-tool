@@ -134,6 +134,7 @@ export default function CompleoAgentPage() {
   const [enableIndustryStandard, setEnableIndustryStandard] = useState(false);
   const [selectedStandard, setSelectedStandard] = useState<string>("");
   const [dynamicOptions, setDynamicOptions] = useState<any>(null);
+  const [enableSoc2Compliance, setEnableSoc2Compliance] = useState(false);
   const [isLoadingOptions, setIsLoadingOptions] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [projectFromDb, setProjectFromDb] = useState<{ id: number; name: string; fileCount: number } | null>(null);
@@ -282,6 +283,7 @@ export default function CompleoAgentPage() {
                             setSelectedStandard(opts.detectedDomain.primary);
                           }
                         }
+                        if (opt.id === "soc2_compliance") setEnableSoc2Compliance(true);
                       }
                     }
                   }
@@ -423,6 +425,7 @@ export default function CompleoAgentPage() {
           enableIndustryStandard,
           industryStandard: enableIndustryStandard && selectedStandard
             ? selectedStandard : undefined,
+          enableSoc2Compliance,
         }),
       });
       if (!patchRes.ok) {
@@ -920,6 +923,7 @@ export default function CompleoAgentPage() {
                         case "reports": return enableReportEnhancer;
                         case "industryStandard": return enableIndustryStandard;
                         case "ml": return enableML;
+                        case "soc2_compliance": return enableSoc2Compliance;
                         default: return false;
                       }
                     };
@@ -931,6 +935,7 @@ export default function CompleoAgentPage() {
                         case "reports": setEnableReportEnhancer(v); break;
                         case "industryStandard": setEnableIndustryStandard(v); break;
                         case "ml": setEnableML(v); break;
+                        case "soc2_compliance": setEnableSoc2Compliance(v); break;
                       }
                     };
                     const iconMap: Record<string, any> = {
@@ -940,6 +945,7 @@ export default function CompleoAgentPage() {
                       reports: Star,
                       industryStandard: Shield,
                       ml: Zap,
+                      soc2_compliance: Lock,
                     };
                     const colorMap: Record<string, string> = {
                       frontend: "text-blue-400",
@@ -948,6 +954,7 @@ export default function CompleoAgentPage() {
                       reports: "text-amber-400",
                       industryStandard: "text-cyan-400",
                       ml: "text-amber-400",
+                      soc2_compliance: "text-emerald-400",
                     };
                     const checkboxColorMap: Record<string, string> = {
                       frontend: "data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500",
@@ -956,6 +963,7 @@ export default function CompleoAgentPage() {
                       reports: "data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500",
                       industryStandard: "data-[state=checked]:bg-cyan-500 data-[state=checked]:border-cyan-500",
                       ml: "data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500",
+                      soc2_compliance: "data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-500",
                     };
                     const IconComp = iconMap[opt.id] || Zap;
                     const iconColor = colorMap[opt.id] || "text-yellow-400";
