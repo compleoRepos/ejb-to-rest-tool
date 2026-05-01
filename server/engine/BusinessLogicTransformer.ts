@@ -439,8 +439,26 @@ export class BusinessLogicTransformer {
         continue; // Ne pas ajouter les lignes du bloc JDBC aux processedLines
       }
 
-      // Lignes JDBC isolées (pas dans un bloc try/catch)
-      if (
+      // v10.15: Lignes JDBC isolées — traitement intelligent
+      // Cas 1: getConnection() comme paramètre d'un appel de méthode (ex: HibernateDao.xxx(..., ds.getConnection()))
+      //   → Supprimer le paramètre Connection inline au lieu de créer un placeholder
+      // Cas 2: Vraie ligne JDBC autonome (PreparedStatement, executeQuery, etc.)
+      //   → Créer un placeholder pour migration LLM
+      const isGetConnectionParam = trimmedLine.includes("getConnection()") &&
+        (trimmedLine.includes("(") && !trimmedLine.match(/^\s*\w+\s*=\s*\w+\.getConnection\(\)/)) &&
+        !trimmedLine.includes("PreparedStatement") &&
+        !trimmedLine.includes("Statement");
+
+      if (isGetConnectionParam) {
+        // Supprimer le paramètre getConnection() inline — c'est un paramètre d'appel DAO
+        let cleanedLine = line
+          .replace(/,\s*\w+\.getConnection\(\)\s*/g, "")  // ", ds.getConnection()" → ""
+          .replace(/\(\s*\w+\.getConnection\(\)\s*,/g, "(")  // "(ds.getConnection(), " → "("
+          .replace(/\w+\.getConnection\(\)\s*,\s*/g, "")  // "ds.getConnection(), " → ""
+          .replace(/\w+\.getConnection\(\)/g, "");  // standalone
+        processedLines.push(cleanedLine);
+        migratedLines++;
+      } else if (
         trimmedLine.includes("getConnection()") ||
         trimmedLine.includes("PreparedStatement") ||
         trimmedLine.includes("executeQuery") ||
@@ -559,6 +577,12 @@ export class BusinessLogicTransformer {
     result = result.replace(/\blog\.warn\(/g, "log.warn(");
     result = result.replace(/\n{3,}/g, "\n\n");
 
+    // v10.15: Post-traitement des catch blocks — ajouter throw après log.error
+    // Les catch blocks legacy font souvent log.error() sans rethrow,
+    // ce qui avale silencieusement les exceptions. En Spring Boot,
+    // il faut relancer l'exception pour que le @ControllerAdvice la capture.
+    result = this.enhanceCatchBlocks(result);
+
     const trimmed = result.trim();
 
     return {
@@ -610,6 +634,66 @@ export class BusinessLogicTransformer {
 
   private escapeRegex(str: string): string {
     return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  /**
+   * v10.15: Post-traitement des catch blocks.
+   * Transforme les catch blocks qui font log.error() sans throw
+   * en ajoutant un throw RuntimeException après le log.
+   * Cela évite les exceptions avalées silencieusement.
+   */
+  private enhanceCatchBlocks(code: string): string {
+    const lines = code.split("\n");
+    const result: string[] = [];
+    let i = 0;
+
+    while (i < lines.length) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      // Détecter un catch block
+      if (trimmed.match(/^\}?\s*catch\s*\(/) || trimmed.match(/catch\s*\(/)) {
+        // Extraire le nom de la variable d'exception
+        const exMatch = trimmed.match(/catch\s*\(\s*\w+\s+(\w+)\s*\)/);
+        const exVar = exMatch ? exMatch[1] : "e";
+
+        // Collecter le catch block (jusqu'à l'accolade fermante)
+        const catchLines: string[] = [line];
+        let braceCount = 0;
+        let foundOpen = line.includes("{");
+        if (foundOpen) braceCount = (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
+        i++;
+
+        while (i < lines.length && (braceCount > 0 || !foundOpen)) {
+          const cl = lines[i];
+          if (cl.includes("{")) { foundOpen = true; }
+          braceCount += (cl.match(/\{/g) || []).length - (cl.match(/\}/g) || []).length;
+          catchLines.push(cl);
+          i++;
+          if (foundOpen && braceCount <= 0) break;
+        }
+
+        const catchContent = catchLines.join("\n");
+        const hasThrow = /throw\s/.test(catchContent);
+        const hasReturn = /return\s/.test(catchContent);
+        const hasLog = /log\.(?:error|warn)/.test(catchContent);
+
+        if (hasLog && !hasThrow && !hasReturn) {
+          // Insérer throw avant la dernière accolade fermante
+          const lastBrace = catchLines.length - 1;
+          const indent = catchLines[1] ? catchLines[1].match(/^(\s*)/)?.[1] || "        " : "        ";
+          catchLines.splice(lastBrace, 0, `${indent}throw new RuntimeException(${exVar}.getMessage(), ${exVar});`);
+        }
+
+        result.push(...catchLines);
+        continue;
+      }
+
+      result.push(line);
+      i++;
+    }
+
+    return result.join("\n");
   }
 }
 

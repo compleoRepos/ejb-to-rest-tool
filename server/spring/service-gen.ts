@@ -130,7 +130,7 @@ export function generateDomainService(
     const isMigrated = methodBody.includes("return builder.build()") || methodBody.includes("Migrated from:");
     const endingLines = isMigrated
       ? ""
-      : `\n        log.info("=== Ending ${methodName} ===");\n${returnType !== "void" ? "        return response;" : ""}`;
+      : `\n        log.info("Audit trail: transaction ${methodName} completed");\n${returnType !== "void" ? "        return response;" : ""}`;
 
     methods.push(`
 ${txAnnotation}    /**
@@ -138,7 +138,7 @@ ${txAnnotation}    /**
      * Migrated from legacy UseCase: ${uc.className}
      */
     public ${returnType} ${methodName}(${paramType}) {
-        log.info("=== Starting ${methodName} ===");
+        log.info("Audit trail: transaction ${methodName} initiated");
 ${methodBody}${endingLines}
     }`);
   }

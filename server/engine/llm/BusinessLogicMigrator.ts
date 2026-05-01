@@ -24,6 +24,7 @@ import {
   type LLMAdapterConfig,
   type LLMBackend,
 } from "../ml/llm-adapter";
+import { buildEnhancedFallback } from "./EnhancedFallbackMigrator";
 
 // ═══════════════════════════════════════════════════════════════════════
 // TYPES
@@ -387,99 +388,16 @@ export class BusinessLogicMigrator {
 
   /**
    * Fallback quand le LLM est indisponible :
-   * Génère du code Spring Data JPA basique à partir des métadonnées.
+   * Utilise le EnhancedFallbackMigrator v10.15 pour générer du code
+   * Spring Data JPA plus complet et fidèle à la logique métier.
    */
   private buildFallbackResult(
     ctx: JdbcMigrationContext,
     warnings: string[],
   ): JdbcMigrationResult {
-    const repoField = ctx.repositoryName
-      ? ctx.repositoryName.charAt(0).toLowerCase() + ctx.repositoryName.slice(1)
-      : "repository";
-    const entityName = ctx.entityName || "Entity";
-
-    // Analyser le type d'opération JDBC
-    const isSelect = /SELECT|FROM/i.test(ctx.jdbcCode);
-    const isInsert = /INSERT/i.test(ctx.jdbcCode);
-    const isUpdate = /UPDATE.*SET/i.test(ctx.jdbcCode);
-    const isDelete = /DELETE/i.test(ctx.jdbcCode);
-
-    let fallbackCode: string;
-
-    if (isSelect && ctx.jdbcCode.includes("while (rs.next()")) {
-      // SELECT multiple rows
-      fallbackCode = [
-        `        // ─── Logique métier migrée depuis ${ctx.sourceClassName}.${ctx.methodName} ───`,
-        `        // Tables : ${ctx.referencedTables.join(", ") || "N/A"}`,
-        `        // Migration automatique JDBC → Spring Data JPA (fallback règles)`,
-        `        List<${entityName}> entities = ${repoField}.findAll();`,
-        `        // TODO [FALLBACK]: Affiner la requête findAll() avec les critères WHERE du SQL original`,
-        `        // SQL original : voir constantes SQL de la classe`,
-        `        // ─── Fin logique métier migrée (${ctx.sourceClassName}.${ctx.methodName}) ───`,
-      ].join("\n");
-    } else if (isSelect) {
-      // SELECT single row
-      fallbackCode = [
-        `        // ─── Logique métier migrée depuis ${ctx.sourceClassName}.${ctx.methodName} ───`,
-        `        // Tables : ${ctx.referencedTables.join(", ") || "N/A"}`,
-        `        // Migration automatique JDBC → Spring Data JPA (fallback règles)`,
-        `        Optional<${entityName}> entityOpt = ${repoField}.findById(id);`,
-        `        ${entityName} entity = entityOpt.orElseThrow(() ->`,
-        `            new TechnicalException("NOT_FOUND", "${entityName} non trouvé"));`,
-        `        // ─── Fin logique métier migrée (${ctx.sourceClassName}.${ctx.methodName}) ───`,
-      ].join("\n");
-    } else if (isInsert) {
-      fallbackCode = [
-        `        // ─── Logique métier migrée depuis ${ctx.sourceClassName}.${ctx.methodName} ───`,
-        `        // Tables : ${ctx.referencedTables.join(", ") || "N/A"}`,
-        `        // Migration automatique JDBC → Spring Data JPA (fallback règles)`,
-        `        ${entityName} entity = new ${entityName}();`,
-        `        // Mapper les champs depuis le request DTO`,
-        `        ${repoField}.save(entity);`,
-        `        // ─── Fin logique métier migrée (${ctx.sourceClassName}.${ctx.methodName}) ───`,
-      ].join("\n");
-    } else if (isUpdate) {
-      fallbackCode = [
-        `        // ─── Logique métier migrée depuis ${ctx.sourceClassName}.${ctx.methodName} ───`,
-        `        // Tables : ${ctx.referencedTables.join(", ") || "N/A"}`,
-        `        // Migration automatique JDBC → Spring Data JPA (fallback règles)`,
-        `        ${entityName} entity = ${repoField}.findById(id)`,
-        `            .orElseThrow(() -> new TechnicalException("NOT_FOUND", "${entityName} non trouvé"));`,
-        `        // Mettre à jour les champs de l'entity`,
-        `        ${repoField}.save(entity);`,
-        `        // ─── Fin logique métier migrée (${ctx.sourceClassName}.${ctx.methodName}) ───`,
-      ].join("\n");
-    } else if (isDelete) {
-      fallbackCode = [
-        `        // ─── Logique métier migrée depuis ${ctx.sourceClassName}.${ctx.methodName} ───`,
-        `        // Tables : ${ctx.referencedTables.join(", ") || "N/A"}`,
-        `        // Migration automatique JDBC → Spring Data JPA (fallback règles)`,
-        `        ${repoField}.deleteById(id);`,
-        `        // ─── Fin logique métier migrée (${ctx.sourceClassName}.${ctx.methodName}) ───`,
-      ].join("\n");
-    } else {
-      fallbackCode = [
-        `        // ─── Logique métier migrée depuis ${ctx.sourceClassName}.${ctx.methodName} ───`,
-        `        // Tables : ${ctx.referencedTables.join(", ") || "N/A"}`,
-        `        // Migration automatique JDBC → Spring Data JPA (fallback règles)`,
-        `        log.info("${ctx.methodName} — opération migrée depuis JDBC");`,
-        `        // Utiliser ${repoField} pour les opérations CRUD`,
-        `        // ─── Fin logique métier migrée (${ctx.sourceClassName}.${ctx.methodName}) ───`,
-      ].join("\n");
-    }
-
-    const requiredInjections = ctx.repositoryName
-      ? [{ type: ctx.repositoryName, fieldName: repoField }]
-      : [];
-
-    return {
-      migratedCode: fallbackCode,
-      additionalImports: ["import java.util.Optional;", "import java.util.List;"],
-      requiredInjections,
-      confidence: 0.4,
-      warnings: [...warnings, "LLM indisponible — migration fallback basée sur les règles"],
-      success: false,
-    };
+    const result = buildEnhancedFallback(ctx);
+    result.warnings = [...warnings, ...result.warnings];
+    return result;
   }
 }
 

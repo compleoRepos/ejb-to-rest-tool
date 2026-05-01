@@ -1,5 +1,5 @@
 {
-  "total_entries": 27237,
+  "total_entries": 27339,
   "unique_repos": 764,
   "size_mb": 310.4,
   "by_category": {
@@ -15,6 +15,22 @@
   "by_method": {
     "rule_based": 27202,
     "expert": 32,
-    "rule_based_user_project": 3
+    "rule_based_user_project": 105
+  },
+  "banking_projects": {
+    "total_entries": 102,
+    "unique_projects": 19,
+    "by_type": {
+      "uc_to_service": 44,
+      "dto_migration": 49,
+      "full_migration": 8,
+      "dao_to_repository": 1
+    },
+    "by_category": {
+      "ejb_session_bean": 52,
+      "dto": 49,
+      "jdbc_dao": 1
+    },
+    "source": "19 projets bancaires BOA/BMCE Direct (pipeline batch v10.15)"
   }
 }

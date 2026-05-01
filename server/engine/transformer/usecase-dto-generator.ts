@@ -482,21 +482,27 @@ function resolveImports(type: string, imports: Set<string>): string {
 
 function inferValidation(fieldName: string, fieldType: string, imports: Set<string>): string[] {
   const annotations: string[] = [];
+  const isPrimitive = ["int", "long", "double", "float", "boolean", "byte", "short", "char"].includes(fieldType);
+  const isCollection = fieldType.startsWith("List<") || fieldType.startsWith("Set<") || fieldType.startsWith("Map<");
 
-  // @NotNull pour les champs obligatoires
-  if (/^id|^code|^num|^reference|^rib|^iban|^nom/i.test(fieldName)) {
-    imports.add("import jakarta.validation.constraints.NotNull;");
-    annotations.push("@NotNull");
-  }
+  // v10.15: Champs optionnels par nature (ne pas forcer @NotNull)
+  const optionalPatterns = /^optional|^comment|^remarque|^note|^description|^complement|^detail|^motif$/i;
 
-  // @NotBlank pour les String obligatoires
-  if (fieldType === "String" && /^code|^nom|^reference|^rib|^iban/i.test(fieldName)) {
+  // v10.15: @NotBlank pour les String non-optionnels (approche par défaut stricte)
+  if (fieldType === "String" && !optionalPatterns.test(fieldName)) {
     imports.add("import jakarta.validation.constraints.NotBlank;");
     annotations.push("@NotBlank");
   }
 
+  // v10.15: @NotNull pour les objets non-primitifs, non-collections, non-optionnels
+  if (fieldType !== "String" && !isPrimitive && !isCollection && !optionalPatterns.test(fieldName)) {
+    imports.add("import jakarta.validation.constraints.NotNull;");
+    annotations.push("@NotNull");
+  }
+
   // @Positive pour les montants
-  if (fieldType === "BigDecimal" && /montant|solde|amount|balance|prix|tarif/i.test(fieldName)) {
+  if ((fieldType === "BigDecimal" || fieldType === "Double" || fieldType === "double") &&
+      /montant|solde|amount|balance|prix|tarif/i.test(fieldName)) {
     imports.add("import jakarta.validation.constraints.Positive;");
     annotations.push("@Positive");
   }
@@ -505,6 +511,18 @@ function inferValidation(fieldName: string, fieldType: string, imports: Set<stri
   if (fieldType === "String" && /^code/i.test(fieldName)) {
     imports.add("import jakarta.validation.constraints.Size;");
     annotations.push("@Size(max = 20)");
+  }
+
+  // v10.15: @Pattern pour les numéros de carte
+  if (fieldType === "String" && /numcarte|cardnumber|numerocarte/i.test(fieldName)) {
+    imports.add("import jakarta.validation.constraints.Pattern;");
+    annotations.push("@Pattern(regexp = \"^[0-9]{16}$\", message = \"Card number must be 16 digits\")");
+  }
+
+  // v10.15: @Email pour les emails
+  if (fieldType === "String" && /email|mail/i.test(fieldName)) {
+    imports.add("import jakarta.validation.constraints.Email;");
+    annotations.push("@Email");
   }
 
   return annotations;

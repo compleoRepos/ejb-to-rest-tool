@@ -31,6 +31,8 @@ import { registerAllDetectors } from "./detectors/index";
 import { registerAllGenerators } from "./generators/index";
 import { registry } from "./registry/index";
 import type { DetectedComponent, GeneratedFile, TechnologyType, ValidationResult } from "./registry/types";
+import { JdbcPostProcessor, countUnresolvedPlaceholders } from "./llm/JdbcPostProcessor";
+import type { JdbcBlock } from "./BusinessLogicTransformer";
 
 // ─── Types publics ────────────────────────────────────────────────────────────
 
@@ -286,6 +288,74 @@ export class CompleoEngine {
       warnings: result.warnings,
       migrationReport,
       multiTechFiles: multiTechFiles || [],
+    };
+  }
+
+  // ─── postProcessJdbc ──────────────────────────────────────────────────────
+
+  /**
+   * Post-traite les fichiers générés pour migrer les blocs JDBC via LLM.
+   * Remplace les placeholders @@JDBC_LLM_BLOCK_*@@ et @@DAO_LLM_BLOCK_*@@
+   * par du code Spring Data JPA migré.
+   *
+   * Appeler après generate() pour obtenir un projet complet.
+   * Si le LLM est indisponible, un fallback rule-based amélioré est utilisé.
+   *
+   * @since v10.15
+   */
+  async postProcessJdbc(project: GeneratedProject, ir?: ProjectIR): Promise<{
+    migratedCount: number;
+    fallbackCount: number;
+    warnings: string[];
+  }> {
+    const allFiles = [...project.files, ...project.multiTechFiles];
+    const placeholderCount = countUnresolvedPlaceholders(
+      allFiles.map(f => ({ path: f.path, content: f.content }))
+    );
+
+    if (placeholderCount === 0) {
+      return { migratedCount: 0, fallbackCount: 0, warnings: [] };
+    }
+
+    const postProcessor = new JdbcPostProcessor();
+    const jdbcBlocks: JdbcBlock[] = [];
+
+    // Identifier les fichiers Entity et Repository pour le contexte LLM
+    const entityFiles = allFiles
+      .filter(f => f.path.includes("/entity/") || f.path.includes("/model/"))
+      .map(f => ({ path: f.path, content: f.content }));
+    const repositoryFiles = allFiles
+      .filter(f => f.path.includes("/repository/"))
+      .map(f => ({ path: f.path, content: f.content }));
+
+    // Déterminer le basePackage
+    const basePackage = ir?.groupId
+      ? `${ir.groupId}.${ir.artifactId?.replace(/-/g, "") || "app"}`
+      : "com.example.app";
+
+    const result = await postProcessor.processAll(
+      allFiles.map(f => ({ path: f.path, content: f.content, category: (f as any).category })),
+      jdbcBlocks,
+      basePackage,
+      entityFiles,
+      repositoryFiles,
+    );
+
+    // Mettre à jour les fichiers du projet avec le code migré
+    const fileMap = new Map(result.files.map(f => [f.path, f.content]));
+    for (const file of project.files) {
+      const migrated = fileMap.get(file.path);
+      if (migrated) file.content = migrated;
+    }
+    for (const file of project.multiTechFiles) {
+      const migrated = fileMap.get(file.path);
+      if (migrated) file.content = migrated;
+    }
+
+    return {
+      migratedCount: result.migratedCount,
+      fallbackCount: result.fallbackCount,
+      warnings: result.warnings,
     };
   }
 

@@ -24,6 +24,8 @@ export interface GenerationResult {
   warnings: string[];
   compilationResult?: CompilationResult;
   dsInfo?: DataSourceInfo;
+  /** v10.15: JDBC blocks collected during BLT for post-processing */
+  jdbcBlocks?: Array<{ blockId: string; code: string; tables: string[]; dataSources: string[]; sqlConstants: Array<{ name: string; type: string; value: string }>; sourceClassName: string; methodName: string }>;
 }
 
 export interface GenerationStats {
@@ -378,16 +380,24 @@ export function getHttpAnnotation(method: string, path: string): string {
 }
 
 // R10: Infer Bean Validation from field metadata
+// v10.15: Par défaut, tous les champs non-primitifs des Request DTOs
+// reçoivent @NotBlank (String) ou @NotNull (objets) pour la validation stricte.
 export function inferBeanValidation(field: DtoFieldIR, imports: Set<string>): string[] {
   const annotations: string[] = [];
   const name = field.name.toLowerCase();
   const type = field.type;
 
-  if (field.required) {
+  const isPrimitive = ["int", "long", "double", "float", "boolean", "byte", "short", "char"].includes(type);
+  const isCollection = type.startsWith("List<") || type.startsWith("Set<") || type.startsWith("Map<");
+  // Champs qui ne doivent pas être @NotNull (optionnels par nature)
+  const optionalFields = ["optional", "comment", "remarque", "note", "description", "complement", "detail"];
+  const isOptionalByName = optionalFields.some(p => name.includes(p));
+
+  if (field.required || (!isPrimitive && !isCollection && !isOptionalByName)) {
     if (type === "String") {
       imports.add("import jakarta.validation.constraints.NotBlank;");
       annotations.push("    @NotBlank");
-    } else {
+    } else if (!isPrimitive && !isCollection) {
       imports.add("import jakarta.validation.constraints.NotNull;");
       annotations.push("    @NotNull");
     }
