@@ -1,6 +1,7 @@
 /**
- * Compleo v5.4 — Page unifiée de migration Java Legacy → Spring Boot
- * 4 états : idle → analyzing → choices → results
+ * Compleo v10.7 — Page unifiée de migration Java Legacy → Spring Boot
+ * 6 états : idle → analyzing → analysis_review → missing_deps → choices → results
+ * Nouveau workflow : Analyse d'abord, Génération ensuite.
  * Persistance sessionId dans localStorage + DB.
  * @author Compleo
  */
@@ -29,6 +30,7 @@ import FileExplorer from "@/components/compleo/FileExplorer";
 import CodeViewer from "@/components/compleo/CodeViewer";
 import StepProgress, { type PipelineStep } from "@/components/compleo/StepProgress";
 import SessionList from "@/components/compleo/SessionList";
+import AnalysisReviewScreen from "@/components/compleo/AnalysisReviewScreen";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -208,6 +210,9 @@ export default function CompleoPage() {
   // Multi-tech v3.0 state
   const [multiTechResult, setMultiTechResult] = useState<MultiTechResult | null>(null);
 
+  // v10.7: AI Insights state
+  const [aiInsights, setAiInsights] = useState<any>(null);
+
   // ─── Derived state ──────────────────────────────────────────────────────
 
   const ambiguities = analysisResult?.ambiguities ?? [];
@@ -323,20 +328,21 @@ export default function CompleoPage() {
       // Determine which step to restore to
       if (data.generation) {
         setPipelineStep("results");
-        setCompletedSteps(new Set(["idle", "analyzing", "missing_deps", "choices", "results"] as PipelineStep[]));
+        setCompletedSteps(new Set(["idle", "analyzing", "analysis_review", "missing_deps", "choices", "results"] as PipelineStep[]));
         // Load file contents for the explorer
         if (data.generation.files?.length > 0) {
           await loadFileContents(sid, data.generation.files);
         }
       } else if (data.status === "missing_deps" && data.missingDeps?.length > 0) {
         setPipelineStep("missing_deps");
-        setCompletedSteps(new Set(["idle", "analyzing"] as PipelineStep[]));
+        setCompletedSteps(new Set(["idle", "analyzing", "analysis_review"] as PipelineStep[]));
       } else if (data.ambiguities?.length > 0) {
         setPipelineStep("choices");
-        setCompletedSteps(new Set(["idle", "analyzing", "missing_deps"] as PipelineStep[]));
+        setCompletedSteps(new Set(["idle", "analyzing", "analysis_review", "missing_deps"] as PipelineStep[]));
       } else if (data.stats) {
-        setPipelineStep("analyzing");
-        setCompletedSteps(new Set(["idle"] as PipelineStep[]));
+        // v10.7: Restore to analysis_review instead of analyzing
+        setPipelineStep("analysis_review");
+        setCompletedSteps(new Set(["idle", "analyzing"] as PipelineStep[]));
       }
     } catch {
       localStorage.removeItem(SESSION_KEY);
@@ -382,22 +388,14 @@ export default function CompleoPage() {
       });
 
       setAnalysisResult(data as AnalysisResult);
+      setAiInsights(data.aiInsights || null);
       setCompletedSteps(prev => new Set([...prev, "analyzing"] as PipelineStep[]));
 
       const techCount = data.technologiesDetected?.length || 0;
 
-      if (data.ambiguities && data.ambiguities.length > 0) {
-        setPipelineStep("choices");
-        toast.success(`${techCount} technologies — ${data.ambiguities.length} choix à faire`);
-      } else if (data.missingDeps && data.missingDeps.length > 0) {
-        // Missing dependencies detected — show notification screen
-        setPipelineStep("missing_deps");
-        toast.warning(`${data.missingDeps.length} dépendance(s) manquante(s) détectée(s)`);
-      } else {
-        // No ambiguities, no missing deps — auto-generate
-        setCompletedSteps(prev => new Set([...prev, "missing_deps", "choices"] as PipelineStep[]));
-        await runGeneration(sid, []);
-      }
+      // v10.7: Toujours afficher les résultats d'analyse d'abord
+      setPipelineStep("analysis_review");
+      toast.success(`Analyse terminée — ${techCount} technologies détectées`);
     } catch (err: any) {
       toast.error(err.message || "Erreur lors de l'analyse");
       setPipelineStep("idle");
@@ -777,7 +775,36 @@ export default function CompleoPage() {
                 </div>
               )}
             </motion.div>
-          )}          {/* ═══ STATE: MISSING_DEPS ════════════════════════════════════════ */}
+          )}
+
+          {/* ═══ STATE: ANALYSIS_REVIEW ══════════════════════════════════ */}
+          {pipelineStep === "analysis_review" && analysisResult && (
+            <AnalysisReviewScreen
+              projectName={analysisResult.projectName}
+              stats={analysisResult.stats}
+              technologiesDetected={multiTechResult?.technologiesDetected || []}
+              maturityScore={multiTechResult?.maturityScore || null}
+              aiInsights={aiInsights}
+              ambiguityCount={analysisResult.ambiguities?.length || 0}
+              missingDepsCount={(analysisResult as any).missingDeps?.length || 0}
+              onContinueToGeneration={() => {
+                setCompletedSteps(prev => new Set([...prev, "analysis_review"] as PipelineStep[]));
+                const ambCount = analysisResult.ambiguities?.length || 0;
+                const missingCount = (analysisResult as any).missingDeps?.length || 0;
+                if (missingCount > 0) {
+                  setPipelineStep("missing_deps");
+                } else if (ambCount > 0) {
+                  setPipelineStep("choices");
+                } else {
+                  // No ambiguities, no missing deps — go directly to generation
+                  setCompletedSteps(prev => new Set([...prev, "missing_deps", "choices"] as PipelineStep[]));
+                  runGeneration(sessionId!, []);
+                }
+              }}
+            />
+          )}
+
+          {/* ═══ STATE: MISSING_DEPS ════════════════════════════════════════ */}
           {pipelineStep === "missing_deps" && analysisResult && (analysisResult as any).missingDeps?.length > 0 && (
             <motion.div
               key="missing_deps"

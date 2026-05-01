@@ -1,21 +1,22 @@
 /**
- * StepProgress — Barre de progression cliquable pour les 5 états du pipeline.
+ * StepProgress — Barre de progression cliquable pour les 6 états du pipeline.
  * Retour arrière seulement (pas de saut en avant).
- * v5.6.1 : ajout de l'étape "Dépendances" entre Analyse et Choix.
+ * v10.7 : ajout de l'étape "Résultats" entre Analyse et Choix.
  * @author Compleo
  */
 
-import { CheckCircle2, Upload, BarChart3, HelpCircle, Code2, AlertTriangle } from "lucide-react";
+import { CheckCircle2, Upload, BarChart3, HelpCircle, Code2, AlertTriangle, Eye } from "lucide-react";
 import { motion } from "framer-motion";
 
-export type PipelineStep = "idle" | "analyzing" | "missing_deps" | "choices" | "results";
+export type PipelineStep = "idle" | "analyzing" | "analysis_review" | "missing_deps" | "choices" | "results";
 
 const STEPS: { id: PipelineStep; label: string; icon: React.ElementType }[] = [
   { id: "idle", label: "Source", icon: Upload },
   { id: "analyzing", label: "Analyse", icon: BarChart3 },
+  { id: "analysis_review", label: "Résultats", icon: Eye },
   { id: "missing_deps", label: "Dépendances", icon: AlertTriangle },
-  { id: "choices", label: "Choix", icon: HelpCircle },
-  { id: "results", label: "Résultats", icon: Code2 },
+  { id: "choices", label: "Options", icon: HelpCircle },
+  { id: "results", label: "Code", icon: Code2 },
 ];
 
 interface StepProgressProps {

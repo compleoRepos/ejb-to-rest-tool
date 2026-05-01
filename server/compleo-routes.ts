@@ -341,6 +341,54 @@ router.post("/analyze-multitech", async (req: Request, res: Response) => {
     session.status = finalStatus;
     sessions.persist(session.id);
 
+    // ─── v10.5b: AI Insights Enrichment (non-blocking) ──────────────
+    let aiInsights: import("./engine/analysis/AnalysisLLMEnricher").AIAnalysisInsights | null = null;
+    try {
+      const { getInsightsCache } = await import("./engine/analysis/InsightsCache");
+      const cache = getInsightsCache();
+      const sourceHash = cache.computeHash(session.files);
+      const cached = cache.get(sourceHash);
+      if (cached) {
+        console.log(`[analyze-multitech] AI insights cache HIT (hash: ${sourceHash.slice(0, 8)}...)`);
+        aiInsights = cached;
+      } else {
+        const { AnalysisLLMEnricher } = await import("./engine/analysis/AnalysisLLMEnricher");
+        const { validateInsights } = await import("./engine/analysis/AnalysisInsightValidator");
+        const enricher = new AnalysisLLMEnricher();
+        // Build a minimal AnalysisResult compatible with enricher.enrich()
+        const analysisResultForEnricher: any = {
+          ir,
+          ambiguities: allAmbiguities,
+          multiTech: {
+            technologiesDetected: result.technologiesDetected,
+            detectedComponents: result.detectedComponents,
+            generatedFiles: result.generatedFiles,
+            maturityScore: result.maturityScore,
+            stats: result.stats,
+            migrationNotes: result.migrationNotes,
+          },
+          summary: {
+            useCaseCount: ir.stats.useCaseCount,
+            dtoCount: ir.stats.dtoCount,
+            enumCount: ir.stats.enumCount,
+            exceptionCount: ir.stats.exceptionCount,
+            componentCount: result.detectedComponents.length,
+            technologyCount: result.technologiesDetected.length,
+          },
+        };
+        const rawInsights = await enricher.enrich(analysisResultForEnricher, ir);
+        if (rawInsights) {
+          const { validated } = validateInsights(rawInsights as any, ir);
+          aiInsights = validated as any;
+          cache.set(sourceHash, aiInsights as any, session.projectName);
+          console.log(`[analyze-multitech] AI insights generated and cached for ${session.projectName}`);
+        }
+      }
+    } catch (aiErr) {
+      console.warn("[analyze-multitech] AI enrichment failed (non-blocking):", aiErr);
+    }
+    // ─── End AI Insights ─────────────────────────────────────────────
+
     // ─── Persist project to DB for Accueil/Projets pages ─────────────
     try {
       const { upsertProjectFromAgent } = await import("./db");
@@ -460,6 +508,8 @@ router.post("/analyze-multitech", async (req: Request, res: Response) => {
         })),
         domains: ir.stats.domains,
       },
+      // v10.5b: AI-powered insights (may be null if LLM unavailable)
+      aiInsights,
     });
   } catch (err: any) {
     console.error("[Compleo Multi-Tech Analyze Error]", err);
