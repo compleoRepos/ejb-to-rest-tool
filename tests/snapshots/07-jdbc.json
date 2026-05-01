@@ -1,6 +1,6 @@
 {
   "fixtureId": "07-jdbc",
-  "timestamp": "2026-05-01T15:29:54.941Z",
+  "timestamp": "2026-05-01T17:16:27.890Z",
   "useCaseCount": 1,
   "dtoCount": 2,
   "enumCount": 0,
@@ -29,6 +29,6 @@
     "ARCHITECTURE.md",
     "MIGRATION_SUMMARY.md"
   ],
-  "score": 47,
-  "status": "FAIL"
+  "score": 77,
+  "status": "WARN"
 }

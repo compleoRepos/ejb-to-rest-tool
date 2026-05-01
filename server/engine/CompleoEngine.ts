@@ -190,6 +190,28 @@ export class CompleoEngine {
       },
     };
 
+    // v10.11: BIAN Auto-Mapping via LLM (avant les insights IA)
+    try {
+      const { applyBianAutoMapping } = await import("./bian/BianAutoMapper");
+      const bianResult = await applyBianAutoMapping(ir.useCases);
+      // Mettre à jour les bianMappings dans l'IR
+      for (const bRes of bianResult.results) {
+        if (bRes.bianDomain && bRes.source !== "manual") {
+          if (!ir.bianMapping.find(m => m.useCase === bRes.className)) {
+            ir.bianMapping.push({
+              useCase: bRes.className,
+              serviceDomain: bRes.bianDomain,
+              sdCode: bRes.bianSdCode,
+              action: bRes.bianAction,
+            });
+          }
+        }
+      }
+      console.log(`[CompleoEngine] BIAN auto-mapping: ${bianResult.mappedCount}/${ir.useCases.length} use cases mappés (source: ${bianResult.source})`);
+    } catch (err) {
+      console.warn("[CompleoEngine] BIAN auto-mapping failed (non-blocking):", err);
+    }
+
     // v10.6: Cache des insights IA (hash-based) + enrichissement + validation
     try {
       const { getInsightsCache } = await import("./analysis/InsightsCache");

@@ -42,6 +42,23 @@ export interface TransformTodo {
   priority: "HIGH" | "MEDIUM" | "LOW";
 }
 
+export interface JdbcBlock {
+  /** Identifiant unique du bloc JDBC (pour le placeholder) */
+  blockId: string;
+  /** Code JDBC legacy complet */
+  code: string;
+  /** Tables SQL référencées */
+  tables: string[];
+  /** DataSources utilisées */
+  dataSources: string[];
+  /** Constantes SQL disponibles dans le contexte */
+  sqlConstants: Array<{ name: string; type: string; value: string }>;
+  /** Nom de la classe source */
+  sourceClassName: string;
+  /** Nom de la méthode */
+  methodName: string;
+}
+
 export interface TransformResult {
   /** @deprecated Use `code` instead — kept for backward compatibility */
   body: string;
@@ -60,6 +77,8 @@ export interface TransformResult {
   migratedLines: number;
   /** Lignes nécessitant intervention manuelle */
   manualLines: number;
+  /** Blocs JDBC collectés pour migration LLM (v10.11) */
+  jdbcBlocks: JdbcBlock[];
 }
 
 export class BusinessLogicTransformer {
@@ -345,30 +364,124 @@ export class BusinessLogicTransformer {
     result = result.replace(/FwkRollbackException/g, "BusinessRuleException");
     result = result.replace(/new EaiLog\([^)]+\)/g, "// Logger migré vers @Slf4j");
 
-    // ─── T8: JDBC direct → TODO typé ───
+    // ─── T8: JDBC direct → Collecte blocs pour migration LLM ───
+    const jdbcBlocks: JdbcBlock[] = [];
     const jdbcLines = result.split("\n");
     const processedLines: string[] = [];
-    for (const line of jdbcLines) {
+    let inJdbcBlock = false;
+    let jdbcBlockLines: string[] = [];
+    let jdbcBraceDepth = 0;
+    let blockCounter = 0;
+
+    for (let i = 0; i < jdbcLines.length; i++) {
+      const line = jdbcLines[i];
+      const trimmedLine = line.trim();
+
+      // Détecter le début d'un bloc JDBC
+      if (!inJdbcBlock && (
+        trimmedLine.includes("getConnection()") ||
+        (trimmedLine.includes("PreparedStatement") && trimmedLine.includes("prepareStatement")) ||
+        (trimmedLine.includes("DataSource") && trimmedLine.includes("getConnection"))
+      )) {
+        inJdbcBlock = true;
+        jdbcBraceDepth = 0;
+        jdbcBlockLines = [];
+      }
+
+      if (inJdbcBlock) {
+        jdbcBlockLines.push(line);
+        jdbcBraceDepth += (line.match(/\{/g) || []).length;
+        jdbcBraceDepth -= (line.match(/\}/g) || []).length;
+
+        // Fin du bloc JDBC
+        if (jdbcBraceDepth <= 0 && jdbcBlockLines.length > 1) {
+          blockCounter++;
+          const blockId = `JDBC_LLM_BLOCK_${blockCounter}`;
+          const blockCode = jdbcBlockLines.join("\n");
+
+          // Extraire les tables SQL du bloc
+          const tables: string[] = [];
+          const tableRegex = /(?:FROM|INTO|UPDATE|JOIN|DELETE\s+FROM)\s+([A-Z_][A-Z0-9_]+)/gi;
+          let tm: RegExpExecArray | null;
+          while ((tm = tableRegex.exec(blockCode)) !== null) {
+            const t = tm[1].toUpperCase();
+            if (t.length > 2 && !["SELECT","WHERE","SET","AND","OR","ON","AS","IS","IN","NOT","NULL","VALUES","ORDER","GROUP","HAVING","DUAL"].includes(t)) {
+              tables.push(t);
+            }
+          }
+
+          // Extraire les DataSources
+          const dataSources: string[] = [];
+          const dsRegex = /(\w+DS|dataSource\w*)\s*\.\s*getConnection/g;
+          let dm: RegExpExecArray | null;
+          while ((dm = dsRegex.exec(blockCode)) !== null) {
+            dataSources.push(dm[1]);
+          }
+
+          jdbcBlocks.push({
+            blockId,
+            code: blockCode,
+            tables: [...new Set(tables)],
+            dataSources: [...new Set(dataSources)],
+            sqlConstants: extractedConstants,
+            sourceClassName: resolvedCtx.sourceClassName,
+            methodName: resolvedCtx.methodName || "execute",
+          });
+
+          // Insérer un placeholder pour le post-processeur LLM
+          processedLines.push(`        // @@${blockId}@@`);
+          migratedLines++;
+
+          inJdbcBlock = false;
+          jdbcBlockLines = [];
+          continue;
+        }
+        continue; // Ne pas ajouter les lignes du bloc JDBC aux processedLines
+      }
+
+      // Lignes JDBC isolées (pas dans un bloc try/catch)
       if (
-        line.includes("getConnection()") ||
-        line.includes("PreparedStatement") ||
-        line.includes("executeQuery") ||
-        line.includes("executeUpdate") ||
-        line.includes("DataSource")
+        trimmedLine.includes("getConnection()") ||
+        trimmedLine.includes("PreparedStatement") ||
+        trimmedLine.includes("executeQuery") ||
+        trimmedLine.includes("executeUpdate") ||
+        (trimmedLine.includes("DataSource") && !trimmedLine.startsWith("//") && !trimmedLine.startsWith("*"))
       ) {
-        todos.push({
-          type: "JDBC_DIRECT",
-          line: line.trim(),
-          suggestion: "Migrer vers Spring Data JPA Repository",
-          priority: "HIGH",
+        blockCounter++;
+        const blockId = `JDBC_LLM_BLOCK_${blockCounter}`;
+        jdbcBlocks.push({
+          blockId,
+          code: line,
+          tables: [],
+          dataSources: [],
+          sqlConstants: extractedConstants,
+          sourceClassName: resolvedCtx.sourceClassName,
+          methodName: resolvedCtx.methodName || "execute",
         });
-        processedLines.push(`        // TODO [JDBC_DIRECT]: ${line.trim()}`);
-        processedLines.push(`        // → Migrer vers @Repository Spring Data JPA`);
-        manualLines++;
+        processedLines.push(`        // @@${blockId}@@`);
+        migratedLines++;
       } else {
         processedLines.push(line);
       }
     }
+
+    // Si un bloc JDBC n'a pas été fermé, l'ajouter quand même
+    if (jdbcBlockLines.length > 0) {
+      blockCounter++;
+      const blockId = `JDBC_LLM_BLOCK_${blockCounter}`;
+      jdbcBlocks.push({
+        blockId,
+        code: jdbcBlockLines.join("\n"),
+        tables: [],
+        dataSources: [],
+        sqlConstants: extractedConstants,
+        sourceClassName: resolvedCtx.sourceClassName,
+        methodName: resolvedCtx.methodName || "execute",
+      });
+      processedLines.push(`        // @@${blockId}@@`);
+      migratedLines++;
+    }
+
     result = processedLines.join("\n");
 
     // ─── T9: Self-invocation → warning ───
@@ -459,6 +572,7 @@ export class BusinessLogicTransformer {
       magixCodes: [...new Set(magixCodes)],
       migratedLines,
       manualLines,
+      jdbcBlocks,
     };
   }
 

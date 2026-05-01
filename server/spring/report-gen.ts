@@ -68,11 +68,11 @@ export function generateBianMappingReport(ir: ProjectIR): GeneratedFile {
 
   if (bianUseCases.length === 0 && bianMappings.length === 0) {
     lines.push(
-      "> Aucun mapping BIAN détecté. Les use cases n'ont pas de commentaire `/** BIAN: ... */` ni de fichier `bian.yml`."
+      "> Le mapping BIAN automatique via LLM n'a pas pu mapper ces use cases. Vérifiez les noms de classes et domaines métier."
     );
     lines.push("");
     lines.push(
-      "Pour activer le mapping BIAN, ajoutez un fichier `bian.yml` à la racine du projet ou des commentaires Javadoc BIAN dans vos use cases."
+      "Le mapping BIAN est désormais automatique via LLM. Si certains use cases ne sont pas mappés, vous pouvez forcer le mapping via un fichier `bian.yml`."
     );
     lines.push("");
     lines.push("Exemple de fichier `bian.yml` :");
@@ -112,7 +112,7 @@ export function generateBianMappingReport(ir: ProjectIR): GeneratedFile {
 
   // ── Section 3: Mapping depuis bian.yml ──
   if (bianMappings.length > 0) {
-    lines.push("## 3. Mapping depuis le fichier bian.yml");
+    lines.push("## 3. Mapping BIAN (auto-détecté par LLM + bian.yml)");
     lines.push("");
     lines.push(
       `| Use Case | Service Domain | Code SD | Action |`

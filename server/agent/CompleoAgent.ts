@@ -43,6 +43,8 @@ import {
   type ResolvedOptions,
   type ChecklistInput,
 } from "../engine/frontend";
+import { JdbcPostProcessor, hasUnresolvedPlaceholders, countUnresolvedPlaceholders } from "../engine/llm/JdbcPostProcessor";
+import type { JdbcBlock } from "../engine/BusinessLogicTransformer";
 
 // ─── Types publics ────────────────────────────────────────────────────────────
 
@@ -51,6 +53,7 @@ export type AgentPhase =
   | "CLONING"
   | "ANALYZING"
   | "GENERATING"
+  | "MIGRATING_BUSINESS_LOGIC"
   | "FRONTEND_GENERATION"
   | "MICROSERVICES"
   | "ENHANCING_REPORTS"
@@ -503,10 +506,13 @@ export class CompleoAgent {
         }
       }
 
-      // ─── Phase 4: GENERATING ──────────────────────────────────────────
+      // ─── Phase 4: GENERATING ──────────────────────────────────────
       yield* this.phaseGenerating(session);
 
-      // ─── Phase 4a-bis: FRONTEND GENERATION (optional, v10.8) ────────
+      // ─── Phase 4a: MIGRATING BUSINESS LOGIC via LLM (v10.11) ─────
+      yield* this.phaseMigratingBusinessLogic(session);
+
+      // ─── Phase 4a-bis: FRONTEND GENERATION (optional, v10.8) ────────────
       if (session.config.options.enableFrontend) {
         yield* this.phaseFrontendGeneration(session);
       }
@@ -1077,7 +1083,127 @@ export class CompleoAgent {
     }
   }
 
-  // ─── Phase 4a-bis: FRONTEND GENERATION (optional, v10.8) ──────────────────────────
+  // ─── Phase 4a: MIGRATING BUSINESS LOGIC via LLM (v10.11) ────────────────────
+  /**
+   * Phase de migration de la logique métier JDBC via LLM.
+   * Remplace les placeholders @@JDBC_LLM_BLOCK_*@@ et @@DAO_LLM_BLOCK_*@@
+   * par du code Spring Data JPA migré et validé par le LLM.
+   *
+   * Déclenchée automatiquement après la génération synchrone.
+   * Si le LLM est indisponible, un fallback règles est utilisé.
+   */
+  private async *phaseMigratingBusinessLogic(session: AgentSession): AsyncGenerator<AgentEvent> {
+    const project = session.generatedProject;
+    if (!project) return; // Rien à migrer
+
+    // Vérifier s'il y a des placeholders à résoudre
+    const allFiles = [...project.files, ...project.multiTechFiles];
+    const placeholderCount = countUnresolvedPlaceholders(
+      allFiles.map(f => ({ path: f.path, content: f.content }))
+    );
+
+    if (placeholderCount === 0) {
+      return; // Pas de JDBC à migrer
+    }
+
+    yield this.event("PHASE_START", {
+      phase: "MIGRATING_BUSINESS_LOGIC",
+      message: `Migration de ${placeholderCount} blocs JDBC via LLM...`,
+    });
+    this.sessionStore.update(session.id, { currentPhase: "MIGRATING_BUSINESS_LOGIC" });
+    const startTime = Date.now();
+
+    try {
+      const postProcessor = new JdbcPostProcessor();
+
+      // Collecter les blocs JDBC du BusinessLogicTransformer
+      // (stockés dans les TransformResult pendant la génération)
+      const jdbcBlocks: JdbcBlock[] = [];
+      // Les blocs sont encodés dans les placeholders eux-mêmes
+
+      // Identifier les fichiers Entity et Repository pour le contexte LLM
+      const entityFiles = allFiles
+        .filter(f => f.path.includes("/entity/") || f.path.includes("/model/"))
+        .map(f => ({ path: f.path, content: f.content }));
+      const repositoryFiles = allFiles
+        .filter(f => f.path.includes("/repository/"))
+        .map(f => ({ path: f.path, content: f.content }));
+
+      // Déterminer le basePackage
+      const ir = session.ir;
+      const basePackage = ir?.groupId
+        ? `${ir.groupId}.${ir.artifactId?.replace(/-/g, "") || "app"}`
+        : "com.example.app";
+
+      yield this.event("LOG", {
+        level: "info",
+        message: `${placeholderCount} blocs JDBC détectés — migration via LLM en cours...`,
+        phase: "MIGRATING_BUSINESS_LOGIC",
+      });
+
+      // Exécuter le post-processeur LLM
+      const result = await postProcessor.processAll(
+        allFiles.map(f => ({ path: f.path, content: f.content, category: (f as any).category })),
+        jdbcBlocks,
+        basePackage,
+        entityFiles,
+        repositoryFiles,
+      );
+
+      // Mettre à jour les fichiers du projet avec le code migré
+      const fileMap = new Map(result.files.map(f => [f.path, f.content]));
+      for (const file of project.files) {
+        const migrated = fileMap.get(file.path);
+        if (migrated) file.content = migrated;
+      }
+      for (const file of project.multiTechFiles) {
+        const migrated = fileMap.get(file.path);
+        if (migrated) file.content = migrated;
+      }
+
+      // Mettre à jour la session
+      this.sessionStore.update(session.id, { generatedProject: project });
+
+      yield this.event("LOG", {
+        level: "success",
+        message: `${result.migratedCount} blocs migrés via LLM, ${result.fallbackCount} en fallback règles (${Date.now() - startTime}ms)`,
+        phase: "MIGRATING_BUSINESS_LOGIC",
+        data: {
+          migratedCount: result.migratedCount,
+          fallbackCount: result.fallbackCount,
+          blockResults: result.blockResults.map(b => ({
+            blockId: b.blockId,
+            success: b.success,
+            confidence: b.confidence,
+            backend: b.backend,
+          })),
+        },
+      });
+
+      if (result.warnings.length > 0) {
+        for (const warning of result.warnings.slice(0, 5)) {
+          yield this.event("LOG", {
+            level: "warn",
+            message: warning,
+            phase: "MIGRATING_BUSINESS_LOGIC",
+          });
+        }
+      }
+    } catch (err: any) {
+      yield this.event("LOG", {
+        level: "warn",
+        message: `Migration LLM échouée : ${err.message}. Les fichiers conservent les placeholders.`,
+        phase: "MIGRATING_BUSINESS_LOGIC",
+      });
+    }
+
+    yield this.event("PHASE_END", {
+      phase: "MIGRATING_BUSINESS_LOGIC",
+      message: `Migration logique métier terminée (${Date.now() - startTime}ms)`,
+    });
+  }
+
+  // ─── Phase 4a-bis: FRONTEND GENERATION (optional, v10.8) ──────────────────────
   /**
    * Phase de generation frontend (React/Angular/Vue) connecte au backend Spring Boot.
    * Utilise le modele IA ejb-modernizer pour generer des composants intelligents

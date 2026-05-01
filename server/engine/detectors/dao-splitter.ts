@@ -373,39 +373,22 @@ function generateRepositoryMethod(method: DaoMethod, entityClass: string): strin
   const returnType = mapToSpringType(method.returnType);
   const methodName = method.name;
 
-  // Déterminer le type de requête
-  const isSelect = /SELECT|FROM/i.test(method.body);
-  const isInsert = /INSERT/i.test(method.body);
-  const isUpdate = /UPDATE/i.test(method.body);
-  const isDelete = /DELETE/i.test(method.body);
+  // v10.11: Générer un placeholder LLM au lieu d'un TODO
+  // Le post-processeur async remplacera ce placeholder par du code migré via LLM
+  const blockId = `DAO_LLM_BLOCK_${entityClass}_${methodName}`;
 
-  let bodyComment: string;
-  if (isSelect && /^List/.test(returnType)) {
-    bodyComment = `        // TODO: Migrer la requête JDBC vers JdbcTemplate.query()
-        // Tables référencées: ${method.referencedTables.join(", ") || "N/A"}
-        // DataSources: ${method.dataSources.join(", ") || "default"}
-        log.info("${methodName} appelé");
-        throw new UnsupportedOperationException("À implémenter — migration depuis HibernateDao.${methodName}");`;
-  } else if (isSelect) {
-    bodyComment = `        // TODO: Migrer la requête JDBC vers JdbcTemplate.queryForObject()
-        // Tables référencées: ${method.referencedTables.join(", ") || "N/A"}
-        log.info("${methodName} appelé");
-        throw new UnsupportedOperationException("À implémenter — migration depuis HibernateDao.${methodName}");`;
-  } else if (isInsert || isUpdate) {
-    bodyComment = `        // TODO: Migrer la requête JDBC vers JdbcTemplate.update()
-        // Tables référencées: ${method.referencedTables.join(", ") || "N/A"}
-        log.info("${methodName} appelé");
-        throw new UnsupportedOperationException("À implémenter — migration depuis HibernateDao.${methodName}");`;
-  } else if (isDelete) {
-    bodyComment = `        // TODO: Migrer la requête JDBC vers JdbcTemplate.update() (DELETE)
-        // Tables référencées: ${method.referencedTables.join(", ") || "N/A"}
-        log.info("${methodName} appelé");
-        throw new UnsupportedOperationException("À implémenter — migration depuis HibernateDao.${methodName}");`;
-  } else {
-    bodyComment = `        // TODO: Migrer depuis HibernateDao.${methodName}
-        log.info("${methodName} appelé");
-        throw new UnsupportedOperationException("À implémenter — migration depuis HibernateDao.${methodName}");`;
-  }
+  // Encoder les métadonnées du bloc JDBC dans des commentaires structurés
+  const bodyLines = method.body.split("\n").map(l => l.trim()).filter(l => l.length > 0).slice(0, 30);
+  const bodyComment = `        // @@${blockId}@@
+        // DAO_JDBC_BODY_START
+        // ${bodyLines.join("\n        // ")}
+        // DAO_JDBC_BODY_END
+        // TABLES: ${method.referencedTables.join(",") || "N/A"}
+        // DATASOURCES: ${method.dataSources.join(",") || "default"}
+        // RETURN_TYPE: ${returnType}
+        // ENTITY: ${entityClass}
+        // METHOD: ${methodName}
+        log.info("${methodName} appelé — en attente de migration LLM");`;
 
   return `    /**
      * Migré depuis HibernateDao.${methodName}().
