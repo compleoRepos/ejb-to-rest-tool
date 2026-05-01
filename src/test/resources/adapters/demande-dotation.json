@@ -1,0 +1,106 @@
+{
+  "adapter_name": "demande-dotation",
+  "adapter_base_url": "http://websphere:9080/demande-dotation/api",
+  "bian": {
+    "service_domain": "Cash-Management",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "demande-dotation",
+      "path": "/demande-dotation/demande-dotation",
+      "http_method": "POST",
+      "description": "Demander une dotation",
+      "bian": {
+        "behavior_qualifier": "allocation",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "historique-dotation",
+      "path": "/demande-dotation/historique-dotation",
+      "http_method": "POST",
+      "description": "Historique des dotations",
+      "bian": {
+        "behavior_qualifier": "allocation",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "activer-dotation",
+      "path": "/demande-dotation/activer-dotation",
+      "http_method": "PUT",
+      "description": "Activer une dotation",
+      "bian": {
+        "behavior_qualifier": "activation",
+        "action": "update"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

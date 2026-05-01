@@ -1,0 +1,74 @@
+{
+  "adapter_name": "produits-epargne-bmcedirect",
+  "adapter_base_url": "http://websphere:9080/produits-epargne-bmcedirect/api",
+  "bian": {
+    "service_domain": "Savings-Account",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "produits-epargne",
+      "path": "/produits-epargne-bmcedirect/produits-epargne",
+      "http_method": "POST",
+      "description": "Consulter les produits d'épargne",
+      "bian": {
+        "behavior_qualifier": "savings-product",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "detail-pret",
+      "path": "/produits-epargne-bmcedirect/detail-pret",
+      "http_method": "POST",
+      "description": "Détail d'un prêt",
+      "bian": {
+        "behavior_qualifier": "loan-detail",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

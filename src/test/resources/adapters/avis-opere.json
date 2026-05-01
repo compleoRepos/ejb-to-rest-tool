@@ -1,0 +1,74 @@
+{
+  "adapter_name": "avis-opere",
+  "adapter_base_url": "http://websphere:9080/avis-opere/api",
+  "bian": {
+    "service_domain": "Payment-Execution",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "avis-opere",
+      "path": "/avis-opere/avis-opere",
+      "http_method": "POST",
+      "description": "Envoyer un avis d'opéré",
+      "bian": {
+        "behavior_qualifier": "notification",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "consultation-avis",
+      "path": "/avis-opere/consultation-avis",
+      "http_method": "POST",
+      "description": "Consulter les avis d'opéré",
+      "bian": {
+        "behavior_qualifier": "notification",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

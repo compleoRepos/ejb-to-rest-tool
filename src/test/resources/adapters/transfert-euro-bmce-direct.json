@@ -1,0 +1,74 @@
+{
+  "adapter_name": "transfert-euro-bmce-direct",
+  "adapter_base_url": "http://websphere:9080/transfert-euro-bmce-direct/api",
+  "bian": {
+    "service_domain": "Fund-Transfer",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "transfert-euro",
+      "path": "/transfert-euro-bmce-direct/transfert-euro",
+      "http_method": "POST",
+      "description": "Effectuer un transfert en euros",
+      "bian": {
+        "behavior_qualifier": "international-transfer",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "consultation-transfert",
+      "path": "/transfert-euro-bmce-direct/consultation-transfert",
+      "http_method": "POST",
+      "description": "Consulter un transfert en euros",
+      "bian": {
+        "behavior_qualifier": "international-transfer",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

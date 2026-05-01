@@ -1,0 +1,138 @@
+{
+  "adapter_name": "souscription-assistance-bmcedirect",
+  "adapter_base_url": "http://websphere:9080/souscription-assistance-bmcedirect/api",
+  "bian": {
+    "service_domain": "Insurance-Services",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "souscription-assistance",
+      "path": "/souscription-assistance-bmcedirect/souscription-assistance",
+      "http_method": "POST",
+      "description": "Souscrire à une assistance",
+      "bian": {
+        "behavior_qualifier": "subscription",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "devis-assistance",
+      "path": "/souscription-assistance-bmcedirect/devis-assistance",
+      "http_method": "POST",
+      "description": "Obtenir un devis d'assistance",
+      "bian": {
+        "behavior_qualifier": "quotation",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "contrat-assistance",
+      "path": "/souscription-assistance-bmcedirect/contrat-assistance",
+      "http_method": "POST",
+      "description": "Consulter un contrat d'assistance",
+      "bian": {
+        "behavior_qualifier": "contract",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "historique-assistance",
+      "path": "/souscription-assistance-bmcedirect/historique-assistance",
+      "http_method": "POST",
+      "description": "Historique des souscriptions",
+      "bian": {
+        "behavior_qualifier": "tracking",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

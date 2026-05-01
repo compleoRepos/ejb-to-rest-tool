@@ -1,0 +1,42 @@
+{
+  "adapter_name": "releve-carte-bmcedirect",
+  "adapter_base_url": "http://websphere:9080/releve-carte-bmcedirect/api",
+  "bian": {
+    "service_domain": "Card-Statement",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "releve-carte",
+      "path": "/releve-carte-bmcedirect/releve-carte",
+      "http_method": "POST",
+      "description": "Consulter le relevé de carte",
+      "bian": {
+        "behavior_qualifier": "statement",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

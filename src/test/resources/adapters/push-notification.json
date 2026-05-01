@@ -1,0 +1,42 @@
+{
+  "adapter_name": "push-notification",
+  "adapter_base_url": "http://websphere:9080/push-notification/api",
+  "bian": {
+    "service_domain": "Customer-Contact",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "push-notification",
+      "path": "/push-notification/push-notification",
+      "http_method": "POST",
+      "description": "Envoyer une notification push",
+      "bian": {
+        "behavior_qualifier": "notification",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

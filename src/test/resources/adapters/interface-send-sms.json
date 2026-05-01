@@ -1,0 +1,74 @@
+{
+  "adapter_name": "interface-send-sms",
+  "adapter_base_url": "http://websphere:9080/interface-send-sms/api",
+  "bian": {
+    "service_domain": "Customer-Contact",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "send-sms",
+      "path": "/interface-send-sms/send-sms",
+      "http_method": "POST",
+      "description": "Envoyer un SMS",
+      "bian": {
+        "behavior_qualifier": "notification",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "send-sms-eai",
+      "path": "/interface-send-sms/send-sms-eai",
+      "http_method": "POST",
+      "description": "Envoyer un SMS via EAI",
+      "bian": {
+        "behavior_qualifier": "notification",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

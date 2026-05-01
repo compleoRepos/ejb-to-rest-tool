@@ -1,0 +1,42 @@
+{
+  "adapter_name": "vente-distance-carte-monetique",
+  "adapter_base_url": "http://websphere:9080/vente-distance-carte-monetique/api",
+  "bian": {
+    "service_domain": "Card-Issuance",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "vente-distance-carte",
+      "path": "/vente-distance-carte-monetique/vente-distance-carte",
+      "http_method": "POST",
+      "description": "Vente à distance de carte monétique",
+      "bian": {
+        "behavior_qualifier": "card-order",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

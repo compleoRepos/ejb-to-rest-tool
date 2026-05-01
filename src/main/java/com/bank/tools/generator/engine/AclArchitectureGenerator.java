@@ -2189,7 +2189,6 @@ public class AclArchitectureGenerator {
                 import org.slf4j.MDC;
                 import org.springframework.http.HttpStatus;
                 import org.springframework.http.ResponseEntity;
-                import org.springframework.security.access.AccessDeniedException;
                 import org.springframework.web.bind.MethodArgumentNotValidException;
                 import org.springframework.web.bind.annotation.ControllerAdvice;
                 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -2236,14 +2235,6 @@ public class AclArchitectureGenerator {
                         Map<String, Object> payload = buildErrorPayload("VALIDATION_ERROR", errors);
                         ApiResponse<Map<String, Object>> response = ApiResponse.error(null, "VALIDATION_ERROR", payload);
                         return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
-                    }
-
-                    @ExceptionHandler(AccessDeniedException.class)
-                    public ResponseEntity<ApiResponse<Map<String, Object>>> handleAccessDenied(AccessDeniedException ex) {
-                        log.warn("[EXCEPTION] Acces refuse: {}", ex.getMessage());
-                        Map<String, Object> payload = buildErrorPayload("ACCESS_DENIED", "Acces refuse");
-                        ApiResponse<Map<String, Object>> response = ApiResponse.error(null, "ACCESS_DENIED", payload);
-                        return new ResponseEntity<>(response, HttpStatus.FORBIDDEN);
                     }
 
                     @ExceptionHandler(RuntimeException.class)

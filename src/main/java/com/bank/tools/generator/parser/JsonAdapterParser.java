@@ -173,7 +173,12 @@ public class JsonAdapterParser {
 
     private AdapterDescriptor.BackendEndpoint parseEndpoint(JsonNode epNode) {
         AdapterDescriptor.BackendEndpoint ep = new AdapterDescriptor.BackendEndpoint();
-        ep.setOperation(textOrDefault(epNode, "operation", "unknown"));
+        // FIX: Utiliser "name" comme fallback si "operation" est absent
+        String operation = textOrDefault(epNode, "operation", null);
+        if (operation == null || "unknown".equals(operation)) {
+            operation = textOrDefault(epNode, "name", "unknown");
+        }
+        ep.setOperation(operation);
         ep.setHttpMethod(textOrDefault(epNode, "method", "POST").toUpperCase());
         ep.setPath(textOrDefault(epNode, "path", "/"));
         ep.setIdempotent(boolOrDefault(epNode, "idempotent", false));

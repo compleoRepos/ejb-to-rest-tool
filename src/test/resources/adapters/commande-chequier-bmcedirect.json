@@ -1,0 +1,106 @@
+{
+  "adapter_name": "commande-chequier-bmcedirect",
+  "adapter_base_url": "http://websphere:9080/commande-chequier-bmcedirect/api",
+  "bian": {
+    "service_domain": "Payment-Order",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "enrg-commande",
+      "path": "/commande-chequier-bmcedirect/enrg-commande",
+      "http_method": "POST",
+      "description": "Enregistrer une commande de chéquier",
+      "bian": {
+        "behavior_qualifier": "order",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "suivi-commande",
+      "path": "/commande-chequier-bmcedirect/suivi-commande",
+      "http_method": "POST",
+      "description": "Suivre une commande de chéquier",
+      "bian": {
+        "behavior_qualifier": "tracking",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "history-cmd",
+      "path": "/commande-chequier-bmcedirect/history-cmd",
+      "http_method": "POST",
+      "description": "Historique des commandes",
+      "bian": {
+        "behavior_qualifier": "tracking",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

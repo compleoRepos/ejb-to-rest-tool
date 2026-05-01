@@ -1,0 +1,138 @@
+{
+  "adapter_name": "virement-permanent-bmcedirect",
+  "adapter_base_url": "http://websphere:9080/virement-permanent-bmcedirect/api",
+  "bian": {
+    "service_domain": "Standing-Order",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "exe-vrt",
+      "path": "/virement-permanent-bmcedirect/exe-vrt",
+      "http_method": "POST",
+      "description": "Exécuter un virement permanent",
+      "bian": {
+        "behavior_qualifier": "execution",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "save-benif",
+      "path": "/virement-permanent-bmcedirect/save-benif",
+      "http_method": "POST",
+      "description": "Enregistrer un bénéficiaire",
+      "bian": {
+        "behavior_qualifier": "beneficiary",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "supprimer-vrt",
+      "path": "/virement-permanent-bmcedirect/supprimer-vrt",
+      "http_method": "PUT",
+      "description": "Supprimer un virement permanent",
+      "bian": {
+        "behavior_qualifier": "execution",
+        "action": "update"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "consultation-vrt",
+      "path": "/virement-permanent-bmcedirect/consultation-vrt",
+      "http_method": "POST",
+      "description": "Consulter les virements permanents",
+      "bian": {
+        "behavior_qualifier": "execution",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

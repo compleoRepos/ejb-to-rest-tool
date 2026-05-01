@@ -1,0 +1,42 @@
+{
+  "adapter_name": "activation-carte-bmcedirect",
+  "adapter_base_url": "http://websphere:9080/activation-carte-bmcedirect/api",
+  "bian": {
+    "service_domain": "Card-Administration",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "activation-carte",
+      "path": "/activation-carte-bmcedirect/activation-carte",
+      "http_method": "POST",
+      "description": "Activer une carte bancaire",
+      "bian": {
+        "behavior_qualifier": "activation",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

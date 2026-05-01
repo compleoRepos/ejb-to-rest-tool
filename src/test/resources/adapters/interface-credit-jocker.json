@@ -1,0 +1,74 @@
+{
+  "adapter_name": "interface-credit-jocker",
+  "adapter_base_url": "http://websphere:9080/interface-credit-jocker/api",
+  "bian": {
+    "service_domain": "Consumer-Loan",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "credit-jocker",
+      "path": "/interface-credit-jocker/credit-jocker",
+      "http_method": "POST",
+      "description": "Demander un crédit Jocker",
+      "bian": {
+        "behavior_qualifier": "loan-application",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "simulation-credit",
+      "path": "/interface-credit-jocker/simulation-credit",
+      "http_method": "POST",
+      "description": "Simuler un crédit Jocker",
+      "bian": {
+        "behavior_qualifier": "simulation",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

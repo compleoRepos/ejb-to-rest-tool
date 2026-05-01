@@ -1,0 +1,426 @@
+{
+  "adapter_name": "mise-disposition-bmcedirect",
+  "adapter_base_url": "http://websphere:9080/mise-disposition-bmcedirect/api",
+  "bian": {
+    "service_domain": "Fund-Transfer",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "traitement-mad",
+      "path": "/mise-disposition-bmcedirect/traitement-mad",
+      "http_method": "POST",
+      "description": "Traiter une mise à disposition",
+      "bian": {
+        "behavior_qualifier": "transfer",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "consulter-eligibilite",
+      "path": "/mise-disposition-bmcedirect/consulter-eligibilite",
+      "http_method": "POST",
+      "description": "Consulter l'éligibilité MAD",
+      "bian": {
+        "behavior_qualifier": "eligibility",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "get-histo-mad",
+      "path": "/mise-disposition-bmcedirect/get-histo-mad",
+      "http_method": "POST",
+      "description": "Historique des MAD",
+      "bian": {
+        "behavior_qualifier": "tracking",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "get-list-mad-attente",
+      "path": "/mise-disposition-bmcedirect/get-list-mad-attente",
+      "http_method": "POST",
+      "description": "Liste des MAD en attente",
+      "bian": {
+        "behavior_qualifier": "tracking",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "ajout-benef",
+      "path": "/mise-disposition-bmcedirect/ajout-benef",
+      "http_method": "POST",
+      "description": "Ajouter un bénéficiaire",
+      "bian": {
+        "behavior_qualifier": "beneficiary",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "modif-benef",
+      "path": "/mise-disposition-bmcedirect/modif-benef",
+      "http_method": "PUT",
+      "description": "Modifier un bénéficiaire",
+      "bian": {
+        "behavior_qualifier": "beneficiary",
+        "action": "update"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "supf-benef",
+      "path": "/mise-disposition-bmcedirect/supf-benef",
+      "http_method": "PUT",
+      "description": "Supprimer un bénéficiaire",
+      "bian": {
+        "behavior_qualifier": "beneficiary",
+        "action": "update"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "get-benificiaires",
+      "path": "/mise-disposition-bmcedirect/get-benificiaires",
+      "http_method": "POST",
+      "description": "Lister les bénéficiaires",
+      "bian": {
+        "behavior_qualifier": "beneficiary",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "annuler-mad",
+      "path": "/mise-disposition-bmcedirect/annuler-mad",
+      "http_method": "PUT",
+      "description": "Annuler une MAD",
+      "bian": {
+        "behavior_qualifier": "transfer",
+        "action": "update"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "control-montant",
+      "path": "/mise-disposition-bmcedirect/control-montant",
+      "http_method": "POST",
+      "description": "Contrôler le montant",
+      "bian": {
+        "behavior_qualifier": "validation",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "mad-core-auth",
+      "path": "/mise-disposition-bmcedirect/mad-core-auth",
+      "http_method": "POST",
+      "description": "Autorisation MAD Core",
+      "bian": {
+        "behavior_qualifier": "authorization",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "is-benef-enregistre",
+      "path": "/mise-disposition-bmcedirect/is-benef-enregistre",
+      "http_method": "POST",
+      "description": "Vérifier si bénéficiaire enregistré",
+      "bian": {
+        "behavior_qualifier": "beneficiary",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "modif-tel-benef",
+      "path": "/mise-disposition-bmcedirect/modif-tel-benef",
+      "http_method": "PUT",
+      "description": "Modifier téléphone bénéficiaire",
+      "bian": {
+        "behavior_qualifier": "beneficiary",
+        "action": "update"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

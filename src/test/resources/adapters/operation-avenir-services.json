@@ -1,0 +1,74 @@
+{
+  "adapter_name": "operation-avenir-services",
+  "adapter_base_url": "http://websphere:9080/operation-avenir-services/api",
+  "bian": {
+    "service_domain": "Savings-Account",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "operation-avenir",
+      "path": "/operation-avenir-services/operation-avenir",
+      "http_method": "POST",
+      "description": "Opération avenir services",
+      "bian": {
+        "behavior_qualifier": "savings-plan",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "consultation-avenir",
+      "path": "/operation-avenir-services/consultation-avenir",
+      "http_method": "POST",
+      "description": "Consulter opérations avenir",
+      "bian": {
+        "behavior_qualifier": "savings-plan",
+        "action": "retrieval"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

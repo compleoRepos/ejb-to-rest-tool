@@ -1,0 +1,42 @@
+{
+  "adapter_name": "opposition-carte-bmcedirect",
+  "adapter_base_url": "http://websphere:9080/opposition-carte-bmcedirect/api",
+  "bian": {
+    "service_domain": "Card-Administration",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "opposition-carte",
+      "path": "/opposition-carte-bmcedirect/opposition-carte",
+      "http_method": "POST",
+      "description": "Mettre en opposition une carte",
+      "bian": {
+        "behavior_qualifier": "opposition",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

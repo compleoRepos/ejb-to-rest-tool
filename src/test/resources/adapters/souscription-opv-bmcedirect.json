@@ -1,0 +1,42 @@
+{
+  "adapter_name": "souscription-opv-bmcedirect",
+  "adapter_base_url": "http://websphere:9080/souscription-opv-bmcedirect/api",
+  "bian": {
+    "service_domain": "Securities-Trading",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "souscription-opv",
+      "path": "/souscription-opv-bmcedirect/souscription-opv",
+      "http_method": "POST",
+      "description": "Souscrire à une OPV",
+      "bian": {
+        "behavior_qualifier": "subscription",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

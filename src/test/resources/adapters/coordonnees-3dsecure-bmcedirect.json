@@ -1,0 +1,42 @@
+{
+  "adapter_name": "coordonnees-3dsecure-bmcedirect",
+  "adapter_base_url": "http://websphere:9080/coordonnees-3dsecure-bmcedirect/api",
+  "bian": {
+    "service_domain": "Card-Security",
+    "functional_pattern": "Fulfill"
+  },
+  "endpoints": [
+    {
+      "name": "coordonnees-3dsecure",
+      "path": "/coordonnees-3dsecure-bmcedirect/coordonnees-3dsecure",
+      "http_method": "POST",
+      "description": "Gérer les coordonnées 3D Secure",
+      "bian": {
+        "behavior_qualifier": "enrollment",
+        "action": "initiation"
+      },
+      "request_fields": [
+        {
+          "name": "requestId",
+          "type": "String",
+          "required": true
+        },
+        {
+          "name": "sourceSystem",
+          "type": "String",
+          "required": true
+        }
+      ],
+      "response_fields": [
+        {
+          "name": "code",
+          "type": "String"
+        },
+        {
+          "name": "message",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}
