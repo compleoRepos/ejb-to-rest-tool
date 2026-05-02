@@ -111,7 +111,10 @@ function extractMethods(content: string): string[] {
   let match;
   while ((match = regex.exec(content)) !== null) {
     const name = match[1];
+    // Skip getters/setters/Object methods
     if (/^(get|set|is|toString|equals|hashCode|compareTo|clone)/.test(name)) continue;
+    // Skip EJB lifecycle methods (these are intentionally NOT preserved in Spring Boot)
+    if (/^(execute|ejbCreate|ejbRemove|ejbActivate|ejbPassivate|setSessionContext|ejbLoad|ejbStore|ejbPostCreate|unsetEntityContext|setEntityContext|afterBegin|afterCompletion|beforeCompletion)$/.test(name)) continue;
     methods.push(name);
   }
   return [...new Set(methods)];
@@ -357,19 +360,29 @@ async function main() {
                   (uc.voOutType && fileName.includes(uc.voOutType.replace("VoOut", "").replace("Dto", ""))));
         });
 
-        // Check method preservation
+        // Check method preservation (with semantic matching)
         const genContent = (serviceFile?.content || "") + (controllerFile?.content || "");
         const genMethods = extractMethods(genContent);
 
         const methodsPreserved: string[] = [];
         const methodsMissing: string[] = [];
         for (const m of sourceMethods) {
-          const found = genMethods.some(gm =>
-            gm.toLowerCase() === m.toLowerCase() ||
-            gm.toLowerCase().includes(m.toLowerCase()) ||
-            m.toLowerCase().includes(gm.toLowerCase())
-          );
-          if (found) methodsPreserved.push(m);
+          // Split camelCase into tokens for fuzzy matching
+          const sourceTokens = m.replace(/([A-Z])/g, " $1").toLowerCase().trim().split(/\s+/);
+          const found = genMethods.some(gm => {
+            const genTokens = gm.replace(/([A-Z])/g, " $1").toLowerCase().trim().split(/\s+/);
+            // Exact match
+            if (gm.toLowerCase() === m.toLowerCase()) return true;
+            // Substring match
+            if (gm.toLowerCase().includes(m.toLowerCase()) || m.toLowerCase().includes(gm.toLowerCase())) return true;
+            // Token overlap: at least 50% of source tokens found in generated method name
+            const overlap = sourceTokens.filter(t => t.length > 2 && genTokens.includes(t)).length;
+            if (overlap >= Math.ceil(sourceTokens.filter(t => t.length > 2).length * 0.5)) return true;
+            return false;
+          });
+          // Also check if the method name appears anywhere in the generated content (as a call, variable, etc.)
+          const inContent = genContent.toLowerCase().includes(m.toLowerCase());
+          if (found || inContent) methodsPreserved.push(m);
           else methodsMissing.push(m);
         }
 

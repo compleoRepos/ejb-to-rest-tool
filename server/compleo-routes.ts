@@ -1020,6 +1020,38 @@ router.post("/generate", async (req: Request, res: Response) => {
 
     // Use resolved IR if available, otherwise original IR
     const irToUse = session.resolvedIR || session.ir;
+
+    // v10.16: Apply BIAN/Industry Standard mapping via LLM if requested
+    const { enableIndustryStandard, industryStandard } = req.body;
+    if (enableIndustryStandard && industryStandard) {
+      try {
+        const { IndustryStandardMapper } = await import("./engine/bian/IndustryStandardMapper");
+        const mapper = new IndustryStandardMapper();
+        emitDebugEvent(session, "info", `Mapping standard métier : ${industryStandard} via LLM...`);
+        const mappingResult = await mapper.mapUseCases(irToUse.useCases, industryStandard as any);
+        for (const res of mappingResult.results) {
+          if (res.standardDomain) {
+            const uc = irToUse.useCases.find((u: any) => u.className === res.className);
+            if (uc) {
+              uc.bianDomain = res.standardDomain;
+              uc.bianAction = res.standardAction;
+            }
+            if (!irToUse.bianMapping.find((m: any) => m.useCase === res.className)) {
+              irToUse.bianMapping.push({
+                useCase: res.className,
+                serviceDomain: res.standardDomain,
+                sdCode: res.standardCode || "",
+                action: res.standardAction,
+              });
+            }
+          }
+        }
+        emitDebugEvent(session, "success", `Mapping ${industryStandard} : ${mappingResult.mappedCount}/${irToUse.useCases.length} UC mappés (source: ${mappingResult.source})`);
+      } catch (err: any) {
+        emitDebugEvent(session, "warning", `Mapping ${industryStandard} échoué (non bloquant) : ${err.message}`);
+      }
+    }
+
     emitDebugEvent(session, "info", `Génération du projet Spring Boot...`);
     const result = generateSpringBootProject(irToUse);
     session.generation = result;

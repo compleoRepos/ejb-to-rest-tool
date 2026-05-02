@@ -383,6 +383,25 @@ export default function CompleoAgentPage() {
     }));
 
     try {
+      // v10.16: Always PATCH options before sending choices to ensure checkboxes are applied
+      await fetch(`/api/agent/${sessionId}/options`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          autoResolveAmbiguities: autoResolve,
+          enableMicroservices,
+          enableML: enableMicroservices && enableML,
+          enableReportEnhancer,
+          enableSaga: enableMicroservices && enableSaga,
+          enableFrontend,
+          frontendFramework: enableFrontend ? frontendFramework : undefined,
+          enableIndustryStandard,
+          industryStandard: enableIndustryStandard && selectedStandard
+            ? selectedStandard : undefined,
+          enableSoc2Compliance,
+        }),
+      });
+
       const res = await fetch(`/api/agent/${sessionId}/choices`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -394,7 +413,7 @@ export default function CompleoAgentPage() {
     } catch {
       toast.error("Erreur lors de la résolution des ambiguïtés");
     }
-  }, [sessionId, choices]);
+  }, [sessionId, choices, autoResolve, enableMicroservices, enableML, enableReportEnhancer, enableSaga, enableFrontend, frontendFramework, enableIndustryStandard, selectedStandard, enableSoc2Compliance]);
 
   const handleApplyAllRecommendations = useCallback(() => {
     const recs: Record<string, string> = {};

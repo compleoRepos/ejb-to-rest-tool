@@ -296,6 +296,15 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
     parseDirectEjbUseCases(f, dtoMap, bianMappings, typeRegistry)
   );
 
+  // ─── v10.16: Detect SOAP/JAX-WS @WebService classes ───
+  const soapFiles = javaFiles.filter(f => isSoapWebService(f.content));
+  const soapUseCases = soapFiles.flatMap(f =>
+    parseSoapUseCases(f, dtoMap, bianMappings, typeRegistry)
+  );
+  if (soapFiles.length > 0) {
+    warnings.push(`[v10.16] ${soapFiles.length} SOAP @WebService class(es) detected → ${soapUseCases.length} operations converted to UseCases`);
+  }
+
   // Filter out direct EJB files from the standard UseCase list to avoid duplication
   const directEjbPaths = new Set(directEjbFiles.map(f => f.path));
   const standardUseCaseFiles = useCaseFiles.filter(f => !directEjbPaths.has(f.path));
@@ -368,6 +377,7 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
       return uc;
     }),
     ...directEjbUseCases,
+    ...soapUseCases,
     ...handlerUseCases,
   ].filter(uc => {
     // v8.3: Exclure la façade Strategy des useCases
@@ -562,8 +572,10 @@ function shouldSkipClass(className: string, content: string, fullSource: string)
   if (className.endsWith("Listener") || className.endsWith("Callback")) return true;
   if (className.endsWith("Handler") && !/extends\s+HttpServlet/.test(content)) return true;
 
-  // 4. Enum declaration
-  if (/public\s+enum\s+/.test(content)) return true;
+  // 4. Enum declaration — only if it's the TOP-LEVEL declaration (not an inner enum)
+  const firstPublicClass = content.indexOf('public class ');
+  const firstPublicEnum = content.search(/public\s+enum\s+/);
+  if (firstPublicEnum !== -1 && (firstPublicClass === -1 || firstPublicEnum < firstPublicClass)) return true;
 
   return false;
 }
@@ -869,6 +881,142 @@ function isBatchJob(content: string): boolean {
   // Batchlet
   if (/implements\s+(?:.*\b)?Batchlet\b/.test(content)) return true;
   return false;
+}
+
+/**
+ * v10.16: Detect SOAP/JAX-WS web service classes.
+ * Pattern: @WebService annotation with @WebMethod operations.
+ * These are NOT EJBs (@Stateless) but legacy SOAP endpoints that should be
+ * converted to REST controllers.
+ */
+function isSoapWebService(content: string): boolean {
+  // Must have @WebService annotation
+  if (!/@WebService/.test(content)) return false;
+  // Must NOT be already detected as @Stateless/@Stateful EJB (avoid double-counting)
+  if (/@Stateless/.test(content) || /@Stateful/.test(content)) return false;
+  // Must have at least one @WebMethod or be a @WebService class with public methods
+  if (/@WebMethod/.test(content)) return true;
+  // @WebService without @WebMethod: all public methods are implicitly SOAP operations
+  return /public\s+\w[\w<>,\s]*?\s+\w+\s*\(/.test(content);
+}
+
+/**
+ * v10.16: Parse a SOAP @WebService class into N UseCaseIR.
+ * Each @WebMethod operation produces a distinct UseCase.
+ * Pattern mirrors parseDirectEjbUseCases but for SOAP endpoints.
+ */
+function parseSoapUseCases(
+  file: JavaFile,
+  dtoMap: Map<string, DtoIR>,
+  bianMappings: BianMapping[],
+  typeRegistry: Map<string, string>
+): UseCaseIR[] {
+  const content = file.content;
+  const domain = extractDomain(file.packageName, file.className);
+
+  // Extract serviceName from @WebService annotation
+  let serviceName = file.className;
+  const wsMatch = content.match(/@WebService\s*\(([^)]*)\)/s);
+  if (wsMatch) {
+    const snMatch = wsMatch[1].match(/serviceName\s*=\s*"([^"]+)"/);
+    if (snMatch) serviceName = snMatch[1];
+  }
+
+  // Extract SOAP operations (@WebMethod annotated public methods)
+  interface SoapOperation {
+    name: string;
+    operationName: string;
+    returnType: string;
+    parameters: { name: string; type: string }[];
+    javadoc: string;
+  }
+
+  const operations: SoapOperation[] = [];
+  // Use a two-step approach: first find method declarations, then extract full params
+  // The simple regex [^)]* fails when @WebParam(name="x") contains nested parens
+  const methodStartRegex = /(?:\/\*\*([\s\S]*?)\*\/\s*)?(?:@WebMethod\s*(?:\([^)]*\))?\s*)?public\s+([\w<>,\s\[\]]+?)\s+(\w+)\s*\(/g;
+  let m;
+  while ((m = methodStartRegex.exec(content)) !== null) {
+    const javadocRaw = m[1] || "";
+    const returnType = m[2].trim();
+    const name = m[3];
+    // Extract full parameter string handling nested parentheses
+    const paramStart = m.index + m[0].length;
+    let depth = 1;
+    let i = paramStart;
+    while (i < content.length && depth > 0) {
+      if (content[i] === '(') depth++;
+      else if (content[i] === ')') depth--;
+      i++;
+    }
+    const paramsStr = content.substring(paramStart, i - 1);
+
+    // Skip constructor
+    if (name === file.className) continue;
+    // Skip trivial getters/setters
+    if (/^(get|set|is)[A-Z]/.test(name) && !paramsStr.trim()) continue;
+
+    // Check if this method has @WebMethod nearby or class has @WebService
+    const lineStart = content.lastIndexOf("\n", m.index);
+    const precedingLines = content.substring(Math.max(0, lineStart - 300), m.index);
+    const isWebMethod = /@WebMethod/.test(precedingLines) || /@WebService/.test(content);
+    if (!isWebMethod) continue;
+
+    // Extract operationName from @WebMethod(operationName = "...")
+    const opNameMatch = precedingLines.match(/@WebMethod\s*\(\s*operationName\s*=\s*"([^"]+)"/);
+    const operationName = opNameMatch ? opNameMatch[1] : name;
+
+    // Parse Javadoc
+    const javadoc = javadocRaw
+      .split("\n")
+      .map(l => l.replace(/^\s*\*\s?/, "").trim())
+      .filter(l => l && !l.startsWith("@"))
+      .join(" ")
+      .trim();
+
+    // Parse parameters (handle @WebParam annotations)
+    const parameters = paramsStr
+      .split(",")
+      .map(p => p.trim())
+      .filter(Boolean)
+      .map(p => {
+        const cleaned = p.replace(/@\w+(?:\([^)]*\))?\s*/g, "").trim();
+        const parts = cleaned.split(/\s+/);
+        return { name: parts[parts.length - 1], type: parts.slice(0, -1).join(" ") };
+      });
+
+    operations.push({ name, operationName, returnType, parameters, javadoc });
+  }
+
+  return operations.map(op => {
+    const voInType = op.parameters.length > 0 ? op.parameters[0].type : "Void";
+    const voOutType = op.returnType === "void" ? "Void" : op.returnType;
+    const ucClassName = `${file.className}_${op.operationName}`;
+    const httpMethod = determineHttpMethod(op.name, "");
+    const restPath = generateRestPath(domain, op.operationName);
+    const useCaseDescription = op.javadoc || `${op.operationName} — SOAP operation from ${serviceName}`;
+
+    return {
+      className: ucClassName,
+      packageName: file.packageName,
+      domain,
+      bianDomain: "",
+      bianAction: "",
+      voInType,
+      voOutType,
+      useCaseDescription,
+      javadoc: op.javadoc,
+      injectedServices: [] as InjectedService[],
+      transactional: null,
+      exceptionsCaught: [] as string[],
+      exceptionsThrown: [] as string[],
+      sourceFile: file.path,
+      rawSource: content,
+      httpMethod,
+      restPath,
+      methodParameters: op.parameters,
+    };
+  });
 }
 
 function parseEjb2xBean(file: JavaFile, allFiles: JavaFile[]): Ejb2xBeanIR {
