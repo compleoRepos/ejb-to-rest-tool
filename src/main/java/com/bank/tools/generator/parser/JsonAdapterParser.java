@@ -144,6 +144,11 @@ public class JsonAdapterParser {
             desc.setAuth(parseAuth(root.get("auth")));
         }
 
+        // Parse security (Keycloak/OAuth2)
+        if (root.has("security")) {
+            desc.setSecurity(parseSecurity(root.get("security")));
+        }
+
         // Parse endpoints
         if (root.has("endpoints") && root.get("endpoints").isArray()) {
             List<AdapterDescriptor.BackendEndpoint> endpoints = new ArrayList<>();
@@ -464,6 +469,34 @@ public class JsonAdapterParser {
         dto.setFields(dtoFields);
 
         return dto;
+    }
+
+    // ==================== SECURITY PARSER ====================
+
+    /**
+     * Parse le bloc security{} du JSON pour configurer Keycloak/OAuth2.
+     * Active uniquement en profils qualif et prod.
+     */
+    private AdapterDescriptor.SecurityConfig parseSecurity(JsonNode secNode) {
+        AdapterDescriptor.SecurityConfig sec = new AdapterDescriptor.SecurityConfig();
+        sec.setType(textOrDefault(secNode, "type", "keycloak"));
+        sec.setIssuerUri(textOrDefault(secNode, "issuer_uri", null));
+        sec.setJwkSetUri(textOrDefault(secNode, "jwk_set_uri", null));
+        sec.setClientId(textOrDefault(secNode, "client_id", null));
+        sec.setRolesClaim(textOrDefault(secNode, "roles_claim", "realm_access.roles"));
+
+        // Parse required_roles array
+        if (secNode.has("required_roles") && secNode.get("required_roles").isArray()) {
+            List<String> roles = new ArrayList<>();
+            for (JsonNode roleNode : secNode.get("required_roles")) {
+                roles.add(roleNode.asText());
+            }
+            sec.setRequiredRoles(roles);
+        }
+
+        log.info("[JSON-PARSER] Security config parsed: type={}, issuer={}, roles={}",
+                sec.getType(), sec.getIssuerUri(), sec.getRequiredRoles());
+        return sec;
     }
 
     // ==================== BIAN HELPERS ====================

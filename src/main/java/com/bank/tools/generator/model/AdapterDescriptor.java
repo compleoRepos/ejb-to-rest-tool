@@ -24,6 +24,10 @@ public class AdapterDescriptor {
 
     private AuthConfig auth;
 
+    // ==================== SECURITY (Keycloak/OAuth2) ====================
+
+    private SecurityConfig security;
+
     // ==================== BACKEND ENDPOINTS ====================
 
     private List<BackendEndpoint> backendEndpoints = new ArrayList<>();
@@ -47,6 +51,42 @@ public class AdapterDescriptor {
 
     public List<BackendEndpoint> getBackendEndpoints() { return backendEndpoints; }
     public void setBackendEndpoints(List<BackendEndpoint> backendEndpoints) { this.backendEndpoints = backendEndpoints; }
+
+    public SecurityConfig getSecurity() { return security; }
+    public void setSecurity(SecurityConfig security) { this.security = security; }
+
+    // ==================== INNER CLASS: SecurityConfig ====================
+
+    /**
+     * Configuration de securite OAuth2/Keycloak pour l'API generee.
+     * Active uniquement en profils qualif et prod.
+     */
+    public static class SecurityConfig {
+        private String type = "keycloak"; // keycloak, oauth2
+        private String issuerUri; // ex: http://keycloak:8080/realms/bank
+        private String jwkSetUri; // optionnel, derive de issuerUri si absent
+        private String clientId;
+        private String rolesClaim = "realm_access.roles"; // path dans le JWT
+        private List<String> requiredRoles = new ArrayList<>(); // roles requis pour acceder a l'API
+
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+
+        public String getIssuerUri() { return issuerUri; }
+        public void setIssuerUri(String issuerUri) { this.issuerUri = issuerUri; }
+
+        public String getJwkSetUri() { return jwkSetUri; }
+        public void setJwkSetUri(String jwkSetUri) { this.jwkSetUri = jwkSetUri; }
+
+        public String getClientId() { return clientId; }
+        public void setClientId(String clientId) { this.clientId = clientId; }
+
+        public String getRolesClaim() { return rolesClaim; }
+        public void setRolesClaim(String rolesClaim) { this.rolesClaim = rolesClaim; }
+
+        public List<String> getRequiredRoles() { return requiredRoles; }
+        public void setRequiredRoles(List<String> requiredRoles) { this.requiredRoles = requiredRoles; }
+    }
 
     // ==================== INNER CLASS: AuthConfig ====================
 

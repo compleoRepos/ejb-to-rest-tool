@@ -5,6 +5,7 @@ import com.bank.tools.generator.bian.BianControllerGrouper;
 import com.bank.tools.generator.bian.BianMapping;
 import com.bank.tools.generator.bian.BianMappingResolver;
 import com.bank.tools.generator.engine.generators.*;
+import com.bank.tools.generator.model.AdapterDescriptor;
 import com.bank.tools.generator.model.DtoInfo;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
 import com.bank.tools.generator.model.UseCaseInfo;
@@ -97,7 +98,11 @@ public class CodeGenerationOrchestrator {
         pomGenerator.generate(projectRoot, analysisResult);
 
         // --- 3. Configs Spring ---
-        configGenerator.generateAll(srcMain, resourcesDir, hasXml);
+        AdapterDescriptor.SecurityConfig securityConfig = null;
+        if (analysisResult.getAdapterDescriptor() != null) {
+            securityConfig = analysisResult.getAdapterDescriptor().getSecurity();
+        }
+        configGenerator.generateAll(srcMain, resourcesDir, hasXml, securityConfig);
 
         // --- 4. Mode ACL ou mode couplé ---
         boolean useAcl = bianMode && aclGenerator != null;

@@ -7,6 +7,7 @@ import com.bank.tools.generator.bian.BianControllerGrouper;
 import com.bank.tools.generator.bian.BianMapping;
 import com.bank.tools.generator.bian.BianMappingConfig;
 import com.bank.tools.generator.bian.BianMappingResolver;
+import com.bank.tools.generator.model.AdapterDescriptor;
 import com.bank.tools.generator.model.DtoInfo;
 import com.bank.tools.generator.model.ProjectAnalysisResult;
 import com.bank.tools.generator.model.UseCaseInfo;
@@ -298,6 +299,9 @@ public class CodeGenerationEngine {
             }
         }
 
+        // Keycloak SecurityConfig conditionne par profil (apres ACL pour ne pas etre ecrase)
+        generateSecurityConfig(srcMain, resourcesDir, analysisResult);
+
         // BIAN : Generer le BianHeaderFilter
         if (bianMode && !aclActive) {
             generateBianHeaderFilter(srcMain);
@@ -441,6 +445,26 @@ public class CodeGenerationEngine {
                             <scope>test</scope>
                         </dependency>
                 """);
+
+        // Keycloak / OAuth2 Security (conditionnel)
+        if (analysisResult != null && analysisResult.getAdapterDescriptor() != null
+                && analysisResult.getAdapterDescriptor().getSecurity() != null
+                && analysisResult.getAdapterDescriptor().getSecurity().getIssuerUri() != null) {
+            deps.append("""
+                    
+                            <!-- Spring Security -->
+                            <dependency>
+                                <groupId>org.springframework.boot</groupId>
+                                <artifactId>spring-boot-starter-security</artifactId>
+                            </dependency>
+                    
+                            <!-- OAuth2 Resource Server (JWT / Keycloak) -->
+                            <dependency>
+                                <groupId>org.springframework.boot</groupId>
+                                <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+                            </dependency>
+                    """);
+        }
 
         // DECOUPLAGE : Les dependances ma.eai.* ne sont plus ajoutees au POM genere.
         // L'API est 100% autonome et ne depend plus du framework EJB (ma.eai.*).
@@ -3803,5 +3827,171 @@ public class CodeGenerationEngine {
 
         Files.writeString(projectRoot.resolve("BIAN_MAPPING_V2.md"), sb.toString());
         log.info("[BIAN v2] Rapport BIAN_MAPPING_V2.md genere");
+    }
+
+    // =====================================================================
+    // KEYCLOAK / OAUTH2 — SecurityConfig conditionne par profil
+    // =====================================================================
+
+    /**
+     * Genere un SecurityConfig conditionne par profil Spring :
+     * - dev, mock, test-e2e, default : OUVERT (permitAll)
+     * - qualif, prod : SECURISE avec OAuth2 Resource Server + JWT Keycloak
+     *
+     * Si aucun bloc security{} n'est present dans le JSON, genere un SecurityConfig
+     * basique (permitAll) pour tous les profils.
+     */
+    private void generateSecurityConfig(Path srcMain, Path resourcesDir, ProjectAnalysisResult analysisResult) throws IOException {
+        Path configDir = srcMain.resolve("config");
+        Files.createDirectories(configDir);
+
+        // Determiner si on a une config Keycloak
+        AdapterDescriptor.SecurityConfig sec = null;
+        if (analysisResult.getAdapterDescriptor() != null) {
+            sec = analysisResult.getAdapterDescriptor().getSecurity();
+        }
+
+        String code;
+        if (sec != null && sec.getIssuerUri() != null) {
+            // Mode Keycloak : profils ouverts + profils securises
+            String rolesClaim = sec.getRolesClaim() != null ? sec.getRolesClaim() : "realm_access.roles";
+            code = """
+                    package %s.config;
+                    
+                    import org.springframework.context.annotation.Bean;
+                    import org.springframework.context.annotation.Configuration;
+                    import org.springframework.context.annotation.Profile;
+                    import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+                    import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+                    import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+                    import org.springframework.security.config.http.SessionCreationPolicy;
+                    import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+                    import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+                    import org.springframework.security.web.SecurityFilterChain;
+                    
+                    /**
+                     * Configuration de securite conditionnee par profil Spring :
+                     * - Profils dev, mock, test-e2e : API ouverte (permitAll)
+                     * - Profils qualif, prod : API securisee avec Keycloak OAuth2/JWT
+                     *
+                     * Activation : --spring.profiles.active=qualif,rest
+                     */
+                    @Configuration
+                    @EnableWebSecurity
+                    @EnableMethodSecurity
+                    public class SecurityConfig {
+                    
+                        // ==================== PROFILS OUVERTS (dev, mock, test-e2e) ====================
+                    
+                        @Bean
+                        @Profile({"dev", "mock", "test-e2e", "default"})
+                        public SecurityFilterChain openFilterChain(HttpSecurity http) throws Exception {
+                            http
+                                .csrf(csrf -> csrf.disable())
+                                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                                .authorizeHttpRequests(auth -> auth
+                                    .anyRequest().permitAll()
+                                );
+                            return http.build();
+                        }
+                    
+                        // ==================== PROFILS SECURISES (qualif, prod) ====================
+                    
+                        @Bean
+                        @Profile({"qualif", "prod"})
+                        public SecurityFilterChain securedFilterChain(HttpSecurity http) throws Exception {
+                            http
+                                .csrf(csrf -> csrf.disable())
+                                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                                .authorizeHttpRequests(auth -> auth
+                                    .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
+                                    .requestMatchers("/actuator/**").permitAll()
+                                    .requestMatchers("/api/v1/**").authenticated()
+                                    .anyRequest().denyAll()
+                                )
+                                .oauth2ResourceServer(oauth2 -> oauth2
+                                    .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
+                                );
+                            return http.build();
+                        }
+                    
+                        @Bean
+                        @Profile({"qualif", "prod"})
+                        public JwtAuthenticationConverter jwtAuthenticationConverter() {
+                            JwtGrantedAuthoritiesConverter grantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
+                            grantedAuthoritiesConverter.setAuthoritiesClaimName("%s");
+                            grantedAuthoritiesConverter.setAuthorityPrefix("ROLE_");
+                    
+                            JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+                            converter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
+                            return converter;
+                        }
+                    }
+                    """.formatted(BASE_PACKAGE, rolesClaim);
+
+            // Generer les profils qualif/prod properties dans le dossier resources
+            Files.createDirectories(resourcesDir);
+
+            String issuerUri = sec.getIssuerUri();
+            String jwkSetUri = sec.getJwkSetUri() != null
+                    ? sec.getJwkSetUri()
+                    : issuerUri + "/protocol/openid-connect/certs";
+
+            String keycloakQualif = """
+                    \n# --- Keycloak/OAuth2 ---
+                    app.security.enabled=true
+                    spring.security.oauth2.resourceserver.jwt.issuer-uri=%s
+                    spring.security.oauth2.resourceserver.jwt.jwk-set-uri=%s
+                    logging.level.org.springframework.security=DEBUG
+                    """.formatted(issuerUri, jwkSetUri);
+
+            String keycloakProd = """
+                    \n# --- Keycloak/OAuth2 ---
+                    app.security.enabled=true
+                    spring.security.oauth2.resourceserver.jwt.issuer-uri=%s
+                    spring.security.oauth2.resourceserver.jwt.jwk-set-uri=%s
+                    logging.level.org.springframework.security=WARN
+                    """.formatted(issuerUri, jwkSetUri);
+
+            String securityDisabled = "\n# --- Security ---\napp.security.enabled=false\n";
+
+            // Append aux fichiers existants ou creer
+            Path qualifProps = resourcesDir.resolve("application-qualif.properties");
+            if (Files.exists(qualifProps)) {
+                Files.writeString(qualifProps, Files.readString(qualifProps) + keycloakQualif);
+            } else {
+                Files.writeString(qualifProps, keycloakQualif);
+            }
+
+            Path prodProps = resourcesDir.resolve("application-prod.properties");
+            if (Files.exists(prodProps)) {
+                Files.writeString(prodProps, Files.readString(prodProps) + keycloakProd);
+            } else {
+                Files.writeString(prodProps, keycloakProd);
+            }
+
+            Path devProps = resourcesDir.resolve("application-dev.properties");
+            if (Files.exists(devProps)) {
+                Files.writeString(devProps, Files.readString(devProps) + securityDisabled);
+            } else {
+                Files.writeString(devProps, securityDisabled);
+            }
+
+            Path mockProps = resourcesDir.resolve("application-mock.properties");
+            if (Files.exists(mockProps)) {
+                Files.writeString(mockProps, Files.readString(mockProps) + securityDisabled);
+            } else {
+                Files.writeString(mockProps, securityDisabled);
+            }
+
+            log.info("[SECURITY] SecurityConfig Keycloak genere (ouvert en dev/mock, securise en qualif/prod)");
+        } else {
+            // Pas de bloc security dans le JSON : pas de SecurityConfig genere
+            // L'API est naturellement ouverte sans Spring Security
+            log.info("[SECURITY] Pas de bloc security dans le JSON — API ouverte (pas de SecurityConfig genere)");
+            return;
+        }
+
+        Files.writeString(configDir.resolve("SecurityConfig.java"), code);
     }
 }

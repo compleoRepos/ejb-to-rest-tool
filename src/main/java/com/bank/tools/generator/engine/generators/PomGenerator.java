@@ -42,6 +42,7 @@ public class PomGenerator {
         deps.append(dep("org.springframework.boot", "spring-boot-starter-aop", null));
         deps.append(dep("org.springframework.boot", "spring-boot-starter-actuator", null));
         deps.append(dep("org.springframework.boot", "spring-boot-starter-security", null));
+        deps.append(dep("org.springframework.boot", "spring-boot-starter-oauth2-resource-server", null));
         deps.append(dep("jakarta.platform", "jakarta.jakartaee-api", "10.0.0", "provided"));
         deps.append(dep("org.springdoc", "springdoc-openapi-starter-webmvc-ui", "2.5.0"));
 

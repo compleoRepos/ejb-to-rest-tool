@@ -5,9 +5,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import com.bank.tools.generator.model.AdapterDescriptor;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * Génère les fichiers de configuration Spring Boot du projet REST :
@@ -21,15 +24,24 @@ public class ConfigGenerator {
     private static final String PKG = GeneratorConstants.DEFAULT_BASE_PACKAGE;
 
     public void generateAll(Path srcMain, Path resourcesDir, boolean hasXml) throws IOException {
+        generateAll(srcMain, resourcesDir, hasXml, null);
+    }
+
+    public void generateAll(Path srcMain, Path resourcesDir, boolean hasXml,
+                            AdapterDescriptor.SecurityConfig securityConfig) throws IOException {
         generateApplicationClass(srcMain);
         generateServletInitializer(srcMain);
         generateApplicationProperties(resourcesDir);
-        generateSecurityConfig(srcMain);
+        if (securityConfig != null && securityConfig.getIssuerUri() != null) {
+            generateKeycloakSecurityConfig(srcMain, securityConfig);
+        } else {
+            generateSecurityConfig(srcMain);
+        }
         generateCorsConfig(srcMain);
         if (hasXml) {
             generateContentNegotiationConfig(srcMain);
         }
-        generateProfiles(resourcesDir);
+        generateProfiles(resourcesDir, securityConfig);
         generateLibertyConfig(srcMain, resourcesDir);
     }
 
@@ -207,7 +219,7 @@ public class ConfigGenerator {
         Files.writeString(srcMain.resolve("config/ContentNegotiationConfig.java"), code);
     }
 
-    private void generateProfiles(Path resourcesDir) throws IOException {
+    private void generateProfiles(Path resourcesDir, AdapterDescriptor.SecurityConfig securityConfig) throws IOException {
         // Profil JNDI (production EJB)
         Files.writeString(resourcesDir.resolve("application-jndi.properties"), """
                 # Profil JNDI — Appelle les vrais EJBs via JBoss/WildFly
@@ -215,10 +227,18 @@ public class ConfigGenerator {
                 ejb.jndi.provider.url=${EJB_JNDI_URL:remote+http://serveur-ejb:8080}
                 """);
 
-        // Profil Mock (tests/démo)
+        // Profil Mock (tests/démo) — OUVERT, pas de sécurité
         Files.writeString(resourcesDir.resolve("application-mock.properties"), """
-                # Profil Mock — Données en dur, pas de JNDI
+                # Profil Mock — Données en dur, pas de JNDI, pas de sécurité
                 logging.level.com.bank.api=INFO
+                app.security.enabled=false
+                """);
+
+        // Profil Dev — OUVERT, pas de sécurité
+        Files.writeString(resourcesDir.resolve("application-dev.properties"), """
+                # Profil Dev — Développement local, pas de sécurité
+                logging.level.com.bank.api=DEBUG
+                app.security.enabled=false
                 """);
 
         // Profil HTTP (futur microservices)
@@ -233,9 +253,41 @@ public class ConfigGenerator {
                 # Profil test E2E — MockJndiContextFactory + vrais JndiAdapters
                 ejb.jndi.factory=com.bank.api.infrastructure.mock.jndi.MockJndiContextFactory
                 ejb.jndi.provider.url=mock://localhost
+                app.security.enabled=false
                 """);
 
-        log.info("Profils Spring générés (jndi, mock, http, test-e2e)");
+        // Profils Qualif et Prod — SÉCURISÉS avec Keycloak/OAuth2
+        if (securityConfig != null && securityConfig.getIssuerUri() != null) {
+            String issuerUri = securityConfig.getIssuerUri();
+            String jwkSetUri = securityConfig.getJwkSetUri() != null
+                    ? securityConfig.getJwkSetUri()
+                    : issuerUri + "/protocol/openid-connect/certs";
+
+            String qualifProps = """
+                    # Profil Qualif — Sécurisé avec Keycloak/OAuth2
+                    app.security.enabled=true
+                    spring.security.oauth2.resourceserver.jwt.issuer-uri=%s
+                    spring.security.oauth2.resourceserver.jwt.jwk-set-uri=%s
+                    logging.level.com.bank.api=INFO
+                    logging.level.org.springframework.security=DEBUG
+                    """.formatted(issuerUri, jwkSetUri);
+            Files.writeString(resourcesDir.resolve("application-qualif.properties"), qualifProps);
+
+            String prodProps = """
+                    # Profil Prod — Sécurisé avec Keycloak/OAuth2
+                    app.security.enabled=true
+                    spring.security.oauth2.resourceserver.jwt.issuer-uri=%s
+                    spring.security.oauth2.resourceserver.jwt.jwk-set-uri=%s
+                    logging.level.com.bank.api=INFO
+                    logging.level.org.springframework.security=WARN
+                    """.formatted(issuerUri, jwkSetUri);
+            Files.writeString(resourcesDir.resolve("application-prod.properties"), prodProps);
+
+            log.info("Profils Keycloak générés (qualif, prod) avec issuer={}", issuerUri);
+        }
+
+        log.info("Profils Spring générés (jndi, mock, dev, http, test-e2e" +
+                (securityConfig != null ? ", qualif, prod" : "") + ")");
     }
 
     // =====================================================================
@@ -421,5 +473,97 @@ public class ConfigGenerator {
                 """);
 
         log.info("Configuration WebSphere Liberty générée (server.xml, jvm.options, bootstrap.properties, application-liberty.properties)");
+    }
+
+    // =====================================================================
+    // KEYCLOAK / OAUTH2 — SecurityConfig conditionné par profil
+    // =====================================================================
+
+    /**
+     * Génère un SecurityConfig conditionné par profil :
+     * - dev/mock : OUVERT (permitAll)
+     * - qualif/prod : SÉCURISÉ avec OAuth2 Resource Server + JWT Keycloak
+     */
+    private void generateKeycloakSecurityConfig(Path srcMain, AdapterDescriptor.SecurityConfig sec) throws IOException {
+        // 1. SecurityConfig principal (délègue au bon bean selon le profil)
+        String mainConfig = """
+                package %s.config;
+                
+                import org.springframework.beans.factory.annotation.Value;
+                import org.springframework.context.annotation.Bean;
+                import org.springframework.context.annotation.Configuration;
+                import org.springframework.context.annotation.Profile;
+                import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+                import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+                import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+                import org.springframework.security.config.http.SessionCreationPolicy;
+                import org.springframework.security.oauth2.jwt.JwtDecoder;
+                import org.springframework.security.oauth2.jwt.JwtDecoders;
+                import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+                import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+                import org.springframework.security.web.SecurityFilterChain;
+                
+                /**
+                 * Configuration de s\u00e9curit\u00e9 conditionn\u00e9e par profil Spring :
+                 * - Profils dev, mock, test-e2e : API ouverte (permitAll)
+                 * - Profils qualif, prod : API s\u00e9curis\u00e9e avec Keycloak OAuth2/JWT
+                 *
+                 * Activation : --spring.profiles.active=qualif,rest
+                 */
+                @Configuration
+                @EnableWebSecurity
+                @EnableMethodSecurity
+                public class SecurityConfig {
+                
+                    // ==================== PROFILS OUVERTS (dev, mock, test-e2e) ====================
+                
+                    @Bean
+                    @Profile({"dev", "mock", "test-e2e", "default"})
+                    public SecurityFilterChain openFilterChain(HttpSecurity http) throws Exception {
+                        http
+                            .csrf(csrf -> csrf.disable())
+                            .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                            .authorizeHttpRequests(auth -> auth
+                                .anyRequest().permitAll()
+                            );
+                        return http.build();
+                    }
+                
+                    // ==================== PROFILS S\u00c9CURIS\u00c9S (qualif, prod) ====================
+                
+                    @Bean
+                    @Profile({"qualif", "prod"})
+                    public SecurityFilterChain securedFilterChain(HttpSecurity http) throws Exception {
+                        http
+                            .csrf(csrf -> csrf.disable())
+                            .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                            .authorizeHttpRequests(auth -> auth
+                                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
+                                .requestMatchers("/actuator/**").permitAll()
+                                .requestMatchers("/api/v1/**").authenticated()
+                                .anyRequest().denyAll()
+                            )
+                            .oauth2ResourceServer(oauth2 -> oauth2
+                                .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
+                            );
+                        return http.build();
+                    }
+                
+                    @Bean
+                    @Profile({"qualif", "prod"})
+                    public JwtAuthenticationConverter jwtAuthenticationConverter() {
+                        JwtGrantedAuthoritiesConverter grantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
+                        grantedAuthoritiesConverter.setAuthoritiesClaimName("%s");
+                        grantedAuthoritiesConverter.setAuthorityPrefix("ROLE_");
+                
+                        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+                        converter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
+                        return converter;
+                    }
+                }
+                """.formatted(PKG, sec.getRolesClaim() != null ? sec.getRolesClaim() : "realm_access.roles");
+
+        Files.writeString(srcMain.resolve("config/SecurityConfig.java"), mainConfig);
+        log.info("SecurityConfig Keycloak généré (ouvert en dev/mock, sécurisé en qualif/prod)");
     }
 }
