@@ -135,6 +135,7 @@ export default function CompleoAgentPage() {
   const [selectedStandard, setSelectedStandard] = useState<string>("");
   const [dynamicOptions, setDynamicOptions] = useState<any>(null);
   const [enableSoc2Compliance, setEnableSoc2Compliance] = useState(false);
+  const [enableSoapToRest, setEnableSoapToRest] = useState(false);
   const [isLoadingOptions, setIsLoadingOptions] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [projectFromDb, setProjectFromDb] = useState<{ id: number; name: string; fileCount: number } | null>(null);
@@ -272,18 +273,21 @@ export default function CompleoAgentPage() {
                     // Auto-activer les options recommandées
                     const optList = opts.options || [];
                     for (const opt of optList) {
-                      if (opt.recommended) {
+                      if (opt.defaultEnabled) {
                         if (opt.id === "frontend") setEnableFrontend(true);
                         if (opt.id === "microservices") setEnableMicroservices(true);
                         if (opt.id === "saga") setEnableSaga(true);
-                        if (opt.id === "reports") setEnableReportEnhancer(true);
-                        if (opt.id === "industryStandard") {
+                        if (opt.id === "reports" || opt.id === "ai_reports") setEnableReportEnhancer(true);
+                        if (opt.id === "industryStandard" || opt.id.endsWith("_mapping")) {
                           setEnableIndustryStandard(true);
                           if (opts.detectedDomain?.primary && opts.detectedDomain.primary !== "NONE") {
                             setSelectedStandard(opts.detectedDomain.primary);
                           }
                         }
+                        if (opt.id === "ml") setEnableML(true);
                         if (opt.id === "soc2_compliance") setEnableSoc2Compliance(true);
+                        if (opt.id === "soap_to_rest") setEnableSoapToRest(true);
+                        if (opt.id === "auto_resolve") setAutoResolve(true);
                       }
                     }
                   }
@@ -399,6 +403,7 @@ export default function CompleoAgentPage() {
           industryStandard: enableIndustryStandard && selectedStandard
             ? selectedStandard : undefined,
           enableSoc2Compliance,
+          enableSoapToRest,
         }),
       });
 
@@ -413,7 +418,7 @@ export default function CompleoAgentPage() {
     } catch {
       toast.error("Erreur lors de la résolution des ambiguïtés");
     }
-  }, [sessionId, choices, autoResolve, enableMicroservices, enableML, enableReportEnhancer, enableSaga, enableFrontend, frontendFramework, enableIndustryStandard, selectedStandard, enableSoc2Compliance]);
+  }, [sessionId, choices, autoResolve, enableMicroservices, enableML, enableReportEnhancer, enableSaga, enableFrontend, frontendFramework, enableIndustryStandard, selectedStandard, enableSoc2Compliance, enableSoapToRest]);
 
   const handleApplyAllRecommendations = useCallback(() => {
     const recs: Record<string, string> = {};
@@ -445,6 +450,7 @@ export default function CompleoAgentPage() {
           industryStandard: enableIndustryStandard && selectedStandard
             ? selectedStandard : undefined,
           enableSoc2Compliance,
+          enableSoapToRest,
         }),
       });
       if (!patchRes.ok) {
@@ -939,10 +945,12 @@ export default function CompleoAgentPage() {
                         case "frontend": return enableFrontend;
                         case "microservices": return enableMicroservices;
                         case "saga": return enableSaga;
-                        case "reports": return enableReportEnhancer;
-                        case "industryStandard": return enableIndustryStandard;
+                        case "reports": case "ai_reports": return enableReportEnhancer;
+                        case "industryStandard": case "bian_mapping": case "acord_mapping": case "hl7_mapping": case "tmforum_mapping": case "ddd_mapping": case "togaf_mapping": return enableIndustryStandard;
                         case "ml": return enableML;
                         case "soc2_compliance": return enableSoc2Compliance;
+                        case "soap_to_rest": return enableSoapToRest;
+                        case "auto_resolve": return autoResolve;
                         default: return false;
                       }
                     };
@@ -951,29 +959,42 @@ export default function CompleoAgentPage() {
                         case "frontend": setEnableFrontend(v); break;
                         case "microservices": setEnableMicroservices(v); break;
                         case "saga": setEnableSaga(v); break;
-                        case "reports": setEnableReportEnhancer(v); break;
-                        case "industryStandard": setEnableIndustryStandard(v); break;
+                        case "reports": case "ai_reports": setEnableReportEnhancer(v); break;
+                        case "industryStandard": case "bian_mapping": case "acord_mapping": case "hl7_mapping": case "tmforum_mapping": case "ddd_mapping": case "togaf_mapping":
+                          setEnableIndustryStandard(v);
+                          if (v && opt.id.includes("_mapping")) {
+                            // Auto-select the detected standard
+                            const stdMap: Record<string, string> = { bian_mapping: "BIAN", acord_mapping: "ACORD", hl7_mapping: "HL7_FHIR", tmforum_mapping: "TMFORUM", ddd_mapping: "DDD", togaf_mapping: "TOGAF" };
+                            setSelectedStandard(stdMap[opt.id] || "BIAN");
+                          }
+                          break;
                         case "ml": setEnableML(v); break;
                         case "soc2_compliance": setEnableSoc2Compliance(v); break;
+                        case "soap_to_rest": setEnableSoapToRest(v); break;
+                        case "auto_resolve": setAutoResolve(v); break;
                       }
                     };
                     const iconMap: Record<string, any> = {
                       frontend: Globe,
                       microservices: Layers,
                       saga: GitBranch,
-                      reports: Star,
-                      industryStandard: Shield,
+                      reports: Star, ai_reports: Star,
+                      industryStandard: Shield, bian_mapping: Shield, acord_mapping: Shield, hl7_mapping: Shield, tmforum_mapping: Shield, ddd_mapping: Shield, togaf_mapping: Shield,
                       ml: Zap,
                       soc2_compliance: Lock,
+                      soap_to_rest: Zap,
+                      auto_resolve: CheckCircle2,
                     };
                     const colorMap: Record<string, string> = {
                       frontend: "text-blue-400",
                       microservices: "text-pink-400",
                       saga: "text-violet-400",
-                      reports: "text-amber-400",
-                      industryStandard: "text-cyan-400",
+                      reports: "text-amber-400", ai_reports: "text-amber-400",
+                      industryStandard: "text-cyan-400", bian_mapping: "text-cyan-400", acord_mapping: "text-cyan-400", hl7_mapping: "text-cyan-400", tmforum_mapping: "text-cyan-400", ddd_mapping: "text-cyan-400", togaf_mapping: "text-cyan-400",
                       ml: "text-amber-400",
                       soc2_compliance: "text-emerald-400",
+                      soap_to_rest: "text-orange-400",
+                      auto_resolve: "text-green-400",
                     };
                     const checkboxColorMap: Record<string, string> = {
                       frontend: "data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500",
@@ -1003,7 +1024,7 @@ export default function CompleoAgentPage() {
                               <p className="text-xs text-muted-foreground mt-0.5">{opt.reason}</p>
                             )}
                           </div>
-                          {opt.recommended && (
+                          {opt.defaultEnabled && (
                             <Badge className="bg-emerald-500/20 text-emerald-400 text-[10px] border-emerald-500/30">Recommandé</Badge>
                           )}
                         </label>

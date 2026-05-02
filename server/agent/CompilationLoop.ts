@@ -431,6 +431,7 @@ export class CompilationLoop {
 
   /**
    * Construit le prompt et appelle le LLM pour corriger un fichier Java.
+   * Inclut des règles spécifiques pour les patterns legacy (SOAP, EJB, EAI).
    */
   private async callLLMForFix(
     file: GeneratedFile,
@@ -444,7 +445,10 @@ export class CompilationLoop {
     // Collect related files for context (imports, referenced types)
     const relatedContext = this.buildRelatedContext(file, project);
 
-    const prompt = `Tu es un expert Java Spring Boot. Corrige le fichier Java suivant qui contient des erreurs de compilation.
+    // Detect legacy patterns in the file to add specialized rules
+    const legacyRules = this.buildLegacyMigrationRules(file.content);
+
+    const prompt = `Tu es un expert Java Spring Boot spécialisé dans la migration de code legacy (EJB, SOAP, EAI) vers Spring Boot 3.x. Corrige le fichier Java suivant qui contient des erreurs de compilation.
 
 ## Erreurs détectées :
 ${errorDescriptions}
@@ -456,7 +460,7 @@ ${file.content}
 
 ${relatedContext ? `## Contexte du projet (classes liées) :\n${relatedContext}\n` : ""}
 
-## Règles :
+## Règles générales :
 1. Retourne UNIQUEMENT le fichier Java corrigé complet (pas d'explication)
 2. Conserve la même structure, le même package et les mêmes annotations
 3. Corrige les imports manquants en utilisant les packages Spring Boot standard
@@ -464,7 +468,7 @@ ${relatedContext ? `## Contexte du projet (classes liées) :\n${relatedContext}\
 5. Ne supprime JAMAIS de logique métier — corrige uniquement les erreurs de compilation
 6. Utilise les conventions Spring Boot 3.x (jakarta.* au lieu de javax.*)
 7. Si une méthode est dupliquée, fusionne-les intelligemment
-
+${legacyRules}
 ## Fichier corrigé :`;
 
     try {
@@ -480,6 +484,67 @@ ${relatedContext ? `## Contexte du projet (classes liées) :\n${relatedContext}\
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Construit des règles de migration spécifiques basées sur les patterns legacy détectés dans le fichier.
+   * Ajoute des instructions contextuelles pour que le LLM sache comment remplacer les types legacy.
+   */
+  private buildLegacyMigrationRules(content: string): string {
+    const rules: string[] = [];
+
+    // Détection SOAP / WebService legacy
+    if (content.includes("SynchroneService") || content.includes("AsynchroneService")) {
+      rules.push(
+        "8. MIGRATION SOAP: Remplace tout appel à `SynchroneService.process(...)` ou `AsynchroneService.process(...)` par un appel REST via `org.springframework.web.reactive.function.client.WebClient` ou `org.springframework.web.client.RestTemplate`. Crée un champ `private final WebClient webClient;` injecté par constructeur, et utilise `webClient.post().uri(...).bodyValue(...).retrieve().bodyToMono(...)` pour les appels synchrones."
+      );
+    }
+
+    // Détection Services.find() / ServiceLocator pattern
+    if (content.includes("Services.find(") || content.includes("ServiceLocator")) {
+      rules.push(
+        "9. MIGRATION SERVICE LOCATOR: Remplace tout appel à `Services.find(...)` ou `ServiceLocator.lookup(...)` par une injection Spring `@Autowired` ou injection par constructeur. Déclare le service comme un champ `private final XxxService xxxService;` et injecte-le via `@RequiredArgsConstructor`."
+      );
+    }
+
+    // Détection Envelope / VoIn / VoOut (pattern EAI bancaire)
+    if (content.includes("Envelope") || content.includes("VoIn") || content.includes("VoOut")) {
+      rules.push(
+        "10. MIGRATION EAI ENVELOPE: Remplace les types `Envelope`, `VoIn`, `VoOut` par des DTOs Spring standard. `Envelope` devient un simple wrapper DTO avec `private String status; private Object data;`. `VoIn`/`VoOut` deviennent des Request/Response DTOs avec les mêmes champs. Utilise `@Data @NoArgsConstructor @AllArgsConstructor` de Lombok."
+      );
+    }
+
+    // Détection GenerateFlux / flux XML legacy
+    if (content.includes("GenerateFlux") || content.includes("generateFlux")) {
+      rules.push(
+        "11. MIGRATION FLUX XML: Remplace `GenerateFlux` par la sérialisation Jackson standard. Utilise `ObjectMapper` pour convertir les objets en JSON/XML. Remplace `GenerateFlux.generate(...)` par `objectMapper.writeValueAsString(dto)`. Déclare `private final ObjectMapper objectMapper;` injecté par constructeur."
+      );
+    }
+
+    // Détection JNDI / InitialContext
+    if (content.includes("InitialContext") || content.includes("Context.lookup") || content.includes("jndi")) {
+      rules.push(
+        "12. MIGRATION JNDI: Remplace tout lookup JNDI (`new InitialContext()`, `ctx.lookup(...)`) par une injection Spring `@Autowired`. Les EJB référencés via JNDI deviennent des services Spring injectés par constructeur."
+      );
+    }
+
+    // Détection EJB @Stateless / @Remote
+    if (content.includes("@Stateless") || content.includes("@Remote") || content.includes("@EJB")) {
+      rules.push(
+        "13. MIGRATION EJB: Remplace `@Stateless` par `@Service`, `@Remote` par rien (REST expose l'API), `@EJB` par `@Autowired` ou injection constructeur. Supprime les interfaces Remote/Local et utilise directement la classe de service."
+      );
+    }
+
+    // Détection JDBC direct (Statement, PreparedStatement, ResultSet)
+    if (content.includes("PreparedStatement") || content.includes("ResultSet") || content.includes("getConnection")) {
+      rules.push(
+        "14. MIGRATION JDBC: Remplace le JDBC brut par Spring Data JPA. `PreparedStatement`/`ResultSet` → `JpaRepository` avec des méthodes dérivées ou `@Query`. `getConnection()` → supprimé (Spring gère le pool). Les try-catch JDBC → `@Transactional` sur le service."
+      );
+    }
+
+    if (rules.length === 0) return "\n";
+
+    return `\n## Règles de migration legacy spécifiques :\n${rules.join("\n")}\n\n`;
   }
 
   /**

@@ -303,6 +303,11 @@ Markdown ## ###. Max 600 mots.`;
       features: ds.sqlFeatures,
     }));
 
+    // Si aucune datasource détectée, générer un rapport factuel minimal
+    if (ctx.dataSources.length === 0) {
+      return this.generateFactualDatasourceReport(ctx);
+    }
+
     const prompt = `DBA Oracle senior, migration bases de données, institutions financières.
 BAM = Banque Al-Maghrib (régulateur bancaire marocain).
 ${this.buildRealNamesAnchor(ctx)}
@@ -318,11 +323,122 @@ Pour chaque DataSource, génère DATASOURCE_MIGRATION.md avec :
 Oracle 19c, DB2 LUW 11.5, ojdbc11 v23.2.
 Markdown technique. Max 500 mots.`;
 
-     const raw = await this.ollamaGenerate(prompt, {
-      temperature: 0.2,
-      num_predict: 2000,
-    });
-    return this.sanitizeOutput(raw, ctx);
+    try {
+      const raw = await this.ollamaGenerate(prompt, {
+        temperature: 0.2,
+        num_predict: 2000,
+      });
+      return this.sanitizeOutput(raw, ctx);
+    } catch (err) {
+      // Fallback: si le LLM échoue ou l'output est trop court après nettoyage,
+      // générer un rapport factuel basé sur les données détectées
+      console.warn(`[ReportEnhancer] DATASOURCE_MIGRATION LLM fallback: ${err instanceof Error ? err.message : String(err)}`);
+      return this.generateFactualDatasourceReport(ctx);
+    }
+  }
+
+  /**
+   * Génère un rapport DATASOURCE_MIGRATION factuel sans LLM.
+   * Utilisé comme fallback quand le LLM échoue ou produit un output trop court.
+   */
+  private generateFactualDatasourceReport(ctx: ReportContext): string {
+    const lines: string[] = [
+      `# Migration DataSources — ${ctx.projectName}`,
+      "",
+      `> Rapport généré par analyse statique des sources Java`,
+      "",
+    ];
+
+    if (ctx.dataSources.length === 0) {
+      lines.push("## Aucune DataSource détectée");
+      lines.push("");
+      lines.push("Le projet ne contient pas de connexion base de données directe (JDBC/JPA).");
+      lines.push("La migration se concentre sur les appels de service (SOAP/REST/EJB).");
+      lines.push("");
+      lines.push("### Recommandation");
+      lines.push("");
+      lines.push("Si le projet utilise des données via un service externe (EAI, ESB, SOAP), ");
+      lines.push("la persistance sera gérée par le microservice appelant via Spring Data JPA.");
+      lines.push("");
+      lines.push("### Configuration Spring Boot suggérée");
+      lines.push("");
+      lines.push("```yaml");
+      lines.push("spring:");
+      lines.push("  datasource:");
+      lines.push("    url: \${DATABASE_URL}");
+      lines.push("    driver-class-name: com.mysql.cj.jdbc.Driver");
+      lines.push("  jpa:");
+      lines.push("    hibernate:");
+      lines.push("      ddl-auto: validate");
+      lines.push("```");
+    } else {
+      lines.push(`## DataSources détectées (${ctx.dataSources.length})`);
+      lines.push("");
+      lines.push("| JNDI | Vendor | Schéma | Tables |");
+      lines.push("|------|--------|--------|--------|");
+      for (const ds of ctx.dataSources) {
+        lines.push(`| ${ds.jndi || "N/A"} | ${ds.vendor} | ${ds.schema || "default"} | ${ds.tables.length} |`);
+      }
+      lines.push("");
+
+      for (const ds of ctx.dataSources) {
+        lines.push(`### ${ds.vendor} — ${ds.jndi || "DataSource principale"}`);
+        lines.push("");
+        if (ds.tables.length > 0) {
+          lines.push(`**Tables** : ${ds.tables.join(", ")}`);
+          lines.push("");
+        }
+        if (ds.sqlFeatures.length > 0) {
+          lines.push(`**Features SQL** : ${ds.sqlFeatures.join(", ")}`);
+          lines.push("");
+        }
+        lines.push("**Configuration Spring Boot** :");
+        lines.push("");
+        lines.push("```yaml");
+        lines.push("spring:");
+        lines.push("  datasource:");
+        lines.push(`    url: \${${ds.vendor.toUpperCase()}_DATABASE_URL}`);
+        lines.push(`    driver-class-name: ${this.getDriverClass(ds.vendor)}`);
+        lines.push("  jpa:");
+        lines.push("    hibernate:");
+        lines.push("      ddl-auto: validate");
+        lines.push(`    properties.hibernate.dialect: ${this.getDialect(ds.vendor)}`);
+        lines.push("```");
+        lines.push("");
+      }
+
+      lines.push("## Stratégie de migration");
+      lines.push("");
+      lines.push("1. **Phase 1** : Cohabitation (Strangler Fig Pattern) — le microservice lit la base legacy");
+      lines.push("2. **Phase 2** : Double-écriture — écriture dans l'ancienne et la nouvelle base");
+      lines.push("3. **Phase 3** : Bascule complète — décommissionnement de la base legacy");
+    }
+
+    return lines.join("\n");
+  }
+
+  private getDriverClass(vendor: string): string {
+    const drivers: Record<string, string> = {
+      ORACLE: "oracle.jdbc.OracleDriver",
+      MYSQL: "com.mysql.cj.jdbc.Driver",
+      POSTGRESQL: "org.postgresql.Driver",
+      SQLSERVER: "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+      DB2: "com.ibm.db2.jcc.DB2Driver",
+      H2: "org.h2.Driver",
+    };
+    return drivers[vendor.toUpperCase()] || "com.mysql.cj.jdbc.Driver";
+  }
+
+  private getDialect(vendor: string): string {
+    const dialects: Record<string, string> = {
+      ORACLE: "org.hibernate.dialect.OracleDialect",
+      MYSQL: "org.hibernate.dialect.MySQLDialect",
+      POSTGRESQL: "org.hibernate.dialect.PostgreSQLDialect",
+      SQLSERVER: "org.hibernate.dialect.SQLServerDialect",
+      DB2: "org.hibernate.dialect.DB2Dialect",
+      H2: "org.hibernate.dialect.H2Dialect",
+    };
+    return dialects[vendor.toUpperCase()] || "org.hibernate.dialect.MySQLDialect";
   }
 
   // ── QUALITY_SCORE.md — calculé statiquement (Post-Audit STEP 8c) ──────
