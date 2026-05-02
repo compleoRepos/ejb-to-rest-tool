@@ -3,6 +3,7 @@
   "adapter_base_url": "http://websphere:9080/releve-carte-bmcedirect/api",
   "bian": {
     "service_domain": "Card-Statement",
+    "service_domain_id": "SD0334",
     "functional_pattern": "Fulfill"
   },
   "endpoints": [

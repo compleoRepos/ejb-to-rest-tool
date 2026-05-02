@@ -3,6 +3,7 @@
   "adapter_base_url": "http://websphere:9080/coordonnees-3dsecure-bmcedirect/api",
   "bian": {
     "service_domain": "Card-Security",
+    "service_domain_id": "SD0333",
     "functional_pattern": "Fulfill"
   },
   "endpoints": [

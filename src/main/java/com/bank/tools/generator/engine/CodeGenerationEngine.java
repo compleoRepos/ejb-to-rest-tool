@@ -173,8 +173,11 @@ public class CodeGenerationEngine {
         generatePomXml(projectRoot, projectHasXml, projectHasValidation, analysisResult);
         generateApplicationClass(srcMain);
         generateServletInitializer(srcMain);
-        generateApplicationProperties(resourcesDir);
-        generateLibertyProfile(srcMain, resourcesDir);
+        generateApplicationProperties(resourcesDir, analysisResult.isJsonAdapterMode());
+        // FIX 4 : Liberty/JNDI uniquement en mode non-JSON
+        if (!analysisResult.isJsonAdapterMode()) {
+            generateLibertyProfile(srcMain, resourcesDir);
+        }
         // FIX 4 : HealthIndicator adapte au mode de transport
         if ("rest".equalsIgnoreCase(transportMode) || analysisResult.isJsonAdapterMode()) {
             generateAdapterHealthIndicator(srcMain, analysisResult);
@@ -345,6 +348,7 @@ public class CodeGenerationEngine {
 
     private void generatePomXml(Path projectRoot, boolean includeXml, boolean includeValidation,
                                     ProjectAnalysisResult analysisResult) throws IOException {
+        boolean jsonMode = analysisResult.isJsonAdapterMode();
         StringBuilder deps = new StringBuilder();
         deps.append("""
                         <!-- Spring Boot Web -->
@@ -357,7 +361,11 @@ public class CodeGenerationEngine {
                         <dependency>
                             <groupId>org.springframework.boot</groupId>
                             <artifactId>spring-boot-starter-aop</artifactId>
-                        </dependency>
+                        </dependency>""");
+
+        // FIX 4 : Jakarta EE (JNDI) uniquement en mode non-JSON
+        if (!jsonMode) {
+            deps.append("""
                 
                         <!-- Jakarta EE API (pour JNDI) -->
                         <dependency>
@@ -365,7 +373,10 @@ public class CodeGenerationEngine {
                             <artifactId>jakarta.jakartaee-api</artifactId>
                             <version>10.0.0</version>
                             <scope>provided</scope>
-                        </dependency>
+                        </dependency>""");
+        }
+
+        deps.append("""
                 
                         <!-- Swagger / OpenAPI 3 (G11) -->
                         <dependency>
@@ -529,6 +540,10 @@ public class CodeGenerationEngine {
                         </plugins>
                     </build>
                 
+                    %s
+                
+                </project>
+                """.formatted(parentBlock, javaVersion, deps.toString(), jsonMode ? "" : """
                     <!-- Profil WebSphere Liberty (mvn clean package -Pliberty) -->
                     <profiles>
                         <profile>
@@ -571,10 +586,7 @@ public class CodeGenerationEngine {
                                 </plugins>
                             </build>
                         </profile>
-                    </profiles>
-                
-                </project>
-                """.formatted(parentBlock, javaVersion, deps.toString());
+                    </profiles>""");
 
         Files.writeString(projectRoot.resolve("pom.xml"), pom);
         log.info("pom.xml genere (XML: {}, Validation: {}, Swagger: oui)", includeXml, includeValidation);
@@ -708,13 +720,26 @@ public class CodeGenerationEngine {
     // ===================== APPLICATION PROPERTIES =====================
 
     private void generateApplicationProperties(Path resourcesDir) throws IOException {
-        String props = """
+        generateApplicationProperties(resourcesDir, false);
+    }
+
+    private void generateApplicationProperties(Path resourcesDir, boolean jsonMode) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("""
                 # Generated REST API - Configuration
                 server.port=8081
+                """);
+
+        if (!jsonMode) {
+            sb.append("""
                 
                 # JNDI Configuration
                 ejb.jndi.provider.url=localhost:1099
                 ejb.jndi.factory=org.jboss.naming.remote.client.InitialContextFactory
+                """);
+        }
+
+        sb.append("""
                 
                 # Logging
                 logging.level.com.bank.api=DEBUG
@@ -726,39 +751,61 @@ public class CodeGenerationEngine {
                 springdoc.swagger-ui.url=/v3/api-docs
                 
                 # ===================== Resilience4j =====================
+                """);
+
+        String instanceName = jsonMode ? "restAdapter" : "ejbService";
+        sb.append(String.format("""
                 
-                # Circuit Breaker : s'ouvre si le serveur EJB/WAS ne repond plus
-                resilience4j.circuitbreaker.instances.ejbService.slidingWindowSize=10
-                resilience4j.circuitbreaker.instances.ejbService.failureRateThreshold=50
-                resilience4j.circuitbreaker.instances.ejbService.waitDurationInOpenState=30s
-                resilience4j.circuitbreaker.instances.ejbService.permittedNumberOfCallsInHalfOpenState=3
-                resilience4j.circuitbreaker.instances.ejbService.slidingWindowType=COUNT_BASED
-                resilience4j.circuitbreaker.instances.ejbService.registerHealthIndicator=true
+                # Circuit Breaker
+                resilience4j.circuitbreaker.instances.%s.slidingWindowSize=10
+                resilience4j.circuitbreaker.instances.%s.failureRateThreshold=50
+                resilience4j.circuitbreaker.instances.%s.waitDurationInOpenState=30s
+                resilience4j.circuitbreaker.instances.%s.permittedNumberOfCallsInHalfOpenState=3
+                resilience4j.circuitbreaker.instances.%s.slidingWindowType=COUNT_BASED
+                resilience4j.circuitbreaker.instances.%s.registerHealthIndicator=true
                 
-                # Retry : 3 tentatives avec backoff exponentiel
-                resilience4j.retry.instances.ejbService.maxAttempts=3
-                resilience4j.retry.instances.ejbService.waitDuration=2s
-                resilience4j.retry.instances.ejbService.enableExponentialBackoff=true
-                resilience4j.retry.instances.ejbService.exponentialBackoffMultiplier=2
-                resilience4j.retry.instances.ejbService.retryExceptions=java.net.ConnectException,javax.naming.CommunicationException
+                # Retry
+                resilience4j.retry.instances.%s.maxAttempts=3
+                resilience4j.retry.instances.%s.waitDuration=2s
+                resilience4j.retry.instances.%s.enableExponentialBackoff=true
+                resilience4j.retry.instances.%s.exponentialBackoffMultiplier=2
+                """, instanceName, instanceName, instanceName, instanceName, instanceName, instanceName,
+                instanceName, instanceName, instanceName, instanceName));
+
+        if (!jsonMode) {
+            sb.append(String.format("""
+                resilience4j.retry.instances.%s.retryExceptions=java.net.ConnectException,javax.naming.CommunicationException
+                """, instanceName));
+        } else {
+            sb.append(String.format("""
+                resilience4j.retry.instances.%s.retryExceptions=org.springframework.web.client.HttpServerErrorException,org.springframework.web.client.ResourceAccessException
+                """, instanceName));
+        }
+
+        sb.append(String.format("""
                 
-                # TimeLimiter : timeout de 30s sur les appels EJB
-                resilience4j.timelimiter.instances.ejbService.timeoutDuration=30s
-                resilience4j.timelimiter.instances.ejbService.cancelRunningFuture=true
+                # TimeLimiter
+                resilience4j.timelimiter.instances.%s.timeoutDuration=30s
+                resilience4j.timelimiter.instances.%s.cancelRunningFuture=true
                 
-                # Bulkhead : max 10 appels concurrents par EJB
-                resilience4j.bulkhead.instances.ejbService.maxConcurrentCalls=10
-                resilience4j.bulkhead.instances.ejbService.maxWaitDuration=500ms
+                # Bulkhead
+                resilience4j.bulkhead.instances.%s.maxConcurrentCalls=10
+                resilience4j.bulkhead.instances.%s.maxWaitDuration=500ms
                 
                 # ===================== Actuator =====================
                 
-                # Exposer les endpoints health, info, metrics et resilience4j
                 management.endpoints.web.exposure.include=health,info,metrics,circuitbreakers,retries,bulkheads
                 management.endpoint.health.show-details=always
                 management.health.circuitbreakers.enabled=true
-                """;
+                """, instanceName, instanceName, instanceName, instanceName));
 
-        Files.writeString(resourcesDir.resolve("application.properties"), props);
+        if (!jsonMode) {
+            sb.append("\nspring.profiles.group.prod=jndi\n");
+        } else {
+            sb.append("\nspring.profiles.group.prod=rest\n");
+        }
+
+        Files.writeString(resourcesDir.resolve("application.properties"), sb.toString());
     }
 
     // ===================== JNDI HEALTH INDICATOR (Resilience) =====================

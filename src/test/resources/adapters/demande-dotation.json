@@ -3,6 +3,7 @@
   "adapter_base_url": "http://websphere:9080/demande-dotation/api",
   "bian": {
     "service_domain": "Cash-Management",
+    "service_domain_id": "SD0018",
     "functional_pattern": "Fulfill"
   },
   "endpoints": [

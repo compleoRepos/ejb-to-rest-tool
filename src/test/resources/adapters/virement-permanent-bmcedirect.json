@@ -3,6 +3,7 @@
   "adapter_base_url": "http://websphere:9080/virement-permanent-bmcedirect/api",
   "bian": {
     "service_domain": "Standing-Order",
+    "service_domain_id": "SD0260",
     "functional_pattern": "Fulfill"
   },
   "endpoints": [

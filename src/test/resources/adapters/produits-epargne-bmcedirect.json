@@ -3,6 +3,7 @@
   "adapter_base_url": "http://websphere:9080/produits-epargne-bmcedirect/api",
   "bian": {
     "service_domain": "Savings-Account",
+    "service_domain_id": "SD0258",
     "functional_pattern": "Fulfill"
   },
   "endpoints": [

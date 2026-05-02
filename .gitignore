@@ -25,3 +25,4 @@ logs/
 # Uploads and generated
 uploads/
 generated-output/
+*.gz

@@ -3,6 +3,7 @@
   "adapter_base_url": "http://websphere:9080/souscription-opv-bmcedirect/api",
   "bian": {
     "service_domain": "Securities-Trading",
+    "service_domain_id": "SD0338",
     "functional_pattern": "Fulfill"
   },
   "endpoints": [

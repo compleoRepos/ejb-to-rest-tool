@@ -3,6 +3,7 @@
   "adapter_base_url": "http://websphere:9080/interface-credit-jocker/api",
   "bian": {
     "service_domain": "Consumer-Loan",
+    "service_domain_id": "SD0152",
     "functional_pattern": "Fulfill"
   },
   "endpoints": [

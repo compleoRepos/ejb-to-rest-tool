@@ -3,6 +3,7 @@
   "adapter_base_url": "http://websphere:9080/mise-disposition-bmcedirect/api",
   "bian": {
     "service_domain": "Fund-Transfer",
+    "service_domain_id": "SD0246",
     "functional_pattern": "Fulfill"
   },
   "endpoints": [

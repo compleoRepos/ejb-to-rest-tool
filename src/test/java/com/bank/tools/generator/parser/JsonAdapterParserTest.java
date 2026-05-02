@@ -664,7 +664,7 @@ class JsonAdapterParserTest {
         }
 
         @Test
-        @DisplayName("Sans BQ, le nom de l'operation en PascalCase est utilise (fallback)")
+        @DisplayName("Sans BQ, le prefixe est retire et le BQ derive est utilise (FIX 2)")
         void shouldFallbackToOperationName() {
             String json = """
                 {
@@ -687,9 +687,10 @@ class JsonAdapterParserTest {
             ProjectAnalysisResult result = parser.parseFromString(json);
             UseCaseInfo uc = result.getUseCases().get(0);
 
-            assertEquals("CheckStatusRequest", uc.getInputDtoClassName(),
-                    "Sans BQ, le nom de l'operation en PascalCase est utilise");
-            assertEquals("CheckStatusResponse", uc.getOutputDtoClassName());
+            // FIX 2 : le prefixe 'check' est retire, donc check_status -> status -> StatusRequest
+            assertEquals("StatusRequest", uc.getInputDtoClassName(),
+                    "Sans BQ, le prefixe est retire et le BQ derive est utilise");
+            assertEquals("StatusResponse", uc.getOutputDtoClassName());
         }
 
         @Test

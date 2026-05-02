@@ -3,6 +3,7 @@
   "adapter_base_url": "http://websphere:9080/vente-distance-carte-monetique/api",
   "bian": {
     "service_domain": "Card-Issuance",
+    "service_domain_id": "SD0335",
     "functional_pattern": "Fulfill"
   },
   "endpoints": [

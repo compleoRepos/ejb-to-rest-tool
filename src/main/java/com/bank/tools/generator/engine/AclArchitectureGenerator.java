@@ -34,6 +34,7 @@ public class AclArchitectureGenerator {
     // PACKAGES
     // =====================================================================
     private String PKG_BASE;
+    private boolean currentJsonMode;
     private String PKG_API_CONTROLLER;
     private String PKG_API_DTO_REQUEST;
     private String PKG_API_DTO_RESPONSE;
@@ -61,6 +62,14 @@ public class AclArchitectureGenerator {
 
     private static final Set<String> LEGACY_FIELDS = Set.of(
             "codeRetour", "messageRetour", "serialVersionUID", "scoreInterne"
+    );
+
+    // FIX 5 : Champs d'enveloppe qui restent dans ApiRequest<T> / ApiResponse<T>
+    // et ne doivent PAS apparaitre dans les DTOs metier
+    private static final Set<String> ENVELOPE_FIELDS = Set.of(
+            "requestId", "request_id", "sourceSystem", "source_system",
+            "timestamp", "correlationId", "correlation_id",
+            "code", "message", "status"
     );
 
     private static final Map<String, String> FIELD_RENAME = Map.ofEntries(
@@ -150,6 +159,8 @@ public class AclArchitectureGenerator {
 
         log.info("[ACL] ========== DEBUT GENERATION ARCHITECTURE ACL (transport={}) ==========", transportMode);
         boolean restMode = "rest".equalsIgnoreCase(transportMode);
+        boolean jsonMode = analysis.isJsonAdapterMode();
+        this.currentJsonMode = jsonMode;
 
         // Determiner le package de base depuis srcMain
         // srcMain = .../src/main/java/com/bank/api
@@ -188,22 +199,27 @@ public class AclArchitectureGenerator {
             generateServiceInterface(srcMain, group, analysis);
         }
 
-        // 6. Generer les EJB Types (couche Infrastructure)
-        generateEjbTypes(srcMain, analysis, groups);
+        // FIX 4 : En mode JSON, PAS de JNDI/EJB — uniquement RestAdapter + MockAdapter
+        if (!jsonMode) {
+            // 6. Generer les EJB Types (couche Infrastructure)
+            generateEjbTypes(srcMain, analysis, groups);
 
-        // 7. Generer les Mappers (couche Infrastructure)
-        for (BianControllerGroup group : groups) {
-            for (BianEndpoint ep : group.endpoints) {
-                generateMapper(srcMain, analysis, ep);
+            // 7. Generer les Mappers (couche Infrastructure)
+            for (BianControllerGroup group : groups) {
+                for (BianEndpoint ep : group.endpoints) {
+                    generateMapper(srcMain, analysis, ep);
+                }
             }
-        }
 
-        // 8. Generer l'ExceptionTranslator (couche Infrastructure)
-        generateExceptionTranslator(srcMain, analysis);
+            // 8. Generer l'ExceptionTranslator (couche Infrastructure)
+            generateExceptionTranslator(srcMain, analysis);
 
-        // 9. Generer les JndiAdapters (couche Infrastructure) — toujours generes comme fallback
-        for (BianControllerGroup group : groups) {
-            generateJndiAdapter(srcMain, group, analysis);
+            // 9. Generer les JndiAdapters (couche Infrastructure)
+            for (BianControllerGroup group : groups) {
+                generateJndiAdapter(srcMain, group, analysis);
+            }
+        } else {
+            log.info("[ACL] Mode JSON : skip EJB Types, Mappers, ExceptionTranslator, JndiAdapter");
         }
 
         // 10. Generer les MockAdapters (couche Infrastructure) — toujours generes pour les tests
@@ -281,14 +297,20 @@ public class AclArchitectureGenerator {
 
     private void createDirectories(Path srcMain) throws IOException {
         Path javaRoot = resolveJavaRoot(srcMain);
-        String[] packages = {
+        List<String> packages = new java.util.ArrayList<>(java.util.Arrays.asList(
                 PKG_API_CONTROLLER, PKG_API_DTO_REQUEST, PKG_API_DTO_RESPONSE, PKG_API_ENUM,
                 PKG_DOMAIN_SERVICE, PKG_DOMAIN_EXCEPTION,
-                PKG_INFRA_EJB_ADAPTER, PKG_INFRA_EJB_MAPPER, PKG_INFRA_EJB_EXCEPTION,
-                PKG_INFRA_EJB_TYPES, PKG_INFRA_MOCK,
+                PKG_INFRA_MOCK,
                 PKG_INFRA_REST_ADAPTER, PKG_INFRA_REST_CONFIG,
                 PKG_CONFIG, PKG_API_DTO_VALIDATION, PKG_API_DTO_ENVELOPE
-        };
+        ));
+        // FIX 4 : En mode JSON, pas de répertoires EJB
+        if (!currentJsonMode) {
+            packages.addAll(java.util.Arrays.asList(
+                    PKG_INFRA_EJB_ADAPTER, PKG_INFRA_EJB_MAPPER, PKG_INFRA_EJB_EXCEPTION,
+                    PKG_INFRA_EJB_TYPES
+            ));
+        }
         for (String pkg : packages) {
             Files.createDirectories(javaRoot.resolve(pkg.replace(".", "/")));
         }
@@ -444,7 +466,7 @@ public class AclArchitectureGenerator {
             String httpMethod = ep.bianMapping.getHttpMethod() != null
                     ? ep.bianMapping.getHttpMethod().toUpperCase() : "POST";
             String relUrl = ep.bianMapping.getUrl();
-            if (relUrl != null && relUrl.startsWith("/" + group.serviceDomain)) {
+            if (relUrl != null && relUrl.toLowerCase().startsWith("/" + group.serviceDomain.toLowerCase())) {
                 relUrl = relUrl.substring(("/" + group.serviceDomain).length());
             }
             String routeKey = httpMethod + ":" + relUrl;
@@ -1988,7 +2010,8 @@ public class AclArchitectureGenerator {
 
         // Isolation respectee — aucun commentaire revelant l'implementation interne
 
-        String basePath = "/api/v1/" + group.serviceDomain;
+        // FIX 1 : URL en minuscules kebab-case (Payment-Order -> payment-order)
+        String basePath = "/api/v1/" + group.serviceDomain.toLowerCase();
         String tagName = group.serviceDomainTitle;
         String tagDesc = "BIAN";
         if (group.bianId != null && !group.bianId.isEmpty()) {
@@ -2015,7 +2038,7 @@ public class AclArchitectureGenerator {
             String url = m.getUrl(); // ex: /card-management/{cr-reference-id}/activation/execution
             // Extraire le path relatif au basePath
             String relativePath = url;
-            if (relativePath.startsWith("/" + group.serviceDomain)) {
+            if (relativePath.toLowerCase().startsWith("/" + group.serviceDomain.toLowerCase())) {
                 relativePath = relativePath.substring(("/" + group.serviceDomain).length());
             }
             if (relativePath.isEmpty()) relativePath = "";
@@ -2267,18 +2290,22 @@ public class AclArchitectureGenerator {
     // =====================================================================
 
     private void generateSpringProfiles(Path srcMain, boolean restMode) throws IOException {
+        boolean jsonMode = this.currentJsonMode;
         Path resourcesDir = resolveResourcesDir(srcMain);
         Files.createDirectories(resourcesDir);
 
-        Files.writeString(resourcesDir.resolve("application-jndi.properties"), """
-                # Profil JNDI (production EJB)
-                ejb.jndi.factory=org.jboss.naming.remote.client.InitialContextFactory
-                ejb.jndi.provider.url=remote+http://serveur-ejb:8080
-                """);
+        // FIX 4 : En mode JSON, pas de profil JNDI
+        if (!jsonMode) {
+            Files.writeString(resourcesDir.resolve("application-jndi.properties"), """
+                    # Profil JNDI (production EJB)
+                    ejb.jndi.factory=org.jboss.naming.remote.client.InitialContextFactory
+                    ejb.jndi.provider.url=remote+http://serveur-ejb:8080
+                    """);
+        }
 
         Files.writeString(resourcesDir.resolve("application-mock.properties"), """
                 # Profil Mock (tests/demo)
-                # Pas de configuration JNDI necessaire
+                # Pas de configuration specifique
                 """);
 
         Files.writeString(resourcesDir.resolve("application-http.properties"), """
@@ -2296,14 +2323,14 @@ public class AclArchitectureGenerator {
 
         Files.writeString(resourcesDir.resolve("application-prod.properties"), """
                 # Profil Production
-                # Utiliser spring.profiles.group.prod=jndi dans application.properties
                 logging.level.com.bank.api=WARN
                 springdoc.swagger-ui.enabled=false
                 management.endpoints.web.exposure.include=health,metrics
                 management.endpoint.health.show-details=never
                 """);
 
-        // Profil WebSphere Liberty
+        // Profil WebSphere Liberty — uniquement en mode non-JSON
+        if (!jsonMode) {
         Files.writeString(resourcesDir.resolve("application-liberty.properties"), """
                 # =====================================================================
                 # Profil WebSphere Liberty
@@ -2400,15 +2427,15 @@ public class AclArchitectureGenerator {
                 # Actuator — Monitoring des circuits
                 # =====================================================================
                 management.endpoints.web.exposure.include=health,info,circuitbreakers,retries,bulkheads,metrics
-                management.endpoint.health.show-details=always
-                management.health.circuitbreakers.enabled=true
+                management.endpoint.health.show-details=alw                springdoc.api-docs.enabled=${SWAGGER_ENABLED:false}
                 """);
 
         // Generer les fichiers de configuration Liberty (server.xml, jvm.options, bootstrap.properties)
         generateLibertyServerConfig(srcMain);
-
         log.info("[ACL] Profils Spring generes (jndi, mock, rest, http, dev, prod, liberty)");
-    }
+        } else {
+            log.info("[ACL] Mode JSON : skip profils jndi, liberty, server.xml");
+        }    }
 
     /**
      * Genere les fichiers de configuration WebSphere Liberty :
@@ -2533,7 +2560,7 @@ public class AclArchitectureGenerator {
             sb.append("    @Autowired\n");
             sb.append("    private ObjectMapper objectMapper;\n\n");
 
-            String basePath = "/api/v1/" + group.serviceDomain;
+            String basePath = "/api/v1/" + group.serviceDomain.toLowerCase();
 
             for (BianEndpoint ep : group.endpoints) {
                 BianMapping m = ep.bianMapping;
@@ -2541,7 +2568,9 @@ public class AclArchitectureGenerator {
                 int expectedStatus = m.getHttpStatus() > 0 ? m.getHttpStatus() : 200;
                 String url = m.getUrl();
                 // Remplacer les path variables par des valeurs de test
-                String testUrl = basePath + url.substring(("/" + group.serviceDomain).length());
+                // FIX 1 : strip case-insensitive du service domain
+                int sdPrefixLen = ("/" + group.serviceDomain).length();
+                String testUrl = basePath + (url.toLowerCase().startsWith("/" + group.serviceDomain.toLowerCase()) ? url.substring(sdPrefixLen) : url);
                 testUrl = testUrl.replace("{cr-reference-id}", "TEST-CR-001")
                                  .replace("{bq-reference-id}", "TEST-BQ-001");
 
@@ -2761,6 +2790,8 @@ public class AclArchitectureGenerator {
             if ("serialVersionUID".equals(field.getName())) continue;
             if (field.isStatic()) continue;
             if (LEGACY_FIELDS.contains(field.getName())) continue;
+            // FIX 5 : En mode JSON, exclure les champs d'enveloppe (deja dans ApiRequest/ApiResponse)
+            if (currentJsonMode && ENVELOPE_FIELDS.contains(field.getName())) continue;
             if (isFrameworkType(field.getType())) continue;
             // Correction 7: @XmlTransient → exclure du RestDTO
             if (field.isHasXmlTransient()) continue;

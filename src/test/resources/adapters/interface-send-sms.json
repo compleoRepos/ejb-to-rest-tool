@@ -3,6 +3,7 @@
   "adapter_base_url": "http://websphere:9080/interface-send-sms/api",
   "bian": {
     "service_domain": "Customer-Contact",
+    "service_domain_id": "SD0072",
     "functional_pattern": "Fulfill"
   },
   "endpoints": [

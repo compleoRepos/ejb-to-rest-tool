@@ -244,6 +244,8 @@ public class AdapterDescriptor {
         /** Retourne le type Java correspondant */
         public String toJavaType() {
             if (type == null) return "String";
+            // Types generiques complexes (List<Map>, Map<String,Object>, etc.)
+            if (type.startsWith("List<") || type.startsWith("Map<")) return type;
             return switch (type.toLowerCase()) {
                 case "int", "integer" -> "Integer";
                 case "long" -> "Long";
@@ -251,6 +253,8 @@ public class AdapterDescriptor {
                 case "boolean", "bool" -> "Boolean";
                 case "date" -> "LocalDate";
                 case "datetime" -> "LocalDateTime";
+                case "list" -> "java.util.List<Object>";
+                case "map" -> "java.util.Map<String, Object>";
                 default -> "String";
             };
         }

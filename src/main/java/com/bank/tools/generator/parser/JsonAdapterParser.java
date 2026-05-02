@@ -413,6 +413,19 @@ public class JsonAdapterParser {
             mapping.setServiceDomain(toKebabCase(descriptor.getAdapterName()));
         }
 
+        // FIX 2 : Si pas de BQ, nettoyer le nom d'operation pour en deriver un BQ propre
+        if (mapping.getBehaviorQualifier() == null || mapping.getBehaviorQualifier().isBlank()) {
+            String cleanedBq = ep.getOperation()
+                .replaceAll("^(suivi|consult|get|list|history|hist|search|find|check)[_-]?", "")
+                .replace("_", "-")
+                .toLowerCase();
+            if (cleanedBq.isEmpty()) {
+                cleanedBq = ep.getOperation().replace("_", "-").toLowerCase();
+            }
+            mapping.setBehaviorQualifier(cleanedBq);
+            log.info("[JSON-PARSER] FIX 2 : BQ derive de l'operation '{}' -> '{}'", ep.getOperation(), cleanedBq);
+        }
+
         // FIX 2 : Deriver HTTP method et status depuis l'action BIAN si non fournis
         if (mapping.getHttpMethod() == null || mapping.getHttpMethod().isEmpty()) {
             mapping.setHttpMethod(deriveHttpMethodFromAction(mapping.getAction()));

@@ -3,6 +3,7 @@
   "adapter_base_url": "http://websphere:9080/commande-chequier-bmcedirect/api",
   "bian": {
     "service_domain": "Payment-Order",
+    "service_domain_id": "SD0250",
     "functional_pattern": "Fulfill"
   },
   "endpoints": [
@@ -25,6 +26,36 @@
           "name": "sourceSystem",
           "type": "String",
           "required": true
+        },
+        {
+          "name": "numeroCompte",
+          "type": "String",
+          "required": true,
+          "description": "Numéro de compte RIB"
+        },
+        {
+          "name": "nombreChequiers",
+          "type": "int",
+          "required": true,
+          "description": "Nombre de chéquiers commandés"
+        },
+        {
+          "name": "typeCarnet",
+          "type": "String",
+          "required": true,
+          "description": "Type de carnet (NORMAL, SECURISE)"
+        },
+        {
+          "name": "adresseLivraison",
+          "type": "String",
+          "required": false,
+          "description": "Adresse de livraison si différente de l'agence"
+        },
+        {
+          "name": "agenceRetrait",
+          "type": "String",
+          "required": false,
+          "description": "Code agence de retrait"
         }
       ],
       "response_fields": [
@@ -35,6 +66,26 @@
         {
           "name": "message",
           "type": "String"
+        },
+        {
+          "name": "numeroCommande",
+          "type": "String",
+          "description": "Numéro de la commande créée"
+        },
+        {
+          "name": "dateCommande",
+          "type": "String",
+          "description": "Date de la commande (ISO 8601)"
+        },
+        {
+          "name": "statut",
+          "type": "String",
+          "description": "Statut initial de la commande (EN_COURS, VALIDEE)"
+        },
+        {
+          "name": "delaiEstime",
+          "type": "int",
+          "description": "Délai estimé en jours ouvrés"
         }
       ]
     },
@@ -57,6 +108,18 @@
           "name": "sourceSystem",
           "type": "String",
           "required": true
+        },
+        {
+          "name": "numeroCommande",
+          "type": "String",
+          "required": true,
+          "description": "Numéro de commande à suivre"
+        },
+        {
+          "name": "numeroCompte",
+          "type": "String",
+          "required": false,
+          "description": "Numéro de compte pour filtrage"
         }
       ],
       "response_fields": [
@@ -67,6 +130,31 @@
         {
           "name": "message",
           "type": "String"
+        },
+        {
+          "name": "numeroCommande",
+          "type": "String",
+          "description": "Numéro de la commande"
+        },
+        {
+          "name": "statut",
+          "type": "String",
+          "description": "Statut actuel (EN_COURS, LIVREE, ANNULEE)"
+        },
+        {
+          "name": "dateCreation",
+          "type": "String",
+          "description": "Date de création"
+        },
+        {
+          "name": "dateLivraison",
+          "type": "String",
+          "description": "Date de livraison prévue ou effective"
+        },
+        {
+          "name": "agenceRetrait",
+          "type": "String",
+          "description": "Agence de retrait"
         }
       ]
     },
@@ -76,7 +164,7 @@
       "http_method": "POST",
       "description": "Historique des commandes",
       "bian": {
-        "behavior_qualifier": "tracking",
+        "behavior_qualifier": "history",
         "action": "retrieval"
       },
       "request_fields": [
@@ -89,6 +177,36 @@
           "name": "sourceSystem",
           "type": "String",
           "required": true
+        },
+        {
+          "name": "numeroCompte",
+          "type": "String",
+          "required": true,
+          "description": "Numéro de compte"
+        },
+        {
+          "name": "dateDebut",
+          "type": "String",
+          "required": false,
+          "description": "Date début période (ISO 8601)"
+        },
+        {
+          "name": "dateFin",
+          "type": "String",
+          "required": false,
+          "description": "Date fin période (ISO 8601)"
+        },
+        {
+          "name": "page",
+          "type": "int",
+          "required": false,
+          "description": "Numéro de page (pagination)"
+        },
+        {
+          "name": "taille",
+          "type": "int",
+          "required": false,
+          "description": "Taille de page"
         }
       ],
       "response_fields": [
@@ -99,6 +217,26 @@
         {
           "name": "message",
           "type": "String"
+        },
+        {
+          "name": "commandes",
+          "type": "List<Map>",
+          "description": "Liste des commandes historiques"
+        },
+        {
+          "name": "totalElements",
+          "type": "int",
+          "description": "Nombre total d'éléments"
+        },
+        {
+          "name": "pageActuelle",
+          "type": "int",
+          "description": "Page actuelle"
+        },
+        {
+          "name": "totalPages",
+          "type": "int",
+          "description": "Nombre total de pages"
         }
       ]
     }

@@ -3,6 +3,7 @@
   "adapter_base_url": "http://websphere:9080/souscription-assistance-bmcedirect/api",
   "bian": {
     "service_domain": "Insurance-Services",
+    "service_domain_id": "SD0200",
     "functional_pattern": "Fulfill"
   },
   "endpoints": [

@@ -3,6 +3,7 @@
   "adapter_base_url": "http://websphere:9080/avis-opere/api",
   "bian": {
     "service_domain": "Payment-Execution",
+    "service_domain_id": "SD0319",
     "functional_pattern": "Fulfill"
   },
   "endpoints": [
