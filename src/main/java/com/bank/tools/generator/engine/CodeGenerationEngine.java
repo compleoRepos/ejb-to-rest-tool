@@ -312,7 +312,10 @@ public class CodeGenerationEngine {
 
         // G14 : TRANSFORMATION_SUMMARY.md
         generateTransformationSummary(projectRoot, analysisResult, projectHasXml);
-        generateReadme(projectRoot, analysisResult, projectHasXml);
+        // README : ne pas ecraser le README BIAN genere par AclArchitectureGenerator
+        if (!aclActive) {
+            generateReadme(projectRoot, analysisResult, projectHasXml);
+        }
 
         // BIAN : Generer le rapport de mapping BIAN
         if (bianMode && !bianMappings.isEmpty()) {

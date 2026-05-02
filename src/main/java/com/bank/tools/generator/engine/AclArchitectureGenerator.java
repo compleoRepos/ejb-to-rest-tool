@@ -258,6 +258,13 @@ public class AclArchitectureGenerator {
             generatePactConsumerTests(srcMain, groups, analysis);
         }
 
+        // 16. Generer le README.md dynamique
+        Path projectRoot = resolveJavaRoot(srcMain).getParent().getParent().getParent(); // src/main/java -> src/main -> src -> project
+        generateBianReadme(projectRoot, groups, analysis, jsonMode);
+
+        // 17. Generer la collection Postman
+        generatePostmanCollection(projectRoot, groups, analysis);
+
         log.info("[ACL] ========== FIN GENERATION ARCHITECTURE ACL ==========");
     }
 
@@ -1833,7 +1840,36 @@ public class AclArchitectureGenerator {
             sb.append(String.join(", ", params));
             sb.append(") {\n");
 
-            sb.append("        log.info(\"[MOCK] ").append(ep.methodName).append(" appele\");\n");
+            // Logger les champs de la request recue (pas juste "appele")
+            if (ep.requestDtoName != null) {
+                DtoInfo reqDtoForLog = findDto(analysis, ep.ejbInputDtoName);
+                List<RestField> reqFieldsForLog = reqDtoForLog != null ? deriveRestFields(reqDtoForLog, true, analysis) : Collections.emptyList();
+                if (!reqFieldsForLog.isEmpty()) {
+                    StringBuilder logPattern = new StringBuilder();
+                    StringBuilder logArgs = new StringBuilder();
+                    logPattern.append("[MOCK] ").append(ep.methodName);
+                    if (hasCrRef) {
+                        logPattern.append(" crReferenceId={}");
+                        logArgs.append("crReferenceId");
+                    }
+                    for (RestField rf : reqFieldsForLog) {
+                        logPattern.append(" ").append(rf.name).append("={}");
+                        if (logArgs.length() > 0) logArgs.append(", ");
+                        logArgs.append("request.get").append(capitalize(rf.name)).append("()");
+                    }
+                    sb.append("        log.info(\"").append(logPattern).append("\", ").append(logArgs).append(");\n");
+                } else {
+                    if (hasCrRef) {
+                        sb.append("        log.info(\"[MOCK] ").append(ep.methodName).append(" crReferenceId={}\", crReferenceId);\n");
+                    } else {
+                        sb.append("        log.info(\"[MOCK] ").append(ep.methodName).append(" appele\");\n");
+                    }
+                }
+            } else if (hasCrRef) {
+                sb.append("        log.info(\"[MOCK] ").append(ep.methodName).append(" crReferenceId={}\", crReferenceId);\n");
+            } else {
+                sb.append("        log.info(\"[MOCK] ").append(ep.methodName).append(" appele\");\n");
+            }
 
             if (hasReturn) {
                 sb.append("        ").append(ep.responseDtoName).append(" response = new ").append(ep.responseDtoName).append("();\n");
@@ -1901,11 +1937,8 @@ public class AclArchitectureGenerator {
         if (ejbOut == null) {
             // Pas de DTO EJB source : peupler les champs par defaut (code, message, data)
             sb.append("        response.setCode(\"000\");\n");
-            sb.append("        response.setMessage(\"Operation realisee avec succes\");\n");
-            sb.append("        java.util.Map<String, Object> mockData = new java.util.LinkedHashMap<>();\n");
-            sb.append("        mockData.put(\"timestamp\", java.time.Instant.now().toString());\n");
-            sb.append("        mockData.put(\"reference\", \"REF-" + ep.methodName.toUpperCase() + "\");\n");
-            sb.append("        response.setData(mockData);\n");
+            sb.append("        response.setMessage(\"Operation realisee avec succes (mock)\");\n");
+            sb.append("        response.setReference(\"REF-2026-\" + System.currentTimeMillis() % 100000);\n");
             return;
         }
 
@@ -1923,10 +1956,12 @@ public class AclArchitectureGenerator {
             String mockValue = switch (type) {
                 case "String" -> getMockStringValue(restName);
                 case "BigDecimal" -> "new java.math.BigDecimal(\"15000.00\")";
-                case "int", "Integer" -> "1";
-                case "long", "Long" -> "1L";
+                case "int", "Integer" -> getMockIntValue(restName);
+                case "long", "Long" -> "100L";
                 case "boolean", "Boolean" -> "true";
-                case "double", "Double" -> "0.035";
+                case "double", "Double" -> "99.99";
+                case "LocalDate" -> "java.time.LocalDate.now()";
+                case "LocalDateTime" -> "java.time.LocalDateTime.now()";
                 case "byte[]", "byte []", "Byte[]", "Byte []", "bytes" -> "new byte[]{37,80,68,70}";
                 default -> {
                     if (isEnumType(type, analysis)) {
@@ -1944,25 +1979,37 @@ public class AclArchitectureGenerator {
 
     private String getMockStringValue(String fieldName) {
         String lower = fieldName.toLowerCase();
-        if (lower.contains("carte") || lower.contains("numero")) return "\"4532111122223333\"";
-        if (lower.contains("rib") || lower.contains("compte") || lower.contains("iban")) return "\"001078045600100000000000\"";
-        if (lower.contains("nom")) return "\"NORDINE\"";
+        if (lower.contains("reference") || lower.contains("ref"))
+            return "\"REF-2026-\" + System.currentTimeMillis() % 100000";
+        if (lower.contains("statut") || lower.contains("status")) return "\"EN_COURS\"";
+        if (lower.contains("code")) return "\"000\"";
+        if (lower.contains("message")) return "\"Operation reussie (mock)\"";
+        if (lower.contains("carte") || lower.contains("numero")) return "\"4532********2222\"";
+        if (lower.contains("rib") || lower.contains("compte")) return "\"001078045600100000000000\"";
+        if (lower.contains("iban")) return "\"MA64011519000001205000534\"";
+        if (lower.contains("nom") || lower.contains("name")) return "\"Dupont\"";
         if (lower.contains("prenom")) return "\"Hamza\"";
-        if (lower.contains("email")) return "\"hamza.nordine@example.ma\"";
-        if (lower.contains("telephone") || lower.contains("tel")) return "\"+212661234567\"";
-        if (lower.contains("adresse")) return "\"123 Bd Mohammed V, Casablanca\"";
-        if (lower.contains("statut") || lower.contains("status")) return "\"ACTIF\"";
+        if (lower.contains("email")) return "\"mock@example.com\"";
+        if (lower.contains("telephone") || lower.contains("tel") || lower.contains("phone"))
+            return "\"+212600000000\"";
+        if (lower.contains("adresse") || lower.contains("address"))
+            return "\"123 Bd Mohammed V, Casablanca\"";
         if (lower.contains("devise") || lower.contains("currency")) return "\"MAD\"";
         if (lower.contains("motif")) return "\"Demande client\"";
-        if (lower.contains("date")) return "\"2026-04-06\"";
-        if (lower.contains("identifiant") || lower.contains("corporate") || lower.contains("client")) return "\"CORP-001\"";
-        if (lower.contains("code")) return "\"OK\"";
-        if (lower.contains("message")) return "\"Operation reussie\"";
-        if (lower.contains("reference")) return "\"REF-2026-001\"";
+        if (lower.contains("date")) return "java.time.LocalDate.now().toString()";
+        if (lower.contains("identifiant") || lower.contains("corporate") || lower.contains("client"))
+            return "\"CORP-001\"";
         if (lower.contains("type")) return "\"STANDARD\"";
         if (lower.contains("sujet")) return "\"Notification\"";
         if (lower.contains("contenu")) return "\"Bienvenue chez BOA\"";
-        return "\"MOCK-VALUE\"";
+        return "\"mock-" + fieldName + "\"";
+    }
+
+    private String getMockIntValue(String fieldName) {
+        String lower = fieldName.toLowerCase();
+        if (lower.contains("quantite") || lower.contains("count")) return "2";
+        if (lower.contains("nb") || lower.contains("nombre")) return "5";
+        return "42";
     }
 
     // =====================================================================
@@ -3632,5 +3679,320 @@ public class AclArchitectureGenerator {
             Files.writeString(file, sb.toString());
             log.info("[ACL] Pact Consumer Test genere : {}", testName);
         }
+    }
+
+    // =====================================================================
+    // TACHE 1 : README.md DYNAMIQUE
+    // =====================================================================
+
+    private void generateBianReadme(Path projectRoot, List<BianControllerGroup> groups,
+                                     ProjectAnalysisResult analysis, boolean jsonMode) throws IOException {
+        StringBuilder sb = new StringBuilder();
+
+        // Titre principal
+        String mainTitle = groups.size() == 1 ? groups.get(0).serviceDomainTitle : "Multi-Service";
+        String mainBianId = groups.size() == 1 && groups.get(0).bianId != null ? groups.get(0).bianId : null;
+        sb.append("# ").append(mainTitle).append(" API\n\n");
+        sb.append("> Wrapper REST BIAN genere par Compleo — ").append(java.time.LocalDate.now()).append("\n\n");
+
+        // Demarrage rapide
+        sb.append("## Demarrage rapide\n\n");
+        sb.append("### Prerequis\n\n");
+        sb.append("- Java 21+\n- Maven 3.9+\n\n");
+
+        sb.append("### Lancer en mode mock (sans backend)\n\n");
+        sb.append("```bash\nmvn spring-boot:run -Dspring-boot.run.profiles=mock\n```\n\n");
+
+        sb.append("### Lancer en mode production\n\n");
+        sb.append("```bash\n# Configurer l'URL du backend dans application-rest.properties\n");
+        sb.append("mvn spring-boot:run -Dspring-boot.run.profiles=rest\n```\n\n");
+
+        sb.append("### Acceder au Swagger\n\n");
+        sb.append("```\nhttp://localhost:8081/swagger-ui.html\n```\n\n");
+
+        // Tableau des endpoints
+        sb.append("## Endpoints\n\n");
+        sb.append("| Methode | URL | Action BIAN | Description |\n");
+        sb.append("|---------|-----|-------------|-------------|\n");
+
+        for (BianControllerGroup group : groups) {
+            String basePath = "/api/v1/" + group.serviceDomain.toLowerCase();
+            for (BianEndpoint ep : group.endpoints) {
+                BianMapping m = ep.bianMapping;
+                String httpMethod = m.getHttpMethod() != null ? m.getHttpMethod().toUpperCase() : "POST";
+                String relUrl = m.getUrl() != null ? m.getUrl() : "";
+                // Retirer le serviceDomain du relUrl (il commence par /ServiceDomain/...)
+                relUrl = stripServiceDomainPrefix(relUrl, group.serviceDomain);
+                String fullUrl = basePath + relUrl;
+                String action = m.getAction() != null ? m.getAction() : "-";
+                String summary = m.getSummary() != null ? m.getSummary() : humanize(ep.methodName);
+                sb.append("| ").append(httpMethod)
+                  .append(" | ").append(fullUrl)
+                  .append(" | ").append(action)
+                  .append(" | ").append(summary)
+                  .append(" |\n");
+            }
+        }
+
+        // Exemples curl
+        sb.append("\n## Exemples curl\n\n");
+        for (BianControllerGroup group : groups) {
+            String basePath = "/api/v1/" + group.serviceDomain.toLowerCase();
+            for (BianEndpoint ep : group.endpoints) {
+                BianMapping m = ep.bianMapping;
+                String httpMethod = m.getHttpMethod() != null ? m.getHttpMethod().toUpperCase() : "POST";
+                String relUrl = m.getUrl() != null ? m.getUrl() : "";
+                relUrl = stripServiceDomainPrefix(relUrl, group.serviceDomain);
+                String fullUrl = basePath + relUrl;
+                String summary = m.getSummary() != null ? m.getSummary() : humanize(ep.methodName);
+                int httpStatus = m.getHttpStatus() > 0 ? m.getHttpStatus() : 200;
+
+                // Remplacer {cr-reference-id} par un exemple
+                String curlUrl = fullUrl.replace("{cr-reference-id}", "CR-001");
+
+                sb.append("### ").append(summary).append("\n\n");
+                sb.append("```bash\ncurl -X ").append(httpMethod)
+                  .append(" http://localhost:8081").append(curlUrl)
+                  .append(" \\\n  -H \"Content-Type: application/json\"");
+
+                // Body avec enveloppe ApiRequest
+                if ("POST".equals(httpMethod) || "PUT".equals(httpMethod)) {
+                    String reqJson = generateExampleRequestJson(ep, analysis);
+                    sb.append(" \\\n  -d '").append(reqJson).append("'");
+                }
+                sb.append("\n```\n\n");
+
+                sb.append("Reponse attendue (").append(httpStatus).append(") :\n\n");
+                sb.append("```json\n");
+                String respJson = generateExampleResponseJson(ep, analysis);
+                sb.append(respJson);
+                sb.append("\n```\n\n");
+            }
+        }
+
+        // Profils Spring
+        sb.append("## Profils Spring\n\n");
+        sb.append("| Profil | Usage | Backend |\n");
+        sb.append("|--------|-------|---------|\n");
+        sb.append("| `mock` | Developpement et tests | Donnees simulees en memoire |\n");
+        sb.append("| `rest` | Production (mode JSON) | Appel HTTP vers l'adapter backend |\n");
+        if (!jsonMode) {
+            sb.append("| `jndi` | Production (mode EJB) | Lookup JNDI vers le serveur EJB |\n");
+        }
+
+        // Architecture
+        sb.append("\n## Architecture\n\n");
+        sb.append("```\nController BIAN -> Interface Service -> Adapter (rest/mock");
+        if (!jsonMode) sb.append("/jndi");
+        sb.append(")\n                                          |\n");
+        sb.append("                                    Backend reel\n```\n\n");
+        sb.append("Le controller expose les URLs BIAN. L'interface service definit le contrat.\n");
+        sb.append("L'adapter implemente l'appel vers le backend. Changer de backend = changer de profil.\n\n");
+
+        // Configuration
+        sb.append("## Configuration\n\n");
+        sb.append("| Propriete | Fichier | Description |\n");
+        sb.append("|-----------|---------|-------------|\n");
+        sb.append("| `server.port` | application.properties | Port de l'API (defaut: 8081) |\n");
+        sb.append("| `adapter.websphere.base-url` | application-rest.properties | URL du backend |\n");
+        sb.append("| `resilience4j.circuitbreaker.*` | application.properties | Configuration du circuit breaker |\n");
+
+        Files.writeString(projectRoot.resolve("README.md"), sb.toString());
+        log.info("[ACL] README.md dynamique genere");
+    }
+
+    /**
+     * Genere un JSON d'exemple pour la request (avec enveloppe ApiRequest).
+     */
+    private String generateExampleRequestJson(BianEndpoint ep, ProjectAnalysisResult analysis) {
+        StringBuilder json = new StringBuilder();
+        json.append("{\n");
+        json.append("  \"requestId\": \"REQ-001\",\n");
+        json.append("  \"sourceSystem\": \"postman-test\",\n");
+        json.append("  \"payload\": {");
+
+        DtoInfo reqDto = findDto(analysis, ep.ejbInputDtoName);
+        List<RestField> fields = reqDto != null ? deriveRestFields(reqDto, true, analysis) : Collections.emptyList();
+
+        if (!fields.isEmpty()) {
+            json.append("\n");
+            for (int i = 0; i < fields.size(); i++) {
+                RestField f = fields.get(i);
+                String val = exampleValueForType(f.name, f.type);
+                json.append("    \"").append(f.name).append("\": ").append(val);
+                if (i < fields.size() - 1) json.append(",");
+                json.append("\n");
+            }
+            json.append("  ");
+        }
+        json.append("}\n}");
+        return json.toString();
+    }
+
+    /**
+     * Genere un JSON d'exemple pour la response (avec enveloppe ApiResponse).
+     */
+    private String generateExampleResponseJson(BianEndpoint ep, ProjectAnalysisResult analysis) {
+        StringBuilder json = new StringBuilder();
+        json.append("{\n");
+        json.append("  \"status\": \"SUCCESS\",\n");
+        json.append("  \"timestamp\": \"2026-05-02T10:30:00\",\n");
+        json.append("  \"payload\": {");
+
+        DtoInfo resDto = findDto(analysis, ep.ejbOutputDtoName);
+        List<RestField> fields = resDto != null ? deriveRestFields(resDto, false, analysis) : Collections.emptyList();
+
+        if (!fields.isEmpty()) {
+            json.append("\n");
+            for (int i = 0; i < fields.size(); i++) {
+                RestField f = fields.get(i);
+                String val = exampleValueForType(f.name, f.type);
+                json.append("    \"").append(f.name).append("\": ").append(val);
+                if (i < fields.size() - 1) json.append(",");
+                json.append("\n");
+            }
+            json.append("  ");
+        }
+        json.append("}\n}");
+        return json.toString();
+    }
+
+    /**
+     * Genere une valeur d'exemple pour un type Java donne.
+     */
+    private String exampleValueForType(String fieldName, String fieldType) {
+        String clean = fieldType.replace("java.lang.", "").replace("java.math.", "").replace("java.time.", "");
+        return switch (clean) {
+            case "String" -> {
+                String lower = fieldName.toLowerCase();
+                if (lower.contains("reference") || lower.contains("ref")) yield "\"REF-2026-001\"";
+                if (lower.contains("statut") || lower.contains("status")) yield "\"EN_COURS\"";
+                if (lower.contains("code")) yield "\"000\"";
+                if (lower.contains("message")) yield "\"Operation reussie\"";
+                if (lower.contains("nom") || lower.contains("name")) yield "\"Dupont\"";
+                if (lower.contains("email")) yield "\"test@example.com\"";
+                if (lower.contains("telephone") || lower.contains("phone")) yield "\"+212600000000\"";
+                if (lower.contains("iban")) yield "\"MA64011519000001205000534\"";
+                if (lower.contains("rib")) yield "\"011519000001205000534921\"";
+                if (lower.contains("carte") || lower.contains("card") || lower.contains("numero")) yield "\"4532000011112222\"";
+                if (lower.contains("date")) yield "\"2026-05-02\"";
+                if (lower.contains("adresse") || lower.contains("address")) yield "\"123 Bd Mohammed V, Casablanca\"";
+                if (lower.contains("type")) yield "\"STANDARD\"";
+                yield "\"exemple-" + fieldName + "\"";
+            }
+            case "Integer", "int" -> {
+                String lower = fieldName.toLowerCase();
+                if (lower.contains("quantite") || lower.contains("count") || lower.contains("nombre") || lower.contains("nb")) yield "2";
+                yield "1";
+            }
+            case "Long", "long" -> "100";
+            case "Double", "double", "BigDecimal" -> "99.99";
+            case "Boolean", "boolean" -> "true";
+            case "LocalDate" -> "\"2026-05-02\"";
+            case "LocalDateTime" -> "\"2026-05-02T10:30:00\"";
+            default -> "\"...\"";
+        };
+    }
+
+    // =====================================================================
+    // TACHE 3 : COLLECTION POSTMAN v2.1
+    // =====================================================================
+
+    private void generatePostmanCollection(Path projectRoot, List<BianControllerGroup> groups,
+                                            ProjectAnalysisResult analysis) throws IOException {
+        StringBuilder json = new StringBuilder();
+        json.append("{\n");
+
+        // Info
+        String collectionName = groups.size() == 1 ? groups.get(0).serviceDomainTitle + " — BIAN API" : "Multi-Service BIAN API";
+        String description = groups.size() == 1 ? "Collection generee par Compleo pour " + groups.get(0).serviceDomainTitle : "Collection multi-service generee par Compleo";
+        json.append("  \"info\": {\n");
+        json.append("    \"name\": \"").append(escapeJson(collectionName)).append("\",\n");
+        json.append("    \"schema\": \"https://schema.getpostman.com/json/collection/v2.1.0/collection.json\",\n");
+        json.append("    \"description\": \"").append(escapeJson(description)).append("\"\n");
+        json.append("  },\n");
+
+        // Variables
+        json.append("  \"variable\": [\n");
+        json.append("    { \"key\": \"baseUrl\", \"value\": \"http://localhost:8081\" },\n");
+        json.append("    { \"key\": \"crReferenceId\", \"value\": \"CR-001\" }\n");
+        json.append("  ],\n");
+
+        // Items
+        json.append("  \"item\": [\n");
+        int totalEp = 0;
+        for (BianControllerGroup group : groups) totalEp += group.endpoints.size();
+        int epIdx = 0;
+
+        for (BianControllerGroup group : groups) {
+            String basePath = "/api/v1/" + group.serviceDomain.toLowerCase();
+            for (BianEndpoint ep : group.endpoints) {
+                epIdx++;
+                BianMapping m = ep.bianMapping;
+                String httpMethod = m.getHttpMethod() != null ? m.getHttpMethod().toUpperCase() : "POST";
+                String relUrl = m.getUrl() != null ? m.getUrl() : "";
+                relUrl = stripServiceDomainPrefix(relUrl, group.serviceDomain);
+                String fullUrl = basePath + relUrl;
+                String summary = m.getSummary() != null ? m.getSummary() : humanize(ep.methodName);
+
+                // Remplacer {cr-reference-id} par la variable Postman
+                String postmanUrl = "{{baseUrl}}" + fullUrl.replace("{cr-reference-id}", "{{crReferenceId}}");
+
+                json.append("    {\n");
+                json.append("      \"name\": \"").append(escapeJson(summary)).append("\",\n");
+                json.append("      \"request\": {\n");
+                json.append("        \"method\": \"").append(httpMethod).append("\",\n");
+                json.append("        \"header\": [\n");
+                json.append("          { \"key\": \"Content-Type\", \"value\": \"application/json\" }\n");
+                json.append("        ],\n");
+                json.append("        \"url\": {\n");
+                json.append("          \"raw\": \"").append(escapeJson(postmanUrl)).append("\"\n");
+                json.append("        }");
+
+                // Body pour POST/PUT
+                if ("POST".equals(httpMethod) || "PUT".equals(httpMethod)) {
+                    json.append(",\n");
+                    json.append("        \"body\": {\n");
+                    json.append("          \"mode\": \"raw\",\n");
+                    String bodyJson = generateExampleRequestJson(ep, analysis);
+                    // Echapper pour JSON string
+                    json.append("          \"raw\": \"").append(escapeJson(bodyJson)).append("\",\n");
+                    json.append("          \"options\": { \"raw\": { \"language\": \"json\" } }\n");
+                    json.append("        }\n");
+                } else {
+                    json.append("\n");
+                }
+
+                json.append("      }\n");
+                json.append("    }");
+                if (epIdx < totalEp) json.append(",");
+                json.append("\n");
+            }
+        }
+
+        json.append("  ]\n");
+        json.append("}\n");
+
+        Files.writeString(projectRoot.resolve("postman-collection.json"), json.toString());
+        log.info("[ACL] postman-collection.json genere");
+    }
+
+    private String escapeJson(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "").replace("\t", "\\t");
+    }
+
+    /**
+     * Retire le prefixe /ServiceDomain/ de l'URL BIAN relative.
+     * Ex: /Payment-Order/order/initiation -> /order/initiation
+     */
+    private String stripServiceDomainPrefix(String relUrl, String serviceDomain) {
+        if (relUrl == null || serviceDomain == null) return relUrl;
+        // L'URL BIAN commence par /ServiceDomain/ (ex: /Payment-Order/order/initiation)
+        String prefix = "/" + serviceDomain;
+        if (relUrl.toLowerCase().startsWith(prefix.toLowerCase())) {
+            return relUrl.substring(prefix.length());
+        }
+        return relUrl;
     }
 }
