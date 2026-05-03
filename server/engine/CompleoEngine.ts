@@ -288,7 +288,9 @@ export class CompleoEngine {
       warnings: result.warnings,
       migrationReport,
       multiTechFiles: multiTechFiles || [],
-    };
+      // v10.11: Pass JDBC blocks for LLM post-processing
+      jdbcBlocks: result.jdbcBlocks,
+    } as GeneratedProject;
   }
 
   // ─── postProcessJdbc ──────────────────────────────────────────────────────

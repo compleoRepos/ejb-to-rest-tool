@@ -27,7 +27,7 @@ import { MicroserviceSplitter, buildParsedModules } from "../engine/microservice
 import { MicroserviceGenerator, type MicroserviceOutput } from "../engine/microservices/microservice-generator";
 import { MLEnhancer, type MLConfig } from "../engine/ml/ml-enhancer";
 import { ReportEnhancer, type ReportEnhancerConfig, type ReportContext, type EnhancedReports } from "../engine/ml/report-enhancer";
-import type { QualityReport } from "../engine/quality-scorer";
+import { scoreGeneration, generateQualitySection, type QualityReport } from "../engine/quality-scorer";
 import type { PipelineResult } from "../engine/pipeline/index";
 import { detectSagaCandidates, generateAllSagas, generateAllSagasWithML, SagaMLEnricher, type SagaGenerationResult } from "../engine/saga";
 import { enrichZipWithArchitecture } from "../graph/architecture-zip-enricher";
@@ -536,6 +536,10 @@ export class CompleoAgent {
 
       // ─── Phase 5: COMPILING ───────────────────────────────────────────
       yield* this.phaseCompiling(session);
+
+      // ─── Phase 5b: RE-SCORING (v10.16) ─────────────────────────────────
+      // Recalculer le score qualité sur le code FINAL (après JDBC migration + compilation fixes)
+      yield* this.phaseReScoring(session);
 
       // ─── Phase 6: PUSHING (with retry) ────────────────────────────────
       yield* this.withPhaseRetry(session, "PUSHING", () => this.phasePushing(session));
@@ -1212,10 +1216,17 @@ export class CompleoAgent {
     try {
       const postProcessor = new JdbcPostProcessor();
 
-      // Collecter les blocs JDBC du BusinessLogicTransformer
-      // (stockés dans les TransformResult pendant la génération)
-      const jdbcBlocks: JdbcBlock[] = [];
-      // Les blocs sont encodés dans les placeholders eux-mêmes
+      // v10.11: Récupérer les blocs JDBC collectés pendant la génération (service-gen registry)
+      const rawBlocks = (session.generatedProject as any)?.jdbcBlocks ?? [];
+      const jdbcBlocks: JdbcBlock[] = rawBlocks.map((b: any) => ({
+        blockId: b.blockId ?? "",
+        code: b.code ?? "",
+        tables: b.tables ?? [],
+        dataSources: b.dataSources ?? [],
+        sqlConstants: b.sqlConstants ?? [],
+        sourceClassName: b.sourceClassName ?? "Unknown",
+        methodName: b.methodName ?? "unknown",
+      }));
 
       // Identifier les fichiers Entity et Repository pour le contexte LLM
       const entityFiles = allFiles
@@ -2073,6 +2084,68 @@ export class CompleoAgent {
       phase: "COMPILING",
       message: `Compilation terminée (${Date.now() - startTime}ms)`,
     });
+  }
+
+  // ─── Phase 5b: RE-SCORING (v10.16) ───────────────────────────────────────────
+  /**
+   * Recalcule le score qualité sur le code FINAL.
+   * Le score initial est calculé dans spring-generator.ts AVANT la migration JDBC
+   * et AVANT la compilation. Cette phase recalcule sur le code corrigé final.
+   *
+   * @since v10.16
+   */
+  private async *phaseReScoring(session: AgentSession): AsyncGenerator<AgentEvent> {
+    if (!session.generatedProject) return;
+
+    const allFiles = [...session.generatedProject.files, ...session.generatedProject.multiTechFiles];
+    const javaFiles = allFiles.filter(f => f.path.endsWith(".java"));
+
+    if (javaFiles.length === 0) return;
+
+    // Recalculer le score sur le code final
+    const legacyMethodCount = session.ir?.useCases?.length || 0;
+    const microserviceNames = session.microserviceResult?.services?.map(s => s.name);
+    // Les tables détectées ne sont pas dans UseCaseIR, passer undefined
+    const detectedTables: string[] | undefined = undefined;
+
+    const newQualityReport = scoreGeneration(
+      javaFiles.map(f => ({ path: f.path, content: f.content, category: f.category })),
+      microserviceNames,
+      detectedTables,
+      legacyMethodCount,
+    );
+
+    const oldScore = session.qualityScore?.totalScore || 0;
+    const newScore = newQualityReport.score;
+
+    // Mettre à jour le score seulement s'il s'améliore (ne jamais dégrader)
+    if (newScore >= oldScore) {
+      session.qualityScore = {
+        totalScore: newQualityReport.score,
+        maxScore: 100,
+        grade: newQualityReport.grade,
+        summary: `# Rapport de Qualité \u2014 Compleo v10.16\n\nGénéré le : ${new Date().toLocaleString("fr-FR")}\n\n${generateQualitySection(newQualityReport)}\n`,
+      };
+
+      // Mettre à jour le fichier QUALITY_SCORE.md dans le projet
+      const qualityFileIndex = session.generatedProject.files.findIndex(f => f.path === "QUALITY_SCORE.md");
+      if (qualityFileIndex >= 0) {
+        session.generatedProject.files[qualityFileIndex].content = session.qualityScore.summary;
+      }
+
+      this.sessionStore.update(session.id, {
+        qualityScore: session.qualityScore,
+        generatedProject: session.generatedProject,
+      });
+
+      if (newScore > oldScore) {
+        yield this.event("LOG", {
+          level: "success",
+          message: `Score qualité recalculé sur code final : ${newScore}/100 (${newQualityReport.grade}) [+${newScore - oldScore} pts après corrections]`,
+          phase: "COMPILING",
+        });
+      }
+    }
   }
 
   private async *phasePushing(session: AgentSession): AsyncGenerator<AgentEvent> {

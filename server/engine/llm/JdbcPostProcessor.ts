@@ -402,9 +402,11 @@ export class JdbcPostProcessor {
  */
 export function hasUnresolvedPlaceholders(files: GeneratedFileRef[]): boolean {
   for (const file of files) {
-    if (ANY_LLM_BLOCK_PATTERN.test(file.content)) return true;
-    // Reset lastIndex
-    ANY_LLM_BLOCK_PATTERN.lastIndex = 0;
+    ANY_LLM_BLOCK_PATTERN.lastIndex = 0; // Reset BEFORE test to avoid stale state
+    if (ANY_LLM_BLOCK_PATTERN.test(file.content)) {
+      ANY_LLM_BLOCK_PATTERN.lastIndex = 0; // Reset after match too
+      return true;
+    }
   }
   return false;
 }

@@ -46,7 +46,7 @@ import type { DataSourceInfo } from "./engine/detectors/DataSourceDetector";
 import { ConfigGenerator } from "./engine/generators/ConfigGenerator";
 import { generateDto } from "./spring/dto-gen";
 import { generateEnum, generateException, generateGlobalExceptionHandler, generateValidator } from "./spring/model-gen";
-import { generateDomainService } from "./spring/service-gen";
+import { generateDomainService, resetJdbcBlocksRegistry, getCollectedJdbcBlocks } from "./spring/service-gen";
 import { generateDomainController } from "./spring/controller-gen";
 import { generateDomainControllerTest } from "./spring/test-gen";
 import {
@@ -67,6 +67,9 @@ import { generateStandardMappingReport } from "./spring/report-gen-standard";
 // --- Main Generator (Orchestrator) ---
 
 export function generateSpringBootProject(ir: ProjectIR, reportContext?: MigrationReportContext): GenerationResult {
+  // v10.11: Reset JDBC block registry for this generation run
+  resetJdbcBlocksRegistry();
+
   const files: GeneratedFile[] = [];
   const warnings: string[] = [];
 
@@ -480,7 +483,18 @@ public class BusinessRuleException extends RuntimeException {
   const qMax = scoreMatch ? parseInt(scoreMatch[2], 10) : undefined;
   files.push(generateMigrationSummaryReport(ir, stats, warnings, qGrade, qScore, qMax));
 
-  return { files, stats, warnings, compilationResult, dsInfo };
+  // v10.11: Include collected JDBC blocks for LLM post-processing
+  const jdbcBlocks = getCollectedJdbcBlocks().map(b => ({
+    blockId: b.blockId,
+    code: b.code,
+    tables: b.tables,
+    dataSources: b.dataSources,
+    sqlConstants: b.sqlConstants,
+    sourceClassName: b.sourceClassName,
+    methodName: b.methodName,
+  }));
+
+  return { files, stats, warnings, compilationResult, dsInfo, jdbcBlocks };
 }
 
 // --- POM.xml with vendor-specific DB dependency ---

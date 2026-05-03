@@ -11,6 +11,7 @@ import {
   extractMethodBody,
   extractConstants,
   type TransformContext,
+  type JdbcBlock,
 } from "../engine/BusinessLogicTransformer";
 import { JavaASTParser } from "../engine/ast/JavaASTParser";
 import { SymbolTable } from "../engine/ast/SymbolTable";
@@ -25,6 +26,20 @@ import {
 const astParser = new JavaASTParser();
 const astSymbolTable = new SymbolTable();
 const serviceMethodGenerator = new ServiceMethodGenerator("");
+
+// ─── v10.11: JDBC Block Registry ─────────────────────────────────────────────
+// Accumulates JDBC blocks during service generation for later LLM migration.
+let _jdbcBlocksRegistry: JdbcBlock[] = [];
+
+/** Reset the registry before a new generation run */
+export function resetJdbcBlocksRegistry(): void {
+  _jdbcBlocksRegistry = [];
+}
+
+/** Get all collected JDBC blocks */
+export function getCollectedJdbcBlocks(): JdbcBlock[] {
+  return _jdbcBlocksRegistry;
+}
 
 export function generateDomainService(
   basePackage: string, basePath: string, domain: string,
@@ -239,6 +254,11 @@ function generateServiceMethodBody(
         };
         const result = transformer.transform(executeMethod.body, astSymbolTable, ctx);
 
+        // v10.11: Collect JDBC blocks for LLM migration
+        if (result.jdbcBlocks && result.jdbcBlocks.length > 0) {
+          _jdbcBlocksRegistry.push(...result.jdbcBlocks);
+        }
+
         // FIX v7.8: Post-process Void variable declarations → infer real type
         // When resType is "Void", the T10 replacement produces "Void sql = ..." which is invalid Java.
         // Replace "Void varName = " with inferred type based on the RHS value.
@@ -320,6 +340,11 @@ function generateServiceMethodBody(
       sourceClassName: uc.className,
     };
     const result = transformer.transform(executeBody, ctx);
+
+    // v10.11: Collect JDBC blocks for LLM migration (legacy path)
+    if (result.jdbcBlocks && result.jdbcBlocks.length > 0) {
+      _jdbcBlocksRegistry.push(...result.jdbcBlocks);
+    }
 
     // FIX v7.8: Post-process Void variable declarations → infer real type (legacy path)
     result.body = result.body.replace(/\bVoid\s+(\w+)\s*=/g, (match, varName) => {

@@ -11,6 +11,7 @@
 import { detectHandlerPattern, getMethodNameForHandler, getDomainForHandler } from "./engine/detectors/handler-pattern-detector";
 import type { HandlerPatternDetection } from "./engine/detectors/handler-pattern-detector";
 import { filterTestFiles } from "./engine/detectors/source-filter";
+import { LlmUseCaseDetector } from "./engine/llm/LlmUseCaseDetector";
 
 // ─── IR Types ───────────────────────────────────────────────────────────────
 
@@ -385,6 +386,16 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
     if (handlerFacadeClass && uc.className === handlerFacadeClass) return false;
     return true;
   });
+
+  // v10.16: Fallback LlmUseCaseDetector quand 0 UC détectés par les méthodes rule-based
+  if (useCases.length === 0 && javaFiles.length > 0) {
+    const detector = new LlmUseCaseDetector();
+    const detectorResult = detector.detect(javaFiles.map(f => ({ path: f.path, content: f.content })));
+    if (detectorResult.detectedCount > 0) {
+      useCases.push(...detectorResult.useCases);
+      warnings.push(...detectorResult.warnings);
+    }
+  }
 
   // Compute domains
   const domains = [...new Set(useCases.map(uc => uc.domain))].filter(Boolean);
