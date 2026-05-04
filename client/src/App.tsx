@@ -16,6 +16,7 @@ import CompleoAgentPage from "./pages/CompleoAgent";
 import LearningRulesPage from "./pages/LearningRules";
 import WorkspacePage from "./pages/Workspace";
 import SagasPage from "./pages/Sagas";
+import CobolAnalyzerPage from "./pages/CobolAnalyzer";
 import AppLayout from "./components/AppLayout";
 
 function Router() {
@@ -40,6 +41,7 @@ function Router() {
       <Route path={"/compleo/sagas"} component={SagasPage} />
       <Route path={"/compleo/rules"} component={LearningRulesPage} />
       <Route path={"/compleo/workspace"} component={WorkspacePage} />
+      <Route path={"/compleo/cobol"} component={CobolAnalyzerPage} />
       <Route path={"/compleo/architecture"}>
         {() => <ArchitecturePage />}
       </Route>

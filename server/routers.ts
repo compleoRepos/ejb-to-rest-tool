@@ -355,10 +355,44 @@ const validationRouter = router({
   }),
 });
 
+//// ============================================================
+// COBOL Analyzer Router
+// ============================================================
+
+const cobolRouter = router({
+  analyze: protectedProcedure
+    .input(z.object({
+      projectName: z.string().min(1),
+      files: z.array(z.object({
+        fileName: z.string(),
+        content: z.string(),
+        type: z.enum(['COBOL', 'COPYBOOK', 'JCL']),
+      })),
+    }))
+    .mutation(async ({ input }) => {
+      const { CobolAnalyzer } = await import('./engine/cobol');
+      const analyzer = new CobolAnalyzer();
+      const result = analyzer.analyze({
+        projectName: input.projectName,
+        files: input.files,
+      });
+      return result;
+    }),
+
+  detectFileType: publicProcedure
+    .input(z.object({
+      fileName: z.string(),
+      content: z.string(),
+    }))
+    .query(async ({ input }) => {
+      const { CobolAnalyzer } = await import('./engine/cobol');
+      return { type: CobolAnalyzer.detectFileType(input.fileName, input.content) };
+    }),
+});
+
 // ============================================================
 // Main App Router
 // ============================================================
-
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -376,6 +410,6 @@ export const appRouter = router({
   git: gitRouter,
   sharing: sharingRouter,
   validation: validationRouter,
+  cobol: cobolRouter,
 });
-
 export type AppRouter = typeof appRouter;
