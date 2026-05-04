@@ -25,11 +25,18 @@ export interface CobolProgramIR {
   performCalls: string[];
   callStatements: CobolCall[];
   sqlStatements: CobolSQL[];
+  cicsCommands: CobolCICS[];
   loc: number;
   commentLines: number;
   dataItemCount: number;
   paragraphCount: number;
   complexity: number;
+}
+
+export interface CobolCICS {
+  command: string; // SEND, RECEIVE, RETURN, READ, WRITE, REWRITE, DELETE, LINK, XCTL, etc.
+  options: Record<string, string>;
+  lineNumber: number;
 }
 
 export interface CobolDataItem {
@@ -95,6 +102,7 @@ export class CobolParser {
     const fileDescriptions = this.extractFileDescriptions(codeLines, fullCode);
     const sqlStatements = this.extractSqlStatements(codeLines);
     const callStatements = this.extractCallStatements(codeLines);
+    const cicsCommands = this.extractCicsCommands(codeLines);
     const performCalls = this.extractPerformCalls(fullCode);
     const sections = this.extractSections(codeLines);
     const commentLines = this.countCommentLines(lines);
@@ -111,6 +119,7 @@ export class CobolParser {
       performCalls,
       callStatements,
       sqlStatements,
+      cicsCommands,
       loc: codeLines.length,
       commentLines,
       dataItemCount: dataItems.length,
@@ -440,6 +449,38 @@ export class CobolParser {
   }
 
   /**
+   * Extrait les EXEC CICS ... END-EXEC commands.
+   */
+  extractCicsCommands(codeLines: string[]): CobolCICS[] {
+    const commands: CobolCICS[] = [];
+    const fullCode = codeLines.join('\n');
+    const cicsRegex = /EXEC\s+CICS\s+([\s\S]*?)END-EXEC/gi;
+
+    let match;
+    while ((match = cicsRegex.exec(fullCode)) !== null) {
+      const body = match[1].trim();
+      const linesBefore = fullCode.substring(0, match.index).split('\n').length;
+
+      // First word is the command
+      const cmdMatch = body.match(/^([A-Za-z]+)/);
+      const command = cmdMatch ? cmdMatch[1].toUpperCase() : 'UNKNOWN';
+
+      // Parse options: KEY(VALUE) or KEY('VALUE') or just KEY
+      const options: Record<string, string> = {};
+      const optRegex = /([A-Za-z]+)\s*\(([^)]*?)\)/g;
+      let optMatch;
+      while ((optMatch = optRegex.exec(body)) !== null) {
+        if (optMatch[1].toUpperCase() !== command) {
+          options[optMatch[1].toUpperCase()] = optMatch[2].replace(/'/g, '').trim();
+        }
+      }
+
+      commands.push({ command, options, lineNumber: linesBefore });
+    }
+    return commands;
+  }
+
+  /**
    * Extrait les sections et paragraphes de la PROCEDURE DIVISION.
    */
   extractSections(codeLines: string[]): CobolSection[] {
@@ -477,8 +518,12 @@ export class CobolParser {
       }
 
       // Detect PARAGRAPH (name followed by period, at start of line)
+      // Exclude: COBOL keywords, END-* terminators, indented lines (paragraphs start at margin)
       const paraMatch = line.match(paragraphRegex);
-      if (paraMatch && !line.match(/^\s*(IF|ELSE|END-|EVALUATE|WHEN|PERFORM|MOVE|COMPUTE|ADD|SUBTRACT|MULTIPLY|DIVIDE|DISPLAY|ACCEPT|READ|WRITE|OPEN|CLOSE|CALL|EXEC|STOP|GO|STRING|INSPECT|UNSTRING|SET|INITIALIZE)/i)) {
+      if (paraMatch 
+          && !paraMatch[1].match(/^END-/i)
+          && !line.match(/^\s{4,}/)  // paragraphs are NOT indented (start at col 8 = no leading spaces)
+          && !line.match(/^\s*(IF|ELSE|EVALUATE|WHEN|PERFORM|MOVE|COMPUTE|ADD|SUBTRACT|MULTIPLY|DIVIDE|DISPLAY|ACCEPT|READ|WRITE|OPEN|CLOSE|CALL|EXEC|STOP|GO|STRING|INSPECT|UNSTRING|SET|INITIALIZE)/i)) {
         if (currentSection) {
           currentSection.lineEnd = i;
           sections.push(this.finalizeSection(currentSection, codeLines));

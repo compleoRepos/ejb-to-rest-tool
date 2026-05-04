@@ -79,13 +79,22 @@ export class CobolAnalyzer {
     // 3. Parser les programmes COBOL
     for (const file of cobolFiles) {
       try {
+        // Collecter les COPY statements AVANT expansion (sinon ils disparaissent)
+        const copybookRefs = this.extractCopybookRefs(file.content);
+
         // Résoudre les COPY statements inline (expansion basique)
         const expandedContent = this.expandCopybooks(file.content, copybookMap);
         const ir = this.cobolParser.parse(expandedContent, file.fileName);
+
+        // Ajouter les copybooks détectés depuis le source original
+        if (copybookRefs.length > 0 && ir.copybooks.length === 0) {
+          ir.copybooks = copybookRefs;
+        }
+
         programs.push(ir);
 
-        // Enregistrer le source pour les détecteurs
-        this.detectors.registerSource(ir.programId, expandedContent);
+        // Enregistrer le source pour les détecteurs (source original pour détecter COPY)
+        this.detectors.registerSource(ir.programId, file.content);
       } catch (err) {
         errors.push(`Erreur parsing ${file.fileName}: ${(err as Error).message}`);
       }
@@ -150,6 +159,20 @@ export class CobolAnalyzer {
         parseTimeMs,
       },
     };
+  }
+
+  /**
+   * Extrait les noms de COPYBOOK référencés dans le source AVANT expansion.
+   */
+  private extractCopybookRefs(content: string): string[] {
+    const refs: string[] = [];
+    const regex = /COPY\s+([A-Za-z0-9-]+)/gi;
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+      const name = match[1].toUpperCase();
+      if (!refs.includes(name)) refs.push(name);
+    }
+    return refs;
   }
 
   /**
