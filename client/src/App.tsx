@@ -16,8 +16,13 @@ import CompleoAgentPage from "./pages/CompleoAgent";
 import LearningRulesPage from "./pages/LearningRules";
 import WorkspacePage from "./pages/Workspace";
 import SagasPage from "./pages/Sagas";
-import CobolAnalyzerPage from "./pages/CobolAnalyzer";
 import AppLayout from "./components/AppLayout";
+// Process-Driven Pipeline Pages
+import UploadPage from "./pages/UploadPage";
+import AnalyzePage from "./pages/AnalyzePage";
+import ConfigurePage from "./pages/ConfigurePage";
+import GeneratePage from "./pages/GeneratePage";
+import ResultPage from "./pages/ResultPage";
 
 function Router() {
   return (
@@ -36,12 +41,17 @@ function Router() {
       <Route path={"/collaboration/:projectId"}>
         {(params) => <CollaborationPage projectId={Number(params.projectId)} />}
       </Route>
-      <Route path={"/compleo"} component={CompleoPage} />
+      {/* Process-Driven Pipeline (5 étapes) */}
+      <Route path={"/compleo"} component={UploadPage} />
+      <Route path={"/compleo/agent/:sessionId/analyze"} component={AnalyzePage} />
+      <Route path={"/compleo/agent/:sessionId/configure"} component={ConfigurePage} />
+      <Route path={"/compleo/agent/:sessionId/generate"} component={GeneratePage} />
+      <Route path={"/compleo/agent/:sessionId/result"} component={ResultPage} />
+      {/* Legacy single-page agent (kept for backward compat) */}
       <Route path={"/compleo/agent"} component={CompleoAgentPage} />
       <Route path={"/compleo/sagas"} component={SagasPage} />
       <Route path={"/compleo/rules"} component={LearningRulesPage} />
       <Route path={"/compleo/workspace"} component={WorkspacePage} />
-      <Route path={"/compleo/cobol"} component={CobolAnalyzerPage} />
       <Route path={"/compleo/architecture"}>
         {() => <ArchitecturePage />}
       </Route>

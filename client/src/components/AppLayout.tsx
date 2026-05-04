@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Terminal, FolderGit2, LayoutDashboard, Code2, Network,
   GitBranch, MessageSquare, BookOpen, Menu, X, Package,
-  Bot, Brain, FolderOpen, ChevronRight, Layers, Cpu,
+  Bot, Brain, FolderOpen, ChevronRight, Layers,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -26,7 +26,6 @@ const COMPLEO_TABS = [
   { path: "/compleo/architecture", label: "Architecture", icon: Network },
   { path: "/compleo/rules", label: "Règles", icon: Brain },
   { path: "/compleo/workspace", label: "Workspaces", icon: FolderOpen },
-  { path: "/compleo/cobol", label: "COBOL", icon: Cpu },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

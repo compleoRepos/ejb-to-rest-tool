@@ -111,17 +111,19 @@ export class AnalysisLLMEnricher {
 
     console.log("[AI-ANALYSIS] Enrichissement IA en cours...");
     const startTime = Date.now();
-
-    // Construire le contexte structuré pour le LLM
     const context = this.buildAnalysisContext(analysisResult, projectIR);
-
-    // Lancer les 5 prompts en parallèle (indépendants)
+    // Lancer les 5 prompts en parallèle avec timeouts individuels (10s/15s)
+    const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
+      Promise.race([
+        promise,
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`LLM timeout (${ms}ms)`)), ms)),
+      ]);
     const [summary, domains, risks, strategy, justifications] = await Promise.allSettled([
-      this.analyzeProjectSummary(context),
-      this.analyzeDomains(context),
-      this.analyzeRisks(context),
-      this.analyzeMigrationStrategy(context),
-      this.justifyRecommendations(context),
+      withTimeout(this.analyzeProjectSummary(context), 10_000),
+      withTimeout(this.analyzeDomains(context), 15_000),
+      withTimeout(this.analyzeRisks(context), 10_000),
+      withTimeout(this.analyzeMigrationStrategy(context), 15_000),
+      withTimeout(this.justifyRecommendations(context), 10_000),
     ]);
 
     const elapsed = Date.now() - startTime;
