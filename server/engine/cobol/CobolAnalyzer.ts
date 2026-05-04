@@ -180,14 +180,33 @@ export class CobolAnalyzer {
    * Remplace `COPY COPYNAME.` par le contenu du copybook.
    */
   private expandCopybooks(content: string, copybookMap: Map<string, string>): string {
-    return content.replace(/COPY\s+([A-Za-z0-9-]+)\s*\./gi, (match, name) => {
-      const cbContent = copybookMap.get(name.toUpperCase());
-      if (cbContent) {
-        return cbContent;
+    // Pattern: COPY name [REPLACING ==:TAG:== BY ==prefix==].
+    const copyRegex = /COPY\s+([A-Za-z0-9-]+)(?:\s+REPLACING\s+([^.]+))?\s*\./gi;
+    let result = content.replace(copyRegex, (match, name, replacingClause) => {
+      let cbContent = copybookMap.get(name.toUpperCase());
+      if (!cbContent) return match;
+
+      // Apply REPLACING if present
+      if (replacingClause) {
+        // Parse REPLACING pairs: ==:TAG:== BY ==CD-==
+        const pairRegex = /==([^=]+)==\s+BY\s+==([^=]*)==/gi;
+        let pairMatch;
+        while ((pairMatch = pairRegex.exec(replacingClause)) !== null) {
+          const from = pairMatch[1];
+          const to = pairMatch[2];
+          // Replace all occurrences of the tag in the copybook content
+          cbContent = cbContent.split(from).join(to);
+        }
       }
-      // Keep original if copybook not found
-      return match;
+
+      // Recursive expansion: if the copybook itself contains COPY statements
+      if (/COPY\s+[A-Za-z0-9-]+/i.test(cbContent)) {
+        cbContent = this.expandCopybooks(cbContent, copybookMap);
+      }
+
+      return cbContent;
     });
+    return result;
   }
 
   /**
