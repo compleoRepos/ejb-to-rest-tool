@@ -17,6 +17,8 @@ import LearningRulesPage from "./pages/LearningRules";
 import WorkspacePage from "./pages/Workspace";
 import SagasPage from "./pages/Sagas";
 import AppLayout from "./components/AppLayout";
+import { StatusBar } from "./components/StatusBar";
+import { useGlobalErrorToast } from "./components/Toast";
 
 function Router() {
   return (
@@ -51,6 +53,8 @@ function Router() {
 }
 
 function App() {
+  useGlobalErrorToast();
+
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="dark">
@@ -65,6 +69,7 @@ function App() {
               },
             }}
           />
+          <StatusBar />
           <AppLayout>
             <Router />
           </AppLayout>

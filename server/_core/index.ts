@@ -67,11 +67,27 @@ async function startServer() {
   // ── Status endpoint (monitoring) ─────────────────────────
   app.get("/api/status", async (_req, res) => {
     const { checkLLMHealth } = await import("../engine/ml/llm-health");
+    const { getAgentStore } = await import("../agent/CompleoAgent");
     const llmHealth = await checkLLMHealth();
+    let activeSessions = 0;
+    let rulesCount = 0;
+    try {
+      const store = getAgentStore();
+      activeSessions = store.list().filter(
+        (s: any) => s.state === "ANALYZING" || s.state === "GENERATING"
+      ).length;
+    } catch { /* store not available */ }
+    try {
+      const { RuleEngine } = await import("../intelligence/knowledge/rules/RuleEngine");
+      const engine = new RuleEngine();
+      rulesCount = engine.getRules().length;
+    } catch { /* rules engine not available */ }
     res.json({
-      version: "10.4",
+      version: "11.2",
       uptime: process.uptime(),
       llm: llmHealth,
+      activeSessions,
+      rulesCount,
       memory: {
         heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
         heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
