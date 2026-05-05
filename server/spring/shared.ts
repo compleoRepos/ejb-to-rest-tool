@@ -109,6 +109,21 @@ export function toMethodName(className: string): string {
   return name.charAt(0).toLowerCase() + name.slice(1);
 }
 
+/**
+ * Sanitize className for use in generated comments/Javadoc.
+ * Removes EJB/Bean prefix patterns to avoid polluting generated code.
+ * e.g. "RiskManagementEJB_calculerVaR" → "RiskManagement.calculerVaR"
+ */
+export function sanitizeClassName(className: string): string {
+  if (className.includes("_")) {
+    const parts = className.split("_");
+    const prefix = parts[0].replace(/EJB$|Bean$|Impl$/i, "");
+    const method = parts.slice(1).join("_");
+    return `${prefix}.${method}`;
+  }
+  return className.replace(/EJB$|Bean$|Impl$/i, "");
+}
+
 export function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }

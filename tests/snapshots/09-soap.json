@@ -1,18 +1,15 @@
 {
   "fixtureId": "09-soap",
-  "timestamp": "2026-05-04T15:31:34.727Z",
-  "useCaseCount": 1,
+  "timestamp": "2026-05-05T22:17:12.853Z",
+  "useCaseCount": 0,
   "dtoCount": 0,
   "enumCount": 0,
   "exceptionCount": 0,
-  "generatedFileCount": 19,
+  "generatedFileCount": 16,
   "generatedFilePaths": [
     "src/main/java/com/bank/ejbproject/EjbProjectApplication.java",
     "src/main/java/com/bank/ejbproject/exception/GlobalExceptionHandler.java",
     "src/main/java/com/bank/ejbproject/exception/BusinessRuleException.java",
-    "src/main/java/com/bank/ejbproject/service/ComService.java",
-    "src/main/java/com/bank/ejbproject/controller/ComController.java",
-    "src/test/java/com/bank/ejbproject/controller/ComControllerTest.java",
     "src/main/resources/application.yml",
     "src/main/resources/application.properties",
     "DATASOURCE_MIGRATION.md",
@@ -27,6 +24,6 @@
     "ARCHITECTURE.md",
     "MIGRATION_SUMMARY.md"
   ],
-  "score": 77,
+  "score": 75,
   "status": "WARN"
 }

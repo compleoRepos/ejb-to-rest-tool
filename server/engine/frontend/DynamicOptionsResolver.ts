@@ -62,8 +62,6 @@ export interface DynamicOption {
   subOptions?: SubOption[];
   /** Dependencies: other option IDs that must be enabled for this one */
   requires?: string[];
-  /** AI-generated justification for this recommendation */
-  aiJustification?: string;
 }
 
 export interface SubOption {
@@ -498,15 +496,6 @@ export class DynamicOptionsResolver {
 
     // Build summary
     const detectionSummary = this.buildDetectionSummary(hasIHM, detectedDomain, hasDistributedTransactions, hasBoundedContexts, input);
-    // Inject AI justifications into options from recommendationNotes
-    if (input.aiInsights?.recommendationNotes) {
-      for (const opt of options) {
-        const justification = input.aiInsights.recommendationNotes[opt.id];
-        if (justification) {
-          opt.aiJustification = justification;
-        }
-      }
-    }
 
     return {
       options,

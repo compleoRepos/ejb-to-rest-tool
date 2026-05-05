@@ -19,7 +19,7 @@ import { ServiceMethodGenerator } from "../engine/ServiceMethodGenerator";
 import {
   type GeneratedFile,
   toPascalCase, toMethodName, capitalize, mapDtoClassName,
-  inferSemanticEndpoint, mapToSpringType,
+  inferSemanticEndpoint, mapToSpringType, sanitizeClassName,
 } from "./shared";
 
 // Singleton instances for the AST pipeline
@@ -149,8 +149,8 @@ export function generateDomainService(
 
     methods.push(`
 ${txAnnotation}    /**
-     * ${uc.className} — ${uc.bianDomain || domain} / ${uc.bianAction || methodName}.${javadocLine}
-     * Migrated from legacy UseCase: ${uc.className}
+     * ${sanitizeClassName(uc.className)} — ${uc.bianDomain || domain} / ${uc.bianAction || methodName}.${javadocLine}
+     * Migrated from legacy UseCase: ${sanitizeClassName(uc.className)}
      */
     public ${returnType} ${methodName}(${paramType}) {
         log.info("Audit trail: transaction ${methodName} initiated");
@@ -300,7 +300,7 @@ function generateServiceMethodBody(
           lines.push(`        // Codes Magix identifiés : ${result.magixCodes.join(", ")}`);
         }
 
-        lines.push(`        // Migrated from: ${uc.className}.execute() — ${result.migratedLines} lignes migrées, ${result.manualLines} manuelles, ${result.todos.length} TODOs`);
+        lines.push(`        // Migrated from: ${sanitizeClassName(uc.className)}.execute() — ${result.migratedLines} lignes migrées, ${result.manualLines} manuelles, ${result.todos.length} TODOs`);
 
         // v5.10.2: Validate brace balance before returning AST-migrated code
         const joined = lines.join("\n");
@@ -376,7 +376,7 @@ function generateServiceMethodBody(
       lines.push(`        // WARNING: ${warning}`);
     }
 
-    lines.push(`        // Migrated from: ${uc.className}.execute() — ${result.linesTransformed} transformations applied`);
+    lines.push(`        // Migrated from: ${sanitizeClassName(uc.className)}.execute() — ${result.linesTransformed} transformations applied`);
 
     // v5.10.2: Validate brace balance before returning legacy-migrated code
     const legacyJoined = lines.join("\n");
@@ -422,7 +422,7 @@ function generateServiceMethodBody(
 
   // BUG-I v7.5: If complex method with steps, generate structured stub
   if (legacySteps.length > 0) {
-    lines.push(`        // ─── Structured migration stub from ${uc.className} (${legacySteps.length} steps detected) ───`);
+    lines.push(`        // ─── Structured migration stub from ${sanitizeClassName(uc.className)} (${legacySteps.length} steps detected) ───`);
     lines.push(`        // This method is complex (>50 lines). Each step below corresponds`);
     lines.push(`        // to a logical block in the legacy code. Implement them in order.`);
     lines.push(``);
@@ -441,7 +441,7 @@ function generateServiceMethodBody(
       lines.push(`        // TODO: Implement step ${i + 1} — ${step.label}`);
       lines.push(``);
     }
-    lines.push(`        // Migrated from: ${uc.className} — ${legacySteps.length} steps, structured stub`);
+    lines.push(`        // Migrated from: ${sanitizeClassName(uc.className)} — ${legacySteps.length} steps, structured stub`);
   } else {
     // Simple fallback for non-complex methods
     const magixService = uc.injectedServices.find(s =>
@@ -450,9 +450,9 @@ function generateServiceMethodBody(
     if (magixService) {
       const fieldName = (magixService as any).fieldName || magixService.type.charAt(0).toLowerCase() + magixService.type.slice(1);
       lines.push(`        // TODO: Implement call to ${magixService.type} — migrated from @EJB ${fieldName}`);
-      lines.push(`        // Original transaction code: see legacy ${uc.className}`);
+      lines.push(`        // Original transaction code: see legacy ${sanitizeClassName(uc.className)}`);
     } else {
-      lines.push(`        // TODO: Implement business logic from legacy ${uc.className}`);
+      lines.push(`        // TODO: Implement business logic from legacy ${sanitizeClassName(uc.className)}`);
     }
   }
 

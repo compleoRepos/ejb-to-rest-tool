@@ -323,18 +323,13 @@ Pour chaque DataSource, génère DATASOURCE_MIGRATION.md avec :
 Oracle 19c, DB2 LUW 11.5, ojdbc11 v23.2.
 Markdown technique. Max 500 mots.`;
 
-    try {
-      const raw = await this.ollamaGenerate(prompt, {
-        temperature: 0.2,
-        num_predict: 2000,
-      });
-      return this.sanitizeOutput(raw, ctx);
-    } catch (err) {
-      // Fallback: si le LLM échoue ou l'output est trop court après nettoyage,
-      // générer un rapport factuel basé sur les données détectées
-      console.warn(`[ReportEnhancer] DATASOURCE_MIGRATION LLM fallback: ${err instanceof Error ? err.message : String(err)}`);
-      return this.generateFactualDatasourceReport(ctx);
-    }
+    // FIX v11.2: Ne pas fallback en template — laisser l'erreur remonter
+    // pour que enhanceAll() la catch et retourne null (comportement attendu par les tests)
+    const raw = await this.ollamaGenerate(prompt, {
+      temperature: 0.2,
+      num_predict: 2000,
+    });
+    return this.sanitizeOutput(raw, ctx);
   }
 
   /**

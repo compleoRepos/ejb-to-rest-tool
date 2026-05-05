@@ -428,6 +428,15 @@ export class BusinessLogicTransformer {
             methodName: resolvedCtx.methodName || "execute",
           });
 
+          // FIX v11.2: Ajouter le TODO JDBC_DIRECT (régression v10.15)
+          todos.push({
+            type: "JDBC_DIRECT",
+            line: blockCode.split("\n")[0].trim(),
+            suggestion: "Use Spring Data JPA",
+            priority: "HIGH",
+          });
+          manualLines++;
+
           // Insérer un placeholder pour le post-processeur LLM
           processedLines.push(`        // @@${blockId}@@`);
           migratedLines++;
@@ -476,6 +485,14 @@ export class BusinessLogicTransformer {
           sourceClassName: resolvedCtx.sourceClassName,
           methodName: resolvedCtx.methodName || "execute",
         });
+        // FIX v11.2: Ajouter le TODO JDBC_DIRECT pour lignes isolées (régression v10.15)
+        todos.push({
+          type: "JDBC_DIRECT",
+          line: trimmedLine,
+          suggestion: "Use Spring Data JPA",
+          priority: "HIGH",
+        });
+        manualLines++;
         processedLines.push(`        // @@${blockId}@@`);
         migratedLines++;
       } else {

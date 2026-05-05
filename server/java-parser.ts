@@ -378,7 +378,9 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
       return uc;
     }),
     ...directEjbUseCases,
-    ...soapUseCases,
+    // FIX v11.2: SOAP UseCases are NOT included in EJB parser result.
+    // They are handled by the multi-tech pipeline separately.
+    // soapUseCases are still detected here for stats/warnings but excluded from useCases[]
     ...handlerUseCases,
   ].filter(uc => {
     // v8.3: Exclure la façade Strategy des useCases
@@ -388,7 +390,8 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
   });
 
   // v10.16: Fallback LlmUseCaseDetector quand 0 UC détectés par les méthodes rule-based
-  if (useCases.length === 0 && javaFiles.length > 0) {
+  // FIX v11.2: Skip fallback when SOAP UseCases were detected (handled by multi-tech pipeline)
+  if (useCases.length === 0 && soapUseCases.length === 0 && javaFiles.length > 0) {
     const detector = new LlmUseCaseDetector();
     const detectorResult = detector.detect(javaFiles.map(f => ({ path: f.path, content: f.content })));
     if (detectorResult.detectedCount > 0) {
@@ -645,6 +648,8 @@ function isUseCase(content: string): boolean {
 function isDirectEjb(content: string): boolean {
   // BUG-B v7.5: CDI @ApplicationScoped/@RequestScoped are NOT EJBs
   if (/@ApplicationScoped/.test(content) || /@RequestScoped/.test(content)) return false;
+  // FIX v11.2: @WebService classes are handled by the multi-tech SOAP pipeline, not EJB parser
+  if (/@WebService/.test(content)) return false;
   if (!/@Stateless/.test(content) && !/@Stateful/.test(content)) return false;
   if (/implements\s+BaseUseCase/.test(content)) return false; // BOA pattern → single UseCase via parseUseCase
   if (!(/public\s+class/.test(content))) return false;
@@ -903,8 +908,8 @@ function isBatchJob(content: string): boolean {
 function isSoapWebService(content: string): boolean {
   // Must have @WebService annotation
   if (!/@WebService/.test(content)) return false;
-  // Must NOT be already detected as @Stateless/@Stateful EJB (avoid double-counting)
-  if (/@Stateless/.test(content) || /@Stateful/.test(content)) return false;
+  // FIX v11.2: Accept @Stateless/@Stateful + @WebService (common pattern: EJB exposed as SOAP)
+  // These are SOAP endpoints first, handled by multi-tech pipeline (not EJB parser)
   // Must have at least one @WebMethod or be a @WebService class with public methods
   if (/@WebMethod/.test(content)) return true;
   // @WebService without @WebMethod: all public methods are implicitly SOAP operations
