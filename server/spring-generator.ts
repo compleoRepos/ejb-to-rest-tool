@@ -432,8 +432,35 @@ public class BusinessRuleException extends RuntimeException {
     seenPaths.add(file.path);
     deduplicatedFiles.push(file);
   }
-  files.length = 0;
+   files.length = 0;
   files.push(...deduplicatedFiles);
+
+  // v11.2 STEP 4b: Eliminate pure-stub services when a domain service covers the same methods
+  // A pure-stub service has ALL methods throwing UnsupportedOperationException and no real logic.
+  const domainServiceMethods = new Map<string, Set<string>>(); // domain → method names
+  for (const file of files) {
+    if (!file.path.includes("/service/") || !file.path.endsWith("Service.java")) continue;
+    if (isPureStubService(file.content)) continue; // skip stubs themselves
+    const methods = extractPublicMethodNames(file.content);
+    for (const m of methods) domainServiceMethods.set(m, new Set([...(domainServiceMethods.get(m) || []), file.path]));
+  }
+  const beforeStubFilter = files.length;
+  const stubFilteredFiles: GeneratedFile[] = [];
+  for (const file of files) {
+    if (file.path.includes("/service/") && file.path.endsWith("Service.java") && isPureStubService(file.content)) {
+      const stubMethods = extractPublicMethodNames(file.content);
+      const allCovered = stubMethods.length > 0 && stubMethods.every(m => domainServiceMethods.has(m));
+      if (allCovered) {
+        warnings.push(`[v11.2] Removed pure-stub service (covered by domain service): ${file.path}`);
+        continue;
+      }
+    }
+    stubFilteredFiles.push(file);
+  }
+  if (stubFilteredFiles.length < beforeStubFilter) {
+    files.length = 0;
+    files.push(...stubFilteredFiles);
+  }
 
   // 14. Quality Score — v7.3
   const legacyMethodCount = ir.useCases.length;
@@ -830,4 +857,37 @@ ${fields}
 
 function toPascalCaseLocal(s: string): string {
   return s.replace(/(^|[_-])(\w)/g, (_, __, c) => c.toUpperCase());
+}
+
+// ─── v11.2 Stub detection utilities ─────────────────────────────────────────
+
+/**
+ * Determines if a Java service file is a pure stub (ALL methods throw UnsupportedOperationException).
+ * A pure stub has at least one public method, and every method body is just a throw statement.
+ */
+function isPureStubService(javaCode: string): boolean {
+  // Extract all method bodies (between first { and matching })
+  const methodBodies = javaCode.match(/public\s+\w[\w<>,\s]*\s+\w+\s*\([^)]*\)\s*(?:throws\s+\w[\w,\s]*)?\s*\{([^}]*)\}/g);
+  if (!methodBodies || methodBodies.length === 0) return false;
+  // Every method must throw UnsupportedOperationException
+  return methodBodies.every(m => {
+    const body = m.replace(/^[^{]*\{/, '').replace(/\}$/, '').trim();
+    return /^\s*throw\s+new\s+UnsupportedOperationException\s*\(/.test(body);
+  });
+}
+
+/**
+ * Extracts public method names from a Java service file.
+ */
+function extractPublicMethodNames(javaCode: string): string[] {
+  const matches = javaCode.matchAll(/public\s+\w[\w<>,\s]*\s+(\w+)\s*\(/g);
+  const names: string[] = [];
+  for (const m of matches) {
+    const name = m[1];
+    // Exclude constructors (PascalCase starting with uppercase) and class declarations
+    if (name && name[0] === name[0].toLowerCase()) {
+      names.push(name);
+    }
+  }
+  return names;
 }

@@ -34,7 +34,9 @@ export interface SagaMLIssue {
     | "empty-compensation"
     | "invalid-java-type"
     | "invented-class"
-    | "non-idempotent-compensation";
+    | "non-idempotent-compensation"
+    | "saga-id-on-business-table"
+    | "direct-saga-log-manipulation";
   /** Description du problème */
   message: string;
   /** Sévérité (error = rejet, warning = correction) */
@@ -115,7 +117,11 @@ export function validateSagaMLOutput(
     checkCompensationIdempotent(cleaned.compensationBody, issues);
   }
 
-  // ── Nettoyage automatique ───────────────────────────────────────────
+  // ── Check 7 : Pas de WHERE SAGA_ID sur tables business ──────────────────
+  checkSagaIdOnBusinessTables(cleaned.compensationBody, issues);
+  checkSagaIdOnBusinessTables(cleaned.stepBody, issues);
+
+  // ── Nettoyage automatique ───────────────────────────────────────────────
   cleaned.stepBody = cleanJdbcReferences(cleaned.stepBody);
   cleaned.compensationBody = cleanJdbcReferences(cleaned.compensationBody);
 
@@ -284,6 +290,48 @@ function checkCompensationIdempotent(
       issues.push({
         type: "non-idempotent-compensation",
         message: "Opération de création détectée dans la compensation — vérifier l'idempotence",
+        severity: "warning",
+      });
+    }
+  }
+}
+
+/**
+ * Check 7 : Interdit l'utilisation de SAGA_ID / T_SAGA_LOG dans les compensations et steps.
+ * Les compensations doivent utiliser les repositories Spring (pas de SQL direct sur la table saga).
+ * Les tables business ne doivent JAMAIS avoir une colonne SAGA_ID.
+ */
+function checkSagaIdOnBusinessTables(
+  code: string,
+  issues: SagaMLIssue[],
+): void {
+  if (!code) return;
+
+  // Pattern 1: WHERE ... SAGA_ID (requête SQL sur table business avec SAGA_ID)
+  if (/WHERE[^;]*SAGA_ID/i.test(code)) {
+    issues.push({
+      type: "saga-id-on-business-table",
+      message: "WHERE SAGA_ID détecté — les tables business ne doivent PAS avoir de colonne SAGA_ID. Utiliser les repositories Spring.",
+      severity: "error",
+    });
+  }
+
+  // Pattern 2: INSERT INTO T_SAGA_LOG (manipulation directe de la table saga)
+  if (/(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+T_SAGA_LOG/i.test(code)) {
+    issues.push({
+      type: "direct-saga-log-manipulation",
+      message: "Manipulation directe de T_SAGA_LOG détectée — utiliser SagaLogRepository injecté.",
+      severity: "error",
+    });
+  }
+
+  // Pattern 3: sagaId dans un WHERE clause (variante camelCase)
+  if (/\.findBy.*SagaId|WHERE.*saga_id/i.test(code)) {
+    // Tolérer SagaLogRepository.findBySagaId (c'est le bon pattern)
+    if (!/SagaLogRepository/i.test(code)) {
+      issues.push({
+        type: "saga-id-on-business-table",
+        message: "Référence à sagaId/saga_id dans une requête business — seul SagaLogRepository peut filtrer par sagaId.",
         severity: "warning",
       });
     }
