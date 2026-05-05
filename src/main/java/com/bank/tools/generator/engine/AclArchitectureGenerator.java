@@ -68,8 +68,7 @@ public class AclArchitectureGenerator {
     // et ne doivent PAS apparaitre dans les DTOs metier
     private static final Set<String> ENVELOPE_FIELDS = Set.of(
             "requestId", "request_id", "sourceSystem", "source_system",
-            "timestamp", "correlationId", "correlation_id",
-            "code", "message", "status"
+            "timestamp", "correlationId", "correlation_id"
     );
 
     private static final Map<String, String> FIELD_RENAME = Map.ofEntries(
@@ -3807,8 +3806,8 @@ public class AclArchitectureGenerator {
     private String generateExampleRequestJson(BianEndpoint ep, ProjectAnalysisResult analysis) {
         StringBuilder json = new StringBuilder();
         json.append("{\n");
-        json.append("  \"requestId\": \"REQ-001\",\n");
-        json.append("  \"sourceSystem\": \"postman-test\",\n");
+        json.append("  \"request_id\": \"REQ-001\",\n");
+        json.append("  \"source_system\": \"postman-test\",\n");
         json.append("  \"payload\": {");
 
         DtoInfo reqDto = findDto(analysis, ep.ejbInputDtoName);

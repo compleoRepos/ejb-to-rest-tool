@@ -805,7 +805,9 @@ public class CodeGenerationEngine {
         if (!jsonMode) {
             sb.append("\nspring.profiles.group.prod=jndi\n");
         } else {
-            sb.append("\nspring.profiles.group.prod=rest\n");
+            sb.append("\n# Profil REST actif par defaut (pas besoin de le specifier au demarrage)\n");
+            sb.append("spring.profiles.active=rest\n");
+            sb.append("spring.profiles.group.prod=rest\n");
         }
 
         Files.writeString(resourcesDir.resolve("application.properties"), sb.toString());
