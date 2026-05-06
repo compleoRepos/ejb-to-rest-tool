@@ -19,6 +19,11 @@ import SagasPage from "./pages/Sagas";
 import AppLayout from "./components/AppLayout";
 import { StatusBar } from "./components/StatusBar";
 import { useGlobalErrorToast } from "./components/Toast";
+import UploadPage from "./pages/UploadPage";
+import AnalyzePage from "./pages/AnalyzePage";
+import ConfigurePage from "./pages/ConfigurePage";
+import GeneratePage from "./pages/GeneratePage";
+import ResultPage from "./pages/ResultPage";
 
 function Router() {
   return (
@@ -38,6 +43,11 @@ function Router() {
         {(params) => <CollaborationPage projectId={Number(params.projectId)} />}
       </Route>
       <Route path={"/compleo"} component={CompleoPage} />
+      <Route path={"/compleo/upload"} component={UploadPage} />
+      <Route path={"/compleo/agent/:sessionId/analyze"} component={AnalyzePage} />
+      <Route path={"/compleo/agent/:sessionId/configure"} component={ConfigurePage} />
+      <Route path={"/compleo/agent/:sessionId/generate"} component={GeneratePage} />
+      <Route path={"/compleo/agent/:sessionId/result"} component={ResultPage} />
       <Route path={"/compleo/agent"} component={CompleoAgentPage} />
       <Route path={"/compleo/sagas"} component={SagasPage} />
       <Route path={"/compleo/rules"} component={LearningRulesPage} />
