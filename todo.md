@@ -444,3 +444,9 @@
 - [x] SessionStore : chargement lazy — métadonnées au démarrage, blobs à la demande
 - [x] Cache frontend avec staleTime pour éviter re-fetch inutiles (fetchWithCache 10s TTL)
 - [ ] Index DB sur les colonnes de tri (updatedAt, status) — à faire si besoin
+
+## Bug — Chrome iOS bloqué sur analyse
+- [x] Détecter Chrome iOS (WebKit mobile) en plus de Safari desktop
+- [x] Forcer le polling sur tous les navigateurs WebKit (Chrome iOS = Safari sous le capot)
+- [x] Vérifier que le fallback polling fonctionne correctement sur iOS
+- [x] Fix: bouton "Forcer le rafraîchissement" ne fonctionne pas au clic (fetch immédiat + toast)

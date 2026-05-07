@@ -174,10 +174,17 @@ export default function CompleoAgentPage() {
   const showAnalysisReviewRef = useRef(false);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Safari/iOS detection — SSE is unreliable on these browsers
+  // WebKit detection — SSE is unreliable on ALL iOS browsers (Safari, Chrome iOS, Firefox iOS)
+  // On iOS, ALL browsers use WebKit engine regardless of brand (Apple App Store policy).
+  // Also detect Safari desktop which has similar SSE issues.
   const isSafari = useMemo(() => {
     const ua = navigator.userAgent;
-    return /Safari/.test(ua) && !/Chrome/.test(ua) && !/Chromium/.test(ua);
+    // iOS detection: iPhone/iPad/iPod or Mac with touch (iPad desktop mode)
+    const isIOS = /iPhone|iPad|iPod/.test(ua) || 
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    // Safari desktop detection
+    const isSafariDesktop = /Safari/.test(ua) && !/Chrome/.test(ua) && !/Chromium/.test(ua);
+    return isIOS || isSafariDesktop;
   }, []);
 
   // Phases where polling should be faster (1s instead of 2s)
@@ -1376,7 +1383,42 @@ export default function CompleoAgentPage() {
                     variant="outline"
                     size="sm"
                     className="w-full gap-1.5 border-orange-500/30 text-orange-400 hover:bg-orange-500/10"
-                    onClick={() => startEventPolling(sessionId)}
+                    onClick={async () => {
+                      // Immediate fetch + restart polling
+                      try {
+                        const statusRes = await fetch(`/api/agent/${sessionId}/status`);
+                        if (statusRes.ok) {
+                          const st = await statusRes.json();
+                          setStatus(st);
+                          if (st.events && Array.isArray(st.events)) {
+                            const newEvents: AgentEvent[] = [];
+                            for (const event of st.events) {
+                              const key = `${event.timestamp}-${event.type}-${event.message || ''}-${event.phase || ''}`;
+                              if (!seenEventsRef.current.has(key)) {
+                                seenEventsRef.current.add(key);
+                                newEvents.push(event);
+                              }
+                            }
+                            if (newEvents.length > 0) {
+                              setEvents(prev => {
+                                const allKeys = new Set<string>();
+                                const merged: AgentEvent[] = [];
+                                for (const ev of [...prev, ...newEvents]) {
+                                  const k = `${ev.timestamp}-${ev.type}-${ev.message || ''}-${ev.phase || ''}`;
+                                  if (!allKeys.has(k)) { allKeys.add(k); merged.push(ev); }
+                                }
+                                return merged;
+                              });
+                            }
+                          }
+                          toast.success("Rafraîchissement effectué");
+                        }
+                      } catch {
+                        toast.error("Erreur de rafraîchissement");
+                      }
+                      // Restart polling
+                      startEventPolling(sessionId);
+                    }}
                   >
                     <RefreshCw className="w-4 h-4" />
                     Forcer le rafraîchissement
