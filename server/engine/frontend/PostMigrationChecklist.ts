@@ -78,7 +78,7 @@ export interface ChecklistInput {
   technologiesDetected: TechnologyType[];
   detectedDomain: DetectedDomain;
   hasFrontend: boolean;
-  frontendFramework?: "react" | "angular" | "vue";
+  frontendFramework?: "react" | "angular" | "vue" | "thymeleaf";
   hasMicroservices: boolean;
   hasSaga: boolean;
   hasMessaging: boolean;

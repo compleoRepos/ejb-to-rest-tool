@@ -26,7 +26,7 @@ import type { AIAnalysisInsights, DomainInsight } from "../analysis/AnalysisLLME
 
 // --- Types ---
 
-export type FrontendFramework = "react" | "angular" | "vue";
+export type FrontendFramework = "react" | "angular" | "vue" | "thymeleaf";
 
 export type IndustryStandard =
   | "BIAN"      // Banking Industry Architecture Network
@@ -352,6 +352,7 @@ export class DynamicOptionsResolver {
           { id: "react", label: "React + TypeScript", description: "SPA React avec Vite, React Router, Axios, TailwindCSS", defaultSelected: true },
           { id: "angular", label: "Angular", description: "Application Angular avec Angular Material, HttpClient, routing", defaultSelected: false },
           { id: "vue", label: "Vue.js 3", description: "Application Vue 3 avec Composition API, Vue Router, Pinia, Axios", defaultSelected: false },
+          { id: "thymeleaf", label: "Thymeleaf / Spring MVC", description: "Rendu serveur avec Spring MVC, Thymeleaf templates, Bootstrap 5", defaultSelected: false },
         ],
       });
     }
@@ -390,33 +391,36 @@ export class DynamicOptionsResolver {
       });
     }
 
-    // Option: Industry standard mapping — ALWAYS show ALL standards, mark detected one as recommended
-    const ALL_STANDARDS: Array<{ id: string; standard: IndustryStandard; label: string; description: string; icon: string; color: string }> = [
-      { id: "bian_mapping", standard: "BIAN", label: "Mapping BIAN (Banque / Finance)", description: "Alignement des services sur le referentiel BIAN v12.", icon: "Building2", color: "blue" },
-      { id: "acord_mapping", standard: "ACORD", label: "Mapping ACORD (Assurance)", description: "Alignement sur le standard ACORD pour le domaine assurance.", icon: "Shield", color: "green" },
-      { id: "hl7_mapping", standard: "HL7_FHIR", label: "Mapping HL7/FHIR (Sante)", description: "Alignement sur les standards HL7 FHIR pour le domaine sante.", icon: "Heart", color: "red" },
-      { id: "tmforum_mapping", standard: "TMFORUM", label: "Mapping TMForum/eTOM (Telecom)", description: "Alignement sur le referentiel TMForum pour les telecoms.", icon: "Wifi", color: "purple" },
-      { id: "ddd_mapping", standard: "DDD", label: "Structuration DDD (Domain-Driven Design)", description: "Structuration en Bounded Contexts, Aggregats et Value Objects.", icon: "Layers", color: "orange" },
-      { id: "togaf_mapping", standard: "TOGAF", label: "Architecture TOGAF (Enterprise)", description: "Alignement sur le framework TOGAF ADM.", icon: "Building", color: "slate" },
+    // Option: Industry standard mapping — ONE toggle with sub-options (like frontend framework)
+    const recommendedStandard = detectedDomain.primary !== "NONE" ? detectedDomain.primary : null;
+    const ALL_STANDARDS: Array<{ id: string; standard: IndustryStandard; label: string; description: string }> = [
+      { id: "BIAN", standard: "BIAN", label: "Mapping BIAN (Banque / Finance)", description: "Alignement des services sur le referentiel BIAN v12." },
+      { id: "ACORD", standard: "ACORD", label: "Mapping ACORD (Assurance)", description: "Alignement sur le standard ACORD pour le domaine assurance." },
+      { id: "HL7_FHIR", standard: "HL7_FHIR", label: "Mapping HL7/FHIR (Sante)", description: "Alignement sur les standards HL7 FHIR pour le domaine sante." },
+      { id: "TMFORUM", standard: "TMFORUM", label: "Mapping TMForum/eTOM (Telecom)", description: "Alignement sur le referentiel TMForum pour les telecoms." },
+      { id: "DDD", standard: "DDD", label: "Structuration DDD (Domain-Driven Design)", description: "Structuration en Bounded Contexts, Aggregats et Value Objects." },
+      { id: "TOGAF", standard: "TOGAF", label: "Architecture TOGAF (Enterprise)", description: "Alignement sur le framework TOGAF ADM." },
     ];
 
-    for (const std of ALL_STANDARDS) {
-      const isRecommended = detectedDomain.primary === std.standard;
-      const isDetectedDomain = isRecommended && detectedDomain.primary !== "NONE";
-      options.push({
+    options.push({
+      id: "industry_standard",
+      label: "Standards Metier",
+      description: recommendedStandard
+        ? `Domaine ${detectedDomain.label} detecte (${detectedDomain.confidence}). Choisissez le standard d'alignement.`
+        : "Alignement sur un standard industriel pour structurer vos services.",
+      category: "standard",
+      defaultEnabled: !!recommendedStandard,
+      confidence: recommendedStandard ? detectedDomain.confidence : "low",
+      icon: "Shield",
+      color: "blue",
+      triggeredBy: recommendedStandard ? detectedDomain.indicators.slice(0, 3) : ["user_choice"],
+      subOptions: ALL_STANDARDS.map(std => ({
         id: std.id,
-        label: isDetectedDomain ? `${std.label} (Recommande)` : std.label,
-        description: isDetectedDomain
-          ? `Domaine ${detectedDomain.label} detecte (${detectedDomain.confidence}). ${std.description}`
-          : std.description,
-        category: "standard",
-        defaultEnabled: isDetectedDomain, // Only auto-enable the recommended one
-        confidence: isDetectedDomain ? detectedDomain.confidence : "low",
-        icon: std.icon,
-        color: std.color,
-        triggeredBy: isDetectedDomain ? detectedDomain.indicators.slice(0, 3) : ["user_choice"],
-      });
-    }
+        label: std.id === recommendedStandard ? `${std.label} (Recommande)` : std.label,
+        description: std.description,
+        defaultSelected: std.id === recommendedStandard,
+      })),
+    });
 
     // Option: SOAP to REST adapter (if SOAP detected)
     if (input.technologiesDetected.includes("SOAP")) {

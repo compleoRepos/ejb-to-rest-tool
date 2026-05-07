@@ -106,11 +106,16 @@ describe("DynamicOptionsResolver", () => {
       sourceFiles: [],
     });
 
-    const bianOption = result.options.find((o) => o.id === "bian_mapping");
-    expect(bianOption).toBeDefined();
-    if (bianOption) {
-      expect(bianOption.category).toBe("standard");
-      expect(bianOption.defaultEnabled).toBe(true);
+    const stdOption = result.options.find((o) => o.id === "industry_standard");
+    expect(stdOption).toBeDefined();
+    if (stdOption) {
+      expect(stdOption.category).toBe("standard");
+      expect(stdOption.defaultEnabled).toBe(true);
+      // BIAN should be the recommended sub-option
+      const bianSub = (stdOption.subOptions || []).find((s: any) => s.id === "BIAN");
+      expect(bianSub).toBeDefined();
+      expect(bianSub?.defaultSelected).toBe(true);
+      expect(bianSub?.label).toContain("Recommande");
     }
   });
 

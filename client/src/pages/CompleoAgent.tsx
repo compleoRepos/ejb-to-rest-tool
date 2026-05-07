@@ -130,7 +130,7 @@ export default function CompleoAgentPage() {
   const [enableSaga, setEnableSaga] = useState(false);
   // v10.8: Dynamic options + Frontend generation
   const [enableFrontend, setEnableFrontend] = useState(false);
-  const [frontendFramework, setFrontendFramework] = useState<"react" | "angular" | "vue">("react");
+  const [frontendFramework, setFrontendFramework] = useState<"react" | "angular" | "vue" | "thymeleaf">("react");
   const [enableIndustryStandard, setEnableIndustryStandard] = useState(false);
   const [selectedStandard, setSelectedStandard] = useState<string>("");
   const [dynamicOptions, setDynamicOptions] = useState<any>(null);
@@ -256,10 +256,10 @@ export default function CompleoAgentPage() {
                             if (opt.id === "microservices") setEnableMicroservices(true);
                             if (opt.id === "saga") setEnableSaga(true);
                             if (opt.id === "reports" || opt.id === "ai_reports") setEnableReportEnhancer(true);
-                            if (opt.id.endsWith("_mapping")) {
-                              const stdMapAuto: Record<string, string> = { bian_mapping: "BIAN", acord_mapping: "ACORD", hl7_mapping: "HL7_FHIR", tmforum_mapping: "TMFORUM", ddd_mapping: "DDD", togaf_mapping: "TOGAF" };
+                            if (opt.id === "industry_standard") {
                               setEnableIndustryStandard(true);
-                              setSelectedStandard(stdMapAuto[opt.id] || "");
+                              const rec = (opt.subOptions || []).find((s: any) => s.defaultSelected);
+                              if (rec) setSelectedStandard(rec.id);
                             }
                             if (opt.id === "messaging") setEnableMessaging(true);
                             if (opt.id === "ml") setEnableML(true);
@@ -450,10 +450,10 @@ export default function CompleoAgentPage() {
                             if (opt.id === "microservices") setEnableMicroservices(true);
                             if (opt.id === "saga") setEnableSaga(true);
                             if (opt.id === "reports" || opt.id === "ai_reports") setEnableReportEnhancer(true);
-                            if (opt.id.endsWith("_mapping")) {
-                              const stdMapAuto: Record<string, string> = { bian_mapping: "BIAN", acord_mapping: "ACORD", hl7_mapping: "HL7_FHIR", tmforum_mapping: "TMFORUM", ddd_mapping: "DDD", togaf_mapping: "TOGAF" };
+                            if (opt.id === "industry_standard") {
                               setEnableIndustryStandard(true);
-                              setSelectedStandard(stdMapAuto[opt.id] || "");
+                              const rec = (opt.subOptions || []).find((s: any) => s.defaultSelected);
+                              if (rec) setSelectedStandard(rec.id);
                             }
                             if (opt.id === "messaging") setEnableMessaging(true);
                             if (opt.id === "ml") setEnableML(true);
@@ -1136,21 +1136,15 @@ export default function CompleoAgentPage() {
                 <div className="border-t border-border/30 pt-3 mt-2 space-y-3">
                   {/* Options dynamiques générées par DynamicOptionsResolver */}
                   {(dynamicOptions?.options || []).map((opt: any) => {
-                    // Map option ID to state setter
-                    // Map standard IDs to their standard value
-                    const stdMap: Record<string, string> = { bian_mapping: "BIAN", acord_mapping: "ACORD", hl7_mapping: "HL7_FHIR", tmforum_mapping: "TMFORUM", ddd_mapping: "DDD", togaf_mapping: "TOGAF" };
-                    const isStandardOption = opt.id in stdMap;
-
+                    // Map option ID to state
                     const getChecked = () => {
-                      if (isStandardOption) {
-                        return enableIndustryStandard && selectedStandard === stdMap[opt.id];
-                      }
                       switch (opt.id) {
                         case "frontend": return enableFrontend;
                         case "microservices": return enableMicroservices;
                         case "saga": return enableSaga;
                         case "reports": case "ai_reports": return enableReportEnhancer;
                         case "messaging": return enableMessaging;
+                        case "industry_standard": return enableIndustryStandard;
                         case "ml": return enableML;
                         case "soc2_compliance": return enableSoc2Compliance;
                         case "soap_to_rest": return enableSoapToRest;
@@ -1159,23 +1153,21 @@ export default function CompleoAgentPage() {
                       }
                     };
                     const setChecked = (v: boolean) => {
-                      if (isStandardOption) {
-                        if (v) {
-                          setEnableIndustryStandard(true);
-                          setSelectedStandard(stdMap[opt.id]);
-                        } else {
-                          // Uncheck = disable standard entirely
-                          setEnableIndustryStandard(false);
-                          setSelectedStandard("");
-                        }
-                        return;
-                      }
                       switch (opt.id) {
                         case "frontend": setEnableFrontend(v); break;
                         case "microservices": setEnableMicroservices(v); break;
                         case "saga": setEnableSaga(v); break;
                         case "reports": case "ai_reports": setEnableReportEnhancer(v); break;
                         case "messaging": setEnableMessaging(v); break;
+                        case "industry_standard":
+                          setEnableIndustryStandard(v);
+                          if (v && !selectedStandard) {
+                            // Auto-select recommended or first
+                            const rec = (opt.subOptions || []).find((s: any) => s.defaultSelected);
+                            if (rec) setSelectedStandard(rec.id);
+                          }
+                          if (!v) setSelectedStandard("");
+                          break;
                         case "ml": setEnableML(v); break;
                         case "soc2_compliance": setEnableSoc2Compliance(v); break;
                         case "soap_to_rest": setEnableSoapToRest(v); break;
@@ -1187,7 +1179,7 @@ export default function CompleoAgentPage() {
                       microservices: Layers,
                       saga: GitBranch,
                       reports: Star, ai_reports: Star,
-                      bian_mapping: Shield, acord_mapping: Shield, hl7_mapping: Shield, tmforum_mapping: Shield, ddd_mapping: Layers, togaf_mapping: Shield,
+                      industry_standard: Shield,
                       messaging: Radio,
                       ml: Zap,
                       soc2_compliance: Lock,
@@ -1199,7 +1191,7 @@ export default function CompleoAgentPage() {
                       microservices: "text-pink-400",
                       saga: "text-violet-400",
                       reports: "text-amber-400", ai_reports: "text-amber-400",
-                      bian_mapping: "text-blue-400", acord_mapping: "text-green-400", hl7_mapping: "text-red-400", tmforum_mapping: "text-purple-400", ddd_mapping: "text-orange-400", togaf_mapping: "text-slate-400",
+                      industry_standard: "text-blue-400",
                       messaging: "text-orange-400",
                       ml: "text-amber-400",
                       soc2_compliance: "text-emerald-400",
@@ -1211,12 +1203,7 @@ export default function CompleoAgentPage() {
                       microservices: "data-[state=checked]:bg-pink-500 data-[state=checked]:border-pink-500",
                       saga: "data-[state=checked]:bg-violet-500 data-[state=checked]:border-violet-500",
                       reports: "data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500",
-                      bian_mapping: "data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500",
-                      acord_mapping: "data-[state=checked]:bg-green-500 data-[state=checked]:border-green-500",
-                      hl7_mapping: "data-[state=checked]:bg-red-500 data-[state=checked]:border-red-500",
-                      tmforum_mapping: "data-[state=checked]:bg-purple-500 data-[state=checked]:border-purple-500",
-                      ddd_mapping: "data-[state=checked]:bg-orange-500 data-[state=checked]:border-orange-500",
-                      togaf_mapping: "data-[state=checked]:bg-slate-500 data-[state=checked]:border-slate-500",
+                      industry_standard: "data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500",
                       messaging: "data-[state=checked]:bg-orange-500 data-[state=checked]:border-orange-500",
                       ml: "data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500",
                       soc2_compliance: "data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-500",
@@ -1287,6 +1274,28 @@ export default function CompleoAgentPage() {
                             >
                               RabbitMQ
                             </Button>
+                          </div>
+                        )}
+
+                        {/* Sub-options : choix du standard metier */}
+                        {opt.id === "industry_standard" && enableIndustryStandard && opt.subOptions && (
+                          <div className="ml-8 space-y-2">
+                            <p className="text-xs text-muted-foreground">Choisissez le standard d'alignement :</p>
+                            <div className="flex flex-wrap gap-2">
+                              {(opt.subOptions || []).map((sub: any) => (
+                                <Button
+                                  key={sub.id}
+                                  variant={selectedStandard === sub.id ? "default" : "outline"}
+                                  size="sm"
+                                  className={selectedStandard === sub.id
+                                    ? "bg-blue-500 hover:bg-blue-600 text-white"
+                                    : "hover:border-blue-400"}
+                                  onClick={() => setSelectedStandard(sub.id)}
+                                >
+                                  {sub.label}
+                                </Button>
+                              ))}
+                            </div>
                           </div>
                         )}
 

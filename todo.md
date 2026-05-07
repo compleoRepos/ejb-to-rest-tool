@@ -470,3 +470,10 @@
 ## Bug — Bouton "Forcer le rafraîchissement" ne fonctionne pas (PC + Chrome iOS)
 - [x] Cause : conditionné par `isSafari` — invisible sur PC (Chrome/Firefox) et parfois Chrome iOS
 - [x] Fix : bouton + badge polling visibles pour TOUS les navigateurs quand l'agent tourne
+
+## v11.6 — Regrouper standards + Ajouter Thymeleaf
+- [x] Refactorer UI standards : un seul toggle "Standards Métier" + boutons sub-options (comme frontend framework)
+- [x] Ajouter Thymeleaf/Spring MVC comme 4e option frontend dans DynamicOptionsResolver
+- [x] Ajouter generateThymeleafScaffold dans FrontendGenerator (layout Thymeleaf, Bootstrap 5, HomeController)
+- [x] Mettre à jour PostMigrationChecklist pour supporter thymeleaf
+- [x] Tests : 128 unit + 134 no-regression + 68 compilation + 14 frontend engine = tous passés

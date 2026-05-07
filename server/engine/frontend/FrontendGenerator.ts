@@ -518,6 +518,8 @@ Retourne un JSON avec cette structure:
         return this.generateAngularScaffold(prefix, input);
       case "vue":
         return this.generateVueScaffold(prefix, input);
+      case "thymeleaf":
+        return this.generateThymeleafScaffold(prefix, input);
     }
   }
 
@@ -824,6 +826,62 @@ body {
     return files;
   }
 
+  private generateThymeleafScaffold(prefix: string, input: FrontendGeneratorInput): GeneratedFile[] {
+    const files: GeneratedFile[] = [];
+    const basePackage = input.basePackage || "com.example.app";
+    const packagePath = basePackage.replace(/\./g, "/");
+
+    // pom.xml additions (Thymeleaf + Bootstrap WebJars)
+    files.push({
+      path: `${prefix}/pom-additions.xml`,
+      content: `<!-- Thymeleaf & UI dependencies to add to your Spring Boot pom.xml -->\n<dependencies>\n  <dependency>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-thymeleaf</artifactId>\n  </dependency>\n  <dependency>\n    <groupId>org.webjars</groupId>\n    <artifactId>bootstrap</artifactId>\n    <version>5.3.3</version>\n  </dependency>\n  <dependency>\n    <groupId>org.webjars</groupId>\n    <artifactId>webjars-locator-core</artifactId>\n    <version>0.59</version>\n  </dependency>\n  <dependency>\n    <groupId>nz.net.ultraq.thymeleaf</groupId>\n    <artifactId>thymeleaf-layout-dialect</artifactId>\n    <version>3.3.0</version>\n  </dependency>\n</dependencies>`,
+      category: "config",
+      technology: "JSP",
+    });
+
+    // application.yml Thymeleaf config
+    files.push({
+      path: `${prefix}/application-thymeleaf.yml`,
+      content: `# Thymeleaf configuration\nspring:\n  thymeleaf:\n    prefix: classpath:/templates/\n    suffix: .html\n    mode: HTML\n    encoding: UTF-8\n    cache: false  # Set to true in production\n  web:\n    resources:\n      static-locations: classpath:/static/`,
+      category: "config",
+      technology: "JSP",
+    });
+
+    // Base layout template (Thymeleaf Layout Dialect)
+    files.push({
+      path: `${prefix}/src/main/resources/templates/layout/base.html`,
+      content: `<!DOCTYPE html>\n<html xmlns:th="http://www.thymeleaf.org"\n      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"\n      lang="fr">\n<head>\n  <meta charset="UTF-8"/>\n  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>\n  <title layout:title-pattern="$LAYOUT_TITLE - $CONTENT_TITLE">${input.projectName}</title>\n  <link rel="stylesheet" th:href="@{/webjars/bootstrap/css/bootstrap.min.css}"/>\n  <link rel="stylesheet" th:href="@{/css/style.css}"/>\n</head>\n<body>\n  <!-- Navbar -->\n  <nav class="navbar navbar-expand-lg navbar-dark bg-primary">\n    <div class="container">\n      <a class="navbar-brand" th:href="@{/}">${input.projectName}</a>\n      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">\n        <span class="navbar-toggler-icon"></span>\n      </button>\n      <div class="collapse navbar-collapse" id="navbarNav">\n        <ul class="navbar-nav" id="main-nav">\n          <!-- Navigation items will be generated per entity -->\n        </ul>\n      </div>\n    </div>\n  </nav>\n\n  <!-- Main content -->\n  <main class="container mt-4">\n    <div layout:fragment="content"></div>\n  </main>\n\n  <!-- Footer -->\n  <footer class="bg-light text-center py-3 mt-5">\n    <p class="text-muted mb-0">&copy; 2024 ${input.projectName} - Genere par EJB Client Modernizer</p>\n  </footer>\n\n  <script th:src="@{/webjars/bootstrap/js/bootstrap.bundle.min.js}"></script>\n</body>\n</html>`,
+      category: "config",
+      technology: "JSP",
+    });
+
+    // Static CSS
+    files.push({
+      path: `${prefix}/src/main/resources/static/css/style.css`,
+      content: `/* Custom styles for ${input.projectName} */\n.card-hover:hover {\n  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);\n  transform: translateY(-2px);\n  transition: all 0.3s ease;\n}\n.table-actions .btn {\n  padding: 0.25rem 0.5rem;\n  font-size: 0.875rem;\n}\n.page-header {\n  border-bottom: 2px solid #0d6efd;\n  padding-bottom: 0.5rem;\n  margin-bottom: 1.5rem;\n}`,
+      category: "config",
+      technology: "JSP",
+    });
+
+    // Index/Dashboard page
+    files.push({
+      path: `${prefix}/src/main/resources/templates/index.html`,
+      content: `<!DOCTYPE html>\n<html xmlns:th="http://www.thymeleaf.org"\n      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"\n      layout:decorate="~{layout/base}">\n<head><title>Accueil</title></head>\n<body>\n<div layout:fragment="content">\n  <h1 class="page-header">Tableau de bord</h1>\n  <div class="row">\n    <div class="col-md-4 mb-3" th:each="stat : \${stats}">\n      <div class="card card-hover">\n        <div class="card-body text-center">\n          <h5 class="card-title" th:text="\${stat.label}">Label</h5>\n          <p class="display-4" th:text="\${stat.value}">0</p>\n        </div>\n      </div>\n    </div>\n  </div>\n</div>\n</body>\n</html>`,
+      category: "controller",
+      technology: "JSP",
+    });
+
+    // HomeController (Spring MVC)
+    files.push({
+      path: `${prefix}/src/main/java/${packagePath}/web/HomeController.java`,
+      content: `package ${basePackage}.web;\n\nimport org.springframework.stereotype.Controller;\nimport org.springframework.ui.Model;\nimport org.springframework.web.bind.annotation.GetMapping;\n\nimport java.util.List;\nimport java.util.Map;\n\n/**\n * HomeController - Controleur principal pour le tableau de bord.\n *\n * @generated EJB Client Modernizer v10.8\n */\n@Controller\npublic class HomeController {\n\n    @GetMapping("/")\n    public String index(Model model) {\n        // TODO: [INTEGRATION] Injecter les vrais services pour les statistiques.\n        model.addAttribute("stats", List.of(\n            Map.of("label", "Total", "value", 0)\n        ));\n        return "index";\n    }\n}`,
+      category: "controller",
+      technology: "JSP",
+    });
+
+    return files;
+  }
+
   // =====================================================================
   // Step 4: Generate TypeScript models from DTOs
   // =====================================================================
@@ -924,6 +982,10 @@ ${fields}
   }
 
   private generateApiClient(input: FrontendGeneratorInput): string {
+    if (input.framework === "thymeleaf") {
+      // Thymeleaf uses server-side rendering, no API client needed
+      return `// Thymeleaf/Spring MVC: pas de client HTTP necessaire.\n// Les donnees sont injectees directement dans le Model par les @Controller.\n`;
+    }
     if (input.framework === "react" || input.framework === "vue") {
       return `/**
  * Configuration du client HTTP Axios.
