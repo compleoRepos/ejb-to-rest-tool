@@ -398,6 +398,36 @@ export class DynamicOptionsResolver {
       }
     }
 
+    // Option: TOGAF (toujours proposé pour les projets enterprise multi-composants)
+    if (detectedDomain.primary !== "TOGAF" && input.detectedComponents.length >= 5) {
+      options.push({
+        id: "togaf_mapping",
+        label: "Architecture TOGAF (Enterprise)",
+        description: `Projet multi-composants détecté (${input.detectedComponents.length} composants). Alignement sur le framework TOGAF ADM.`,
+        category: "standard",
+        defaultEnabled: true,
+        confidence: "medium",
+        icon: "Building",
+        color: "slate",
+        triggeredBy: ["multi_component_architecture", `${input.detectedComponents.length}_components`],
+      });
+    }
+
+    // Option: DDD (proposé si microservices détectés et pas déjà primary)
+    if (detectedDomain.primary !== "DDD" && hasBoundedContexts) {
+      options.push({
+        id: "ddd_mapping",
+        label: "Structuration DDD (Domain-Driven Design)",
+        description: `Domaines métier multiples détectés. Structuration en Bounded Contexts, Aggregats et Value Objects.`,
+        category: "standard",
+        defaultEnabled: true,
+        confidence: "medium",
+        icon: "Layers",
+        color: "orange",
+        triggeredBy: ["bounded_contexts", "multiple_domains"],
+      });
+    }
+
     // Option: SOAP to REST adapter (if SOAP detected)
     if (input.technologiesDetected.includes("SOAP")) {
       options.push({
