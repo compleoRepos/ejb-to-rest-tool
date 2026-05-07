@@ -43,19 +43,19 @@ public class AlertMDB implements MessageListener {
   it("should clean JNDI name to Kafka topic: jms/queue/BMCE_NOTIFICATIONS → bmce-notifications", () => {
     const gen = new JmsGenerator();
     // Access private method
-    const cleanTopic = (gen as any)["cleanTopicName"]("jms/queue/BMCE_NOTIFICATIONS");
+    const cleanTopic = (gen as any)["cleanDestinationName"]("jms/queue/BMCE_NOTIFICATIONS");
     expect(cleanTopic).toBe("bmce-notifications");
   });
 
   it("should clean JNDI topic name: jms/topic/ALERTS → alerts", () => {
     const gen = new JmsGenerator();
-    const cleanTopic = (gen as any)["cleanTopicName"]("jms/topic/ALERTS");
+    const cleanTopic = (gen as any)["cleanDestinationName"]("jms/topic/ALERTS");
     expect(cleanTopic).toBe("alerts");
   });
 
   it("should keep simple names unchanged: myQueue → myqueue", () => {
     const gen = new JmsGenerator();
-    const cleanTopic = (gen as any)["cleanTopicName"]("myQueue");
+    const cleanTopic = (gen as any)["cleanDestinationName"]("myQueue");
     expect(cleanTopic).toBe("myqueue");
   });
 });

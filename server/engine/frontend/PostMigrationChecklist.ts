@@ -82,6 +82,7 @@ export interface ChecklistInput {
   hasMicroservices: boolean;
   hasSaga: boolean;
   hasMessaging: boolean;
+  messagingBroker?: "kafka" | "rabbitmq";
   hasBatch: boolean;
   hasSOAP: boolean;
   industryStandard?: IndustryStandard;

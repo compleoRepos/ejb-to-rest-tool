@@ -455,3 +455,14 @@
 - [x] Afficher TOUS les standards disponibles (BIAN, ACORD, HL7_FHIR, TMFORUM, DDD, TOGAF) — chacun avec checkbox individuel
 - [x] Ajouter "(Recommandé)" à côté du standard détecté automatiquement par l'analyse
 - [x] Fix: checkbox messaging/JMS ne se coche pas au clic (nouvel état enableMessaging + envoyé au backend)
+
+## v11.5b — Support RabbitMQ dans la génération messaging
+- [x] Ajouter le choix messaging broker (kafka/rabbitmq) dans le frontend (boutons sous messaging)
+- [x] Envoyer le choix messagingBroker au backend via PATCH options
+- [x] JmsGenerator refactoré : génère Kafka OU RabbitMQ selon le broker choisi
+- [x] RabbitMQ : @RabbitListener, RabbitTemplate, exchange, routing-key
+- [x] pipeline/index.ts : spring-boot-starter-amqp si RabbitMQ, spring-kafka si Kafka
+- [x] application.yml : config RabbitMQ (host, port, user, password, virtual-host)
+- [x] docker-compose.yml : rabbitmq:3.13-management si RabbitMQ, cp-kafka si Kafka
+- [x] Tests unitaires : 12/12 passés (jms-broker-choice.test.ts) + 5/5 anciens tests (jms-fix3)
+- [ ] Modifier microservice-generator pour supporter RabbitMQ (exchanges au lieu de topics) — à faire si besoin

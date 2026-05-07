@@ -137,6 +137,7 @@ export default function CompleoAgentPage() {
   const [enableSoc2Compliance, setEnableSoc2Compliance] = useState(false);
   const [enableSoapToRest, setEnableSoapToRest] = useState(false);
   const [enableMessaging, setEnableMessaging] = useState(false);
+  const [messagingBroker, setMessagingBroker] = useState<"kafka" | "rabbitmq">("kafka");
   const [isLoadingOptions, setIsLoadingOptions] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [projectFromDb, setProjectFromDb] = useState<{ id: number; name: string; fileCount: number } | null>(null);
@@ -542,6 +543,7 @@ export default function CompleoAgentPage() {
           enableSoc2Compliance,
           enableSoapToRest,
           enableMessaging,
+          messagingBroker: enableMessaging ? messagingBroker : undefined,
         }),
       });
 
@@ -590,6 +592,7 @@ export default function CompleoAgentPage() {
           enableSoc2Compliance,
           enableSoapToRest,
           enableMessaging,
+          messagingBroker: enableMessaging ? messagingBroker : undefined,
         }),
       });
       if (!patchRes.ok) {
@@ -1264,7 +1267,29 @@ export default function CompleoAgentPage() {
                           </div>
                         )}
 
-                        {/* Note: le sélecteur dropdown de standard est remplacé par les checkboxes individuels ci-dessus */}
+                        {/* Sub-options : Broker choice (sous messaging) */}
+                        {opt.id === "messaging" && enableMessaging && (
+                          <div className="ml-8 flex items-center gap-3 mt-2">
+                            <span className="text-xs text-muted-foreground">Broker :</span>
+                            <Button
+                              variant={messagingBroker === "kafka" ? "default" : "outline"}
+                              size="sm"
+                              className={`h-7 text-xs ${messagingBroker === "kafka" ? "bg-orange-600 hover:bg-orange-700" : ""}`}
+                              onClick={() => setMessagingBroker("kafka")}
+                            >
+                              Apache Kafka
+                            </Button>
+                            <Button
+                              variant={messagingBroker === "rabbitmq" ? "default" : "outline"}
+                              size="sm"
+                              className={`h-7 text-xs ${messagingBroker === "rabbitmq" ? "bg-orange-600 hover:bg-orange-700" : ""}`}
+                              onClick={() => setMessagingBroker("rabbitmq")}
+                            >
+                              RabbitMQ
+                            </Button>
+                          </div>
+                        )}
+
                         {/* Sub-options : ML enhancement (sous microservices) */}
                         {opt.id === "microservices" && enableMicroservices && (
                           <label className="flex items-center gap-3 cursor-pointer ml-8 group">

@@ -96,6 +96,8 @@ export interface AgentConfig {
     enableSoapToRest?: boolean;
     /** v11.4: Messaging/JMS/MDB support */
     enableMessaging?: boolean;
+    /** v11.5b: Messaging broker choice */
+    messagingBroker?: "kafka" | "rabbitmq";
   };
 }
 
@@ -1048,6 +1050,10 @@ export class CompleoAgent {
       session.ir.industryStandard = chosenStandard;
     }
 
+    // v11.5b: Set messaging broker before generation
+    const { setMessagingBroker } = await import("../engine/generators/jms-generator");
+    setMessagingBroker(session.config.options.messagingBroker || "kafka");
+
     const generatedProject = await this.engine.generate(
       session.ir,
       session.userChoices ? { choices: session.userChoices } : undefined,
@@ -1438,6 +1444,7 @@ export class CompleoAgent {
         hasMicroservices: !!session.config.options.enableMicroservices,
         hasSaga: !!session.config.options.enableSaga,
         hasMessaging: !!session.config.options.enableMessaging || (analysisMultiTech?.technologiesDetected || []).some((t: string) => t === "JMS" || t.includes("MDB") || t.includes("JMS")),
+        messagingBroker: session.config.options.messagingBroker || "kafka",
         hasBatch: (analysisMultiTech?.technologiesDetected || []).includes("BATCH" as any),
         hasSOAP: (analysisMultiTech?.technologiesDetected || []).includes("SOAP" as any),
         industryStandard: (session.config.options.industryStandard as any) || (resolvedOptions.detectedDomain.primary !== "NONE" ? resolvedOptions.detectedDomain.primary : undefined),

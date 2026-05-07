@@ -1,4 +1,30 @@
+/**
+ * JmsGenerator — Génère le code messaging Spring Boot depuis les composants JMS/MDB détectés.
+ *
+ * Supporte deux brokers cibles :
+ *   - kafka (défaut) : @KafkaListener + KafkaTemplate + spring-kafka
+ *   - rabbitmq : @RabbitListener + RabbitTemplate + spring-amqp
+ *
+ * Le choix du broker est passé via le contexte de génération (messagingBroker).
+ *
+ * @version v11.5b
+ * @author Compleo
+ */
+
 import type { CodeGenerator, DetectedComponent, JmsComponent, GeneratedFile, ValidationResult } from "../registry/types";
+
+export type MessagingBrokerType = "kafka" | "rabbitmq";
+
+// Global broker setting — set before generation by the pipeline
+let _activeBroker: MessagingBrokerType = "kafka";
+
+export function setMessagingBroker(broker: MessagingBrokerType): void {
+  _activeBroker = broker;
+}
+
+export function getMessagingBroker(): MessagingBrokerType {
+  return _activeBroker;
+}
 
 export class JmsGenerator implements CodeGenerator {
   readonly technology = "JMS" as const;
@@ -8,25 +34,52 @@ export class JmsGenerator implements CodeGenerator {
     const c = component as JmsComponent;
     const files: GeneratedFile[] = [];
     const pp = basePackage.replace(/\./g, "/");
+    const broker = _activeBroker;
 
     if (c.metadata.role === "MDB" || c.metadata.role === "CONSUMER") {
-      const listenerName = c.className.replace(/MDB$|Bean$/, "") + "KafkaListener";
-      files.push({ path: `src/main/java/${pp}/messaging/${listenerName}.java`, content: this.genListener(c, listenerName, basePackage), category: "infrastructure", technology: "JMS", sourceRef: c.filePath });
+      const suffix = broker === "kafka" ? "KafkaListener" : "RabbitListener";
+      const listenerName = c.className.replace(/MDB$|Bean$/, "") + suffix;
+      files.push({
+        path: `src/main/java/${pp}/messaging/${listenerName}.java`,
+        content: broker === "kafka"
+          ? this.genKafkaListener(c, listenerName, basePackage)
+          : this.genRabbitListener(c, listenerName, basePackage),
+        category: "infrastructure",
+        technology: "JMS",
+        sourceRef: c.filePath,
+      });
     }
 
     if (c.metadata.role === "PRODUCER") {
-      const producerName = c.className.replace(/Producer$|Sender$/, "") + "KafkaProducer";
-      files.push({ path: `src/main/java/${pp}/messaging/${producerName}.java`, content: this.genProducer(c, producerName, basePackage), category: "infrastructure", technology: "JMS", sourceRef: c.filePath });
+      const suffix = broker === "kafka" ? "KafkaProducer" : "RabbitProducer";
+      const producerName = c.className.replace(/Producer$|Sender$/, "") + suffix;
+      files.push({
+        path: `src/main/java/${pp}/messaging/${producerName}.java`,
+        content: broker === "kafka"
+          ? this.genKafkaProducer(c, producerName, basePackage)
+          : this.genRabbitProducer(c, producerName, basePackage),
+        category: "infrastructure",
+        technology: "JMS",
+        sourceRef: c.filePath,
+      });
     }
 
-    files.push({ path: `docs/migration-notes/${c.className}-jms-migration.md`, content: this.genNote(c), category: "migration_note", technology: "JMS", sourceRef: c.filePath });
+    files.push({
+      path: `docs/migration-notes/${c.className}-jms-migration.md`,
+      content: this.genNote(c, broker),
+      category: "migration_note",
+      technology: "JMS",
+      sourceRef: c.filePath,
+    });
     return files;
   }
 
   validate(generated: GeneratedFile[]): ValidationResult { return { valid: true, errors: [], warnings: [] }; }
 
-  /** Convert JNDI name to clean Kafka topic: jms/queue/BMCE_NOTIFICATIONS → bmce-notifications */
-  private cleanTopicName(destinationName: string): string {
+  // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+  /** Convert JNDI name to clean topic/queue name: jms/queue/BMCE_NOTIFICATIONS → bmce-notifications */
+  private cleanDestinationName(destinationName: string): string {
     return destinationName
       .replace(/jms\/(queue|topic)\//i, '')
       .replace(/\//g, '.')
@@ -35,17 +88,184 @@ export class JmsGenerator implements CodeGenerator {
       .replace(/_/g, '-');
   }
 
-  private genListener(c: JmsComponent, listenerName: string, pkg: string): string {
-    const topic = this.cleanTopicName(c.metadata.destinationName);
-    return `package ${pkg}.messaging;\n\nimport lombok.RequiredArgsConstructor;\nimport lombok.extern.slf4j.Slf4j;\nimport org.springframework.kafka.annotation.KafkaListener;\nimport org.springframework.stereotype.Component;\n\n/** Kafka Listener migre depuis JMS ${c.metadata.role}: ${c.className}\n * Destination legacy: ${c.metadata.destinationName} (${c.metadata.destinationType})\n * Type de message: ${c.metadata.messageType}\n */\n@Component\n@RequiredArgsConstructor\n@Slf4j\npublic class ${listenerName} {\n\n    @KafkaListener(topics = "${topic}", groupId = "${pkg.split(".").pop()}-group")\n    public void onMessage(String message) {\n        log.info("Message recu sur topic {}: {}", "${topic}", message);\n        // TODO: Migrer la logique de ${c.className}.onMessage\n    }\n}\n`;
+  // ─── Kafka generators ────────────────────────────────────────────────────────
+
+  private genKafkaListener(c: JmsComponent, listenerName: string, pkg: string): string {
+    const topic = this.cleanDestinationName(c.metadata.destinationName);
+    return `package ${pkg}.messaging;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+
+/**
+ * Kafka Listener migré depuis JMS ${c.metadata.role}: ${c.className}
+ * Destination legacy: ${c.metadata.destinationName} (${c.metadata.destinationType})
+ * Type de message: ${c.metadata.messageType}
+ *
+ * @generated by Compleo v11.5b
+ */
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class ${listenerName} {
+
+    @KafkaListener(topics = "${topic}", groupId = "${pkg.split(".").pop()}-group")
+    public void onMessage(String message) {
+        log.info("Message reçu sur topic {}: {}", "${topic}", message);
+        // TODO: Migrer la logique de ${c.className}.onMessage
+    }
+}
+`;
   }
 
-  private genProducer(c: JmsComponent, producerName: string, pkg: string): string {
-    const topic = this.cleanTopicName(c.metadata.destinationName);
-    return `package ${pkg}.messaging;\n\nimport lombok.RequiredArgsConstructor;\nimport lombok.extern.slf4j.Slf4j;\nimport org.springframework.kafka.core.KafkaTemplate;\nimport org.springframework.stereotype.Component;\n\n/** Kafka Producer migre depuis JMS Producer: ${c.className}\n * Destination legacy: ${c.metadata.destinationName} (${c.metadata.destinationType})\n */\n@Component\n@RequiredArgsConstructor\n@Slf4j\npublic class ${producerName} {\n\n    private final KafkaTemplate<String, String> kafkaTemplate;\n\n    public void send(String message) {\n        log.info("Envoi message sur topic {}", "${topic}");\n        kafkaTemplate.send("${topic}", message);\n    }\n}\n`;
+  private genKafkaProducer(c: JmsComponent, producerName: string, pkg: string): string {
+    const topic = this.cleanDestinationName(c.metadata.destinationName);
+    return `package ${pkg}.messaging;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Component;
+
+/**
+ * Kafka Producer migré depuis JMS Producer: ${c.className}
+ * Destination legacy: ${c.metadata.destinationName} (${c.metadata.destinationType})
+ *
+ * @generated by Compleo v11.5b
+ */
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class ${producerName} {
+
+    private final KafkaTemplate<String, String> kafkaTemplate;
+
+    public void send(String message) {
+        log.info("Envoi message sur topic {}", "${topic}");
+        kafkaTemplate.send("${topic}", message);
+    }
+}
+`;
   }
 
-  private genNote(c: JmsComponent): string {
-    return `# Migration JMS -> Kafka: ${c.className}\n\n## Changements\n- **@MessageDriven / MDB** -> **@KafkaListener**\n- **JMS Queue/Topic** -> **Kafka Topic**: ${c.metadata.destinationName}\n- **ConnectionFactory** -> **KafkaTemplate (auto-configure)**\n- **MessageProducer** -> **KafkaTemplate.send()**\n- **ObjectMessage** -> **JSON serialization**\n\n## Configuration requise\n\`\`\`yaml\nspring:\n  kafka:\n    bootstrap-servers: localhost:9092\n    consumer:\n      group-id: app-group\n      auto-offset-reset: earliest\n\`\`\`\n`;
+  // ─── RabbitMQ generators ─────────────────────────────────────────────────────
+
+  private genRabbitListener(c: JmsComponent, listenerName: string, pkg: string): string {
+    const queue = this.cleanDestinationName(c.metadata.destinationName);
+    const exchange = queue + "-exchange";
+    return `package ${pkg}.messaging;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.stereotype.Component;
+
+/**
+ * RabbitMQ Listener migré depuis JMS ${c.metadata.role}: ${c.className}
+ * Destination legacy: ${c.metadata.destinationName} (${c.metadata.destinationType})
+ * Type de message: ${c.metadata.messageType}
+ * Exchange: ${exchange}
+ *
+ * @generated by Compleo v11.5b
+ */
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class ${listenerName} {
+
+    @RabbitListener(queues = "${queue}")
+    public void onMessage(String message) {
+        log.info("Message reçu sur queue {}: {}", "${queue}", message);
+        // TODO: Migrer la logique de ${c.className}.onMessage
+    }
+}
+`;
+  }
+
+  private genRabbitProducer(c: JmsComponent, producerName: string, pkg: string): string {
+    const queue = this.cleanDestinationName(c.metadata.destinationName);
+    const exchange = queue + "-exchange";
+    const routingKey = queue + ".routing";
+    return `package ${pkg}.messaging;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.stereotype.Component;
+
+/**
+ * RabbitMQ Producer migré depuis JMS Producer: ${c.className}
+ * Destination legacy: ${c.metadata.destinationName} (${c.metadata.destinationType})
+ * Exchange: ${exchange}
+ * Routing key: ${routingKey}
+ *
+ * @generated by Compleo v11.5b
+ */
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class ${producerName} {
+
+    private final RabbitTemplate rabbitTemplate;
+
+    public void send(String message) {
+        log.info("Envoi message sur exchange {} avec routing key {}", "${exchange}", "${routingKey}");
+        rabbitTemplate.convertAndSend("${exchange}", "${routingKey}", message);
+    }
+}
+`;
+  }
+
+  // ─── Migration notes ─────────────────────────────────────────────────────────
+
+  private genNote(c: JmsComponent, broker: MessagingBrokerType): string {
+    if (broker === "rabbitmq") {
+      return `# Migration JMS → RabbitMQ: ${c.className}
+
+## Changements
+- **@MessageDriven / MDB** → **@RabbitListener**
+- **JMS Queue/Topic** → **RabbitMQ Queue**: ${c.metadata.destinationName}
+- **ConnectionFactory** → **RabbitTemplate (auto-configure)**
+- **MessageProducer** → **RabbitTemplate.convertAndSend()**
+- **ObjectMessage** → **JSON serialization (Jackson)**
+
+## Configuration requise
+\`\`\`yaml
+spring:
+  rabbitmq:
+    host: \${RABBITMQ_HOST:localhost}
+    port: \${RABBITMQ_PORT:5672}
+    username: \${RABBITMQ_USER:guest}
+    password: \${RABBITMQ_PASSWORD:guest}
+\`\`\`
+
+## Concepts RabbitMQ
+- **Exchange** : Point d'entrée des messages (direct, topic, fanout)
+- **Queue** : File d'attente liée à un exchange via un routing key
+- **Routing Key** : Clé de routage pour diriger les messages
+`;
+    }
+
+    return `# Migration JMS → Kafka: ${c.className}
+
+## Changements
+- **@MessageDriven / MDB** → **@KafkaListener**
+- **JMS Queue/Topic** → **Kafka Topic**: ${c.metadata.destinationName}
+- **ConnectionFactory** → **KafkaTemplate (auto-configure)**
+- **MessageProducer** → **KafkaTemplate.send()**
+- **ObjectMessage** → **JSON serialization**
+
+## Configuration requise
+\`\`\`yaml
+spring:
+  kafka:
+    bootstrap-servers: \${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: app-group
+      auto-offset-reset: earliest
+\`\`\`
+`;
   }
 }

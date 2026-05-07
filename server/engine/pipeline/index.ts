@@ -5,6 +5,7 @@
  */
 
 import { registry } from "../registry";
+import { getMessagingBroker } from "../generators/jms-generator";
 import type {
   DetectedComponent,
   GeneratedFile,
@@ -108,7 +109,7 @@ export function runPipeline(input: PipelineInput): PipelineResult {
 
 // ─── Infrastructure commune ────────────────────────────────────────────────
 
-function generateInfrastructure(components: DetectedComponent[], basePackage: string): GeneratedFile[] {
+function generateInfrastructure(components: DetectedComponent[], basePackage: string, messagingBroker: "kafka" | "rabbitmq" = "kafka"): GeneratedFile[] {
   const files: GeneratedFile[] = [];
   const techs = new Set(components.map((c) => c.technology));
 
@@ -117,11 +118,11 @@ function generateInfrastructure(components: DetectedComponent[], basePackage: st
   // Spring generator in infra-gen.ts with richer, project-specific content.
   // Only keep docker-compose.yml for JMS/BATCH which is NOT generated elsewhere.
 
-  // docker-compose.yml (si Kafka ou DB) — unique to multi-tech pipeline
+  // docker-compose.yml (si Kafka/RabbitMQ ou DB) — unique to multi-tech pipeline
   if (techs.has("JMS") || techs.has("BATCH")) {
     files.push({
       path: "docker-compose.yml",
-      content: generateDockerCompose(techs),
+      content: generateDockerCompose(techs, messagingBroker),
       category: "infrastructure",
       technology: "JMS",
     });
@@ -130,7 +131,7 @@ function generateInfrastructure(components: DetectedComponent[], basePackage: st
   return files;
 }
 
-function generatePomXml(basePackage: string, techs: Set<TechnologyType>): string {
+function generatePomXml(basePackage: string, techs: Set<TechnologyType>, messagingBroker: "kafka" | "rabbitmq" = "kafka"): string {
   const artifactId = basePackage.split(".").pop() || "app";
   const deps: string[] = [];
 
@@ -144,7 +145,11 @@ function generatePomXml(basePackage: string, techs: Set<TechnologyType>): string
   }
 
   if (techs.has("JMS")) {
-    deps.push("        <dependency>\n            <groupId>org.springframework.kafka</groupId>\n            <artifactId>spring-kafka</artifactId>\n        </dependency>");
+    if (messagingBroker === "rabbitmq") {
+      deps.push("        <dependency>\n            <groupId>org.springframework.boot</groupId>\n            <artifactId>spring-boot-starter-amqp</artifactId>\n        </dependency>");
+    } else {
+      deps.push("        <dependency>\n            <groupId>org.springframework.kafka</groupId>\n            <artifactId>spring-kafka</artifactId>\n        </dependency>");
+    }
   }
 
   if (techs.has("BATCH")) {
@@ -189,7 +194,7 @@ ${deps.join("\n")}
 `;
 }
 
-function generateApplicationYml(techs: Set<TechnologyType>): string {
+function generateApplicationYml(techs: Set<TechnologyType>, messagingBroker: "kafka" | "rabbitmq" = "kafka"): string {
   let yml = `# Généré par Compleo v3.0
 server:
   port: 8080
@@ -217,7 +222,17 @@ spring:
   }
 
   if (techs.has("JMS")) {
-    yml += `
+    if (messagingBroker === "rabbitmq") {
+      yml += `
+  rabbitmq:
+    host: \${RABBITMQ_HOST:localhost}
+    port: \${RABBITMQ_PORT:5672}
+    username: \${RABBITMQ_USER:guest}
+    password: \${RABBITMQ_PASSWORD:guest}
+    virtual-host: /
+`;
+    } else {
+      yml += `
   kafka:
     bootstrap-servers: \${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
@@ -227,6 +242,7 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 `;
+    }
   }
 
   if (techs.has("BATCH")) {
@@ -306,7 +322,7 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
 `;
 }
 
-function generateDockerCompose(techs: Set<TechnologyType>): string {
+function generateDockerCompose(techs: Set<TechnologyType>, messagingBroker: "kafka" | "rabbitmq" = "kafka"): string {
   let compose = `version: '3.8'
 services:
   app:
@@ -318,7 +334,24 @@ services:
 `;
 
   if (techs.has("JMS")) {
-    compose += `
+    if (messagingBroker === "rabbitmq") {
+      compose += `
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+`;
+    } else {
+      compose += `
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     environment:
@@ -336,6 +369,7 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 `;
+    }
   }
 
   return compose;
@@ -368,9 +402,12 @@ function collectMigrationNotes(components: DetectedComponent[]): MigrationNote[]
   }
 
   if (techs.has("JMS")) {
+    const broker = getMessagingBroker();
     notes.push({
-      title: "Migration JMS → Kafka",
-      content: "Les queues/topics JMS sont migrés vers Apache Kafka. Le broker Kafka doit être provisionné (docker-compose fourni). Les noms de topics doivent être configurés dans application.yml.",
+      title: broker === "rabbitmq" ? "Migration JMS → RabbitMQ" : "Migration JMS → Kafka",
+      content: broker === "rabbitmq"
+        ? "Les queues/topics JMS sont migrés vers RabbitMQ (AMQP). Le broker RabbitMQ doit être provisionné (docker-compose fourni). Les exchanges et routing keys doivent être configurés dans application.yml."
+        : "Les queues/topics JMS sont migrés vers Apache Kafka. Le broker Kafka doit être provisionné (docker-compose fourni). Les noms de topics doivent être configurés dans application.yml.",
       severity: "warning",
       technology: "JMS",
       affectedFiles: components.filter((c) => c.technology === "JMS").map((c) => c.filePath),
