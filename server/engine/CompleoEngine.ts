@@ -200,6 +200,32 @@ export class CompleoEngine {
         };
       });
 
+    // v12.2: Si 0 entité JPA détectée mais JDBC présent, inférer depuis les requêtes SQL
+    const hasJdbc = pipelineResult.technologiesDetected.some(
+      (t: string) => t === "JDBC" || t === "JDBC_RAW"
+    ) || files.some(f => /prepareStatement|executeQuery|DriverManager|getConnection/.test(f.content));
+
+    if (detectedEntities.length === 0 && hasJdbc) {
+      const { inferEntitiesFromJdbc } = await import("./migration/JdbcEntityInferrer");
+      const inferResult = inferEntitiesFromJdbc(
+        files.map(f => ({ path: f.path, content: f.content })),
+        basePackage
+      );
+      for (const entity of inferResult.entities) {
+        detectedEntities.push({
+          name: entity.className,
+          tableName: entity.tableName,
+          fieldsCount: entity.columns.length,
+          relations: [],
+        });
+      }
+      // Store inferred entities/repos in IR for downstream use
+      (ir as any)._inferredEntities = inferResult.entities;
+      (ir as any)._inferredRepositories = inferResult.repositories;
+      (ir as any)._inferredEntityFiles = inferResult.entityFiles;
+      (ir as any)._inferredRepositoryFiles = inferResult.repositoryFiles;
+    }
+
     // v11.9: Extraire les DTOs depuis l'IR
     const detectedDTOs = (ir.dtos || []).map((d: any) => ({
       name: d.className,

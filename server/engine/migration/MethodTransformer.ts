@@ -60,13 +60,15 @@ export class MethodTransformer {
 
   /**
    * Transform a single legacy method body to Spring Boot.
+   * @param ctx Method context with body, services, repositories
+   * @param options.skipLLM If true, skip LLM and use only rule-based (for testing)
    */
-  async transform(ctx: MethodContext): Promise<MethodMigrationResult> {
+  async transform(ctx: MethodContext, options?: { skipLLM?: boolean }): Promise<MethodMigrationResult> {
     // Guard: if body is too large, skip LLM and go rule-based
     const bodyLOC = ctx.body.split("\n").filter(l => l.trim()).length;
 
-    // Try LLM first (if available and body is reasonable size)
-    if (bodyLOC <= MethodTransformer.MAX_BODY_LOC_FOR_LLM) {
+    // Try LLM first (if available, not skipped, and body is reasonable size)
+    if (!options?.skipLLM && bodyLOC <= MethodTransformer.MAX_BODY_LOC_FOR_LLM) {
       try {
         const llmAvailable = await isLLMAvailable();
         if (llmAvailable) {

@@ -81,6 +81,57 @@ export function buildMethodBodyMap(ir: ProjectIR): MethodBodyMap {
     }
   }
 
+  // Resolve @Remote interface methods → find body in implementing Bean
+  // For each UseCase that injects services, try to resolve the Bean body
+  for (const uc of ir.useCases) {
+    for (const injected of uc.injectedServices) {
+      // The injected type is e.g. "AccountService", the bean is "AccountServiceBean"
+      const interfaceName = injected.type;
+      const beanNames = [
+        `${interfaceName}Bean`,
+        `${interfaceName}Impl`,
+        `${interfaceName}EJB`,
+        interfaceName.replace(/Service$/, "ServiceBean"),
+        interfaceName.replace(/Remote$/, "Bean"),
+      ];
+      for (const beanName of beanNames) {
+        // Find all methods from this bean and alias them under the interface name
+        for (const [key, value] of Object.entries(map)) {
+          if (key.startsWith(`${beanName}_`)) {
+            const methodName = key.split("_").slice(1).join("_");
+            const interfaceKey = `${interfaceName}_${methodName}`;
+            if (!map[interfaceKey]) {
+              map[interfaceKey] = { ...value, className: interfaceName };
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Also resolve from services in IR
+  for (const svc of ir.services) {
+    if (svc.methods) {
+      for (const method of svc.methods) {
+        if ((method as any).body && (method as any).body.trim().length > 20) {
+          const key = `${svc.className}_${method.name}`;
+          if (!map[key]) {
+            const body = (method as any).body;
+            map[key] = {
+              body,
+              bodyLOC: body.split("\n").filter((l: string) => l.trim().length > 0).length,
+              hasBusinessLogic: detectBusinessLogic(body),
+              returnType: method.returnType || "void",
+              parameters: method.parameters || [],
+              className: svc.className,
+              methodName: method.name,
+            };
+          }
+        }
+      }
+    }
+  }
+
   return map;
 }
 
@@ -147,13 +198,8 @@ export async function runPostGenerationMigration(
       };
 
       try {
-        let result: MethodMigrationResult;
-        if (options?.skipLLM) {
-          // Force rule-based only (for testing without LLM)
-          result = await transformer.transform(ctx);
-        } else {
-          result = await transformer.transform(ctx);
-        }
+        // Pass skipLLM to the transformer — if true, only rule-based is used
+        const result = await transformer.transform(ctx, { skipLLM: options?.skipLLM ?? false });
 
         if (result.strategy !== "todo") {
           // Replace the TODO block with migrated code

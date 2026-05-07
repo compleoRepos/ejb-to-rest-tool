@@ -1,7 +1,8 @@
 /**
- * Test détaillé des 10 projets bancaires GitHub (batch v2) — moteur v12.1.
+ * Test détaillé des 10 projets bancaires GitHub (batch v2) — moteur v12.2.
  * Capture complète pour rapport ultra-détaillé.
  * v12.1: Inclut PostGenerationMigrator pour remplacer les TODOs par du code migré.
+ * v12.2: LLM activé par défaut + inférence entités JDBC.
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -225,7 +226,7 @@ async function testProject(projectDir: string): Promise<DetailedResult> {
         const postMigStats = await runPostGenerationMigration(
           generated.files || [],
           analysis.ir,
-          { maxMethodsPerRun: 30, skipLLM: true } // skipLLM in test mode (no LLM server)
+          { maxMethodsPerRun: 30, skipLLM: false } // v12.2: LLM activé (fallback rule-based si indisponible)
         );
         result.postMigrationStats = postMigStats;
       } catch (postMigErr: any) {
@@ -381,7 +382,7 @@ function categorizeFile(filePath: string): string {
 }
 
 async function main() {
-  console.log("=== Test détaillé des 10 projets bancaires GitHub (batch v2) — moteur v11.9 ===\n");
+   console.log("=== Test détaillé des 10 projets bancaires GitHub (batch v2) — moteur v12.2 ===");;
 
   const projectDirs = fs.readdirSync(BASE_DIR)
     .filter(d => d.startsWith("proj-"))
