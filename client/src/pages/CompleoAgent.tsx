@@ -174,6 +174,133 @@ export default function CompleoAgentPage() {
   const showAnalysisReviewRef = useRef(false);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Safari/iOS detection — SSE is unreliable on these browsers
+  const isSafari = useMemo(() => {
+    const ua = navigator.userAgent;
+    return /Safari/.test(ua) && !/Chrome/.test(ua) && !/Chromium/.test(ua);
+  }, []);
+
+  // Unified polling function that fetches events from /status endpoint
+  const startEventPolling = useCallback((targetSessionId: string, onComplete?: () => void) => {
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusRes = await fetch(`/api/agent/${targetSessionId}/status`);
+        if (!statusRes.ok) return;
+        const st = await statusRes.json();
+        setStatus(st);
+        // Sync events from status response (deduplicated)
+        if (st.events && Array.isArray(st.events)) {
+          const newEvents: AgentEvent[] = [];
+          for (const event of st.events) {
+            const key = `${event.timestamp}-${event.type}-${event.message || ''}-${event.phase || ''}`;
+            if (!seenEventsRef.current.has(key)) {
+              seenEventsRef.current.add(key);
+              newEvents.push(event);
+            }
+          }
+          if (newEvents.length > 0) {
+            setEvents(prev => {
+              // Replace with full deduplicated list from server
+              const allKeys = new Set<string>();
+              const merged: AgentEvent[] = [];
+              for (const ev of [...prev, ...newEvents]) {
+                const k = `${ev.timestamp}-${ev.type}-${ev.message || ''}-${ev.phase || ''}`;
+                if (!allKeys.has(k)) {
+                  allKeys.add(k);
+                  merged.push(ev);
+                }
+              }
+              return merged;
+            });
+            // Process latest events for state transitions
+            for (const event of newEvents) {
+              if (event.type === "PHASE_END" && event.phase === "ANALYZING" && event.data) {
+                setAnalysisData(event.data);
+                setAnalysisPhaseComplete(true);
+              }
+              if (event.type === "PHASE_END" && event.phase === "ANALYZING") {
+                if (!showAnalysisReviewRef.current) {
+                  setShowAnalysisReview(true);
+                  fetch(`/api/agent/${targetSessionId}/dynamic-options`)
+                    .then(r => r.ok ? r.json() : null)
+                    .then(opts => {
+                      if (opts) {
+                        setDynamicOptions(opts);
+                        const optList = opts.options || [];
+                        for (const opt of optList) {
+                          if (opt.defaultEnabled) {
+                            if (opt.id === "frontend") setEnableFrontend(true);
+                            if (opt.id === "microservices") setEnableMicroservices(true);
+                            if (opt.id === "saga") setEnableSaga(true);
+                            if (opt.id === "reports" || opt.id === "ai_reports") setEnableReportEnhancer(true);
+                            if (opt.id === "industryStandard" || opt.id.endsWith("_mapping")) {
+                              setEnableIndustryStandard(true);
+                              if (opts.detectedDomain?.primary && opts.detectedDomain.primary !== "NONE") {
+                                setSelectedStandard(opts.detectedDomain.primary);
+                              }
+                            }
+                            if (opt.id === "ml") setEnableML(true);
+                            if (opt.id === "soc2_compliance") setEnableSoc2Compliance(true);
+                            if (opt.id === "soap_to_rest") setEnableSoapToRest(true);
+                            if (opt.id === "auto_resolve") setAutoResolve(true);
+                          }
+                        }
+                      }
+                    })
+                    .catch(() => {});
+                }
+              }
+              if ((event.type === "AMBIGUITY_DETECTED" || event.type === "AWAITING_INPUT") && event.data?.ambiguities) {
+                setAmbiguities(event.data.ambiguities as AgentAmbiguity[]);
+                if (!showAnalysisReviewRef.current) {
+                  setShowAnalysisReview(true);
+                }
+              }
+              if (event.type === "SUCCESS" || event.type === "FAILURE" || event.type === "CANCELLED") {
+                setIsRunning(false);
+                if (timerRef.current) clearInterval(timerRef.current);
+                clearInterval(pollInterval);
+                pollIntervalRef.current = null;
+                if (event.type === "SUCCESS" && targetSessionId) {
+                  fetch(`/api/agent/${targetSessionId}/post-migration-checklist`)
+                    .then(r => r.ok ? r.json() : null)
+                    .then(d => { if (d) { setPostMigrationChecklist(d); setActiveTab("checklist"); } })
+                    .catch(() => {});
+                }
+                onComplete?.();
+              }
+            }
+          }
+          // Also check state directly
+          if (st.state === "COMPLETED" || st.state === "FAILED" || st.state === "CANCELLED") {
+            setIsRunning(false);
+            if (timerRef.current) clearInterval(timerRef.current);
+            clearInterval(pollInterval);
+            pollIntervalRef.current = null;
+            if (st.state === "COMPLETED" && targetSessionId) {
+              fetch(`/api/agent/${targetSessionId}/post-migration-checklist`)
+                .then(r => r.ok ? r.json() : null)
+                .then(d => { if (d) { setPostMigrationChecklist(d); setActiveTab("checklist"); } })
+                .catch(() => {});
+            }
+            onComplete?.();
+          }
+          if (st.state === "AWAITING_INPUT" && !showAnalysisReviewRef.current) {
+            setShowAnalysisReview(true);
+            setAnalysisPhaseComplete(true);
+            fetch(`/api/agent/${targetSessionId}/dynamic-options`)
+              .then(r => r.ok ? r.json() : null)
+              .then(opts => { if (opts) setDynamicOptions(opts); })
+              .catch(() => {});
+          }
+        }
+      } catch { /* ignore network errors */ }
+    }, 2000);
+    pollIntervalRef.current = pollInterval;
+    return pollInterval;
+  }, []);
+
   // ─── Upload ZIP ─────────────────────────────────────────────────────────
 
   const handleFileSelect = useCallback(async (file: File) => {
@@ -239,141 +366,96 @@ export default function CompleoAgentPage() {
         setElapsedMs(Date.now() - startTimeRef.current);
       }, 1000);
 
-      // Connect SSE
+      // Connect to agent events — use polling for Safari (SSE unreliable), SSE for others
       seenEventsRef.current.clear();
-      const es = new EventSource(`/api/agent/${data.sessionId}/events`);
-      eventSourceRef.current = es;
 
-      es.onmessage = (e) => {
-        try {
-          const event: AgentEvent = JSON.parse(e.data);
-          // Deduplicate events on reconnection (server replays full history)
-          const key = `${event.timestamp}-${event.type}-${event.message || ''}-${event.phase || ''}`;
-          if (seenEventsRef.current.has(key)) return;
-          seenEventsRef.current.add(key);
-          setEvents((prev) => [...prev, event]);
+      if (isSafari) {
+        // Safari/iOS: Use polling only (SSE is unreliable due to aggressive connection killing)
+        console.log("[Safari] Mode polling activé (SSE désactivé)");
+        startEventPolling(data.sessionId);
+      } else {
+        // Chrome/Firefox: Use SSE with polling fallback
+        const es = new EventSource(`/api/agent/${data.sessionId}/events`);
+        eventSourceRef.current = es;
 
-          // v10.7: Capturer la fin de la phase ANALYZING pour afficher l'écran de review
-          if (event.type === "PHASE_END" && event.phase === "ANALYZING" && event.data) {
-            setAnalysisData(event.data);
-            setAnalysisPhaseComplete(true);
-          }
+        es.onmessage = (e) => {
+          try {
+            const event: AgentEvent = JSON.parse(e.data);
+            const key = `${event.timestamp}-${event.type}-${event.message || ''}-${event.phase || ''}`;
+            if (seenEventsRef.current.has(key)) return;
+            seenEventsRef.current.add(key);
+            setEvents((prev) => [...prev, event]);
 
-          // Handle ambiguity detection (from both AMBIGUITY_DETECTED and AWAITING_INPUT events)
-          if ((event.type === "AMBIGUITY_DETECTED" || event.type === "AWAITING_INPUT") && event.data?.ambiguities) {
-            setAmbiguities(event.data.ambiguities as AgentAmbiguity[]);
-            // v10.7: Afficher l'écran de review au lieu de switcher directement aux ambiguités
-            if (!showAnalysisReview) {
-              setShowAnalysisReview(true);
+            if (event.type === "PHASE_END" && event.phase === "ANALYZING" && event.data) {
+              setAnalysisData(event.data);
+              setAnalysisPhaseComplete(true);
             }
-          }
 
-          // v10.7: Si la phase ANALYZING est terminée, afficher le review + charger les options dynamiques
-          if (event.type === "PHASE_END" && event.phase === "ANALYZING") {
-            setShowAnalysisReview(true);
-            // v10.8: Charger les options dynamiques basées sur l'analyse
-            if (data.sessionId) {
-              setIsLoadingOptions(true);
-              fetch(`/api/agent/${data.sessionId}/dynamic-options`)
-                .then(r => r.ok ? r.json() : null)
-                .then(opts => {
-                  if (opts) {
-                    setDynamicOptions(opts);
-                    // Auto-activer les options recommandées
-                    const optList = opts.options || [];
-                    for (const opt of optList) {
-                      if (opt.defaultEnabled) {
-                        if (opt.id === "frontend") setEnableFrontend(true);
-                        if (opt.id === "microservices") setEnableMicroservices(true);
-                        if (opt.id === "saga") setEnableSaga(true);
-                        if (opt.id === "reports" || opt.id === "ai_reports") setEnableReportEnhancer(true);
-                        if (opt.id === "industryStandard" || opt.id.endsWith("_mapping")) {
-                          setEnableIndustryStandard(true);
-                          if (opts.detectedDomain?.primary && opts.detectedDomain.primary !== "NONE") {
-                            setSelectedStandard(opts.detectedDomain.primary);
+            if ((event.type === "AMBIGUITY_DETECTED" || event.type === "AWAITING_INPUT") && event.data?.ambiguities) {
+              setAmbiguities(event.data.ambiguities as AgentAmbiguity[]);
+              if (!showAnalysisReviewRef.current) {
+                setShowAnalysisReview(true);
+              }
+            }
+
+            if (event.type === "PHASE_END" && event.phase === "ANALYZING") {
+              if (!showAnalysisReviewRef.current) {
+                setShowAnalysisReview(true);
+                if (data.sessionId) {
+                  setIsLoadingOptions(true);
+                  fetch(`/api/agent/${data.sessionId}/dynamic-options`)
+                    .then(r => r.ok ? r.json() : null)
+                    .then(opts => {
+                      if (opts) {
+                        setDynamicOptions(opts);
+                        const optList = opts.options || [];
+                        for (const opt of optList) {
+                          if (opt.defaultEnabled) {
+                            if (opt.id === "frontend") setEnableFrontend(true);
+                            if (opt.id === "microservices") setEnableMicroservices(true);
+                            if (opt.id === "saga") setEnableSaga(true);
+                            if (opt.id === "reports" || opt.id === "ai_reports") setEnableReportEnhancer(true);
+                            if (opt.id === "industryStandard" || opt.id.endsWith("_mapping")) {
+                              setEnableIndustryStandard(true);
+                              if (opts.detectedDomain?.primary && opts.detectedDomain.primary !== "NONE") {
+                                setSelectedStandard(opts.detectedDomain.primary);
+                              }
+                            }
+                            if (opt.id === "ml") setEnableML(true);
+                            if (opt.id === "soc2_compliance") setEnableSoc2Compliance(true);
+                            if (opt.id === "soap_to_rest") setEnableSoapToRest(true);
+                            if (opt.id === "auto_resolve") setAutoResolve(true);
                           }
                         }
-                        if (opt.id === "ml") setEnableML(true);
-                        if (opt.id === "soc2_compliance") setEnableSoc2Compliance(true);
-                        if (opt.id === "soap_to_rest") setEnableSoapToRest(true);
-                        if (opt.id === "auto_resolve") setAutoResolve(true);
                       }
-                    }
-                  }
-                })
-                .catch(() => {})
-                .finally(() => setIsLoadingOptions(false));
-            }
-          }
-
-          // Handle completion/failure
-          if (event.type === "SUCCESS" || event.type === "FAILURE" || event.type === "CANCELLED") {
-            setIsRunning(false);
-            if (timerRef.current) clearInterval(timerRef.current);
-            es.close();
-
-            // v10.8: Load post-migration checklist on success
-            if (event.type === "SUCCESS" && sessionId) {
-              fetch(`/api/agent/${sessionId}/post-migration-checklist`)
-                .then(r => r.ok ? r.json() : null)
-                .then(data => {
-                  if (data) {
-                    setPostMigrationChecklist(data);
-                    setActiveTab("checklist");
-                  }
-                })
-                .catch(() => {});
-            }
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      };
-
-      es.onerror = () => {
-        // SSE connection lost — do NOT reconnect in loop (server replays all events causing duplicates)
-        // Instead, switch to polling for status detection
-        es.close();
-        eventSourceRef.current = null;
-        console.log("[SSE] Connexion perdue, passage en mode polling");
-        // Start polling fallback
-        const pollInterval = setInterval(async () => {
-          try {
-            const statusRes = await fetch(`/api/agent/${data.sessionId}/status`);
-            if (statusRes.ok) {
-              const st = await statusRes.json();
-              setStatus(st);
-              if (st.state === "COMPLETED" || st.state === "FAILED" || st.state === "CANCELLED") {
-                setIsRunning(false);
-                if (timerRef.current) clearInterval(timerRef.current);
-                clearInterval(pollInterval);
-                if (st.state === "COMPLETED" && sessionId) {
-                  fetch(`/api/agent/${sessionId}/post-migration-checklist`)
-                    .then(r => r.ok ? r.json() : null)
-                    .then(d => { if (d) { setPostMigrationChecklist(d); setActiveTab("checklist"); } })
-                    .catch(() => {});
+                    })
+                    .catch(() => {})
+                    .finally(() => setIsLoadingOptions(false));
                 }
               }
-              if (st.state === "AWAITING_INPUT" && !showAnalysisReviewRef.current) {
-                setShowAnalysisReview(true);
-                setAnalysisPhaseComplete(true);
-                fetch(`/api/agent/${data.sessionId}/dynamic-options`)
+            }
+
+            if (event.type === "SUCCESS" || event.type === "FAILURE" || event.type === "CANCELLED") {
+              setIsRunning(false);
+              if (timerRef.current) clearInterval(timerRef.current);
+              es.close();
+              if (event.type === "SUCCESS" && sessionId) {
+                fetch(`/api/agent/${sessionId}/post-migration-checklist`)
                   .then(r => r.ok ? r.json() : null)
-                  .then(opts => { if (opts) setDynamicOptions(opts); })
-                  .catch(() => {});
-                // Also fetch ambiguities
-                fetch(`/api/agent/${data.sessionId}/status`)
-                  .then(r => r.ok ? r.json() : null)
-                  .then(st2 => {
-                    if (st2?.ambiguities) setAmbiguities(st2.ambiguities);
-                  })
+                  .then(d => { if (d) { setPostMigrationChecklist(d); setActiveTab("checklist"); } })
                   .catch(() => {});
               }
             }
           } catch { /* ignore */ }
-        }, 3000);
-        pollIntervalRef.current = pollInterval;
-      };
+        };
+
+        es.onerror = () => {
+          es.close();
+          eventSourceRef.current = null;
+          console.log("[SSE] Connexion perdue, passage en mode polling");
+          startEventPolling(data.sessionId);
+        };
+      }
 
       toast.success("Agent démarré");
     } catch (err) {
@@ -513,10 +595,48 @@ export default function CompleoAgentPage() {
         });
         toast.success("Options configurées, génération en cours...");
       }
+
+      // Reconnect event monitoring after choices are sent
+      if (isSafari) {
+        console.log("[Safari] Relancement polling après choix");
+        startEventPolling(sessionId);
+      } else {
+        if (eventSourceRef.current) {
+          eventSourceRef.current.close();
+          eventSourceRef.current = null;
+        }
+        const es = new EventSource(`/api/agent/${sessionId}/events`);
+        eventSourceRef.current = es;
+        es.onmessage = (e) => {
+          try {
+            const event: AgentEvent = JSON.parse(e.data);
+            const key = `${event.timestamp}-${event.type}-${event.message || ''}-${event.phase || ''}`;
+            if (seenEventsRef.current.has(key)) return;
+            seenEventsRef.current.add(key);
+            setEvents((prev) => [...prev, event]);
+            if (event.type === "SUCCESS" || event.type === "FAILURE" || event.type === "CANCELLED") {
+              setIsRunning(false);
+              if (timerRef.current) clearInterval(timerRef.current);
+              es.close();
+              if (event.type === "SUCCESS") {
+                fetch(`/api/agent/${sessionId}/post-migration-checklist`)
+                  .then(r => r.ok ? r.json() : null)
+                  .then(d => { if (d) { setPostMigrationChecklist(d); setActiveTab("checklist"); } })
+                  .catch(() => {});
+              }
+            }
+          } catch { /* ignore */ }
+        };
+        es.onerror = () => {
+          es.close();
+          eventSourceRef.current = null;
+          startEventPolling(sessionId);
+        };
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erreur de configuration");
     }
-  }, [sessionId, autoResolve, enableMicroservices, enableML, enableReportEnhancer, enableSaga, enableFrontend, frontendFramework, enableIndustryStandard, selectedStandard, dynamicOptions, ambiguities]);
+  }, [sessionId, autoResolve, enableMicroservices, enableML, enableReportEnhancer, enableSaga, enableFrontend, frontendFramework, enableIndustryStandard, selectedStandard, dynamicOptions, ambiguities, isSafari, startEventPolling]);
 
   // ─── Download ───────────────────────────────────────────────────────────
 
@@ -584,58 +704,49 @@ export default function CompleoAgentPage() {
       }, 1000);
 
       seenEventsRef.current.clear();
-      const es = new EventSource(`/api/agent/${data.sessionId}/events`);
-      eventSourceRef.current = es;
 
-      es.onmessage = (e) => {
-        try {
-          const event: AgentEvent = JSON.parse(e.data);
-          const key = `${event.timestamp}-${event.type}-${event.message || ''}-${event.phase || ''}`;
-          if (seenEventsRef.current.has(key)) return;
-          seenEventsRef.current.add(key);
-          setEvents((prev) => [...prev, event]);
+      if (isSafari) {
+        console.log("[Safari] Mode polling activ\u00e9 (handleResumeGeneration)");
+        startEventPolling(data.sessionId);
+      } else {
+        const es = new EventSource(`/api/agent/${data.sessionId}/events`);
+        eventSourceRef.current = es;
 
-          // v10.7: Capturer la fin de la phase ANALYZING
-          if (event.type === "PHASE_END" && event.phase === "ANALYZING" && event.data) {
-            setAnalysisData(event.data);
-            setAnalysisPhaseComplete(true);
-            setShowAnalysisReview(true);
-          }
+        es.onmessage = (e) => {
+          try {
+            const event: AgentEvent = JSON.parse(e.data);
+            const key = `${event.timestamp}-${event.type}-${event.message || ''}-${event.phase || ''}`;
+            if (seenEventsRef.current.has(key)) return;
+            seenEventsRef.current.add(key);
+            setEvents((prev) => [...prev, event]);
 
-          if ((event.type === "AMBIGUITY_DETECTED" || event.type === "AWAITING_INPUT") && event.data?.ambiguities) {
-            setAmbiguities(event.data.ambiguities as AgentAmbiguity[]);
-            if (!showAnalysisReview) {
+            if (event.type === "PHASE_END" && event.phase === "ANALYZING" && event.data) {
+              setAnalysisData(event.data);
+              setAnalysisPhaseComplete(true);
               setShowAnalysisReview(true);
             }
-          }
-          if (event.type === "SUCCESS" || event.type === "FAILURE" || event.type === "CANCELLED") {
-            setIsRunning(false);
-            if (timerRef.current) clearInterval(timerRef.current);
-            es.close();
-          }
-        } catch { /* ignore */ }
-      };
 
-      es.onerror = () => {
-        es.close();
-        // Polling fallback instead of reconnect
-        const pollInterval = setInterval(async () => {
-          try {
-            const statusRes = await fetch(`/api/agent/${data.sessionId}/status`);
-            if (statusRes.ok) {
-              const st = await statusRes.json();
-              if (st.state === "COMPLETED" || st.state === "FAILED" || st.state === "CANCELLED") {
-                setIsRunning(false);
-                if (timerRef.current) clearInterval(timerRef.current);
-                clearInterval(pollInterval);
-              }
-              if (st.state === "AWAITING_INPUT" && !showAnalysisReview) {
+            if ((event.type === "AMBIGUITY_DETECTED" || event.type === "AWAITING_INPUT") && event.data?.ambiguities) {
+              setAmbiguities(event.data.ambiguities as AgentAmbiguity[]);
+              if (!showAnalysisReviewRef.current) {
                 setShowAnalysisReview(true);
               }
             }
+            if (event.type === "SUCCESS" || event.type === "FAILURE" || event.type === "CANCELLED") {
+              setIsRunning(false);
+              if (timerRef.current) clearInterval(timerRef.current);
+              es.close();
+            }
           } catch { /* ignore */ }
-        }, 5000);
-      };
+        };
+
+        es.onerror = () => {
+          es.close();
+          eventSourceRef.current = null;
+          console.log("[SSE] Connexion perdue (resume), passage en mode polling");
+          startEventPolling(data.sessionId);
+        };
+      }
 
       toast.success(`Agent d\u00e9marr\u00e9 depuis le projet ${data.projectName} (${data.fileCount} fichiers)`);
     } catch (err) {
