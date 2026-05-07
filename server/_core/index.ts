@@ -85,7 +85,11 @@ async function startServer() {
     res.json({
       version: "11.2",
       uptime: process.uptime(),
-      llm: llmHealth,
+      llm: {
+        available: llmHealth.manus || llmHealth.finetuned,
+        model: llmHealth.activeBackend !== "none" ? llmHealth.activeBackend : undefined,
+        backend: llmHealth.activeBackend,
+      },
       activeSessions,
       rulesCount,
       memory: {
