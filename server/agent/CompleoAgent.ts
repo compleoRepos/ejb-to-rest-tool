@@ -1206,7 +1206,18 @@ export class CompleoAgent {
       allFiles.map(f => ({ path: f.path, content: f.content }))
     );
 
-    if (placeholderCount === 0) {
+    // BUG 7 FIX: Baisser le seuil — aussi déclencher si des patterns JDBC raw
+    // sont détectés dans les services (Connection, PreparedStatement, ResultSet, SQLException)
+    let shouldMigrate = placeholderCount > 0;
+    if (!shouldMigrate) {
+      const jdbcRawPatterns = /(?:Connection\s+conn|PreparedStatement\s+ps|ResultSet\s+rs|getConnection\(\)|createStatement\(\)|catch\s*\(\s*SQLException)/;
+      const jdbcRawCount = allFiles.filter(f =>
+        f.path.endsWith(".java") && jdbcRawPatterns.test(f.content)
+      ).length;
+      shouldMigrate = jdbcRawCount >= 3; // Au moins 3 fichiers avec JDBC raw
+    }
+
+    if (!shouldMigrate) {
       return; // Pas de JDBC à migrer
     }
 
@@ -1527,7 +1538,27 @@ export class CompleoAgent {
 
     // 1. Split into microservices
     const splitter = new MicroserviceSplitter();
-    const services = splitter.split(session.ir, pipelineResult);
+    let services = splitter.split(session.ir, pipelineResult);
+
+    // BUG 9 FIX: Limiter le nombre de microservices selon la taille du projet
+    const sourceFileCount = session.analysisResult?.summary?.useCaseCount || session.ir?.useCases?.length || 0;
+    let maxServices: number;
+    if (sourceFileCount <= 15) maxServices = 1;
+    else if (sourceFileCount <= 30) maxServices = 2;
+    else if (sourceFileCount <= 60) maxServices = 3;
+    else maxServices = Infinity;
+
+    // Aussi: ne jamais dépasser nombre_entités / 2
+    const entityCount = session.analysisResult?.summary?.dtoCount || sourceFileCount;
+    const entityLimit = Math.max(1, Math.floor(entityCount / 2));
+    maxServices = Math.min(maxServices, entityLimit);
+
+    if (services.length > maxServices && maxServices < Infinity) {
+      // Garder les N services les plus confiants
+      services = services
+        .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
+        .slice(0, maxServices);
+    }
 
     yield this.event("LOG", {
       level: "info",
@@ -2114,7 +2145,7 @@ export class CompleoAgent {
     const detectedTables: string[] | undefined = undefined;
 
     const newQualityReport = scoreGeneration(
-      javaFiles.map(f => ({ path: f.path, content: f.content, category: f.category })),
+      javaFiles.map(f => ({ path: f.path, content: f.content, category: f.category, technology: f.technology || "other" as any })),
       microserviceNames,
       detectedTables,
       legacyMethodCount,

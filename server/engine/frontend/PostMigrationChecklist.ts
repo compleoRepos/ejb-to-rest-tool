@@ -370,6 +370,54 @@ export class PostMigrationChecklist {
     }
 
     // =====================================================================
+    // 6b. PERFORMANCE — Transaction boundaries & connection pooling
+    // =====================================================================
+
+    items.push({
+      id: nextId(),
+      category: "performance",
+      priority: "high",
+      title: "Valider les frontieres transactionnelles (@Transactional)",
+      what: "Verifier que chaque @Transactional est place au bon niveau (service, pas controller) et avec la bonne propagation.",
+      why: "Le legacy utilisait des transactions container-managed (CMT) ou bean-managed (BMT). La transformation automatique place @Transactional sur les services mais la propagation (REQUIRED, REQUIRES_NEW) doit etre validee.",
+      how: "1. Lister tous les @Transactional dans les services\n2. Verifier que les methodes read-only ont readOnly=true\n3. Verifier la propagation pour les appels imbriques\n4. Tester les rollbacks sur exception.",
+      relatedFiles: ["backend/src/main/java/**/service/"],
+      estimatedEffort: "1 jour",
+      autoVerified: false,
+      tags: ["backend", "performance", "transaction"],
+    });
+
+    items.push({
+      id: nextId(),
+      category: "performance",
+      priority: "medium",
+      title: "Configurer le pool de connexions (HikariCP)",
+      what: "Ajuster les parametres HikariCP (maximumPoolSize, connectionTimeout, idleTimeout) selon la charge attendue.",
+      why: "Le legacy utilisait un pool JNDI configure dans le serveur d'applications. Spring Boot utilise HikariCP par defaut mais les valeurs par defaut (10 connexions) peuvent etre insuffisantes.",
+      how: "1. Estimer le nombre de connexions simultanees necessaires\n2. Configurer spring.datasource.hikari.maximum-pool-size\n3. Configurer les timeouts\n4. Monitorer avec Actuator /actuator/metrics/hikaricp.*",
+      relatedFiles: ["backend/src/main/resources/application.yml"],
+      estimatedEffort: "0.5 jour",
+      autoVerified: false,
+      tags: ["backend", "performance", "database"],
+    });
+
+    if (input.hasMicroservices) {
+      items.push({
+        id: nextId(),
+        category: "performance",
+        priority: "high",
+        title: "Implementer les circuit breakers inter-services",
+        what: "Ajouter Resilience4j (CircuitBreaker, Retry, Bulkhead) sur les appels inter-microservices.",
+        why: "En architecture microservices, un service lent peut cascader et bloquer tous les autres. Les circuit breakers isolent les pannes.",
+        how: "1. Ajouter la dependance resilience4j-spring-boot3\n2. Annoter les appels inter-services avec @CircuitBreaker\n3. Configurer les seuils (failureRateThreshold, waitDurationInOpenState)\n4. Tester avec un service volontairement arrete.",
+        relatedFiles: ["backend/src/main/java/**/client/", "backend/src/main/resources/application.yml"],
+        estimatedEffort: "1 jour",
+        autoVerified: false,
+        tags: ["backend", "performance", "microservices"],
+      });
+    }
+
+    // =====================================================================
     // 7. DATA MIGRATION
     // =====================================================================
 

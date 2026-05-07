@@ -889,17 +889,120 @@ ${legacyRules}
 
     if (lineIndex >= 0 && lineIndex < lines.length && lines[lineIndex].startsWith("import ")) {
       const importLine = lines[lineIndex].trim();
-      // Comment out the import and add TODO
-      lines[lineIndex] = `// TODO: Dependance externe non resolue - ${importLine}`;
-      project[fileIndex] = { ...project[fileIndex], content: lines.join("\n") };
+      const importMatch = importLine.match(/^import\s+([\w.]+)\.(\w+)\s*;$/);
+      if (!importMatch) return null;
 
-      return {
-        file: error.file,
-        description: `Dependance externe commentee : ${importLine} → TODO ajoute`,
-      };
+      const fullPackage = importMatch[1];
+      const className = importMatch[2];
+
+      // Déterminer si c'est un package interne au projet (même base package)
+      const basePackage = this.findMostCommonPackage(project);
+      const isInternalPackage = fullPackage.startsWith(basePackage) ||
+        fullPackage.split(".").slice(0, 2).join(".") === basePackage.split(".").slice(0, 2).join(".");
+
+      if (isInternalPackage) {
+        // --- INTERNE : Générer un stub au lieu de commenter ---
+        const stubContent = this.generateStubForMissingClass(className, fullPackage, project);
+        const stubPath = `src/main/java/${fullPackage.replace(/\./g, "/")}/${className}.java`;
+
+        const alreadyExists = project.some(f => f.path === stubPath);
+        if (!alreadyExists) {
+          project.push({ path: stubPath, content: stubContent, category: "generated-stub" });
+        }
+
+        return {
+          file: stubPath,
+          description: `Stub généré pour classe manquante : ${fullPackage}.${className}`,
+        };
+      } else {
+        // --- EXTERNE : Garder si connu, sinon supprimer l'import ---
+        const isKnownExternal = this.isKnownExternalDependency(fullPackage);
+        if (isKnownExternal) {
+          return { file: error.file, description: `Import externe conservé (dépendance Maven) : ${importLine}` };
+        } else {
+          lines.splice(lineIndex, 1);
+          project[fileIndex] = { ...project[fileIndex], content: lines.join("\n") };
+          return { file: error.file, description: `Import externe supprimé (non résolu) : ${importLine}` };
+        }
+      }
     }
 
     return null;
+  }
+
+  private generateStubForMissingClass(className: string, packageName: string, project: GeneratedFile[]): string {
+    const lines: string[] = [`package ${packageName};`, ""];
+
+    if (className.endsWith("DTO") || className.endsWith("Dto") || className.endsWith("Request") || className.endsWith("Response") || className.endsWith("Vo")) {
+      lines.push("import lombok.Data;", "import lombok.NoArgsConstructor;", "import lombok.AllArgsConstructor;", "");
+      lines.push("/** DTO généré automatiquement \u2014 TODO: Compléter les champs. */");
+      lines.push("@Data", "@NoArgsConstructor", "@AllArgsConstructor");
+      lines.push(`public class ${className} {`, "");
+      const inferredFields = this.inferFieldsFromUsage(className, project);
+      for (const f of inferredFields) lines.push(`    private ${f.type} ${f.name};`);
+      if (inferredFields.length === 0) lines.push("    private Long id;");
+      lines.push("}");
+    } else if (className.endsWith("Exception")) {
+      lines.push(`public class ${className} extends RuntimeException {`, "");
+      lines.push(`    public ${className}() { super(); }`);
+      lines.push(`    public ${className}(String message) { super(message); }`);
+      lines.push(`    public ${className}(String message, Throwable cause) { super(message, cause); }`);
+      lines.push("}");
+    } else if (className.endsWith("Repository")) {
+      const entity = className.replace("Repository", "");
+      lines.push(`import org.springframework.data.jpa.repository.JpaRepository;`, "import org.springframework.stereotype.Repository;", "");
+      lines.push("@Repository");
+      lines.push(`public interface ${className} extends JpaRepository<${entity}, Long> {`, "}");
+    } else if (className.endsWith("Service") && !className.endsWith("ServiceImpl")) {
+      lines.push(`/** Interface de service générée \u2014 TODO: Ajouter les méthodes métier. */`);
+      lines.push(`public interface ${className} {`, "}");
+    } else if (className.endsWith("Mapper")) {
+      lines.push("import org.mapstruct.Mapper;", "import org.mapstruct.MappingConstants;", "");
+      lines.push("@Mapper(componentModel = MappingConstants.ComponentModel.SPRING)");
+      lines.push(`public interface ${className} {`, "}");
+    } else if (className.endsWith("Enum") || className.endsWith("Type") || className.endsWith("Status")) {
+      lines.push(`public enum ${className} { DEFAULT }`);
+    } else {
+      lines.push("import lombok.Data;", "");
+      lines.push("/** Classe générée automatiquement \u2014 TODO: Implémenter. */");
+      lines.push("@Data");
+      lines.push(`public class ${className} {`, "    private Long id;", "}");
+    }
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  private inferFieldsFromUsage(className: string, project: GeneratedFile[]): { type: string; name: string }[] {
+    const fields: { type: string; name: string }[] = [];
+    const seen = new Set<string>();
+    for (const file of project) {
+      if (!file.path.endsWith(".java") || !file.content.includes(className)) continue;
+      const getters = file.content.matchAll(/\.get(\w+)\(\)/g);
+      for (const m of getters) {
+        const name = m[1].charAt(0).toLowerCase() + m[1].slice(1);
+        if (!seen.has(name) && name !== "class") { seen.add(name); fields.push({ type: this.inferFieldType(name), name }); }
+        if (fields.length >= 10) break;
+      }
+      if (fields.length >= 10) break;
+    }
+    return fields;
+  }
+
+  private inferFieldType(name: string): string {
+    const l = name.toLowerCase();
+    if (l.includes("id") || l.includes("count") || l.includes("number")) return "Long";
+    if (l.includes("amount") || l.includes("price") || l.includes("total") || l.includes("balance")) return "BigDecimal";
+    if (l.includes("date") || l.includes("time") || l.includes("created") || l.includes("updated")) return "LocalDateTime";
+    if (l.includes("active") || l.includes("enabled") || l.includes("valid") || l.includes("flag")) return "Boolean";
+    return "String";
+  }
+
+  private isKnownExternalDependency(pkg: string): boolean {
+    const known = ["org.apache.commons", "com.google.common", "com.google.gson", "org.apache.http",
+      "org.apache.poi", "org.apache.kafka", "com.rabbitmq", "org.quartz", "org.jboss",
+      "io.jsonwebtoken", "com.auth0", "org.modelmapper", "org.mapstruct", "com.opencsv",
+      "net.sf.jasperreports", "org.thymeleaf", "org.primefaces"];
+    return known.some(p => pkg.startsWith(p));
   }
 
   // --- Niveau 3 : Cross-File Analysis & Auto-Correction ---------------

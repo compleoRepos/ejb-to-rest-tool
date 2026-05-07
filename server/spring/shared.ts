@@ -15,7 +15,8 @@ export interface GeneratedFile {
   content: string;
   category: "controller" | "service" | "dto" | "test" | "enum" | "exception" |
     "validator" | "config" | "cloud" | "pom" | "report" | "main" | "other" |
-    "entity" | "repository" | "migration_note" | "infrastructure" | "adapter";
+    "entity" | "repository" | "migration_note" | "infrastructure" | "adapter" | "saga";
+  technology?: string;
 }
 
 export interface GenerationResult {

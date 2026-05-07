@@ -164,16 +164,17 @@ const DOMAIN_INDICATORS: Record<IndustryStandard, { keywords: string[]; classPat
   },
   DDD: {
     keywords: [
-      "product", "catalog", "cart", "order", "checkout", "inventory",
-      "shipping", "warehouse", "customer", "merchant", "payment",
-      "discount", "coupon", "review", "wishlist", "recommendation",
+      "product", "catalog", "cart", "order", "checkout",
+      "customer", "merchant", "discount", "coupon", "review",
+      "wishlist", "recommendation", "shop", "store", "ecommerce",
+      "marketplace", "boutique", "panier", "commande",
     ],
     classPatterns: [
       /Product(Service|Manager|Bean|DAO)/i,
       /Cart(Service|Manager)/i,
       /Order(Service|Manager|Processor)/i,
-      /Inventory(Service|Manager)/i,
-      /(Commande|Panier|Catalogue|Produit|Stock)(Service|Manager|Bean)/i,
+      /(Commande|Panier|Catalogue|Produit)(Service|Manager|Bean)/i,
+      /Shop(Service|Manager|Controller)/i,
     ],
     label: "E-Commerce / Retail",
   },
@@ -182,12 +183,36 @@ const DOMAIN_INDICATORS: Record<IndustryStandard, { keywords: string[]; classPat
       "enterprise", "workflow", "process", "bpm", "erp", "crm",
       "document", "approval", "notification", "audit", "report",
       "dashboard", "kpi", "metric", "integration", "middleware",
+      "billing", "invoice", "facture", "payment", "paiement",
+      "comptabilite", "devis", "avoir", "echeance", "recouvrement",
+      "inventory", "stock", "warehouse", "entrepot", "magasin",
+      "approvisionnement", "reception", "expedition",
+      "student", "university", "course", "enrollment", "academic",
+      "teacher", "grade", "diploma", "etudiant", "formation",
+      "logistics", "shipping", "delivery", "transport", "fleet",
+      "tracking", "route", "livraison", "expedition", "colis",
+      "auth", "login", "user", "role", "permission", "identity",
+      "token", "session", "oauth", "ldap", "sso", "rbac",
     ],
     classPatterns: [
       /Workflow(Service|Manager|Engine)/i,
       /Process(Service|Manager|Orchestrator)/i,
       /Approval(Service|Manager)/i,
       /Audit(Service|Logger|Trail)/i,
+      /Invoice(Service|Manager|Generator)/i,
+      /Billing(Service|Manager|Engine)/i,
+      /Inventory(Service|Manager|Controller)/i,
+      /Stock(Service|Manager)/i,
+      /Student(Service|Manager|Bean|DAO)/i,
+      /Course(Service|Manager)/i,
+      /Shipping(Service|Manager)/i,
+      /Delivery(Service|Manager|Tracker)/i,
+      /Auth(Service|Manager|Filter)/i,
+      /User(Service|Manager|Bean|DAO)/i,
+      /Role(Service|Manager)/i,
+      /(Facture|Devis|Avoir|Echeance)(Service|Manager|Bean)/i,
+      /(Etudiant|Formation|Diplome)(Service|Manager|Bean)/i,
+      /(Livraison|Expedition|Colis)(Service|Manager|Bean)/i,
     ],
     label: "Enterprise / ERP",
   },
@@ -293,6 +318,8 @@ const IHM_CLASS_PATTERNS = [
 
 const DISTRIBUTED_TX_PATTERNS = [
   /@TransactionAttribute\s*\(\s*TransactionAttributeType\.REQUIRES_NEW/,
+  /@TransactionAttribute\s*\(\s*TransactionAttributeType\.MANDATORY/,
+  /@TransactionAttribute/,  // BUG 1: Tout @TransactionAttribute indique gestion transactionnelle
   /UserTransaction/,
   /javax\.transaction/,
   /jakarta\.transaction/,
@@ -302,6 +329,11 @@ const DISTRIBUTED_TX_PATTERNS = [
   /distributed.?transaction/i,
   /saga/i,
   /compensat/i,
+  /TransactionManager/,
+  /TransactionSynchronizationRegistry/,
+  /setRollbackOnly/,
+  /SessionSynchronization/,
+  /afterBegin|beforeCompletion|afterCompletion/,
 ];
 
 // --- Main resolver class ---
@@ -336,8 +368,20 @@ export class DynamicOptionsResolver {
 
     // --- Build dynamic options ---
 
-    // Option: Frontend generation (only if IHM detected)
-    if (hasIHM) {
+    // BUG 6 FIX: Detecter les endpoints REST pour conditionner le frontend
+    const hasRESTEndpoints = input.detectedComponents.some(c =>
+      c.technology === "JAX_RS" || c.technology === "SERVLET" ||
+      (c.type === "controller" || c.type === "rest")
+    ) || (input.sourceFiles?.some(f =>
+      /@(?:GET|POST|PUT|DELETE|PATCH)Mapping/.test(f.content) ||
+      /@(?:GetMapping|PostMapping|PutMapping|DeleteMapping)/.test(f.content) ||
+      /@Path/.test(f.content) ||
+      /doGet|doPost|doPut|doDelete/.test(f.content)
+    ) ?? false);
+
+    // Option: Frontend generation (only if IHM detected OR REST endpoints exist)
+    // BUG 6: Ne PAS proposer frontend si 0 endpoint ET 0 IHM
+    if (hasIHM || hasRESTEndpoints) {
       options.push({
         id: "frontend",
         label: "Generation Frontend",
@@ -376,8 +420,10 @@ export class DynamicOptionsResolver {
       });
     }
 
-    // Option: Saga (only if distributed transactions detected AND microservices proposed)
-    if (hasDistributedTransactions && hasBoundedContexts) {
+    // Option: Saga (if distributed transactions detected — ne plus exiger bounded contexts)
+    // BUG 1 FIX: Proposer saga des que des transactions distribuees sont detectees,
+    // meme en monolithe (la saga peut etre intra-service avec compensation).
+    if (hasDistributedTransactions) {
       options.push({
         id: "saga",
         label: "Saga Orchestration",
@@ -388,7 +434,7 @@ export class DynamicOptionsResolver {
         icon: "GitBranch",
         color: "violet",
         triggeredBy: this.getDistributedTxTriggers(input),
-        requires: ["microservices"],
+        // Plus de requires: ["microservices"] — saga est valide meme en monolithe
       });
     }
 

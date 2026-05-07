@@ -345,6 +345,50 @@ export class FrontendGenerator {
       });
     }
 
+    // BUG 2 FIX: Si peu de DTOs explicites, inferer depuis les entites JPA
+    if (dtos.length < 3) {
+      const entityFiles = backendFiles.filter(
+        f => f.category === "entity" && f.path.endsWith(".java")
+      );
+      const existingNames = new Set(dtos.map(d => d.name));
+
+      for (const file of entityFiles) {
+        const content = file.content;
+        const className = this.extractClassName(content);
+        // Ne pas dupliquer si un DTO du meme nom existe deja
+        if (existingNames.has(className) || existingNames.has(className + "DTO")) continue;
+
+        const fields: ExtractedDto["fields"] = [];
+        const fieldRegex = /(?:\/\*\*([^*]*(?:\*(?!\/)[^*]*)*)\*\/\s*)?(?:@\w+(?:\([^)]*\))?[\s\n]*)*private\s+(\w+(?:<[^>]+>)?)\s+(\w+)\s*[;=]/g;
+        let fieldMatch;
+
+        while ((fieldMatch = fieldRegex.exec(content)) !== null) {
+          const javadoc = fieldMatch[1]?.replace(/\s*\*\s*/g, " ").trim() || "";
+          const javaType = fieldMatch[2];
+          const fieldName = fieldMatch[3];
+          // Exclure les champs techniques JPA (version, serialVersionUID)
+          if (fieldName === "serialVersionUID" || fieldName === "version") continue;
+
+          fields.push({
+            name: fieldName,
+            type: javaType,
+            tsType: this.javaTypeToTS(javaType),
+            required: content.includes(`@Column(`) && content.includes(`nullable = false`),
+            description: javadoc || `Champ infere depuis l'entite JPA ${className}`,
+          });
+        }
+
+        if (fields.length > 0) {
+          dtos.push({
+            name: className + "DTO",
+            fields,
+            sourceRef: file.sourceRef,
+          });
+          existingNames.add(className + "DTO");
+        }
+      }
+    }
+
     return dtos;
   }
 
@@ -1434,16 +1478,27 @@ ${body}
     const prefix = `frontend/${input.projectName}-ui/src`;
     const files: GeneratedFile[] = [];
 
-    for (const page of strategy.pages) {
+    // BUG 4 FIX: Limiter a 8 pages max (les plus importantes par endpoints)
+    const MAX_FRONTEND_PAGES = 8;
+    const pagesToGenerate = strategy.pages.slice(0, MAX_FRONTEND_PAGES);
+    if (strategy.pages.length > MAX_FRONTEND_PAGES) {
+      this.emit({ type: "phase_start", phase: "pages_limit", message: `Limite de ${MAX_FRONTEND_PAGES} pages atteinte (${strategy.pages.length} detectees). Les ${strategy.pages.length - MAX_FRONTEND_PAGES} pages restantes sont en TODO.` });
+    }
+
+    let pageIndex = 0;
+    for (const page of pagesToGenerate) {
+      pageIndex++;
+      this.emit({ type: "phase_start", phase: "page_gen", message: `Page ${pageIndex}/${pagesToGenerate.length} — ${page.name}...` });
+
       let content: string;
 
-      // Try LLM-enhanced generation
-      const llmContent = await this.generatePageWithLLM(page, endpoints, dtos, input);
+      // Try LLM-enhanced generation with 30s timeout per page
+      const llmContent = await this.generatePageWithTimeout(page, endpoints, dtos, input, 30000);
       if (llmContent) {
         content = llmContent;
         this.llmEnhancedFiles++;
       } else {
-        // Fallback: deterministic generation
+        // Fallback: deterministic generation (timeout or LLM unavailable)
         content = this.generatePageDeterministic(page, endpoints, dtos, input);
       }
 
@@ -1458,6 +1513,25 @@ ${body}
     }
 
     return files;
+  }
+
+  /** BUG 4: Wrapper avec timeout pour la generation LLM par page */
+  private async generatePageWithTimeout(
+    page: UIStrategyPage,
+    endpoints: ExtractedEndpoint[],
+    dtos: ExtractedDto[],
+    input: FrontendGeneratorInput,
+    timeoutMs: number,
+  ): Promise<string | null> {
+    try {
+      const result = await Promise.race([
+        this.generatePageWithLLM(page, endpoints, dtos, input),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+      ]);
+      return result;
+    } catch {
+      return null;
+    }
   }
 
   private async generatePageWithLLM(
@@ -1533,7 +1607,7 @@ Genere UNIQUEMENT le code TypeScript/TSX, sans markdown.`;
 
   private generateListPage(page: UIStrategyPage, endpoints: ExtractedEndpoint[], dtos: ExtractedDto[], input: FrontendGeneratorInput): string {
     const group = page.name.replace(/List$/, "");
-    const dtoName = dtos.find(d => d.name.includes(group))?.name || "any";
+    const dtoName = dtos.find(d => d.name.includes(group))?.name || "Record<string, unknown>";
 
     return `/**
  * ${page.name} - Page de liste ${group}.
@@ -1563,7 +1637,7 @@ import { Loader2, Plus, Search, AlertCircle } from "lucide-react";
 // import { getAll${group} } from "../services/${this.kebabCase(group)}.service";
 
 export default function ${page.name}() {
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<${dtoName}[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -1753,6 +1827,7 @@ export default function ${page.name}() {
 
   private generateDetailPage(page: UIStrategyPage, endpoints: ExtractedEndpoint[], dtos: ExtractedDto[], input: FrontendGeneratorInput): string {
     const group = page.name.replace(/Detail$/, "");
+    const dtoName = dtos.find(d => d.name.includes(group))?.name || "Record<string, unknown>";
     return `/**
  * ${page.name} - Detail d'un(e) ${group}.
  *
@@ -1773,7 +1848,7 @@ import toast from "react-hot-toast";
 export default function ${page.name}() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [item, setItem] = useState<any>(null);
+  const [item, setItem] = useState<${dtoName} | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -2211,7 +2286,7 @@ export default function Layout() {
     const hasServices = files.some(f => f.path.includes("/services/"));
     const hasPages = files.some(f => f.path.includes("/pages/"));
 
-    if (!hasModels) warnings.push("Aucun modele TypeScript genere - les types seront 'any'");
+    if (!hasModels) warnings.push("Aucun modele TypeScript genere - les types utiliseront Record<string, unknown>");
     if (!hasServices) warnings.push("Aucun service API genere - les appels HTTP ne sont pas structures");
     if (!hasPages) warnings.push("Aucune page generee - l'application sera vide");
 

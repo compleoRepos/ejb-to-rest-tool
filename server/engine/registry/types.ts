@@ -23,7 +23,8 @@ export type TechnologyType =
   | "JMS"
   | "BATCH"
   | "JPA"
-  | "EAI_CUSTOM";
+  | "EAI_CUSTOM"
+  | "SAGA";
 
 export type TechnologyTier = 1 | 2;
 
@@ -222,7 +223,7 @@ export interface EaiComponent extends DetectedComponent {
 export interface GeneratedFile {
   path: string;
   content: string;
-  category: "controller" | "service" | "dto" | "entity" | "repository" | "config" | "test" | "migration_note" | "infrastructure" | "exception" | "enum" | "adapter" | "validator" | "cloud" | "pom" | "report" | "main" | "other";
+  category: "controller" | "service" | "dto" | "entity" | "repository" | "config" | "test" | "migration_note" | "infrastructure" | "exception" | "enum" | "adapter" | "validator" | "cloud" | "pom" | "report" | "main" | "saga" | "other";
   technology: TechnologyType;
   sourceRef?: string;
 }
