@@ -59,8 +59,13 @@ export default function AnalyzePage() {
 
         if (event.phase) setPhase(event.phase);
 
-        // Check for analysis completion
-        if (event.type === "ANALYSIS_COMPLETE" || event.type === "PHASE_CHANGE" && event.phase === "WAITING_CHOICES") {
+        // Check for analysis completion — l'agent émet AWAITING_INPUT quand l'analyse est terminée
+        if (
+          event.type === "AWAITING_INPUT" ||
+          event.type === "ANALYSIS_COMPLETE" ||
+          (event.type === "PHASE_CHANGE" && event.phase === "WAITING_CHOICES") ||
+          (event.phase === "AWAITING_INPUT")
+        ) {
           setDone(true);
           es.close();
           // Fetch the dynamic options (analysis report)
@@ -87,7 +92,7 @@ export default function AnalyzePage() {
       const res = await fetch(`/api/agent/${sessionId}/status`);
       if (res.ok) {
         const status = await res.json();
-        if (status.state === "WAITING_CHOICES" || status.currentPhase === "WAITING_CHOICES") {
+        if (status.state === "WAITING_CHOICES" || status.state === "AWAITING_INPUT" || status.currentPhase === "WAITING_CHOICES" || status.phase === "AWAITING_INPUT") {
           setDone(true);
           fetchAnalysisReport();
         }

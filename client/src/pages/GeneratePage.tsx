@@ -75,7 +75,7 @@ export default function GeneratePage() {
         const statusRes = await fetch(`/api/agent/${sessionId}/status`);
         if (statusRes.ok) {
           const status = await statusRes.json();
-          if (status.phase === "GENERATION_COMPLETE" || status.state === "COMPLETED") {
+          if (status.phase === "GENERATION_COMPLETE" || status.phase === "DONE" || status.state === "COMPLETED") {
             setDone(true);
             navigate(`/compleo/agent/${sessionId}/result`);
             return;
@@ -133,10 +133,13 @@ export default function GeneratePage() {
           });
         }
 
-        // Generation complete
+        // Generation complete — l'agent émet SUCCESS (phase=DONE) quand terminé
         if (
-          event.type === "PHASE_CHANGE" && event.phase === "GENERATION_COMPLETE" ||
-          event.type === "GENERATION_COMPLETE"
+          event.type === "SUCCESS" ||
+          event.type === "GENERATION_COMPLETE" ||
+          (event.type === "PHASE_CHANGE" && event.phase === "GENERATION_COMPLETE") ||
+          (event.type === "PHASE_START" && event.phase === "DONE") ||
+          (event.type === "PHASE_END" && event.phase === "PUSHING")
         ) {
           setDone(true);
           es.close();
@@ -161,7 +164,7 @@ export default function GeneratePage() {
           const res = await fetch(`/api/agent/${sessionId}/status`);
           if (res.ok) {
             const status = await res.json();
-            if (status.phase === "GENERATION_COMPLETE" || status.state === "COMPLETED") {
+            if (status.phase === "GENERATION_COMPLETE" || status.phase === "DONE" || status.state === "COMPLETED") {
               setDone(true);
               navigate(`/compleo/agent/${sessionId}/result`);
             }
