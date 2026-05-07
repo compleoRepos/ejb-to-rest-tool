@@ -284,14 +284,8 @@ export class AgentSessionStore {
         prResultData: session.prResult as any ?? null,
         errorMessage: session.errorMessage ?? null,
       };
-      const existing = await db.select({ id: agentSessions.id })
-        .from(agentSessions)
-        .where(eq(agentSessions.id, session.id));
-      if (existing.length > 0) {
-        await db.update(agentSessions).set(row).where(eq(agentSessions.id, session.id));
-      } else {
-        await db.insert(agentSessions).values(row);
-      }
+      // Use INSERT ... ON DUPLICATE KEY UPDATE to avoid race conditions
+      await db.insert(agentSessions).values(row).onDuplicateKeyUpdate({ set: row });
     } catch (err) {
       console.warn("[AgentSessionStore] Failed to save to DB:", err);
     }

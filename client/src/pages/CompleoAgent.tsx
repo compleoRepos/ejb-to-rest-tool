@@ -155,7 +155,8 @@ export default function CompleoAgentPage() {
 
   // v10.7: Analysis Review workflow — analyse d'abord, options ensuite
   const [postMigrationChecklist, setPostMigrationChecklist] = useState<any>(null);
-  const [showAnalysisReview, setShowAnalysisReview] = useState(false);
+  const [showAnalysisReview, _setShowAnalysisReview] = useState(false);
+  const setShowAnalysisReview = (v: boolean) => { showAnalysisReviewRef.current = v; _setShowAnalysisReview(v); };
   const [analysisData, setAnalysisData] = useState<any>(null);
   const [analysisPhaseComplete, setAnalysisPhaseComplete] = useState(false);
 
@@ -170,6 +171,8 @@ export default function CompleoAgentPage() {
   const startTimeRef = useRef<number>(0);
   const logEndRef = useRef<HTMLDivElement>(null);
   const seenEventsRef = useRef<Set<string>>(new Set());
+  const showAnalysisReviewRef = useRef(false);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ─── Upload ZIP ─────────────────────────────────────────────────────────
 
@@ -351,16 +354,25 @@ export default function CompleoAgentPage() {
                     .catch(() => {});
                 }
               }
-              if (st.state === "AWAITING_INPUT" && !showAnalysisReview) {
+              if (st.state === "AWAITING_INPUT" && !showAnalysisReviewRef.current) {
                 setShowAnalysisReview(true);
+                setAnalysisPhaseComplete(true);
                 fetch(`/api/agent/${data.sessionId}/dynamic-options`)
                   .then(r => r.ok ? r.json() : null)
                   .then(opts => { if (opts) setDynamicOptions(opts); })
                   .catch(() => {});
+                // Also fetch ambiguities
+                fetch(`/api/agent/${data.sessionId}/status`)
+                  .then(r => r.ok ? r.json() : null)
+                  .then(st2 => {
+                    if (st2?.ambiguities) setAmbiguities(st2.ambiguities);
+                  })
+                  .catch(() => {});
               }
             }
           } catch { /* ignore */ }
-        }, 5000);
+        }, 3000);
+        pollIntervalRef.current = pollInterval;
       };
 
       toast.success("Agent démarré");
