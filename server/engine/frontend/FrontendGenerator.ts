@@ -177,35 +177,40 @@ export class FrontendGenerator {
     files.push(...scaffoldFiles);
     this.emit({ type: "phase_end", phase: "scaffold", message: `${scaffoldFiles.length} fichiers de configuration generes` });
 
-    // --- Step 4: Generate TypeScript models from DTOs ---
-    this.emit({ type: "phase_start", phase: "models", message: "Generation des modeles TypeScript..." });
-    const modelFiles = this.generateModels(dtos, input);
-    files.push(...modelFiles);
-    this.emit({ type: "phase_end", phase: "models", message: `${modelFiles.length} modeles generes` });
+    // --- Steps 4-8: Framework-specific generation ---
+    if (input.framework === "thymeleaf" || input.framework === "jsf") {
+      // Server-rendered frameworks: generate HTML templates + Spring MVC controllers
+      this.emit({ type: "phase_start", phase: "pages", message: `Generation des pages ${input.framework} (CRUD par entite)...` });
+      const serverPages = this.generateServerRenderedPages(endpoints, dtos, uiStrategy, input);
+      files.push(...serverPages);
+      this.emit({ type: "phase_end", phase: "pages", message: `${serverPages.length} fichiers generes (templates + controllers)` });
+    } else {
+      // SPA frameworks (React, Angular, Vue): TypeScript models + API services + pages
+      this.emit({ type: "phase_start", phase: "models", message: "Generation des modeles TypeScript..." });
+      const modelFiles = this.generateModels(dtos, input);
+      files.push(...modelFiles);
+      this.emit({ type: "phase_end", phase: "models", message: `${modelFiles.length} modeles generes` });
 
-    // --- Step 5: Generate API services ---
-    this.emit({ type: "phase_start", phase: "services", message: "Generation des services API..." });
-    const serviceFiles = this.generateServices(endpoints, dtos, input);
-    files.push(...serviceFiles);
-    this.emit({ type: "phase_end", phase: "services", message: `${serviceFiles.length} services generes` });
+      this.emit({ type: "phase_start", phase: "services", message: "Generation des services API..." });
+      const serviceFiles = this.generateServices(endpoints, dtos, input);
+      files.push(...serviceFiles);
+      this.emit({ type: "phase_end", phase: "services", message: `${serviceFiles.length} services generes` });
 
-    // --- Step 6: Generate pages/components with LLM enrichment ---
-    this.emit({ type: "phase_start", phase: "pages", message: "Generation des pages et composants (IA-driven)..." });
-    const pageFiles = await this.generatePages(endpoints, dtos, uiStrategy, input);
-    files.push(...pageFiles);
-    this.emit({ type: "phase_end", phase: "pages", message: `${pageFiles.length} pages/composants generes` });
+      this.emit({ type: "phase_start", phase: "pages", message: "Generation des pages et composants (IA-driven)..." });
+      const pageFiles = await this.generatePages(endpoints, dtos, uiStrategy, input);
+      files.push(...pageFiles);
+      this.emit({ type: "phase_end", phase: "pages", message: `${pageFiles.length} pages/composants generes` });
 
-    // --- Step 7: Generate routing ---
-    this.emit({ type: "phase_start", phase: "routing", message: "Generation du routing..." });
-    const routingFiles = this.generateRouting(endpoints, input);
-    files.push(...routingFiles);
-    this.emit({ type: "phase_end", phase: "routing", message: "Routing genere" });
+      this.emit({ type: "phase_start", phase: "routing", message: "Generation du routing..." });
+      const routingFiles = this.generateRouting(endpoints, input);
+      files.push(...routingFiles);
+      this.emit({ type: "phase_end", phase: "routing", message: "Routing genere" });
 
-    // --- Step 8: Generate shared components (layout, auth, error handling) ---
-    this.emit({ type: "phase_start", phase: "shared", message: "Generation des composants partages..." });
-    const sharedFiles = this.generateSharedComponents(input);
-    files.push(...sharedFiles);
-    this.emit({ type: "phase_end", phase: "shared", message: `${sharedFiles.length} composants partages generes` });
+      this.emit({ type: "phase_start", phase: "shared", message: "Generation des composants partages..." });
+      const sharedFiles = this.generateSharedComponents(input);
+      files.push(...sharedFiles);
+      this.emit({ type: "phase_end", phase: "shared", message: `${sharedFiles.length} composants partages generes` });
+    }
 
     // --- Step 9: Build TODOs ---
     this.emit({ type: "phase_start", phase: "todos", message: "Generation de la checklist post-migration..." });
@@ -226,7 +231,7 @@ export class FrontendGenerator {
         components: files.filter(f => f.category === "controller").length,
         services: files.filter(f => f.category === "service").length,
         pages: files.filter(f => f.path.includes("/pages/")).length,
-        models: modelFiles.length,
+        models: files.filter(f => f.category === "dto").length,
         configFiles: scaffoldFiles.length,
         llmCalls: this.llmCalls,
         llmEnhancedFiles: this.llmEnhancedFiles,
@@ -520,6 +525,8 @@ Retourne un JSON avec cette structure:
         return this.generateVueScaffold(prefix, input);
       case "thymeleaf":
         return this.generateThymeleafScaffold(prefix, input);
+      case "jsf":
+        return this.generateJsfScaffold(prefix, input);
     }
   }
 
@@ -878,6 +885,261 @@ body {
       category: "controller",
       technology: "JSP",
     });
+
+    return files;
+  }
+
+  // =====================================================================
+  // JSF/PrimeFaces Scaffold
+  // =====================================================================
+
+  private generateJsfScaffold(prefix: string, input: FrontendGeneratorInput): GeneratedFile[] {
+    const files: GeneratedFile[] = [];
+    const basePackage = input.basePackage || "com.example.app";
+    const packagePath = basePackage.replace(/\./g, "/");
+
+    // pom.xml additions (JSF + PrimeFaces)
+    files.push({
+      path: `${prefix}/pom-additions.xml`,
+      content: `<!-- JSF & PrimeFaces dependencies to add to your Spring Boot pom.xml -->\n<dependencies>\n  <dependency>\n    <groupId>org.joinfaces</groupId>\n    <artifactId>primefaces-spring-boot-starter</artifactId>\n    <version>5.3.3</version>\n  </dependency>\n  <dependency>\n    <groupId>org.primefaces</groupId>\n    <artifactId>primefaces</artifactId>\n    <version>14.0.5</version>\n    <classifier>jakarta</classifier>\n  </dependency>\n  <dependency>\n    <groupId>org.primefaces.themes</groupId>\n    <artifactId>all-themes</artifactId>\n    <version>1.0.10</version>\n  </dependency>\n  <dependency>\n    <groupId>org.glassfish</groupId>\n    <artifactId>jakarta.faces</artifactId>\n    <version>4.0.7</version>\n  </dependency>\n</dependencies>`,
+      category: "config",
+      technology: "JSP",
+    });
+
+    // application.yml JSF config
+    files.push({
+      path: `${prefix}/application-jsf.yml`,
+      content: `# JSF/PrimeFaces configuration\nserver:\n  servlet:\n    context-path: /\njoinfaces:\n  primefaces:\n    theme: saga\n    font-awesome: true\n  jsf:\n    project-stage: Development  # Set to Production in prod`,
+      category: "config",
+      technology: "JSP",
+    });
+
+    // Base template (Facelets)
+    files.push({
+      path: `${prefix}/src/main/resources/META-INF/resources/WEB-INF/templates/layout.xhtml`,
+      content: `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml"\n      xmlns:h="jakarta.faces.html"\n      xmlns:f="jakarta.faces.core"\n      xmlns:p="http://primefaces.org/ui"\n      xmlns:ui="jakarta.faces.facelets">\n<h:head>\n  <title>${input.projectName} - <ui:insert name="title">Accueil</ui:insert></title>\n  <h:outputStylesheet library="primefaces" name="primefaces.css"/>\n</h:head>\n<h:body>\n  <!-- Top Menubar -->\n  <p:menubar>\n    <p:menuitem value="Accueil" url="/" icon="pi pi-home"/>\n    <ui:insert name="menuItems"/>\n  </p:menubar>\n\n  <!-- Content -->\n  <div class="ui-g" style="padding: 1em;">\n    <ui:insert name="content">Contenu par defaut</ui:insert>\n  </div>\n\n  <!-- Footer -->\n  <div class="ui-g" style="text-align:center; padding:1em; border-top:1px solid #dee2e6;">\n    <p>&copy; 2024 ${input.projectName} - Genere par EJB Client Modernizer</p>\n  </div>\n</h:body>\n</html>`,
+      category: "config",
+      technology: "JSP",
+    });
+
+    // Index page
+    files.push({
+      path: `${prefix}/src/main/resources/META-INF/resources/index.xhtml`,
+      content: `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml"\n      xmlns:h="jakarta.faces.html"\n      xmlns:p="http://primefaces.org/ui"\n      xmlns:ui="jakarta.faces.facelets">\n<ui:composition template="/WEB-INF/templates/layout.xhtml">\n  <ui:define name="title">Tableau de bord</ui:define>\n  <ui:define name="content">\n    <h:form>\n      <p:panel header="Tableau de bord">\n        <p:dashboard id="board">\n          <p:panel header="Statistiques">\n            <p>Bienvenue sur ${input.projectName}</p>\n          </p:panel>\n        </p:dashboard>\n      </p:panel>\n    </h:form>\n  </ui:define>\n</ui:composition>\n</html>`,
+      category: "controller",
+      technology: "JSP",
+    });
+
+    // IndexBean (CDI Managed Bean)
+    files.push({
+      path: `${prefix}/src/main/java/${packagePath}/web/IndexBean.java`,
+      content: `package ${basePackage}.web;\n\nimport jakarta.enterprise.context.RequestScoped;\nimport jakarta.inject.Named;\n\n/**\n * IndexBean - Managed Bean pour la page d'accueil.\n *\n * @generated EJB Client Modernizer v10.8\n */\n@Named\n@RequestScoped\npublic class IndexBean {\n\n    public String getWelcomeMessage() {\n        return "Bienvenue sur ${input.projectName}";\n    }\n}`,
+      category: "controller",
+      technology: "JSP",
+    });
+
+    return files;
+  }
+
+  // =====================================================================
+  // Server-Rendered Pages (Thymeleaf / JSF) — CRUD per entity
+  // =====================================================================
+
+  private generateServerRenderedPages(
+    endpoints: ExtractedEndpoint[],
+    dtos: ExtractedDto[],
+    strategy: UIStrategy,
+    input: FrontendGeneratorInput,
+  ): GeneratedFile[] {
+    if (input.framework === "thymeleaf") {
+      return this.generateThymeleafCrudPages(endpoints, dtos, input);
+    } else {
+      return this.generateJsfCrudPages(endpoints, dtos, input);
+    }
+  }
+
+  private generateThymeleafCrudPages(
+    endpoints: ExtractedEndpoint[],
+    dtos: ExtractedDto[],
+    input: FrontendGeneratorInput,
+  ): GeneratedFile[] {
+    const files: GeneratedFile[] = [];
+    const prefix = `frontend/${input.projectName}-ui`;
+    const basePackage = input.basePackage || "com.example.app";
+    const packagePath = basePackage.replace(/\./g, "/");
+
+    // Group endpoints by controller/entity
+    const groups = new Map<string, ExtractedEndpoint[]>();
+    for (const ep of endpoints) {
+      const group = ep.controller.replace(/Controller$/, "");
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group)!.push(ep);
+    }
+
+    // Update base layout navigation with entity links
+    const navItems = Array.from(groups.keys()).map(g =>
+      `          <li class="nav-item"><a class="nav-link" th:href="@{/${this.kebabCase(g)}}">${g}</a></li>`
+    ).join("\n");
+
+    files.push({
+      path: `${prefix}/src/main/resources/templates/fragments/nav.html`,
+      content: `<!-- Navigation fragment - Genere par EJB Client Modernizer -->\n<nav th:fragment="navigation" class="navbar navbar-expand-lg navbar-dark bg-primary">\n  <div class="container">\n    <a class="navbar-brand" th:href="@{/}">${input.projectName}</a>\n    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">\n      <span class="navbar-toggler-icon"></span>\n    </button>\n    <div class="collapse navbar-collapse" id="navbarNav">\n      <ul class="navbar-nav">\n${navItems}\n      </ul>\n    </div>\n  </div>\n</nav>`,
+      category: "config",
+      technology: "JSP",
+    });
+
+    // Pagination fragment
+    files.push({
+      path: `${prefix}/src/main/resources/templates/fragments/pagination.html`,
+      content: `<!-- Pagination fragment -->\n<nav th:fragment="pagination(page, totalPages, baseUrl)" aria-label="Navigation">\n  <ul class="pagination justify-content-center">\n    <li class="page-item" th:classappend="\${page == 0 ? 'disabled' : ''}">\n      <a class="page-link" th:href="@{\${baseUrl}(page=\${page - 1})}">Precedent</a>\n    </li>\n    <li class="page-item" th:each="i : \${#numbers.sequence(0, totalPages - 1)}"\n        th:classappend="\${i == page ? 'active' : ''}">\n      <a class="page-link" th:href="@{\${baseUrl}(page=\${i})}" th:text="\${i + 1}">1</a>\n    </li>\n    <li class="page-item" th:classappend="\${page == totalPages - 1 ? 'disabled' : ''}">\n      <a class="page-link" th:href="@{\${baseUrl}(page=\${page + 1})}">Suivant</a>\n    </li>\n  </ul>\n</nav>`,
+      category: "config",
+      technology: "JSP",
+    });
+
+    // Generate CRUD pages + controller for each entity
+    for (const [group, eps] of groups) {
+      const kebab = this.kebabCase(group);
+      const dto = dtos.find(d => d.name.includes(group));
+      const fields = dto ? dto.fields : [{ name: "id", type: "Long", tsType: "number", required: true, description: "Identifiant" }];
+
+      const hasGetAll = eps.some(e => e.method === "GET" && !e.pathVariables.length);
+      const hasGetById = eps.some(e => e.method === "GET" && e.pathVariables.length > 0);
+      const hasCreate = eps.some(e => e.method === "POST");
+      const hasUpdate = eps.some(e => e.method === "PUT" || e.method === "PATCH");
+      const hasDelete = eps.some(e => e.method === "DELETE");
+
+      // --- list.html ---
+      if (hasGetAll) {
+        const tableHeaders = fields.map(f => `          <th>${f.name}</th>`).join("\n");
+        const tableCells = fields.map(f => `          <td th:text="\${item.${f.name}}">-</td>`).join("\n");
+
+        files.push({
+          path: `${prefix}/src/main/resources/templates/${kebab}/list.html`,
+          content: `<!DOCTYPE html>\n<html xmlns:th="http://www.thymeleaf.org"\n      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"\n      layout:decorate="~{layout/base}">\n<head><title>Liste ${group}</title></head>\n<body>\n<div layout:fragment="content">\n  <div class="d-flex justify-content-between align-items-center page-header">\n    <h1>Liste des ${group}</h1>\n    ${hasCreate ? `<a th:href="@{/${kebab}/new}" class="btn btn-primary"><i class="bi bi-plus"></i> Nouveau</a>` : ""}\n  </div>\n\n  <!-- Search -->\n  <form th:action="@{/${kebab}}" method="get" class="mb-3">\n    <div class="input-group">\n      <input type="text" name="search" th:value="\${search}" class="form-control" placeholder="Rechercher..."/>\n      <button class="btn btn-outline-secondary" type="submit">Rechercher</button>\n    </div>\n  </form>\n\n  <!-- Table -->\n  <div class="table-responsive">\n    <table class="table table-striped table-hover">\n      <thead class="table-dark">\n        <tr>\n${tableHeaders}\n          <th>Actions</th>\n        </tr>\n      </thead>\n      <tbody>\n        <tr th:each="item : \${items}">\n${tableCells}\n          <td class="table-actions">\n            ${hasGetById ? `<a th:href="@{/${kebab}/{id}(id=\${item.id})}" class="btn btn-sm btn-info">Voir</a>` : ""}\n            ${hasUpdate ? `<a th:href="@{/${kebab}/{id}/edit(id=\${item.id})}" class="btn btn-sm btn-warning">Modifier</a>` : ""}\n            ${hasDelete ? `<form th:action="@{/${kebab}/{id}/delete(id=\${item.id})}" method="post" style="display:inline"><button class="btn btn-sm btn-danger" onclick="return confirm('Confirmer la suppression ?')">Supprimer</button></form>` : ""}\n          </td>\n        </tr>\n      </tbody>\n    </table>\n  </div>\n\n  <!-- Pagination -->\n  <div th:replace="~{fragments/pagination :: pagination(\${page}, \${totalPages}, '/${kebab}')}"></div>\n\n  <p th:if="\${#lists.isEmpty(items)}" class="text-muted text-center mt-3">Aucun element trouve.</p>\n</div>\n</body>\n</html>`,
+          category: "controller",
+          technology: "JSP",
+        });
+      }
+
+      // --- form.html ---
+      if (hasCreate || hasUpdate) {
+        const formFields = fields.filter(f => f.name !== "id").map(f => {
+          const inputType = f.tsType === "number" ? "number" : f.tsType === "boolean" ? "checkbox" : "text";
+          return `    <div class="mb-3">\n      <label for="${f.name}" class="form-label">${f.name}${f.required ? " *" : ""}</label>\n      <input type="${inputType}" id="${f.name}" name="${f.name}" th:value="\${item.${f.name}}"\n             class="form-control" ${f.required ? "required" : ""}/>\n    </div>`;
+        }).join("\n");
+
+        files.push({
+          path: `${prefix}/src/main/resources/templates/${kebab}/form.html`,
+          content: `<!DOCTYPE html>\n<html xmlns:th="http://www.thymeleaf.org"\n      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"\n      layout:decorate="~{layout/base}">\n<head><title th:text="\${item.id != null ? 'Modifier' : 'Creer'} + ' ${group}'">Formulaire</title></head>\n<body>\n<div layout:fragment="content">\n  <h1 class="page-header" th:text="\${item.id != null ? 'Modifier ${group}' : 'Nouveau ${group}'}">Formulaire</h1>\n\n  <div th:if="\${error}" class="alert alert-danger" th:text="\${error}"></div>\n  <div th:if="\${success}" class="alert alert-success" th:text="\${success}"></div>\n\n  <form th:action="@{/${kebab}/save}" method="post" class="needs-validation">\n    <input type="hidden" name="id" th:value="\${item.id}"/>\n${formFields}\n    <div class="d-flex gap-2">\n      <button type="submit" class="btn btn-primary">Enregistrer</button>\n      <a th:href="@{/${kebab}}" class="btn btn-secondary">Annuler</a>\n    </div>\n  </form>\n</div>\n</body>\n</html>`,
+          category: "controller",
+          technology: "JSP",
+        });
+      }
+
+      // --- detail.html ---
+      if (hasGetById) {
+        const detailFields = fields.map(f =>
+          `    <tr>\n      <th>${f.name}</th>\n      <td th:text="\${item.${f.name}}">-</td>\n    </tr>`
+        ).join("\n");
+
+        files.push({
+          path: `${prefix}/src/main/resources/templates/${kebab}/detail.html`,
+          content: `<!DOCTYPE html>\n<html xmlns:th="http://www.thymeleaf.org"\n      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"\n      layout:decorate="~{layout/base}">\n<head><title>Detail ${group}</title></head>\n<body>\n<div layout:fragment="content">\n  <div class="d-flex justify-content-between align-items-center page-header">\n    <h1>Detail ${group}</h1>\n    <div>\n      ${hasUpdate ? `<a th:href="@{/${kebab}/{id}/edit(id=\${item.id})}" class="btn btn-warning">Modifier</a>` : ""}\n      <a th:href="@{/${kebab}}" class="btn btn-secondary">Retour</a>\n    </div>\n  </div>\n\n  <table class="table table-bordered">\n    <tbody>\n${detailFields}\n    </tbody>\n  </table>\n</div>\n</body>\n</html>`,
+          category: "controller",
+          technology: "JSP",
+        });
+      }
+
+      // --- Spring MVC Controller for this entity ---
+      const controllerMethods: string[] = [];
+
+      if (hasGetAll) {
+        controllerMethods.push(`    @GetMapping\n    public String list(@RequestParam(defaultValue = "") String search,\n                       @RequestParam(defaultValue = "0") int page,\n                       Model model) {\n        // TODO: [INTEGRATION] Injecter le service ${group}Service et appeler findAll/search\n        model.addAttribute("items", List.of());\n        model.addAttribute("search", search);\n        model.addAttribute("page", page);\n        model.addAttribute("totalPages", 1);\n        return "${kebab}/list";\n    }`);
+      }
+
+      if (hasGetById) {
+        controllerMethods.push(`    @GetMapping("/{id}")\n    public String detail(@PathVariable Long id, Model model) {\n        // TODO: [INTEGRATION] Injecter le service ${group}Service et appeler findById\n        model.addAttribute("item", Map.of("id", id));\n        return "${kebab}/detail";\n    }`);
+      }
+
+      if (hasCreate) {
+        controllerMethods.push(`    @GetMapping("/new")\n    public String createForm(Model model) {\n        model.addAttribute("item", Map.of());\n        return "${kebab}/form";\n    }`);
+      }
+
+      if (hasUpdate) {
+        controllerMethods.push(`    @GetMapping("/{id}/edit")\n    public String editForm(@PathVariable Long id, Model model) {\n        // TODO: [INTEGRATION] Charger l'entite existante\n        model.addAttribute("item", Map.of("id", id));\n        return "${kebab}/form";\n    }`);
+      }
+
+      if (hasCreate || hasUpdate) {
+        controllerMethods.push(`    @PostMapping("/save")\n    public String save(@RequestParam Map<String, String> params, RedirectAttributes redirectAttributes) {\n        // TODO: [INTEGRATION] Appeler ${group}Service.save(...)\n        redirectAttributes.addFlashAttribute("success", "${group} enregistre avec succes");\n        return "redirect:/${kebab}";\n    }`);
+      }
+
+      if (hasDelete) {
+        controllerMethods.push(`    @PostMapping("/{id}/delete")\n    public String delete(@PathVariable Long id, RedirectAttributes redirectAttributes) {\n        // TODO: [INTEGRATION] Appeler ${group}Service.delete(id)\n        redirectAttributes.addFlashAttribute("success", "${group} supprime avec succes");\n        return "redirect:/${kebab}";\n    }`);
+      }
+
+      files.push({
+        path: `${prefix}/src/main/java/${packagePath}/web/${group}WebController.java`,
+        content: `package ${basePackage}.web;\n\nimport org.springframework.stereotype.Controller;\nimport org.springframework.ui.Model;\nimport org.springframework.web.bind.annotation.*;\nimport org.springframework.web.servlet.mvc.support.RedirectAttributes;\n\nimport java.util.List;\nimport java.util.Map;\n\n/**\n * ${group}WebController - Controleur Spring MVC pour les pages CRUD ${group}.\n *\n * TODO: [INTEGRATION] Injecter ${group}Service pour les operations CRUD reelles.\n * Pourquoi : Ce controleur utilise des donnees stub qui doivent etre remplacees.\n * Comment : @Autowired private ${group}Service ${group.charAt(0).toLowerCase() + group.slice(1)}Service;\n *\n * @generated EJB Client Modernizer v10.8\n */\n@Controller\n@RequestMapping("/${kebab}")\npublic class ${group}WebController {\n\n${controllerMethods.join("\n\n")}\n}`,
+        category: "controller",
+        technology: "JSP",
+      });
+    }
+
+    return files;
+  }
+
+  private generateJsfCrudPages(
+    endpoints: ExtractedEndpoint[],
+    dtos: ExtractedDto[],
+    input: FrontendGeneratorInput,
+  ): GeneratedFile[] {
+    const files: GeneratedFile[] = [];
+    const prefix = `frontend/${input.projectName}-ui`;
+    const basePackage = input.basePackage || "com.example.app";
+    const packagePath = basePackage.replace(/\./g, "/");
+
+    // Group endpoints by controller/entity
+    const groups = new Map<string, ExtractedEndpoint[]>();
+    for (const ep of endpoints) {
+      const group = ep.controller.replace(/Controller$/, "");
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group)!.push(ep);
+    }
+
+    // Generate CRUD pages + managed bean for each entity
+    for (const [group, eps] of groups) {
+      const kebab = this.kebabCase(group);
+      const dto = dtos.find(d => d.name.includes(group));
+      const fields = dto ? dto.fields : [{ name: "id", type: "Long", tsType: "number", required: true, description: "Identifiant" }];
+
+      const hasGetAll = eps.some(e => e.method === "GET" && !e.pathVariables.length);
+      const hasCreate = eps.some(e => e.method === "POST");
+      const hasUpdate = eps.some(e => e.method === "PUT" || e.method === "PATCH");
+      const hasDelete = eps.some(e => e.method === "DELETE");
+
+      // --- list.xhtml (PrimeFaces DataTable) ---
+      if (hasGetAll) {
+        const columns = fields.map(f =>
+          `        <p:column headerText="${f.name}" sortBy="#{item.${f.name}}" filterBy="#{item.${f.name}}">\n          <h:outputText value="#{item.${f.name}}"/>\n        </p:column>`
+        ).join("\n");
+
+        files.push({
+          path: `${prefix}/src/main/resources/META-INF/resources/${kebab}/list.xhtml`,
+          content: `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml"\n      xmlns:h="jakarta.faces.html"\n      xmlns:p="http://primefaces.org/ui"\n      xmlns:ui="jakarta.faces.facelets">\n<ui:composition template="/WEB-INF/templates/layout.xhtml">\n  <ui:define name="title">Liste ${group}</ui:define>\n  <ui:define name="content">\n    <h:form id="${kebab}Form">\n      <p:panel header="Liste des ${group}">\n        <p:dataTable id="${kebab}Table" var="item" value="#{${group.charAt(0).toLowerCase() + group.slice(1)}Bean.items}"\n                     paginator="true" rows="10"\n                     paginatorTemplate="{CurrentPageReport} {FirstPageLink} {PreviousPageLink} {PageLinks} {NextPageLink} {LastPageLink} {RowsPerPageDropdown}"\n                     rowsPerPageTemplate="5,10,20,50">\n${columns}\n          <p:column headerText="Actions" style="width:200px">\n            ${hasUpdate ? `<p:commandButton value="Modifier" action="#{${group.charAt(0).toLowerCase() + group.slice(1)}Bean.edit(item)}" icon="pi pi-pencil" styleClass="ui-button-warning"/>` : ""}\n            ${hasDelete ? `<p:commandButton value="Supprimer" action="#{${group.charAt(0).toLowerCase() + group.slice(1)}Bean.delete(item)}" icon="pi pi-trash" styleClass="ui-button-danger"\n                            onclick="return confirm('Confirmer la suppression ?')"/>` : ""}\n          </p:column>\n        </p:dataTable>\n        ${hasCreate ? `<p:commandButton value="Nouveau" action="#{${group.charAt(0).toLowerCase() + group.slice(1)}Bean.prepareCreate()}" icon="pi pi-plus" styleClass="ui-button-success" style="margin-top:1em"/>` : ""}\n      </p:panel>\n    </h:form>\n  </ui:define>\n</ui:composition>\n</html>`,
+          category: "controller",
+          technology: "JSP",
+        });
+      }
+
+      // --- Managed Bean ---
+      const beanName = group.charAt(0).toLowerCase() + group.slice(1) + "Bean";
+      files.push({
+        path: `${prefix}/src/main/java/${packagePath}/web/${group}Bean.java`,
+        content: `package ${basePackage}.web;\n\nimport jakarta.faces.view.ViewScoped;\nimport jakarta.inject.Named;\nimport java.io.Serializable;\nimport java.util.ArrayList;\nimport java.util.List;\n\n/**\n * ${group}Bean - Managed Bean JSF pour les operations CRUD ${group}.\n *\n * TODO: [INTEGRATION] Injecter ${group}Service pour les operations CRUD reelles.\n * Pourquoi : Ce bean utilise des donnees stub qui doivent etre remplacees.\n * Comment : @Inject private ${group}Service service;\n *\n * @generated EJB Client Modernizer v10.8\n */\n@Named\n@ViewScoped\npublic class ${group}Bean implements Serializable {\n\n    private List<Object> items = new ArrayList<>();\n    private Object selected;\n\n    public List<Object> getItems() {\n        // TODO: [INTEGRATION] Remplacer par service.findAll()\n        return items;\n    }\n\n    ${hasCreate ? `public String prepareCreate() {\n        this.selected = null;\n        return "/${kebab}/form?faces-redirect=true";\n    }` : ""}\n\n    ${hasUpdate ? `public String edit(Object item) {\n        this.selected = item;\n        return "/${kebab}/form?faces-redirect=true";\n    }` : ""}\n\n    ${hasDelete ? `public void delete(Object item) {\n        // TODO: [INTEGRATION] Appeler service.delete(item)\n        items.remove(item);\n    }` : ""}\n\n    public Object getSelected() { return selected; }\n    public void setSelected(Object selected) { this.selected = selected; }\n}`,
+        category: "controller",
+        technology: "JSP",
+      });
+    }
 
     return files;
   }

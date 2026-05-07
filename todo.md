@@ -477,3 +477,9 @@
 - [x] Ajouter generateThymeleafScaffold dans FrontendGenerator (layout Thymeleaf, Bootstrap 5, HomeController)
 - [x] Mettre à jour PostMigrationChecklist pour supporter thymeleaf
 - [x] Tests : 128 unit + 134 no-regression + 68 compilation + 14 frontend engine = tous passés
+
+## v11.7 — Thymeleaf CRUD + JSF/PrimeFaces + Fragments
+- [x] Enrichir Thymeleaf avec pages CRUD par entité (list.html, form.html, detail.html) + Controllers Spring MVC
+- [x] Ajouter JSF/PrimeFaces comme 5e option frontend (JoinFaces + PrimeFaces DataTable + Managed Beans)
+- [x] Générer les fragments Thymeleaf (nav.html, pagination.html) + pages CRUD par entité détectée
+- [x] Tests : 128 unit + 134 no-regression + 68 compilation + 14 frontend + 17 JMS + 9 session = tous passés

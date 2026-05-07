@@ -78,7 +78,7 @@ export interface ChecklistInput {
   technologiesDetected: TechnologyType[];
   detectedDomain: DetectedDomain;
   hasFrontend: boolean;
-  frontendFramework?: "react" | "angular" | "vue" | "thymeleaf";
+  frontendFramework?: "react" | "angular" | "vue" | "thymeleaf" | "jsf";
   hasMicroservices: boolean;
   hasSaga: boolean;
   hasMessaging: boolean;
@@ -291,7 +291,7 @@ export class PostMigrationChecklist {
         category: "testing",
         priority: "high",
         title: "Ecrire les tests frontend",
-        what: `Ecrire des tests avec ${input.frontendFramework === "angular" ? "Jasmine/Karma" : "Vitest + React Testing Library"} pour les composants et services.`,
+        what: `Ecrire des tests avec ${input.frontendFramework === "angular" ? "Jasmine/Karma" : input.frontendFramework === "thymeleaf" || input.frontendFramework === "jsf" ? "Spring Boot Test + MockMvc" : "Vitest + React Testing Library"} pour les composants et services.`,
         why: "Les composants frontend generes doivent etre testes pour valider l'affichage et les interactions.",
         how: "1. Tester chaque service API avec des mocks (MSW)\n2. Tester les composants avec des snapshots\n3. Tester les formulaires (validation, soumission)\n4. Tester la navigation et le routing.",
         relatedFiles: ["frontend/src/"],

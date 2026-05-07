@@ -26,7 +26,7 @@ import type { AIAnalysisInsights, DomainInsight } from "../analysis/AnalysisLLME
 
 // --- Types ---
 
-export type FrontendFramework = "react" | "angular" | "vue" | "thymeleaf";
+export type FrontendFramework = "react" | "angular" | "vue" | "thymeleaf" | "jsf";
 
 export type IndustryStandard =
   | "BIAN"      // Banking Industry Architecture Network
@@ -353,6 +353,7 @@ export class DynamicOptionsResolver {
           { id: "angular", label: "Angular", description: "Application Angular avec Angular Material, HttpClient, routing", defaultSelected: false },
           { id: "vue", label: "Vue.js 3", description: "Application Vue 3 avec Composition API, Vue Router, Pinia, Axios", defaultSelected: false },
           { id: "thymeleaf", label: "Thymeleaf / Spring MVC", description: "Rendu serveur avec Spring MVC, Thymeleaf templates, Bootstrap 5", defaultSelected: false },
+          { id: "jsf", label: "JSF / PrimeFaces", description: "Jakarta Faces avec PrimeFaces, JoinFaces Spring Boot, composants riches", defaultSelected: false },
         ],
       });
     }

@@ -130,7 +130,7 @@ export default function CompleoAgentPage() {
   const [enableSaga, setEnableSaga] = useState(false);
   // v10.8: Dynamic options + Frontend generation
   const [enableFrontend, setEnableFrontend] = useState(false);
-  const [frontendFramework, setFrontendFramework] = useState<"react" | "angular" | "vue" | "thymeleaf">("react");
+  const [frontendFramework, setFrontendFramework] = useState<"react" | "angular" | "vue" | "thymeleaf" | "jsf">("react");
   const [enableIndustryStandard, setEnableIndustryStandard] = useState(false);
   const [selectedStandard, setSelectedStandard] = useState<string>("");
   const [dynamicOptions, setDynamicOptions] = useState<any>(null);
