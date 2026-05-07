@@ -1319,6 +1319,34 @@ export class CompleoAgent {
       });
     }
 
+    // ─── v12.1: Post-generation migration — replace TODO stubs with migrated code ───
+    try {
+      const { runPostGenerationMigration } = await import("../engine/migration/PostGenerationMigrator");
+      const postMigStats = await runPostGenerationMigration(
+        project.files,
+        session.ir!,
+        { maxMethodsPerRun: 30, skipLLM: false }
+      );
+
+      if (postMigStats.todosReplaced > 0) {
+        // Update session
+        this.sessionStore.update(session.id, { generatedProject: project });
+
+        yield this.event("LOG", {
+          level: "success",
+          message: `v12.1: ${postMigStats.todosReplaced} TODOs remplacés (${postMigStats.todosByLLM} LLM, ${postMigStats.todosByRules} règles) — ${postMigStats.todosKept} conservés`,
+          phase: "MIGRATING_BUSINESS_LOGIC",
+          data: postMigStats as unknown as Record<string, unknown>,
+        });
+      }
+    } catch (postMigErr: any) {
+      yield this.event("LOG", {
+        level: "warn",
+        message: `v12.1 post-migration partielle : ${postMigErr.message}`,
+        phase: "MIGRATING_BUSINESS_LOGIC",
+      });
+    }
+
     yield this.event("PHASE_END", {
       phase: "MIGRATING_BUSINESS_LOGIC",
       message: `Migration logique métier terminée (${Date.now() - startTime}ms)`,

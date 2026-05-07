@@ -124,6 +124,9 @@ export interface ServiceMethodIR {
   returnType: string;
   parameters: { name: string; type: string }[];
   throwsExceptions: string[];
+  body?: string;
+  bodyLOC?: number;
+  hasBusinessLogic?: boolean;
 }
 
 export interface EnumIR {
@@ -671,6 +674,9 @@ interface DirectEjbMethod {
   parameters: { name: string; type: string }[];
   throwsExceptions: string[];
   javadoc: string;
+  body?: string;
+  bodyLOC?: number;
+  hasBusinessLogic?: boolean;
 }
 
 const LIFECYCLE_METHODS = new Set([
@@ -732,7 +738,29 @@ function extractBusinessMethods(content: string, className: string): DirectEjbMe
 
     const throwsExceptions = throwsStr.split(",").map(e => e.trim()).filter(Boolean);
 
-    methods.push({ name, returnType, parameters, throwsExceptions, javadoc });
+    // v12.1: Extract method body (everything between the opening { and matching })
+    const bodyStart = m.index! + m[0].length; // position right after the opening {
+    let braceCount = 1;
+    let bodyEnd = bodyStart;
+    for (let i = bodyStart; i < content.length && braceCount > 0; i++) {
+      if (content[i] === '{') braceCount++;
+      else if (content[i] === '}') braceCount--;
+      if (braceCount === 0) { bodyEnd = i; break; }
+    }
+    const body = content.substring(bodyStart, bodyEnd).trim();
+    const bodyLOC = body.split('\n').filter(l => l.trim().length > 0).length;
+
+    // v12.1: Determine if body contains business logic
+    const hasBusinessLogic = bodyLOC > 2 && (
+      /em\.(persist|merge|remove|find|createQuery|createNativeQuery)/.test(body) ||
+      /\w+Service\.\w+\(|\w+Bean\.\w+\(|\w+EJB\.\w+\(/.test(body) ||
+      /prepareStatement|executeQuery|executeUpdate|getConnection/.test(body) ||
+      /BigDecimal|\.(add|subtract|multiply|divide)\(/.test(body) ||
+      /\bfor\s*\(|\bwhile\s*\(/.test(body) && /\.(get|set|add|remove)\w*\(/.test(body) ||
+      /\bif\s*\([^)]*\b(status|state|amount|solde|balance|montant|type|code)\b/.test(body)
+    );
+
+    methods.push({ name, returnType, parameters, throwsExceptions, javadoc, body, bodyLOC, hasBusinessLogic });
   }
   return methods;
 }
@@ -1611,7 +1639,27 @@ function parseService(file: JavaFile): ServiceIR {
 
     const throwsExceptions = throwsStr.split(",").map(e => e.trim()).filter(Boolean);
 
-    methods.push({ name, returnType, parameters, throwsExceptions });
+    // v12.1: Extract method body
+    const bodyStart = mm.index! + mm[0].length;
+    let braceCount = 1;
+    let bodyEnd = bodyStart;
+    for (let i = bodyStart; i < content.length && braceCount > 0; i++) {
+      if (content[i] === '{') braceCount++;
+      else if (content[i] === '}') braceCount--;
+      if (braceCount === 0) { bodyEnd = i; break; }
+    }
+    const body = content.substring(bodyStart, bodyEnd).trim();
+    const bodyLOC = body.split('\n').filter(l => l.trim().length > 0).length;
+    const hasBusinessLogic = bodyLOC > 2 && (
+      /em\.(persist|merge|remove|find|createQuery|createNativeQuery)/.test(body) ||
+      /\w+Service\.\w+\(|\w+Bean\.\w+\(|\w+EJB\.\w+\(/.test(body) ||
+      /prepareStatement|executeQuery|executeUpdate|getConnection/.test(body) ||
+      /BigDecimal|\.(add|subtract|multiply|divide)\(/.test(body) ||
+      /\bfor\s*\(|\bwhile\s*\(/.test(body) && /\.(get|set|add|remove)\w*\(/.test(body) ||
+      /\bif\s*\([^)]*\b(status|state|amount|solde|balance|montant|type|code)\b/.test(body)
+    );
+
+    methods.push({ name, returnType, parameters, throwsExceptions, body, bodyLOC, hasBusinessLogic });
   }
 
   // Extract injected dependencies

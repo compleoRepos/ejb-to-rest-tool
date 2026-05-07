@@ -1,0 +1,404 @@
+/**
+ * PostGenerationMigrator v12.1 — Post-generation phase that replaces TODO stubs
+ * with actual migrated business logic using LLM + rule-based fallback.
+ *
+ * This runs AFTER generateSpringBootProject() and BEFORE quality scoring in the agent pipeline.
+ * It scans generated service files for TODO patterns and replaces them with migrated code
+ * using the original method bodies extracted by the parser (v12.1 body extraction).
+ *
+ * @author Hamza NORDINE — Compleo
+ */
+
+import type { GeneratedFile } from "../../spring/shared";
+import type { ProjectIR, UseCaseIR } from "../../java-parser";
+import { MethodTransformer, type MethodContext, type MethodMigrationResult } from "./MethodTransformer";
+
+export interface PostMigrationStats {
+  totalTodosFound: number;
+  todosReplaced: number;
+  todosByLLM: number;
+  todosByRules: number;
+  todosKept: number;
+  totalTimeMs: number;
+}
+
+export interface MethodBodyMap {
+  /** className_methodName → body string */
+  [key: string]: {
+    body: string;
+    bodyLOC: number;
+    hasBusinessLogic: boolean;
+    returnType: string;
+    parameters: { name: string; type: string }[];
+    className: string;
+    methodName: string;
+  };
+}
+
+/**
+ * Build a map of all method bodies from the IR (UseCases + services + raw files).
+ */
+export function buildMethodBodyMap(ir: ProjectIR): MethodBodyMap {
+  const map: MethodBodyMap = {};
+
+  // From UseCases (direct EJB methods)
+  for (const uc of ir.useCases) {
+    if (!uc.rawSource) continue;
+
+    // Extract method body from rawSource using the same regex as the parser
+    const className = uc.className.includes("_") ? uc.className.split("_")[0] : uc.className;
+    const methodName = uc.className.includes("_") ? uc.className.split("_").slice(1).join("_") : "execute";
+
+    // Try to extract the specific method body
+    const body = extractMethodBodyFromSource(uc.rawSource, methodName);
+    if (body && body.trim().length > 20) {
+      const bodyLOC = body.split("\n").filter(l => l.trim().length > 0).length;
+      const hasBusinessLogic = detectBusinessLogic(body);
+
+      map[`${className}_${methodName}`] = {
+        body,
+        bodyLOC,
+        hasBusinessLogic,
+        returnType: uc.voOutType || "void",
+        parameters: (uc as any).methodParameters || [],
+        className,
+        methodName,
+      };
+    }
+  }
+
+  // From raw files — extract all public method bodies
+  const rawFiles = (ir as any)._rawFiles ?? [];
+  for (const file of rawFiles) {
+    if (!file.content) continue;
+    const fileClassName = file.path?.split("/").pop()?.replace(".java", "") ?? "";
+    const methods = extractAllMethodBodies(file.content, fileClassName);
+    for (const m of methods) {
+      const key = `${fileClassName}_${m.methodName}`;
+      if (!map[key]) {
+        map[key] = m;
+      }
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Run post-generation migration on all generated service/adapter files.
+ * Replaces TODO stubs with migrated business logic.
+ */
+export async function runPostGenerationMigration(
+  files: GeneratedFile[],
+  ir: ProjectIR,
+  options?: { maxMethodsPerRun?: number; skipLLM?: boolean }
+): Promise<PostMigrationStats> {
+  const stats: PostMigrationStats = {
+    totalTodosFound: 0,
+    todosReplaced: 0,
+    todosByLLM: 0,
+    todosByRules: 0,
+    todosKept: 0,
+    totalTimeMs: 0,
+  };
+
+  const startTime = Date.now();
+  const methodBodyMap = buildMethodBodyMap(ir);
+  const transformer = new MethodTransformer();
+  const maxMethods = options?.maxMethodsPerRun ?? 30;
+  let methodsProcessed = 0;
+
+  // Collect available services and repositories from generated files
+  const availableServices = extractServiceNames(files);
+  const availableRepositories = extractRepositoryNames(files);
+
+  for (const file of files) {
+    if (!file.path.endsWith(".java")) continue;
+    if (!file.path.includes("/service/") && !file.path.includes("/adapter/")) continue;
+
+    // Find TODO patterns in the file
+    const todoPatterns = findTodoPatterns(file.content);
+    if (todoPatterns.length === 0) continue;
+
+    stats.totalTodosFound += todoPatterns.length;
+
+    for (const todo of todoPatterns) {
+      if (methodsProcessed >= maxMethods) {
+        stats.todosKept++;
+        continue;
+      }
+
+      // Try to find the corresponding method body
+      const methodBody = findMethodBody(todo, methodBodyMap);
+      if (!methodBody || !methodBody.hasBusinessLogic) {
+        stats.todosKept++;
+        continue;
+      }
+
+      // Transform the method body
+      const ctx: MethodContext = {
+        className: methodBody.className,
+        methodName: methodBody.methodName,
+        returnType: methodBody.returnType,
+        parameters: methodBody.parameters,
+        body: methodBody.body,
+        availableServices,
+        availableRepositories,
+      };
+
+      try {
+        let result: MethodMigrationResult;
+        if (options?.skipLLM) {
+          // Force rule-based only (for testing without LLM)
+          result = await transformer.transform(ctx);
+        } else {
+          result = await transformer.transform(ctx);
+        }
+
+        if (result.strategy !== "todo") {
+          // Replace the TODO block with migrated code
+          file.content = replaceTodoWithCode(file.content, todo, result.code, result.strategy);
+          stats.todosReplaced++;
+          if (result.strategy === "llm") stats.todosByLLM++;
+          else stats.todosByRules++;
+        } else {
+          stats.todosKept++;
+        }
+      } catch {
+        stats.todosKept++;
+      }
+
+      methodsProcessed++;
+    }
+  }
+
+  stats.totalTimeMs = Date.now() - startTime;
+  return stats;
+}
+
+// ─── Internal Helpers ────────────────────────────────────────────────────────
+
+interface TodoPattern {
+  startIndex: number;
+  endIndex: number;
+  text: string;
+  methodName: string;
+  className: string;
+}
+
+function findTodoPatterns(content: string): TodoPattern[] {
+  const patterns: TodoPattern[] = [];
+  const lines = content.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Match: // TODO: Implement business logic from legacy ClassName
+    let match = line.match(/\/\/\s*TODO:?\s*Implement\s+(?:business logic from legacy|call to)\s+(\w+)/);
+    if (match) {
+      const className = match[1];
+      // Try to find method name from context (previous line might have method signature)
+      let methodName = "execute";
+      for (let j = i - 1; j >= Math.max(0, i - 5); j--) {
+        const sigMatch = lines[j].match(/public\s+\w+\s+(\w+)\s*\(/);
+        if (sigMatch) { methodName = sigMatch[1]; break; }
+      }
+      patterns.push({
+        startIndex: i,
+        endIndex: i,
+        text: line,
+        methodName,
+        className,
+      });
+      continue;
+    }
+
+    // Match: // TODO: Implement <method> — migrated from @Remote ClassName
+    match = line.match(/\/\/\s*TODO:?\s*Implement\s+(\w+)\s*[—\-]+\s*migrated from\s+@Remote\s+(\w+)/);
+    if (match) {
+      patterns.push({
+        startIndex: i,
+        endIndex: i + 1, // Also includes the next TODO line
+        text: line,
+        methodName: match[1],
+        className: match[2],
+      });
+      continue;
+    }
+
+    // Match: // TODO: Implement step N — label
+    match = line.match(/\/\/\s*TODO:?\s*Implement step\s+\d+\s*[—\-]+\s*(.+)/);
+    if (match) {
+      // Find the className from surrounding context
+      let className = "Unknown";
+      for (let j = i - 1; j >= Math.max(0, i - 10); j--) {
+        const ctxMatch = lines[j].match(/Migrated from:?\s*(\w+)/);
+        if (ctxMatch) { className = ctxMatch[1]; break; }
+      }
+      let methodName = "execute";
+      for (let j = i - 1; j >= Math.max(0, i - 10); j--) {
+        const sigMatch = lines[j].match(/public\s+\w+\s+(\w+)\s*\(/);
+        if (sigMatch) { methodName = sigMatch[1]; break; }
+      }
+      patterns.push({
+        startIndex: i,
+        endIndex: i,
+        text: line,
+        methodName,
+        className,
+      });
+    }
+  }
+
+  return patterns;
+}
+
+function findMethodBody(todo: TodoPattern, map: MethodBodyMap): MethodBodyMap[string] | null {
+  // Try exact match first
+  const exactKey = `${todo.className}_${todo.methodName}`;
+  if (map[exactKey]) return map[exactKey];
+
+  // Try without suffix (Bean, EJB, Impl)
+  const baseName = todo.className.replace(/(Bean|EJB|Impl|Service|Adapter)$/, "");
+  const baseKey = `${baseName}_${todo.methodName}`;
+  if (map[baseKey]) return map[baseKey];
+
+  // Try fuzzy match on method name
+  for (const [key, value] of Object.entries(map)) {
+    if (key.endsWith(`_${todo.methodName}`)) return value;
+  }
+
+  return null;
+}
+
+function replaceTodoWithCode(
+  content: string, todo: TodoPattern, migratedCode: string, strategy: string
+): string {
+  const lines = content.split("\n");
+
+  // Find the TODO line and the surrounding stub block
+  let blockStart = todo.startIndex;
+  let blockEnd = todo.endIndex;
+
+  // Expand block to include related TODO/comment lines
+  while (blockStart > 0 && /^\s*\/\//.test(lines[blockStart - 1])) {
+    blockStart--;
+  }
+  while (blockEnd < lines.length - 1 && /^\s*\/\//.test(lines[blockEnd + 1])) {
+    blockEnd++;
+  }
+  // Also include the throw statement if it follows
+  if (blockEnd < lines.length - 1 && /throw new UnsupportedOperationException/.test(lines[blockEnd + 1])) {
+    blockEnd++;
+  }
+
+  // Replace the block with migrated code
+  const migrationComment = `        // ─── Migrated by v12.1 (${strategy}) ───`;
+  const replacement = [migrationComment, migratedCode].join("\n");
+  lines.splice(blockStart, blockEnd - blockStart + 1, replacement);
+
+  return lines.join("\n");
+}
+
+function extractServiceNames(files: GeneratedFile[]): string[] {
+  const names: string[] = [];
+  for (const f of files) {
+    if (f.path.includes("/service/") && f.path.endsWith("Service.java")) {
+      const match = f.path.match(/\/(\w+Service)\.java$/);
+      if (match) names.push(match[1]);
+    }
+  }
+  return names;
+}
+
+function extractRepositoryNames(files: GeneratedFile[]): string[] {
+  const names: string[] = [];
+  for (const f of files) {
+    if (f.path.includes("/repository/") && f.path.endsWith("Repository.java")) {
+      const match = f.path.match(/\/(\w+Repository)\.java$/);
+      if (match) names.push(match[1]);
+    }
+  }
+  return names;
+}
+
+function extractMethodBodyFromSource(source: string, methodName: string): string | null {
+  const regex = new RegExp(
+    `(?:public|protected)\\s+[\\w<>,\\s\\[\\]]+?\\s+${escapeRegex(methodName)}\\s*\\([^)]*\\)\\s*(?:throws\\s+[\\w,\\s]+)?\\s*\\{`,
+    "g"
+  );
+  const match = regex.exec(source);
+  if (!match) return null;
+
+  const bodyStart = match.index + match[0].length;
+  let braceCount = 1;
+  let bodyEnd = bodyStart;
+  for (let i = bodyStart; i < source.length && braceCount > 0; i++) {
+    if (source[i] === "{") braceCount++;
+    else if (source[i] === "}") braceCount--;
+    if (braceCount === 0) { bodyEnd = i; break; }
+  }
+
+  return source.substring(bodyStart, bodyEnd).trim();
+}
+
+function extractAllMethodBodies(content: string, className: string): Array<{
+  body: string; bodyLOC: number; hasBusinessLogic: boolean;
+  returnType: string; parameters: { name: string; type: string }[];
+  className: string; methodName: string;
+}> {
+  const results: Array<{
+    body: string; bodyLOC: number; hasBusinessLogic: boolean;
+    returnType: string; parameters: { name: string; type: string }[];
+    className: string; methodName: string;
+  }> = [];
+
+  const methodRegex = /public\s+([\w<>,\s\[\]]+?)\s+(\w+)\s*\(([^)]*)\)\s*(?:throws\s+[\w,\s]+)?\s*\{/g;
+  let m;
+  while ((m = methodRegex.exec(content)) !== null) {
+    const returnType = m[1].trim();
+    const methodName = m[2];
+    const paramsStr = m[3];
+
+    // Skip constructor
+    if (methodName === className) continue;
+
+    const bodyStart = m.index + m[0].length;
+    let braceCount = 1;
+    let bodyEnd = bodyStart;
+    for (let i = bodyStart; i < content.length && braceCount > 0; i++) {
+      if (content[i] === "{") braceCount++;
+      else if (content[i] === "}") braceCount--;
+      if (braceCount === 0) { bodyEnd = i; break; }
+    }
+
+    const body = content.substring(bodyStart, bodyEnd).trim();
+    const bodyLOC = body.split("\n").filter(l => l.trim().length > 0).length;
+    const hasBusinessLogic = detectBusinessLogic(body);
+
+    const parameters = paramsStr.split(",").map(p => p.trim()).filter(Boolean).map(p => {
+      const parts = p.split(/\s+/);
+      return { name: parts[parts.length - 1], type: parts.slice(0, -1).join(" ") };
+    });
+
+    results.push({ body, bodyLOC, hasBusinessLogic, returnType, parameters, className, methodName });
+  }
+
+  return results;
+}
+
+function detectBusinessLogic(body: string): boolean {
+  const loc = body.split("\n").filter(l => l.trim().length > 0).length;
+  return loc > 2 && (
+    /em\.(persist|merge|remove|find|createQuery|createNativeQuery)/.test(body) ||
+    /\w+Service\.\w+\(|\w+Bean\.\w+\(|\w+EJB\.\w+\(/.test(body) ||
+    /prepareStatement|executeQuery|executeUpdate|getConnection/.test(body) ||
+    /BigDecimal|\.(add|subtract|multiply|divide)\(/.test(body) ||
+    /\bfor\s*\(|\bwhile\s*\(/.test(body) && /\.(get|set|add|remove)\w*\(/.test(body) ||
+    /\bif\s*\([^)]*\b(status|state|amount|solde|balance|montant|type|code)\b/.test(body)
+  );
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

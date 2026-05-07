@@ -22,6 +22,7 @@ export const PHASE_TIMEOUTS: Record<string, number> = {
   COMPILING: 600_000,        // 10 min — compilation + self-healing loop
   TESTING: 180_000,          // 3 min — tests
   PUSHING: 120_000,          // 2 min — push git / ZIP S3
+  MIGRATING_BUSINESS_LOGIC: 600_000, // 10 min — migration LLM des corps de méthodes
 };
 
 /**
