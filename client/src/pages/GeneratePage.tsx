@@ -68,6 +68,8 @@ export default function GeneratePage() {
   const doneRef = useRef(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const seenEventsRef = useRef<Set<string>>(new Set());
+  const sseConnectedRef = useRef(false);
 
   const goToResult = useCallback(() => {
     if (doneRef.current) return;
@@ -123,15 +125,20 @@ export default function GeneratePage() {
     };
   }, [sessionId, goToResult]);
 
-  // SSE for real-time events display
+  // SSE for real-time events display — single connection, no reconnect loop
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || sseConnectedRef.current) return;
+    sseConnectedRef.current = true;
 
     const es = new EventSource(`/api/agent/${sessionId}/events`);
 
     es.onmessage = (e) => {
       try {
         const event: PipelineEvent = JSON.parse(e.data);
+        // Deduplicate events by timestamp+type+message
+        const key = `${event.timestamp}-${event.type}-${event.message}`;
+        if (seenEventsRef.current.has(key)) return;
+        seenEventsRef.current.add(key);
         setEvents((prev) => [...prev, event]);
 
         // Track phases
@@ -198,7 +205,10 @@ export default function GeneratePage() {
       es.close();
     };
 
-    return () => { es.close(); };
+    return () => {
+      es.close();
+      sseConnectedRef.current = false;
+    };
   }, [sessionId, goToResult]);
 
   // Auto-scroll events

@@ -47,6 +47,8 @@ export default function AnalyzePage() {
   const [error, setError] = useState<string | null>(null);
   const doneRef = useRef(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const seenEventsRef = useRef<Set<string>>(new Set());
+  const sseConnectedRef = useRef(false);
 
   const fetchAnalysisReport = useCallback(async () => {
     try {
@@ -124,14 +126,19 @@ export default function AnalyzePage() {
     };
   }, [sessionId, markDone]);
 
-  // SSE for real-time events display
+  // SSE for real-time events display — single connection, no reconnect loop
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || sseConnectedRef.current) return;
+    sseConnectedRef.current = true;
     const es = new EventSource(`/api/agent/${sessionId}/events`);
 
     es.onmessage = (e) => {
       try {
         const event: AnalysisEvent = JSON.parse(e.data);
+        // Deduplicate events
+        const key = `${event.timestamp}-${event.type}-${event.message}`;
+        if (seenEventsRef.current.has(key)) return;
+        seenEventsRef.current.add(key);
         setEvents((prev) => [...prev, event]);
 
         if (event.phase) setPhase(event.phase);
@@ -159,7 +166,10 @@ export default function AnalyzePage() {
       es.close();
     };
 
-    return () => { es.close(); };
+    return () => {
+      es.close();
+      sseConnectedRef.current = false;
+    };
   }, [sessionId, markDone]);
 
   const handleContinue = () => {
