@@ -466,3 +466,7 @@
 - [x] docker-compose.yml : rabbitmq:3.13-management si RabbitMQ, cp-kafka si Kafka
 - [x] Tests unitaires : 12/12 passés (jms-broker-choice.test.ts) + 5/5 anciens tests (jms-fix3)
 - [ ] Modifier microservice-generator pour supporter RabbitMQ (exchanges au lieu de topics) — à faire si besoin
+
+## Bug — Bouton "Forcer le rafraîchissement" ne fonctionne pas (PC + Chrome iOS)
+- [x] Cause : conditionné par `isSafari` — invisible sur PC (Chrome/Firefox) et parfois Chrome iOS
+- [x] Fix : bouton + badge polling visibles pour TOUS les navigateurs quand l'agent tourne

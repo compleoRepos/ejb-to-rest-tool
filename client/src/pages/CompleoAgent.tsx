@@ -890,7 +890,7 @@ export default function CompleoAgentPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {isSafari && isRunning && (
+              {isRunning && (
                 <Badge variant="outline" className="text-[10px] border-orange-500/40 text-orange-400 gap-1">
                   <Wifi className="w-3 h-3" />
                   Polling {pollingIntervalMs === 1000 ? "1s" : "2s"}
@@ -1404,7 +1404,7 @@ export default function CompleoAgentPage() {
 
               {/* Actions */}
               <div className="space-y-2">
-                {isSafari && isRunning && sessionId && (
+                {isRunning && sessionId && (
                   <Button
                     variant="outline"
                     size="sm"
