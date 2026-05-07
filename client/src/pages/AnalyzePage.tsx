@@ -1,8 +1,8 @@
 /**
  * AnalyzePage — Affiche la progression de l'analyse puis le rapport.
- * Écoute les SSE /api/agent/:id/events et affiche le rapport quand ANALYSIS_COMPLETE.
+ * Utilise SSE + polling fallback toutes les 3s pour détecter la fin.
  */
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useLocation } from "wouter";
 import { PipelineStepper } from "@/components/PipelineStepper";
 import { Button } from "@/components/ui/button";
@@ -45,67 +45,14 @@ export default function AnalyzePage() {
   const [phase, setPhase] = useState("INITIALIZING");
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const doneRef = useRef(false);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    if (!sessionId) return;
-    const es = new EventSource(`/api/agent/${sessionId}/events`);
-    esRef.current = es;
-
-    es.onmessage = (e) => {
-      try {
-        const event: AnalysisEvent = JSON.parse(e.data);
-        setEvents((prev) => [...prev, event]);
-
-        if (event.phase) setPhase(event.phase);
-
-        // Check for analysis completion — l'agent émet AWAITING_INPUT quand l'analyse est terminée
-        if (
-          event.type === "AWAITING_INPUT" ||
-          event.type === "ANALYSIS_COMPLETE" ||
-          (event.type === "PHASE_CHANGE" && event.phase === "WAITING_CHOICES") ||
-          (event.phase === "AWAITING_INPUT")
-        ) {
-          setDone(true);
-          es.close();
-          // Fetch the dynamic options (analysis report)
-          fetchAnalysisReport();
-        }
-
-        if (event.type === "FAILURE") {
-          setError(event.message);
-          es.close();
-        }
-      } catch { /* ignore parse errors */ }
-    };
-
-    es.onerror = () => {
-      // Check if analysis is already done
-      fetchStatus();
-    };
-
-    return () => { es.close(); };
-  }, [sessionId]);
-
-  const fetchStatus = async () => {
-    try {
-      const res = await fetch(`/api/agent/${sessionId}/status`);
-      if (res.ok) {
-        const status = await res.json();
-        if (status.state === "WAITING_CHOICES" || status.state === "AWAITING_INPUT" || status.currentPhase === "WAITING_CHOICES" || status.phase === "AWAITING_INPUT") {
-          setDone(true);
-          fetchAnalysisReport();
-        }
-      }
-    } catch { /* ignore */ }
-  };
-
-  const fetchAnalysisReport = async () => {
+  const fetchAnalysisReport = useCallback(async () => {
     try {
       const res = await fetch(`/api/agent/${sessionId}/dynamic-options`);
       if (res.ok) {
         const data = await res.json();
-        // Extract analysis info from dynamic options
         setReport({
           projectName: data.projectName || "Projet",
           totalFiles: data.totalFiles || 0,
@@ -117,7 +64,103 @@ export default function AnalyzePage() {
         });
       }
     } catch { /* ignore */ }
-  };
+  }, [sessionId]);
+
+  const markDone = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    setDone(true);
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    fetchAnalysisReport();
+  }, [fetchAnalysisReport]);
+
+  // Polling fallback — vérifie le statut toutes les 3s
+  useEffect(() => {
+    if (!sessionId || doneRef.current) return;
+
+    const poll = async () => {
+      if (doneRef.current) return;
+      try {
+        const res = await fetch(`/api/agent/${sessionId}/status`);
+        if (res.ok) {
+          const status = await res.json();
+          // Detect analysis done states
+          if (
+            status.state === "AWAITING_INPUT" ||
+            status.state === "WAITING_CHOICES" ||
+            status.phase === "AWAITING_INPUT" ||
+            status.currentPhase === "AWAITING_INPUT" ||
+            // Also detect if generation already started (user came back to this page)
+            status.state === "RUNNING" && (
+              status.phase === "GENERATING" ||
+              status.phase === "MIGRATING_BUSINESS_LOGIC" ||
+              status.phase === "COMPILING" ||
+              status.phase === "PUSHING"
+            ) ||
+            status.state === "COMPLETED"
+          ) {
+            markDone();
+          }
+          if (status.state === "FAILED") {
+            setError("L'analyse a échoué");
+          }
+        }
+      } catch { /* ignore */ }
+    };
+
+    // First poll immediately
+    poll();
+    // Then every 3 seconds
+    pollingRef.current = setInterval(poll, 3000);
+
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [sessionId, markDone]);
+
+  // SSE for real-time events display
+  useEffect(() => {
+    if (!sessionId) return;
+    const es = new EventSource(`/api/agent/${sessionId}/events`);
+
+    es.onmessage = (e) => {
+      try {
+        const event: AnalysisEvent = JSON.parse(e.data);
+        setEvents((prev) => [...prev, event]);
+
+        if (event.phase) setPhase(event.phase);
+
+        // Check for analysis completion
+        if (
+          event.type === "AWAITING_INPUT" ||
+          event.type === "ANALYSIS_COMPLETE" ||
+          (event.type === "PHASE_CHANGE" && event.phase === "WAITING_CHOICES") ||
+          (event.phase === "AWAITING_INPUT")
+        ) {
+          es.close();
+          markDone();
+        }
+
+        if (event.type === "FAILURE") {
+          setError(event.message);
+          es.close();
+        }
+      } catch { /* ignore parse errors */ }
+    };
+
+    es.onerror = () => {
+      // SSE failed — polling will handle it
+      es.close();
+    };
+
+    return () => { es.close(); };
+  }, [sessionId, markDone]);
 
   const handleContinue = () => {
     navigate(`/compleo/agent/${sessionId}/configure`);
@@ -268,6 +311,22 @@ export default function AnalyzePage() {
                 <ArrowRight className="w-4 h-4" />
               </Button>
             </div>
+          </div>
+        )}
+
+        {/* Done but no report yet — show continue button anyway */}
+        {done && !report && (
+          <div className="text-center pt-8">
+            <CheckCircle2 className="w-10 h-10 text-teal-400 mx-auto mb-2" />
+            <h2 className="text-2xl font-bold text-zinc-100 mb-4">Analyse terminée</h2>
+            <Button
+              size="lg"
+              onClick={handleContinue}
+              className="gap-2 bg-teal-600 hover:bg-teal-500 text-white px-8"
+            >
+              Configurer la migration
+              <ArrowRight className="w-4 h-4" />
+            </Button>
           </div>
         )}
       </div>

@@ -1,17 +1,18 @@
 /**
  * GeneratePage — Affiche la progression de la génération en temps réel.
- * Écoute SSE /api/agent/:id/events pour afficher les phases du pipeline.
- * Navigation auto vers /result quand GENERATION_COMPLETE.
+ * Utilise SSE + polling fallback toutes les 3s pour détecter la fin.
+ * Navigation auto vers /result quand COMPLETED.
  */
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useLocation } from "wouter";
 import { PipelineStepper } from "@/components/PipelineStepper";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Loader2, CheckCircle2, AlertTriangle, Zap, Code2, Hammer,
-  FileCode2, RefreshCw, Package, Shield, BarChart3
+  FileCode2, RefreshCw, Package, Shield, BarChart3, ArrowRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -45,6 +46,7 @@ const PHASE_META: Record<string, { label: string; icon: React.ElementType }> = {
   MIGRATING_BUSINESS_LOGIC: { label: "Migration logique métier", icon: Code2 },
   SOC2_COMPLIANCE: { label: "Conformité SOC 2", icon: Shield },
   GENERATION_COMPLETE: { label: "Terminé", icon: CheckCircle2 },
+  PUSHING: { label: "Push des artefacts", icon: Package },
 };
 
 export default function GeneratePage() {
@@ -63,29 +65,69 @@ export default function GeneratePage() {
     fixed: number;
     remaining: number;
   } | null>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const doneRef = useRef(false);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!sessionId) return;
+  const goToResult = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    setDone(true);
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    setTimeout(() => {
+      navigate(`/compleo/agent/${sessionId}/result`);
+    }, 1500);
+  }, [navigate, sessionId]);
 
-    // First check if already done
-    (async () => {
+  // Polling fallback — vérifie le statut toutes les 3s
+  useEffect(() => {
+    if (!sessionId || doneRef.current) return;
+
+    const poll = async () => {
+      if (doneRef.current) return;
       try {
-        const statusRes = await fetch(`/api/agent/${sessionId}/status`);
-        if (statusRes.ok) {
-          const status = await statusRes.json();
-          if (status.phase === "GENERATION_COMPLETE" || status.phase === "DONE" || status.state === "COMPLETED") {
-            setDone(true);
-            navigate(`/compleo/agent/${sessionId}/result`);
-            return;
+        const res = await fetch(`/api/agent/${sessionId}/status`);
+        if (res.ok) {
+          const status = await res.json();
+          if (
+            status.state === "COMPLETED" ||
+            status.phase === "DONE" ||
+            status.phase === "GENERATION_COMPLETE"
+          ) {
+            goToResult();
+          }
+          // Update current phase from polling
+          if (status.phase && status.phase !== "DONE") {
+            setCurrentPhase(status.phase);
+          }
+          if (status.state === "FAILED") {
+            setError(status.errorMessage || "La génération a échoué");
           }
         }
       } catch { /* ignore */ }
-    })();
+    };
+
+    // First poll immediately
+    poll();
+    // Then every 3 seconds
+    pollingRef.current = setInterval(poll, 3000);
+
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [sessionId, goToResult]);
+
+  // SSE for real-time events display
+  useEffect(() => {
+    if (!sessionId) return;
 
     const es = new EventSource(`/api/agent/${sessionId}/events`);
-    esRef.current = es;
 
     es.onmessage = (e) => {
       try {
@@ -98,15 +140,13 @@ export default function GeneratePage() {
           if (phaseId) {
             setCurrentPhase(phaseId);
             setPhases((prev) => {
-              // Mark previous active phases as completed
               const updated = prev.map((p) =>
                 p.status === "active"
                   ? { ...p, status: "completed" as const, endTime: event.timestamp }
                   : p
               );
-              // Add new phase if not already present
               const exists = updated.find((p) => p.id === phaseId);
-              if (!exists && phaseId !== "GENERATION_COMPLETE") {
+              if (!exists && phaseId !== "GENERATION_COMPLETE" && phaseId !== "DONE") {
                 const meta = PHASE_META[phaseId] || { label: phaseId, icon: Zap };
                 updated.push({
                   id: phaseId,
@@ -133,7 +173,7 @@ export default function GeneratePage() {
           });
         }
 
-        // Generation complete — l'agent émet SUCCESS (phase=DONE) quand terminé
+        // Generation complete
         if (
           event.type === "SUCCESS" ||
           event.type === "GENERATION_COMPLETE" ||
@@ -141,12 +181,8 @@ export default function GeneratePage() {
           (event.type === "PHASE_START" && event.phase === "DONE") ||
           (event.type === "PHASE_END" && event.phase === "PUSHING")
         ) {
-          setDone(true);
           es.close();
-          // Auto-navigate after a short delay
-          setTimeout(() => {
-            navigate(`/compleo/agent/${sessionId}/result`);
-          }, 1500);
+          goToResult();
         }
 
         // Failure
@@ -158,23 +194,12 @@ export default function GeneratePage() {
     };
 
     es.onerror = () => {
-      // Check status to see if generation is complete
-      (async () => {
-        try {
-          const res = await fetch(`/api/agent/${sessionId}/status`);
-          if (res.ok) {
-            const status = await res.json();
-            if (status.phase === "GENERATION_COMPLETE" || status.phase === "DONE" || status.state === "COMPLETED") {
-              setDone(true);
-              navigate(`/compleo/agent/${sessionId}/result`);
-            }
-          }
-        } catch { /* ignore */ }
-      })();
+      // SSE failed — polling will handle it
+      es.close();
     };
 
     return () => { es.close(); };
-  }, [sessionId]);
+  }, [sessionId, goToResult]);
 
   // Auto-scroll events
   useEffect(() => {
@@ -189,6 +214,10 @@ export default function GeneratePage() {
     const elapsed = Math.round((Date.now() - start) / 1000);
     if (elapsed < 60) return `${elapsed}s`;
     return `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
+  };
+
+  const handleManualNavigate = () => {
+    navigate(`/compleo/agent/${sessionId}/result`);
   };
 
   return (
@@ -278,7 +307,6 @@ export default function GeneratePage() {
                 </span>
               </div>
             </div>
-            {/* Progress bar */}
             <div className="mt-2 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
               <div
                 className="h-full bg-teal-500 rounded-full transition-all duration-500"
@@ -338,7 +366,29 @@ export default function GeneratePage() {
         {done && (
           <div className="mt-6 text-center">
             <CheckCircle2 className="w-10 h-10 text-teal-400 mx-auto mb-2" />
-            <p className="text-zinc-300">Redirection vers les résultats...</p>
+            <p className="text-zinc-300 mb-3">Redirection vers les résultats...</p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleManualNavigate}
+              className="gap-2 text-teal-400 border-teal-600"
+            >
+              Voir les résultats <ArrowRight className="w-3 h-3" />
+            </Button>
+          </div>
+        )}
+
+        {/* Manual navigation button after 60s */}
+        {!done && !error && events.length > 5 && (
+          <div className="mt-4 text-center">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleManualNavigate}
+              className="text-xs text-zinc-500 hover:text-zinc-300"
+            >
+              Aller aux résultats manuellement
+            </Button>
           </div>
         )}
       </div>
