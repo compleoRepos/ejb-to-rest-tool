@@ -437,3 +437,10 @@
 - [x] Indicateur visuel "Mode polling" dans le header pour Safari (badge orange avec intervalle)
 - [x] Polling adaptatif 1s pendant phases actives (GENERATING, COMPILING, MICROSERVICES, etc.)
 - [x] Bouton "Forcer le rafraîchissement" visible sur Safari quand l'agent est en cours
+
+## Performance — Chargement des sessions trop lent
+- [x] Projection légère dans /api/agent/sessions (seulement colonnes scalaires, pas les blobs JSON)
+- [x] Projection légère dans /api/compleo/sessions (ne pas itérer sur les blobs en mémoire)
+- [x] SessionStore : chargement lazy — métadonnées au démarrage, blobs à la demande
+- [x] Cache frontend avec staleTime pour éviter re-fetch inutiles (fetchWithCache 10s TTL)
+- [ ] Index DB sur les colonnes de tri (updatedAt, status) — à faire si besoin

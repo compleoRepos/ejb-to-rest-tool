@@ -174,4 +174,67 @@ describe("SessionStore", () => {
       expect(store.get("persist-1")?.projectName).toBe("PersistTest");
     });
   });
+
+  describe("listSessionsExtended() — v11.3", () => {
+    it("retourne les métadonnées étendues (useCaseCount, dtoCount, generatedFiles, ambiguityCount)", async () => {
+      const { SessionStore } = await import("./session-store");
+      const store = new SessionStore();
+
+      store.set("ext-1", {
+        id: "ext-1",
+        projectName: "ExtendedProject",
+        status: "generated",
+        uploadedAt: new Date(),
+        files: [{ path: "A.java", content: "" }, { path: "B.java", content: "" }],
+        ir: { stats: { useCaseCount: 7, dtoCount: 3 } },
+        generation: { stats: { totalFiles: 15 } },
+        ambiguities: [{ id: "a1" }, { id: "a2" }, { id: "a3" }],
+        technologiesDetected: ["EJB_3X_STATELESS", "HIBERNATE"],
+        debugEvents: [],
+        sseClients: [],
+      } as any);
+
+      const extended = store.listSessionsExtended();
+      expect(extended).toHaveLength(1);
+      expect(extended[0].useCaseCount).toBe(7);
+      expect(extended[0].dtoCount).toBe(3);
+      expect(extended[0].generatedFiles).toBe(15);
+      expect(extended[0].ambiguityCount).toBe(3);
+      expect(extended[0].fileCount).toBe(2);
+      expect(extended[0].technologies).toEqual(["EJB_3X_STATELESS", "HIBERNATE"]);
+    });
+  });
+
+  describe("persist() met à jour le metaIndex — v11.3", () => {
+    it("met à jour les métadonnées après modification de la session", async () => {
+      const { SessionStore } = await import("./session-store");
+      const store = new SessionStore();
+
+      const session = {
+        id: "persist-meta-1",
+        projectName: "PersistMeta",
+        status: "uploaded" as const,
+        uploadedAt: new Date(),
+        files: [{ path: "X.java", content: "" }],
+        debugEvents: [],
+        sseClients: [],
+      } as any;
+
+      store.set("persist-meta-1", session);
+
+      // Simulate analysis completing
+      session.status = "analyzed";
+      session.ir = { stats: { useCaseCount: 4, dtoCount: 2 } };
+      session.technologiesDetected = ["SERVLET"];
+      store.persist("persist-meta-1");
+
+      const list = store.listSessionsExtended();
+      const meta = list.find(m => m.id === "persist-meta-1");
+      expect(meta).toBeDefined();
+      expect(meta?.status).toBe("analyzed");
+      expect(meta?.useCaseCount).toBe(4);
+      expect(meta?.dtoCount).toBe(2);
+      expect(meta?.technologies).toEqual(["SERVLET"]);
+    });
+  });
 });

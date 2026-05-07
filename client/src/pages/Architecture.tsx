@@ -8,6 +8,7 @@
 
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
+import { fetchWithCache } from "@/hooks/useSessionsCache";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -145,8 +146,7 @@ export default function ArchitecturePage({ projectId }: { projectId?: number }) 
     const urlParams = new URLSearchParams(window.location.search);
     const sessionIdFromUrl = urlParams.get("sessionId");
 
-    fetch("/api/compleo/sessions")
-      .then((r) => r.json())
+    fetchWithCache<any>("/api/compleo/sessions")
       .then((data) => {
         // API returns a flat array, not { sessions: [...] }
         const sessionList = Array.isArray(data) ? data : (data.sessions || []);

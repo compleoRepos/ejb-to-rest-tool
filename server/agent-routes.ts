@@ -727,7 +727,8 @@ export function registerAgentRoutes(app: Express) {
   });
 
   // ─── GET /api/agent/sessions ────────────────────────────────────────────────
-  // v10.2: Merge in-memory sessions + DB-persisted sessions for full artifact visibility
+  // v10.2 + v11.3: Merge in-memory sessions + DB-persisted sessions
+  // Performance: DB query uses lightweight projection (no heavy blobs like eventsData, generatedProjectData)
   router.get("/sessions", async (_req: Request, res: Response) => {
     const store = getAgentStore();
     // 1. In-memory sessions (highest priority — most up-to-date)
@@ -750,13 +751,27 @@ export function registerAgentRoutes(app: Express) {
       qualityGrade: s.qualityScore?.grade ?? null,
       llmStats: s.compilationResult?.llmStats ?? null,
     }));
-    // 2. DB sessions (fallback for sessions lost after server restart)
+    // 2. DB sessions — lightweight projection (no eventsData, generatedProjectData, etc.)
     let dbSessions: typeof memorySessions = [];
     try {
       const database = await getDb();
       if (database) {
         const memoryIds = new Set(memorySessions.map((s) => s.id));
-        const rows = await database.select().from(agentSessions)
+        const rows = await database.select({
+          id: agentSessions.id,
+          state: agentSessions.state,
+          currentPhase: agentSessions.currentPhase,
+          projectName: agentSessions.projectName,
+          configData: agentSessions.configData,
+          zipUrl: agentSessions.zipUrl,
+          enhancedReportsData: agentSessions.enhancedReportsData,
+          microserviceResultData: agentSessions.microserviceResultData,
+          sagaResultData: agentSessions.sagaResultData,
+          qualityScoreData: agentSessions.qualityScoreData,
+          compilationResultData: agentSessions.compilationResultData,
+          createdAt: agentSessions.createdAt,
+          updatedAt: agentSessions.updatedAt,
+        }).from(agentSessions)
           .orderBy(desc(agentSessions.updatedAt))
           .limit(100);
         dbSessions = rows
@@ -769,7 +784,7 @@ export function registerAgentRoutes(app: Express) {
               currentPhase: row.currentPhase as any,
               createdAt: row.createdAt ? new Date(row.createdAt).getTime() : 0,
               updatedAt: row.updatedAt ? new Date(row.updatedAt).getTime() : 0,
-              eventCount: (row.eventsData as any[] | null)?.length ?? 0,
+              eventCount: 0, // Not loaded for performance — only visible in detail view
               projectName: row.projectName || null,
               gitUrl: config?.source?.type === "git" ? (config.source as any).url : null,
               sourceType: config?.source?.type || "zip",

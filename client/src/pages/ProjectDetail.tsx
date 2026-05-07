@@ -7,6 +7,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { fetchWithCache } from "@/hooks/useSessionsCache";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -104,9 +105,7 @@ function useSagaInfo(projectName: string | undefined): { sagaInfo: SagaInfo | nu
       setLoading(true);
       try {
         // Step 1: Get all completed agent sessions
-        const sessionsRes = await fetch("/api/agent/sessions");
-        if (!sessionsRes.ok) { setLoading(false); return; }
-        const sessionsJson = await sessionsRes.json();
+        const sessionsJson = await fetchWithCache<any>("/api/agent/sessions");
         const allSessions = sessionsJson.sessions || [];
 
         // Step 2: Find the latest completed session for this project (by name)
@@ -179,9 +178,7 @@ function useAgentArtifacts(projectName: string | undefined, gitUrl?: string | nu
     const fetchArtifacts = async () => {
       setLoading(true);
       try {
-        const res = await fetch("/api/agent/sessions");
-        if (!res.ok) { setLoading(false); return; }
-        const json = await res.json();
+        const json = await fetchWithCache<any>("/api/agent/sessions");
         const sessions = ((json.sessions || []) as any[]).map((s: any) => ({
           ...s,
           sessionId: s.id || s.sessionId,

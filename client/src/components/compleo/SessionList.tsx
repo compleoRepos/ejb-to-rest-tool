@@ -6,6 +6,7 @@
 
 import { useState, useEffect } from "react";
 import { History, ChevronRight, Loader2 } from "lucide-react";
+import { fetchWithCache } from "@/hooks/useSessionsCache";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
 
@@ -38,10 +39,9 @@ export default function SessionList({ onRestore }: SessionListProps) {
 
   useEffect(() => {
     let mounted = true;
-    fetch("/api/compleo/sessions")
-      .then(res => res.json())
+    fetchWithCache<SessionSummary[]>("/api/compleo/sessions")
       .then(data => {
-        if (mounted) setSessions(data);
+        if (mounted) setSessions(Array.isArray(data) ? data : []);
       })
       .catch(() => {})
       .finally(() => { if (mounted) setLoading(false); });

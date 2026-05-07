@@ -1330,18 +1330,19 @@ router.get("/session/:sessionId", async (req: Request, res: Response) => {
 });
 
 // ─── GET /api/compleo/sessions ──────────────────────────────────────────────
-// List all sessions (history)
+// List all sessions (history) — v11.3: uses lightweight metadata index (no blob loading)
 router.get("/sessions", async (_req: Request, res: Response) => {
-  const list = [...sessions.values()].map(s => ({
-    id: s.id,
-    projectName: s.projectName,
-    uploadedAt: s.uploadedAt,
-    status: s.status,
-    fileCount: s.files?.length ?? 0,
-    useCaseCount: s.ir?.stats?.useCaseCount ?? 0,
-    dtoCount: s.ir?.stats?.dtoCount ?? 0,
-    generatedFiles: s.generation?.stats?.totalFiles ?? 0,
-    ambiguityCount: s.ambiguities?.length ?? 0,
+  await sessions.ensureLoaded();
+  const list = sessions.listSessionsExtended().map(meta => ({
+    id: meta.id,
+    projectName: meta.projectName,
+    uploadedAt: meta.createdAt,
+    status: meta.status,
+    fileCount: meta.fileCount,
+    useCaseCount: meta.useCaseCount,
+    dtoCount: meta.dtoCount,
+    generatedFiles: meta.generatedFiles,
+    ambiguityCount: meta.ambiguityCount,
   }));
   return res.json(list);
 });
