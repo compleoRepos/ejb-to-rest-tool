@@ -214,6 +214,10 @@ function inferDomainFromClassName(className: string): string {
 
 /**
  * Analyse un UseCase pour déterminer s'il est éligible Saga.
+ * v11.9: Critères élargis:
+ *   Option A (original): 1 méthode avec ≥2 deps inter-services + writeOps + flux séquentiel
+ *   Option B: EJB avec ≥3 méthodes transactionnelles + ≥2 deps @EJB + writeOps
+ *   Option C: JMS détecté + ≥1 dep @EJB inter-service + writeOps
  */
 function analyzeSagaEligibility(
   uc: UseCaseIR,
@@ -224,16 +228,29 @@ function analyzeSagaEligibility(
   // Mapper les InjectedService vers EjbDependency
   const ejbDeps = mapDependencies(uc.injectedServices, source, ir);
 
-  // Condition 1 : ≥ 2 dépendances @EJB inter-services
+  // Compter toutes les deps (inter-service + locales qui sont des services)
   const interServiceDeps = ejbDeps.filter((d) => d.isInterService);
-  if (interServiceDeps.length < 2) return null;
+  // v11.9: Aussi compter les deps @EJB qui ne sont pas des DAOs comme "quasi-inter-service"
+  const allServiceDeps = ejbDeps.filter((d) => !DAO_PATTERNS.test(d.type));
 
-  // Condition 2 : au moins 1 opération d'écriture
+  // Détecter les opérations d'écriture
   const writeOps = detectWriteOperations(source);
-  if (writeOps.length === 0) return null;
 
-  // Condition 3 : flux séquentiel avec dépendance entre steps
-  if (!hasSequentialDependency(source, ejbDeps)) return null;
+  // ─── Option A (critère original) ───
+  const optionA = interServiceDeps.length >= 2 && writeOps.length > 0 && hasSequentialDependency(source, ejbDeps);
+
+  // ─── Option B (v11.9): Multi-méthodes transactionnelles + deps ───
+  // Un EJB avec ≥3 méthodes @TransactionAttribute(REQUIRED) + ≥2 deps @EJB (services) + writeOps
+  const transactionalMethodCount = (source.match(/@TransactionAttribute\s*\(\s*TransactionAttributeType\.REQUIRED\s*\)/g) || []).length;
+  const optionB = transactionalMethodCount >= 3 && allServiceDeps.length >= 2 && writeOps.length > 0;
+
+  // ─── Option C (v11.9): JMS + dep inter-service ───
+  // Pattern "transaction + messaging" = Saga candidate
+  const hasJMS = /(?:@Resource.*Queue|@Resource.*Topic|ConnectionFactory|MessageProducer|JMSException|createProducer|virementQueue|jms\/)/i.test(source);
+  const optionC = hasJMS && allServiceDeps.length >= 1 && writeOps.length > 0;
+
+  // Si aucune option ne matche, pas de candidat
+  if (!optionA && !optionB && !optionC) return null;
 
   // Inférer le domaine
   const domain = inferDomain(uc);
@@ -245,7 +262,7 @@ function analyzeSagaEligibility(
     className: uc.className,
     domain,
     ejbDependencies: ejbDeps,
-    interServiceCount: interServiceDeps.length,
+    interServiceCount: Math.max(interServiceDeps.length, allServiceDeps.length),
     writeOperations: writeOps,
     hasWriteOps: true,
     hasCompensation: writeOps.length > 0,

@@ -55,6 +55,19 @@ export interface AnalysisResult {
     stats: PipelineResult["stats"];
     migrationNotes: PipelineResult["migrationNotes"];
   };
+  /** v11.9: Entités JPA détectées */
+  detectedEntities: Array<{
+    name: string;
+    tableName: string;
+    fieldsCount: number;
+    relations: string[];
+  }>;
+  /** v11.9: DTOs détectés */
+  detectedDTOs: Array<{
+    name: string;
+    fieldsCount: number;
+    direction: string;
+  }>;
   /** Résumé rapide */
   summary: {
     useCaseCount: number;
@@ -169,9 +182,49 @@ export class CompleoEngine {
       projectName,
     });
 
+    // v11.9: Extraire les entités JPA depuis les composants détectés
+    // Exclure les ServiceBean/EJB qui ne sont pas de vraies entités
+    const detectedEntities = pipelineResult.detectedComponents
+      .filter((c: any) => c.technology === "JPA" && c.metadata?.entityClass &&
+        !/(Service|Bean|EJB|Controller|Servlet|DAO|Repository)$/i.test(c.className))
+      .map((c: any) => {
+        const fields = c.metadata?.fields || [];
+        const relations = fields
+          .filter((f: any) => /ManyToOne|OneToMany|ManyToMany|OneToOne/.test((f.annotations || []).join(" ")) || /List<|Set</.test(f.type))
+          .map((f: any) => f.name);
+        return {
+          name: c.className,
+          tableName: c.metadata?.tableName || c.className,
+          fieldsCount: fields.length,
+          relations,
+        };
+      });
+
+    // v11.9: Extraire les DTOs depuis l'IR
+    const detectedDTOs = (ir.dtos || []).map((d: any) => ({
+      name: d.className,
+      fieldsCount: (d.fields || []).length,
+      direction: d.direction || "unknown",
+    }));
+
+    // v11.9: Aussi détecter les classes qui ressemblent à des DTOs dans les sources
+    for (const file of files) {
+      const classMatch = file.content.match(/(?:public\s+)?class\s+(\w+(?:DTO|Dto|Request|Response|Command|Event))/);
+      if (classMatch && !detectedDTOs.some(d => d.name === classMatch[1])) {
+        const fieldCount = (file.content.match(/private\s+\w[\w<>,\s]*?\s+\w+\s*[;=]/g) || []).length;
+        detectedDTOs.push({
+          name: classMatch[1],
+          fieldsCount: fieldCount,
+          direction: classMatch[1].endsWith("Request") || classMatch[1].endsWith("Command") ? "in" : classMatch[1].endsWith("Response") ? "out" : "unknown",
+        });
+      }
+    }
+
     const result: AnalysisResult = {
       ir,
       ambiguities,
+      detectedEntities,
+      detectedDTOs,
       multiTech: {
         technologiesDetected: pipelineResult.technologiesDetected,
         detectedComponents: pipelineResult.detectedComponents,
@@ -182,7 +235,7 @@ export class CompleoEngine {
       },
       summary: {
         useCaseCount: ir.stats.useCaseCount,
-        dtoCount: ir.stats.dtoCount,
+        dtoCount: Math.max(ir.stats.dtoCount, detectedDTOs.length),
         enumCount: ir.stats.enumCount,
         exceptionCount: ir.stats.exceptionCount,
         componentCount: pipelineResult.detectedComponents.length,
