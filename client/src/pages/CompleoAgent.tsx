@@ -169,6 +169,7 @@ export default function CompleoAgentPage() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const seenEventsRef = useRef<Set<string>>(new Set());
 
   // ─── Upload ZIP ─────────────────────────────────────────────────────────
 
@@ -236,12 +237,17 @@ export default function CompleoAgentPage() {
       }, 1000);
 
       // Connect SSE
+      seenEventsRef.current.clear();
       const es = new EventSource(`/api/agent/${data.sessionId}/events`);
       eventSourceRef.current = es;
 
       es.onmessage = (e) => {
         try {
           const event: AgentEvent = JSON.parse(e.data);
+          // Deduplicate events on reconnection (server replays full history)
+          const key = `${event.timestamp}-${event.type}-${event.message || ''}-${event.phase || ''}`;
+          if (seenEventsRef.current.has(key)) return;
+          seenEventsRef.current.add(key);
           setEvents((prev) => [...prev, event]);
 
           // v10.7: Capturer la fin de la phase ANALYZING pour afficher l'écran de review
@@ -322,36 +328,39 @@ export default function CompleoAgentPage() {
       };
 
       es.onerror = () => {
-        // SSE connection error — attempt reconnection with exponential backoff
+        // SSE connection lost — do NOT reconnect in loop (server replays all events causing duplicates)
+        // Instead, switch to polling for status detection
         es.close();
         eventSourceRef.current = null;
-        let retryCount = 0;
-        const maxRetries = 8;
-        const reconnect = () => {
-          if (retryCount >= maxRetries) {
-            setIsRunning(false);
-            if (timerRef.current) clearInterval(timerRef.current);
-            toast.error("Connexion SSE perdue après plusieurs tentatives");
-            return;
-          }
-          retryCount++;
-          const delay = Math.min(1000 * Math.pow(2, retryCount), 30_000);
-          console.log(`[SSE] Reconnexion dans ${delay / 1000}s (tentative ${retryCount}/${maxRetries})`);
-          setTimeout(() => {
-            const newEs = new EventSource(`/api/agent/${data.sessionId}/events`);
-            eventSourceRef.current = newEs;
-            newEs.onmessage = es.onmessage;
-            newEs.onerror = () => {
-              newEs.close();
-              reconnect();
-            };
-            newEs.onopen = () => {
-              retryCount = 0;
-              console.log("[SSE] Reconnecté");
-            };
-          }, delay);
-        };
-        reconnect();
+        console.log("[SSE] Connexion perdue, passage en mode polling");
+        // Start polling fallback
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`/api/agent/${data.sessionId}/status`);
+            if (statusRes.ok) {
+              const st = await statusRes.json();
+              setStatus(st);
+              if (st.state === "COMPLETED" || st.state === "FAILED" || st.state === "CANCELLED") {
+                setIsRunning(false);
+                if (timerRef.current) clearInterval(timerRef.current);
+                clearInterval(pollInterval);
+                if (st.state === "COMPLETED" && sessionId) {
+                  fetch(`/api/agent/${sessionId}/post-migration-checklist`)
+                    .then(r => r.ok ? r.json() : null)
+                    .then(d => { if (d) { setPostMigrationChecklist(d); setActiveTab("checklist"); } })
+                    .catch(() => {});
+                }
+              }
+              if (st.state === "AWAITING_INPUT" && !showAnalysisReview) {
+                setShowAnalysisReview(true);
+                fetch(`/api/agent/${data.sessionId}/dynamic-options`)
+                  .then(r => r.ok ? r.json() : null)
+                  .then(opts => { if (opts) setDynamicOptions(opts); })
+                  .catch(() => {});
+              }
+            }
+          } catch { /* ignore */ }
+        }, 5000);
       };
 
       toast.success("Agent démarré");
@@ -562,12 +571,16 @@ export default function CompleoAgentPage() {
         setElapsedMs(Date.now() - startTimeRef.current);
       }, 1000);
 
+      seenEventsRef.current.clear();
       const es = new EventSource(`/api/agent/${data.sessionId}/events`);
       eventSourceRef.current = es;
 
       es.onmessage = (e) => {
         try {
           const event: AgentEvent = JSON.parse(e.data);
+          const key = `${event.timestamp}-${event.type}-${event.message || ''}-${event.phase || ''}`;
+          if (seenEventsRef.current.has(key)) return;
+          seenEventsRef.current.add(key);
           setEvents((prev) => [...prev, event]);
 
           // v10.7: Capturer la fin de la phase ANALYZING
@@ -592,8 +605,24 @@ export default function CompleoAgentPage() {
       };
 
       es.onerror = () => {
-        setIsRunning(false);
-        if (timerRef.current) clearInterval(timerRef.current);
+        es.close();
+        // Polling fallback instead of reconnect
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`/api/agent/${data.sessionId}/status`);
+            if (statusRes.ok) {
+              const st = await statusRes.json();
+              if (st.state === "COMPLETED" || st.state === "FAILED" || st.state === "CANCELLED") {
+                setIsRunning(false);
+                if (timerRef.current) clearInterval(timerRef.current);
+                clearInterval(pollInterval);
+              }
+              if (st.state === "AWAITING_INPUT" && !showAnalysisReview) {
+                setShowAnalysisReview(true);
+              }
+            }
+          } catch { /* ignore */ }
+        }, 5000);
       };
 
       toast.success(`Agent d\u00e9marr\u00e9 depuis le projet ${data.projectName} (${data.fileCount} fichiers)`);
