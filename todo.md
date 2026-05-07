@@ -432,3 +432,8 @@
 - [x] Rapports enrichis (5 rapports : MIGRATION, MICROSERVICES, DATASOURCE, QUALITY, EXECUTIVE)
 - [x] Routes frontend SPA fonctionnelles (5 pages process-driven)
 - [x] 0 erreur TypeScript
+
+## Safari Polling Améliorations
+- [x] Indicateur visuel "Mode polling" dans le header pour Safari (badge orange avec intervalle)
+- [x] Polling adaptatif 1s pendant phases actives (GENERATING, COMPILING, MICROSERVICES, etc.)
+- [x] Bouton "Forcer le rafraîchissement" visible sur Safari quand l'agent est en cours

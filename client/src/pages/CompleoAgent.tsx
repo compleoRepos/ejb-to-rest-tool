@@ -21,7 +21,7 @@ import {
   Terminal, Zap, Server, Database, Shield, Box,
   ChevronDown, ChevronRight, Eye, FileCode2, Layers,
   ArrowLeft, RefreshCw, Globe, Lock, Info, Star,
-  Activity, Radio, Pause, SkipForward, Network,
+  Activity, Radio, Pause, SkipForward, Network, Wifi,
 } from "lucide-react";
 import { Link, useLocation, useSearch } from "wouter";
 import ReportViewer from "@/components/compleo/ReportViewer";
@@ -180,9 +180,22 @@ export default function CompleoAgentPage() {
     return /Safari/.test(ua) && !/Chrome/.test(ua) && !/Chromium/.test(ua);
   }, []);
 
+  // Phases where polling should be faster (1s instead of 2s)
+  const FAST_POLL_PHASES = useMemo(() => new Set([
+    "GENERATING", "MIGRATING_BUSINESS_LOGIC", "MICROSERVICES",
+    "ENHANCING_REPORTS", "COMPILING", "FRONTEND_GENERATION"
+  ]), []);
+
+  // Track current polling interval for adaptive polling
+  const [pollingIntervalMs, setPollingIntervalMs] = useState<number>(2000);
+
   // Unified polling function that fetches events from /status endpoint
   const startEventPolling = useCallback((targetSessionId: string, onComplete?: () => void) => {
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    // Determine interval based on current phase
+    const currentPh = status?.phase || "";
+    const interval = FAST_POLL_PHASES.has(currentPh) ? 1000 : 2000;
+    setPollingIntervalMs(interval);
     const pollInterval = setInterval(async () => {
       try {
         const statusRes = await fetch(`/api/agent/${targetSessionId}/status`);
@@ -295,11 +308,24 @@ export default function CompleoAgentPage() {
               .catch(() => {});
           }
         }
+        // Adaptive polling: if phase changed, restart with correct interval
+        if (st.phase) {
+          const shouldBeFast = ["GENERATING", "MIGRATING_BUSINESS_LOGIC", "MICROSERVICES", "ENHANCING_REPORTS", "COMPILING", "FRONTEND_GENERATION"].includes(st.phase);
+          const desiredInterval = shouldBeFast ? 1000 : 2000;
+          if (desiredInterval !== interval) {
+            clearInterval(pollInterval);
+            pollIntervalRef.current = null;
+            setPollingIntervalMs(desiredInterval);
+            // Re-schedule with new interval
+            startEventPolling(targetSessionId, onComplete);
+            return;
+          }
+        }
       } catch { /* ignore network errors */ }
-    }, 2000);
+    }, interval);
     pollIntervalRef.current = pollInterval;
     return pollInterval;
-  }, []);
+  }, [FAST_POLL_PHASES, status?.phase]);
 
   // ─── Upload ZIP ─────────────────────────────────────────────────────────
 
@@ -851,6 +877,12 @@ export default function CompleoAgentPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {isSafari && isRunning && (
+                <Badge variant="outline" className="text-[10px] border-orange-500/40 text-orange-400 gap-1">
+                  <Wifi className="w-3 h-3" />
+                  Polling {pollingIntervalMs === 1000 ? "1s" : "2s"}
+                </Badge>
+              )}
               {isRunning && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
@@ -1339,6 +1371,17 @@ export default function CompleoAgentPage() {
 
               {/* Actions */}
               <div className="space-y-2">
+                {isSafari && isRunning && sessionId && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full gap-1.5 border-orange-500/30 text-orange-400 hover:bg-orange-500/10"
+                    onClick={() => startEventPolling(sessionId)}
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Forcer le rafraîchissement
+                  </Button>
+                )}
                 {isRunning && (
                   <Button
                     variant="destructive"
