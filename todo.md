@@ -450,3 +450,8 @@
 - [x] Forcer le polling sur tous les navigateurs WebKit (Chrome iOS = Safari sous le capot)
 - [x] Vérifier que le fallback polling fonctionne correctement sur iOS
 - [x] Fix: bouton "Forcer le rafraîchissement" ne fonctionne pas au clic (fetch immédiat + toast)
+
+## Bug — Standards et Messaging post-analyse
+- [x] Afficher TOUS les standards disponibles (BIAN, ACORD, HL7_FHIR, TMFORUM, DDD, TOGAF) — chacun avec checkbox individuel
+- [x] Ajouter "(Recommandé)" à côté du standard détecté automatiquement par l'analyse
+- [x] Fix: checkbox messaging/JMS ne se coche pas au clic (nouvel état enableMessaging + envoyé au backend)

@@ -92,6 +92,10 @@ export interface AgentConfig {
     industryStandard?: string;
     /** v10.13: SOC 2 Compliance generation */
     enableSoc2Compliance?: boolean;
+    /** v11.4: SOAP to REST migration */
+    enableSoapToRest?: boolean;
+    /** v11.4: Messaging/JMS/MDB support */
+    enableMessaging?: boolean;
   };
 }
 
@@ -1433,10 +1437,10 @@ export class CompleoAgent {
         frontendFramework: framework,
         hasMicroservices: !!session.config.options.enableMicroservices,
         hasSaga: !!session.config.options.enableSaga,
-        hasMessaging: (analysisMultiTech?.technologiesDetected || []).includes("JMS" as any),
+        hasMessaging: !!session.config.options.enableMessaging || (analysisMultiTech?.technologiesDetected || []).some((t: string) => t === "JMS" || t.includes("MDB") || t.includes("JMS")),
         hasBatch: (analysisMultiTech?.technologiesDetected || []).includes("BATCH" as any),
         hasSOAP: (analysisMultiTech?.technologiesDetected || []).includes("SOAP" as any),
-        industryStandard: resolvedOptions.detectedDomain.primary !== "NONE" ? resolvedOptions.detectedDomain.primary : undefined,
+        industryStandard: (session.config.options.industryStandard as any) || (resolvedOptions.detectedDomain.primary !== "NONE" ? resolvedOptions.detectedDomain.primary : undefined),
         generatedBackendFiles: backendFiles.length,
         generatedFrontendFiles: frontendOutput.stats.totalFiles,
         frontendTodos: frontendOutput.todos,

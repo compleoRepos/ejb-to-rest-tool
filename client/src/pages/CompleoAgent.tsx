@@ -136,6 +136,7 @@ export default function CompleoAgentPage() {
   const [dynamicOptions, setDynamicOptions] = useState<any>(null);
   const [enableSoc2Compliance, setEnableSoc2Compliance] = useState(false);
   const [enableSoapToRest, setEnableSoapToRest] = useState(false);
+  const [enableMessaging, setEnableMessaging] = useState(false);
   const [isLoadingOptions, setIsLoadingOptions] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [projectFromDb, setProjectFromDb] = useState<{ id: number; name: string; fileCount: number } | null>(null);
@@ -254,12 +255,12 @@ export default function CompleoAgentPage() {
                             if (opt.id === "microservices") setEnableMicroservices(true);
                             if (opt.id === "saga") setEnableSaga(true);
                             if (opt.id === "reports" || opt.id === "ai_reports") setEnableReportEnhancer(true);
-                            if (opt.id === "industryStandard" || opt.id.endsWith("_mapping")) {
+                            if (opt.id.endsWith("_mapping")) {
+                              const stdMapAuto: Record<string, string> = { bian_mapping: "BIAN", acord_mapping: "ACORD", hl7_mapping: "HL7_FHIR", tmforum_mapping: "TMFORUM", ddd_mapping: "DDD", togaf_mapping: "TOGAF" };
                               setEnableIndustryStandard(true);
-                              if (opts.detectedDomain?.primary && opts.detectedDomain.primary !== "NONE") {
-                                setSelectedStandard(opts.detectedDomain.primary);
-                              }
+                              setSelectedStandard(stdMapAuto[opt.id] || "");
                             }
+                            if (opt.id === "messaging") setEnableMessaging(true);
                             if (opt.id === "ml") setEnableML(true);
                             if (opt.id === "soc2_compliance") setEnableSoc2Compliance(true);
                             if (opt.id === "soap_to_rest") setEnableSoapToRest(true);
@@ -448,12 +449,12 @@ export default function CompleoAgentPage() {
                             if (opt.id === "microservices") setEnableMicroservices(true);
                             if (opt.id === "saga") setEnableSaga(true);
                             if (opt.id === "reports" || opt.id === "ai_reports") setEnableReportEnhancer(true);
-                            if (opt.id === "industryStandard" || opt.id.endsWith("_mapping")) {
+                            if (opt.id.endsWith("_mapping")) {
+                              const stdMapAuto: Record<string, string> = { bian_mapping: "BIAN", acord_mapping: "ACORD", hl7_mapping: "HL7_FHIR", tmforum_mapping: "TMFORUM", ddd_mapping: "DDD", togaf_mapping: "TOGAF" };
                               setEnableIndustryStandard(true);
-                              if (opts.detectedDomain?.primary && opts.detectedDomain.primary !== "NONE") {
-                                setSelectedStandard(opts.detectedDomain.primary);
-                              }
+                              setSelectedStandard(stdMapAuto[opt.id] || "");
                             }
+                            if (opt.id === "messaging") setEnableMessaging(true);
                             if (opt.id === "ml") setEnableML(true);
                             if (opt.id === "soc2_compliance") setEnableSoc2Compliance(true);
                             if (opt.id === "soap_to_rest") setEnableSoapToRest(true);
@@ -540,6 +541,7 @@ export default function CompleoAgentPage() {
             ? selectedStandard : undefined,
           enableSoc2Compliance,
           enableSoapToRest,
+          enableMessaging,
         }),
       });
 
@@ -587,6 +589,7 @@ export default function CompleoAgentPage() {
             ? selectedStandard : undefined,
           enableSoc2Compliance,
           enableSoapToRest,
+          enableMessaging,
         }),
       });
       if (!patchRes.ok) {
@@ -669,7 +672,7 @@ export default function CompleoAgentPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erreur de configuration");
     }
-  }, [sessionId, autoResolve, enableMicroservices, enableML, enableReportEnhancer, enableSaga, enableFrontend, frontendFramework, enableIndustryStandard, selectedStandard, dynamicOptions, ambiguities, isSafari, startEventPolling]);
+  }, [sessionId, autoResolve, enableMicroservices, enableML, enableReportEnhancer, enableSaga, enableFrontend, frontendFramework, enableIndustryStandard, selectedStandard, enableMessaging, dynamicOptions, ambiguities, isSafari, startEventPolling]);
 
   // ─── Download ───────────────────────────────────────────────────────────
 
@@ -1131,13 +1134,20 @@ export default function CompleoAgentPage() {
                   {/* Options dynamiques générées par DynamicOptionsResolver */}
                   {(dynamicOptions?.options || []).map((opt: any) => {
                     // Map option ID to state setter
+                    // Map standard IDs to their standard value
+                    const stdMap: Record<string, string> = { bian_mapping: "BIAN", acord_mapping: "ACORD", hl7_mapping: "HL7_FHIR", tmforum_mapping: "TMFORUM", ddd_mapping: "DDD", togaf_mapping: "TOGAF" };
+                    const isStandardOption = opt.id in stdMap;
+
                     const getChecked = () => {
+                      if (isStandardOption) {
+                        return enableIndustryStandard && selectedStandard === stdMap[opt.id];
+                      }
                       switch (opt.id) {
                         case "frontend": return enableFrontend;
                         case "microservices": return enableMicroservices;
                         case "saga": return enableSaga;
                         case "reports": case "ai_reports": return enableReportEnhancer;
-                        case "industryStandard": case "bian_mapping": case "acord_mapping": case "hl7_mapping": case "tmforum_mapping": case "ddd_mapping": case "togaf_mapping": return enableIndustryStandard;
+                        case "messaging": return enableMessaging;
                         case "ml": return enableML;
                         case "soc2_compliance": return enableSoc2Compliance;
                         case "soap_to_rest": return enableSoapToRest;
@@ -1146,19 +1156,23 @@ export default function CompleoAgentPage() {
                       }
                     };
                     const setChecked = (v: boolean) => {
+                      if (isStandardOption) {
+                        if (v) {
+                          setEnableIndustryStandard(true);
+                          setSelectedStandard(stdMap[opt.id]);
+                        } else {
+                          // Uncheck = disable standard entirely
+                          setEnableIndustryStandard(false);
+                          setSelectedStandard("");
+                        }
+                        return;
+                      }
                       switch (opt.id) {
                         case "frontend": setEnableFrontend(v); break;
                         case "microservices": setEnableMicroservices(v); break;
                         case "saga": setEnableSaga(v); break;
                         case "reports": case "ai_reports": setEnableReportEnhancer(v); break;
-                        case "industryStandard": case "bian_mapping": case "acord_mapping": case "hl7_mapping": case "tmforum_mapping": case "ddd_mapping": case "togaf_mapping":
-                          setEnableIndustryStandard(v);
-                          if (v && opt.id.includes("_mapping")) {
-                            // Auto-select the detected standard
-                            const stdMap: Record<string, string> = { bian_mapping: "BIAN", acord_mapping: "ACORD", hl7_mapping: "HL7_FHIR", tmforum_mapping: "TMFORUM", ddd_mapping: "DDD", togaf_mapping: "TOGAF" };
-                            setSelectedStandard(stdMap[opt.id] || "BIAN");
-                          }
-                          break;
+                        case "messaging": setEnableMessaging(v); break;
                         case "ml": setEnableML(v); break;
                         case "soc2_compliance": setEnableSoc2Compliance(v); break;
                         case "soap_to_rest": setEnableSoapToRest(v); break;
@@ -1170,7 +1184,8 @@ export default function CompleoAgentPage() {
                       microservices: Layers,
                       saga: GitBranch,
                       reports: Star, ai_reports: Star,
-                      industryStandard: Shield, bian_mapping: Shield, acord_mapping: Shield, hl7_mapping: Shield, tmforum_mapping: Shield, ddd_mapping: Shield, togaf_mapping: Shield,
+                      bian_mapping: Shield, acord_mapping: Shield, hl7_mapping: Shield, tmforum_mapping: Shield, ddd_mapping: Layers, togaf_mapping: Shield,
+                      messaging: Radio,
                       ml: Zap,
                       soc2_compliance: Lock,
                       soap_to_rest: Zap,
@@ -1181,7 +1196,8 @@ export default function CompleoAgentPage() {
                       microservices: "text-pink-400",
                       saga: "text-violet-400",
                       reports: "text-amber-400", ai_reports: "text-amber-400",
-                      industryStandard: "text-cyan-400", bian_mapping: "text-cyan-400", acord_mapping: "text-cyan-400", hl7_mapping: "text-cyan-400", tmforum_mapping: "text-cyan-400", ddd_mapping: "text-cyan-400", togaf_mapping: "text-cyan-400",
+                      bian_mapping: "text-blue-400", acord_mapping: "text-green-400", hl7_mapping: "text-red-400", tmforum_mapping: "text-purple-400", ddd_mapping: "text-orange-400", togaf_mapping: "text-slate-400",
+                      messaging: "text-orange-400",
                       ml: "text-amber-400",
                       soc2_compliance: "text-emerald-400",
                       soap_to_rest: "text-orange-400",
@@ -1192,7 +1208,13 @@ export default function CompleoAgentPage() {
                       microservices: "data-[state=checked]:bg-pink-500 data-[state=checked]:border-pink-500",
                       saga: "data-[state=checked]:bg-violet-500 data-[state=checked]:border-violet-500",
                       reports: "data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500",
-                      industryStandard: "data-[state=checked]:bg-cyan-500 data-[state=checked]:border-cyan-500",
+                      bian_mapping: "data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500",
+                      acord_mapping: "data-[state=checked]:bg-green-500 data-[state=checked]:border-green-500",
+                      hl7_mapping: "data-[state=checked]:bg-red-500 data-[state=checked]:border-red-500",
+                      tmforum_mapping: "data-[state=checked]:bg-purple-500 data-[state=checked]:border-purple-500",
+                      ddd_mapping: "data-[state=checked]:bg-orange-500 data-[state=checked]:border-orange-500",
+                      togaf_mapping: "data-[state=checked]:bg-slate-500 data-[state=checked]:border-slate-500",
+                      messaging: "data-[state=checked]:bg-orange-500 data-[state=checked]:border-orange-500",
                       ml: "data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500",
                       soc2_compliance: "data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-500",
                     };
@@ -1242,28 +1264,7 @@ export default function CompleoAgentPage() {
                           </div>
                         )}
 
-                        {/* Sub-options : Sélecteur de standard métier */}
-                        {opt.id === "industryStandard" && enableIndustryStandard && (
-                          <div className="ml-8 space-y-2">
-                            <p className="text-xs text-muted-foreground">Choisissez le standard métier :</p>
-                            <Select value={selectedStandard} onValueChange={setSelectedStandard}>
-                              <SelectTrigger className="w-full max-w-xs h-8 text-xs">
-                                <SelectValue placeholder="Standard auto-détecté" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="BIAN">BIAN — Banking (Banque)</SelectItem>
-                                <SelectItem value="ACORD">ACORD — Insurance (Assurance)</SelectItem>
-                                <SelectItem value="HL7_FHIR">HL7/FHIR — Healthcare (Santé)</SelectItem>
-                                <SelectItem value="TMFORUM">TMForum — Telecom</SelectItem>
-                                <SelectItem value="DDD">DDD — Domain-Driven Design</SelectItem>
-                                <SelectItem value="TOGAF">TOGAF — Enterprise Architecture</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            {dynamicOptions?.detectedDomain?.primary && dynamicOptions.detectedDomain.primary !== "NONE" && selectedStandard !== dynamicOptions.detectedDomain.primary && (
-                              <p className="text-[10px] text-amber-400">⚠ Standard auto-détecté : {dynamicOptions.detectedDomain.label}</p>
-                            )}
-                          </div>
-                        )}
+                        {/* Note: le sélecteur dropdown de standard est remplacé par les checkboxes individuels ci-dessus */}
                         {/* Sub-options : ML enhancement (sous microservices) */}
                         {opt.id === "microservices" && enableMicroservices && (
                           <label className="flex items-center gap-3 cursor-pointer ml-8 group">

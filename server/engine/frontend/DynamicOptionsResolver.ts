@@ -390,41 +390,31 @@ export class DynamicOptionsResolver {
       });
     }
 
-    // Option: Industry standard mapping (based on detected domain)
-    if (detectedDomain.primary !== "NONE") {
-      const standardOption = this.buildIndustryStandardOption(detectedDomain);
-      if (standardOption) {
-        options.push(standardOption);
-      }
-    }
+    // Option: Industry standard mapping — ALWAYS show ALL standards, mark detected one as recommended
+    const ALL_STANDARDS: Array<{ id: string; standard: IndustryStandard; label: string; description: string; icon: string; color: string }> = [
+      { id: "bian_mapping", standard: "BIAN", label: "Mapping BIAN (Banque / Finance)", description: "Alignement des services sur le referentiel BIAN v12.", icon: "Building2", color: "blue" },
+      { id: "acord_mapping", standard: "ACORD", label: "Mapping ACORD (Assurance)", description: "Alignement sur le standard ACORD pour le domaine assurance.", icon: "Shield", color: "green" },
+      { id: "hl7_mapping", standard: "HL7_FHIR", label: "Mapping HL7/FHIR (Sante)", description: "Alignement sur les standards HL7 FHIR pour le domaine sante.", icon: "Heart", color: "red" },
+      { id: "tmforum_mapping", standard: "TMFORUM", label: "Mapping TMForum/eTOM (Telecom)", description: "Alignement sur le referentiel TMForum pour les telecoms.", icon: "Wifi", color: "purple" },
+      { id: "ddd_mapping", standard: "DDD", label: "Structuration DDD (Domain-Driven Design)", description: "Structuration en Bounded Contexts, Aggregats et Value Objects.", icon: "Layers", color: "orange" },
+      { id: "togaf_mapping", standard: "TOGAF", label: "Architecture TOGAF (Enterprise)", description: "Alignement sur le framework TOGAF ADM.", icon: "Building", color: "slate" },
+    ];
 
-    // Option: TOGAF (toujours proposé pour les projets enterprise multi-composants)
-    if (detectedDomain.primary !== "TOGAF" && input.detectedComponents.length >= 5) {
+    for (const std of ALL_STANDARDS) {
+      const isRecommended = detectedDomain.primary === std.standard;
+      const isDetectedDomain = isRecommended && detectedDomain.primary !== "NONE";
       options.push({
-        id: "togaf_mapping",
-        label: "Architecture TOGAF (Enterprise)",
-        description: `Projet multi-composants détecté (${input.detectedComponents.length} composants). Alignement sur le framework TOGAF ADM.`,
+        id: std.id,
+        label: isDetectedDomain ? `${std.label} (Recommande)` : std.label,
+        description: isDetectedDomain
+          ? `Domaine ${detectedDomain.label} detecte (${detectedDomain.confidence}). ${std.description}`
+          : std.description,
         category: "standard",
-        defaultEnabled: true,
-        confidence: "medium",
-        icon: "Building",
-        color: "slate",
-        triggeredBy: ["multi_component_architecture", `${input.detectedComponents.length}_components`],
-      });
-    }
-
-    // Option: DDD (proposé si microservices détectés et pas déjà primary)
-    if (detectedDomain.primary !== "DDD" && hasBoundedContexts) {
-      options.push({
-        id: "ddd_mapping",
-        label: "Structuration DDD (Domain-Driven Design)",
-        description: `Domaines métier multiples détectés. Structuration en Bounded Contexts, Aggregats et Value Objects.`,
-        category: "standard",
-        defaultEnabled: true,
-        confidence: "medium",
-        icon: "Layers",
-        color: "orange",
-        triggeredBy: ["bounded_contexts", "multiple_domains"],
+        defaultEnabled: isDetectedDomain, // Only auto-enable the recommended one
+        confidence: isDetectedDomain ? detectedDomain.confidence : "low",
+        icon: std.icon,
+        color: std.color,
+        triggeredBy: isDetectedDomain ? detectedDomain.indicators.slice(0, 3) : ["user_choice"],
       });
     }
 
@@ -443,8 +433,11 @@ export class DynamicOptionsResolver {
       });
     }
 
-    // Option: Messaging migration (if JMS detected)
-    if (input.technologiesDetected.includes("JMS")) {
+    // Option: Messaging migration (if JMS or MDB detected)
+    const hasMessaging = input.technologiesDetected.some(t =>
+      t === "JMS" || t.includes("MDB") || t.includes("JMS") || t === "EJB_3X_MDB"
+    );
+    if (hasMessaging) {
       options.push({
         id: "messaging",
         label: "Migration Messaging",
