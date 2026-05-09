@@ -1,8 +1,9 @@
 /**
- * Test détaillé des 10 projets bancaires GitHub (batch v2) — moteur v12.2.
+ * Test détaillé des 10 projets bancaires GitHub (batch v2) — moteur v12.3.
  * Capture complète pour rapport ultra-détaillé.
  * v12.1: Inclut PostGenerationMigrator pour remplacer les TODOs par du code migré.
  * v12.2: LLM activé par défaut + inférence entités JDBC.
+ * v12.3: ServletBodySplitter + DtoFieldMapper + @Remote resolution enrichie.
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -221,16 +222,18 @@ async function testProject(projectDir: string): Promise<DetailedResult> {
       }
       result.todos = todos;
 
-      // v12.1: Post-generation migration (replace TODOs with migrated code)
+      // v12.3: Post-generation migration (replace TODOs with migrated code)
+      // Inject raw source files into IR so PostGenerationMigrator can resolve Servlet/DTO bodies
+      (analysis.ir as any)._rawFiles = sourceFiles.map(f => ({ path: f.path, content: f.content }));
       try {
         const postMigStats = await runPostGenerationMigration(
-          generated.files || [],
+          [...(generated.files || []), ...(generated.multiTechFiles || [])],
           analysis.ir,
-          { maxMethodsPerRun: 30, skipLLM: false } // v12.2: LLM activé (fallback rule-based si indisponible)
+          { maxMethodsPerRun: 50, skipLLM: false } // v12.3: LLM + Servlet + DTO + @Remote
         );
         result.postMigrationStats = postMigStats;
       } catch (postMigErr: any) {
-        result.postMigrationStats = { totalTodosFound: 0, todosReplaced: 0, todosByLLM: 0, todosByRules: 0, todosKept: 0, totalTimeMs: 0 };
+        result.postMigrationStats = { totalTodosFound: 0, todosReplaced: 0, todosByLLM: 0, todosByRules: 0, todosByServletSplitter: 0, todosByDtoMapper: 0, todosByRemoteResolution: 0, todosKept: 0, totalTimeMs: 0 };
       }
 
       // Re-count TODOs after post-migration

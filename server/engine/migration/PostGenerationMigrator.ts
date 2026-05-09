@@ -1,10 +1,15 @@
 /**
- * PostGenerationMigrator v12.1 — Post-generation phase that replaces TODO stubs
+ * PostGenerationMigrator v12.3 — Post-generation phase that replaces TODO stubs
  * with actual migrated business logic using LLM + rule-based fallback.
  *
  * This runs AFTER generateSpringBootProject() and BEFORE quality scoring in the agent pipeline.
- * It scans generated service files for TODO patterns and replaces them with migrated code
- * using the original method bodies extracted by the parser (v12.1 body extraction).
+ * It scans generated service/adapter files for TODO patterns and replaces them with migrated code
+ * using the original method bodies extracted by the parser.
+ *
+ * v12.3 additions:
+ *   - ServletBodySplitter: splits Servlet doGet/doPost into Controller + Service (FIX 1)
+ *   - Enhanced @Remote resolution: scans ALL source files for Bean implementations (FIX 2)
+ *   - DtoFieldMapper: auto-generates DTOs and mappers from entity fields (FIX 3)
  *
  * @author Hamza NORDINE — Compleo
  */
@@ -12,12 +17,17 @@
 import type { GeneratedFile } from "../../spring/shared";
 import type { ProjectIR, UseCaseIR } from "../../java-parser";
 import { MethodTransformer, type MethodContext, type MethodMigrationResult } from "./MethodTransformer";
+import { splitServletBody, isServletBodyMigrable } from "./ServletBodySplitter";
+import { extractEntityFields, generateInlineDtoMapping, generateDtoAndMapper } from "./DtoFieldMapper";
 
 export interface PostMigrationStats {
   totalTodosFound: number;
   todosReplaced: number;
   todosByLLM: number;
   todosByRules: number;
+  todosByServletSplitter: number;
+  todosByDtoMapper: number;
+  todosByRemoteResolution: number;
   todosKept: number;
   totalTimeMs: number;
 }
@@ -149,6 +159,9 @@ export async function runPostGenerationMigration(
     todosReplaced: 0,
     todosByLLM: 0,
     todosByRules: 0,
+    todosByServletSplitter: 0,
+    todosByDtoMapper: 0,
+    todosByRemoteResolution: 0,
     todosKept: 0,
     totalTimeMs: 0,
   };
@@ -163,11 +176,70 @@ export async function runPostGenerationMigration(
   const availableServices = extractServiceNames(files);
   const availableRepositories = extractRepositoryNames(files);
 
+  // ─── Phase A: Servlet Body Splitting (FIX 1) ───────────────────────────────
+  for (const file of files) {
+    if (!file.path.endsWith(".java")) continue;
+    if (!file.path.includes("/service/") && !file.path.includes("/controller/")) continue;
+
+    const servletTodos = findServletTodoPatterns(file.content);
+    for (const todo of servletTodos) {
+      stats.totalTodosFound++;
+      if (methodsProcessed >= maxMethods) { stats.todosKept++; continue; }
+
+      // Find the original Servlet body
+      const servletBody = findServletBody(todo, methodBodyMap, ir);
+      if (!servletBody) { stats.todosKept++; continue; }
+
+      // Check if migrable (≤15 lines, no complex patterns)
+      if (!isServletBodyMigrable(servletBody)) {
+        stats.todosKept++;
+        continue;
+      }
+
+      const splitResult = splitServletBody(servletBody, todo.methodName, todo.className);
+      if (splitResult.canMigrate) {
+        file.content = replaceTodoWithCode(file.content, todo, splitResult.serviceCode, "servlet-splitter");
+        stats.todosReplaced++;
+        stats.todosByServletSplitter++;
+      } else {
+        stats.todosKept++;
+      }
+      methodsProcessed++;
+    }
+  }
+
+  // ─── Phase B: DTO Field Mapping (FIX 3) ────────────────────────────────────
   for (const file of files) {
     if (!file.path.endsWith(".java")) continue;
     if (!file.path.includes("/service/") && !file.path.includes("/adapter/")) continue;
 
-    // Find TODO patterns in the file
+    const dtoTodos = findDtoTodoPatterns(file.content);
+    for (const todo of dtoTodos) {
+      stats.totalTodosFound++;
+      if (methodsProcessed >= maxMethods) { stats.todosKept++; continue; }
+
+      // Find the entity fields from the IR or generated entity files
+      const entityFields = resolveEntityFields(todo.className, ir, files);
+      if (entityFields.length === 0) { stats.todosKept++; continue; }
+
+      const mappingCode = generateInlineDtoMapping(todo.className, entityFields, todo.className.charAt(0).toLowerCase() + todo.className.slice(1));
+      if (mappingCode && !mappingCode.includes('No mappable fields')) {
+        file.content = replaceTodoWithCode(file.content, todo, mappingCode, "dto-mapper");
+        stats.todosReplaced++;
+        stats.todosByDtoMapper++;
+      } else {
+        stats.todosKept++;
+      }
+      methodsProcessed++;
+    }
+  }
+
+  // ─── Phase C: General TODO replacement (original + @Remote resolution) ─────
+  for (const file of files) {
+    if (!file.path.endsWith(".java")) continue;
+    if (!file.path.includes("/service/") && !file.path.includes("/adapter/")) continue;
+
+    // Find TODO patterns in the file (excluding Servlet and DTO ones already processed)
     const todoPatterns = findTodoPatterns(file.content);
     if (todoPatterns.length === 0) continue;
 
@@ -179,12 +251,15 @@ export async function runPostGenerationMigration(
         continue;
       }
 
-      // Try to find the corresponding method body
+      // Try to find the corresponding method body (enhanced @Remote resolution)
       const methodBody = findMethodBody(todo, methodBodyMap);
       if (!methodBody || !methodBody.hasBusinessLogic) {
         stats.todosKept++;
         continue;
       }
+
+      // Track if this was resolved via @Remote
+      const isRemoteResolution = todo.text.includes('@Remote') || todo.text.includes('migrated from');
 
       // Transform the method body
       const ctx: MethodContext = {
@@ -205,7 +280,8 @@ export async function runPostGenerationMigration(
           // Replace the TODO block with migrated code
           file.content = replaceTodoWithCode(file.content, todo, result.code, result.strategy);
           stats.todosReplaced++;
-          if (result.strategy === "llm") stats.todosByLLM++;
+          if (isRemoteResolution) stats.todosByRemoteResolution++;
+          else if (result.strategy === "llm") stats.todosByLLM++;
           else stats.todosByRules++;
         } else {
           stats.todosKept++;
@@ -220,6 +296,105 @@ export async function runPostGenerationMigration(
 
   stats.totalTimeMs = Date.now() - startTime;
   return stats;
+}
+
+// ─── Servlet TODO Detection ─────────────────────────────────────────────────
+
+function findServletTodoPatterns(content: string): TodoPattern[] {
+  const patterns: TodoPattern[] = [];
+  const lines = content.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Match: // TODO: Migrer la logique métier de X.doPost/doGet
+    const match = line.match(/\/\/\s*TODO:?\s*Migrer la logique m[ée]tier de\s+(\w+)\.(doPost|doGet)/i);
+    if (match) {
+      patterns.push({
+        startIndex: i,
+        endIndex: i,
+        text: line,
+        methodName: match[2],
+        className: match[1],
+      });
+    }
+  }
+
+  return patterns;
+}
+
+function findServletBody(todo: TodoPattern, map: MethodBodyMap, ir: ProjectIR): string | null {
+  // Try to find the Servlet body from the map
+  const key = `${todo.className}_${todo.methodName}`;
+  if (map[key]) return map[key].body;
+
+  // Try with Servlet suffix
+  const servletKey = `${todo.className}Servlet_${todo.methodName}`;
+  if (map[servletKey]) return map[servletKey].body;
+
+  // Try from raw files in IR
+  const rawFiles = (ir as any)._rawFiles ?? [];
+  for (const file of rawFiles) {
+    if (!file.content) continue;
+    const fileName = file.path?.split("/").pop()?.replace(".java", "") ?? "";
+    if (fileName.toLowerCase().includes(todo.className.toLowerCase())) {
+      const body = extractMethodBodyFromSource(file.content, todo.methodName);
+      if (body) return body;
+    }
+  }
+
+  return null;
+}
+
+// ─── DTO TODO Detection ─────────────────────────────────────────────────────
+
+function findDtoTodoPatterns(content: string): TodoPattern[] {
+  const patterns: TodoPattern[] = [];
+  const lines = content.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Match: // TODO: Mapper les champs depuis X vers existing
+    const match = line.match(/\/\/\s*TODO:?\s*Mapper les champs depuis\s+(\w+)/i);
+    if (match) {
+      patterns.push({
+        startIndex: i,
+        endIndex: i,
+        text: line,
+        methodName: 'toDTO',
+        className: match[1],
+      });
+    }
+  }
+
+  return patterns;
+}
+
+function resolveEntityFields(entityName: string, ir: ProjectIR, files: GeneratedFile[]): Array<{ name: string; type: string; annotations?: string[] }> {
+  // Try from generated entity files
+  for (const file of files) {
+    if (file.path.includes('/entity/') && file.path.includes(entityName)) {
+      return extractEntityFields(file.content);
+    }
+  }
+
+  // Try from IR DTOs
+  for (const dto of ir.dtos) {
+    if (dto.className === entityName || dto.className === `${entityName}DTO`) {
+      return dto.fields.map(f => ({ name: f.name, type: f.type }));
+    }
+  }
+
+  // Try from raw source files
+  const rawFiles = (ir as any)._rawFiles ?? [];
+  for (const file of rawFiles) {
+    if (!file.content) continue;
+    const fileName = file.path?.split("/").pop()?.replace(".java", "") ?? "";
+    if (fileName === entityName) {
+      return extractEntityFields(file.content);
+    }
+  }
+
+  return [];
 }
 
 // ─── Internal Helpers ────────────────────────────────────────────────────────
@@ -339,7 +514,7 @@ function replaceTodoWithCode(
   }
 
   // Replace the block with migrated code
-  const migrationComment = `        // ─── Migrated by v12.1 (${strategy}) ───`;
+  const migrationComment = `        // ─── Migrated by v12.3 (${strategy}) ───`;
   const replacement = [migrationComment, migratedCode].join("\n");
   lines.splice(blockStart, blockEnd - blockStart + 1, replacement);
 
