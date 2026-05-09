@@ -294,6 +294,29 @@ const sharingRouter = router({
 });
 
 // ============================================================
+// Schema Decoder Router (v12.6 — Standalone feature)
+// ============================================================
+
+const schemaDecoderRouter = router({
+  /** Decode cryptic DB columns using Java source code semantics */
+  decode: protectedProcedure
+    .input(z.object({
+      projectId: z.number(),
+      files: z.array(z.object({ path: z.string(), content: z.string() })),
+    }))
+    .mutation(async ({ input }) => {
+      const { decodeSchema, generateSchemaDictionaryJson, generateSchemaDictionaryMd, generateSchemaDictionaryCsv } = await import("./engine/decoder/SchemaDecoder");
+      const result = decodeSchema(input.files);
+      return {
+        ...result,
+        json: generateSchemaDictionaryJson(result),
+        markdown: generateSchemaDictionaryMd(result),
+        csv: generateSchemaDictionaryCsv(result),
+      };
+    }),
+});
+
+// ============================================================
 // Validation Router (v8.7)
 // ============================================================
 
@@ -376,6 +399,7 @@ export const appRouter = router({
   git: gitRouter,
   sharing: sharingRouter,
   validation: validationRouter,
+  schemaDecoder: schemaDecoderRouter,
 });
 
 export type AppRouter = typeof appRouter;

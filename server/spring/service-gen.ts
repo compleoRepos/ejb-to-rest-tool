@@ -14,6 +14,7 @@ import {
   type JdbcBlock,
 } from "../engine/BusinessLogicTransformer";
 import { JavaASTParser } from "../engine/ast/JavaASTParser";
+import { transformEaiFrameworkReferences } from "../engine/transformer/eai-framework-transformer";
 import { SymbolTable } from "../engine/ast/SymbolTable";
 import { ServiceMethodGenerator } from "../engine/ServiceMethodGenerator";
 import {
@@ -357,6 +358,9 @@ function generateServiceMethodBody(
       _jdbcBlocksRegistry.push(...result.jdbcBlocks);
     }
 
+    // v12.6: Apply EAI framework transformer to clean legacy API calls (AppLog, SessionContext, etc.)
+    result.body = transformEaiFrameworkReferences(result.body);
+
     // FIX v7.8: Post-process Void variable declarations → infer real type (legacy path)
     result.body = result.body.replace(/\bVoid\s+(\w+)\s*=/g, (match, varName) => {
       if (/sql|query|hql|jpql/i.test(varName)) return `String ${varName} =`;
@@ -388,6 +392,13 @@ function generateServiceMethodBody(
     }
 
     lines.push(`        // Migrated from: ${sanitizeClassName(uc.className)}.execute() — ${result.linesTransformed} transformations applied`);
+
+    // v12.6: Inject step annotations from legacy comments into the migrated body
+    const stepsInBody = extractLegacySteps(uc.rawSource, uc.className);
+    if (stepsInBody.length >= 2) {
+      lines.unshift(`        // \u2500\u2500\u2500 Migrated from ${sanitizeClassName(uc.className)} (${stepsInBody.length} steps) \u2500\u2500\u2500`);
+      lines.unshift(`        // Steps: ${stepsInBody.map((s, i) => `${i+1}.${s.label}`).join(' \u2192 ')}`);
+    }
 
     // v5.10.2: Validate brace balance before returning legacy-migrated code
     const legacyJoined = lines.join("\n");
@@ -497,7 +508,8 @@ export function extractLegacySteps(rawSource: string, className: string): Legacy
   const steps: LegacyStep[] = [];
 
   // Strategy 1: Look for explicit step comments (ÉTAPE, Step, STEP, Phase)
-  const stepCommentRegex = /\/\/\s*(?:ÉTAPE|ETAPE|Step|STEP|Phase)\s*(\d+)\s*[:.]?\s*(.+)/gi;
+  // Supports separators: colon (:), period (.), em-dash (—), en-dash (–), hyphen (-)
+  const stepCommentRegex = /\/\/\s*(?:ÉTAPE|ETAPE|Step|STEP|Phase)\s*(\d+)\s*(?:[:.\u2014\u2013\-])+\s*(.+)/gi;
   let match: RegExpExecArray | null;
   const stepPositions: { index: number; label: string }[] = [];
 

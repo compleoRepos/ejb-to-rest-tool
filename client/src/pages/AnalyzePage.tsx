@@ -173,7 +173,7 @@ export default function AnalyzePage() {
   }, [sessionId, markDone]);
 
   const handleContinue = () => {
-    navigate(`/compleo/agent/${sessionId}/configure`);
+    navigate(`/compleo/agent/${sessionId}/schema-decoder`);
   };
 
   return (

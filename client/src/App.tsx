@@ -24,6 +24,7 @@ import AnalyzePage from "./pages/AnalyzePage";
 import ConfigurePage from "./pages/ConfigurePage";
 import GeneratePage from "./pages/GeneratePage";
 import ResultPage from "./pages/ResultPage";
+import SchemaDecoderPage from "./pages/SchemaDecoderPage";
 
 function Router() {
   return (
@@ -45,6 +46,7 @@ function Router() {
       <Route path={"/compleo"} component={CompleoPage} />
       <Route path={"/compleo/upload"} component={UploadPage} />
       <Route path={"/compleo/agent/:sessionId/analyze"} component={AnalyzePage} />
+      <Route path={"/compleo/agent/:sessionId/schema-decoder"} component={SchemaDecoderPage} />
       <Route path={"/compleo/agent/:sessionId/configure"} component={ConfigurePage} />
       <Route path={"/compleo/agent/:sessionId/generate"} component={GeneratePage} />
       <Route path={"/compleo/agent/:sessionId/result"} component={ResultPage} />

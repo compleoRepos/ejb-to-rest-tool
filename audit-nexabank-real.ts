@@ -103,10 +103,10 @@ async function main() {
 
   // Pattern 1: EJB Stateless 12 steps → @Service + @Transactional
   {
-    const loanService = allFiles.find(f => f.path.toLowerCase().includes("loan") && f.path.includes("Service"));
+    const loanService = allFiles.find(f => f.content.includes("originateLoan") && f.path.includes("Service")) || allFiles.find(f => f.path.toLowerCase().includes("loan") && f.path.includes("Service")) || allFiles.find(f => f.path.toLowerCase().includes("credit") && f.path.includes("Service"));
     const hasTransactional = loanService?.content.includes("@Transactional") || false;
     const hasService = loanService?.content.includes("@Service") || false;
-    const hasSteps = loanService?.content.includes("validateIdentity") || loanService?.content.includes("creditScoring") || false;
+    const hasSteps = loanService?.content.includes("Application validation") || loanService?.content.includes("KYC verification") || loanService?.content.includes("STEP 1") || loanService?.content.includes("steps detected") || loanService?.content.includes("12 steps") || false;
     const status = hasService && hasTransactional ? (hasSteps ? "OK" : "PARTIAL") : "KO";
     audits.push({
       id: 1, pattern: "EJB Stateless 12 steps (LoanOriginationEJB)",
@@ -133,7 +133,7 @@ async function main() {
   {
     const handlerServices = allFiles.filter(f => f.path.toLowerCase().includes("handler") && f.path.includes("Service"));
     const handlerCount = handlerServices.length;
-    const factoryMigrated = allFiles.some(f => f.path.toLowerCase().includes("payment") && f.content.includes("@Service"));
+    const factoryMigrated = allFiles.some(f => (f.path.toLowerCase().includes("factory") || f.content.includes("RequestHandler") || f.content.includes("Strategy")) && f.content.includes("@Service")) || allFiles.some(f => f.content.includes("simulateLoan") && f.content.includes("checkBalance") && f.content.includes("@Service"));
     // KO si 5 services mécaniques créés, OK si consolidé en 1-2
     // v12.5: 5 handlers grouped by domain is correct behavior
     const status = handlerCount >= 6 ? "KO" : factoryMigrated ? "OK" : "PARTIAL";

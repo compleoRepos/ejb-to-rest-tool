@@ -2,10 +2,10 @@
  * PipelineStepper — Barre horizontale 5 étapes pour le pipeline COMPLEO.
  * États : completed (✅ teal), active (● pulse), pending (○ gris).
  */
-import { Check, Upload, Search, Settings, Zap, Trophy } from "lucide-react";
+import { Check, Upload, Search, Settings, Zap, Trophy, Database } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type PipelineStep = "upload" | "analyze" | "configure" | "generate" | "result";
+export type PipelineStep = "upload" | "analyze" | "schema-decoder" | "configure" | "generate" | "result";
 
 interface PipelineStepperProps {
   currentStep: PipelineStep;
@@ -15,6 +15,7 @@ interface PipelineStepperProps {
 const STEPS: Array<{ id: PipelineStep; label: string; icon: React.ElementType }> = [
   { id: "upload", label: "Upload", icon: Upload },
   { id: "analyze", label: "Analyse", icon: Search },
+  { id: "schema-decoder", label: "Schema", icon: Database },
   { id: "configure", label: "Configuration", icon: Settings },
   { id: "generate", label: "Génération", icon: Zap },
   { id: "result", label: "Résultat", icon: Trophy },
