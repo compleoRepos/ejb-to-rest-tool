@@ -29,6 +29,13 @@ const LOGGING_REPLACEMENTS: [RegExp, string][] = [
 
   // Supprimer les appels d'initialisation EAI (MDC géré par Spring)
   [/\s*EaiLog\.initLogTraceInfos\([^)]*\);\r?\n?/g, "\n"],
+  // v12.5: AppLog.initTrace / AppLog.info / AppLog.error → log equivalents
+  [/AppLog\.info\(/g, "log.info("],
+  [/AppLog\.error\(/g, "log.error("],
+  [/AppLog\.warn\(/g, "log.warn("],
+  [/AppLog\.debug\(/g, "log.debug("],
+  [/\s*AppLog\.initTrace\s*\([^)]*\)\s*;\r?\n?/g, "\n"],
+  [/\s*AppLog\.init\w*\s*\([^)]*\)\s*;\r?\n?/g, "\n"],
   [/\s*EaiLog\.setNewThreadId\(\);\r?\n?/g, "\n"],
   [/\s*Log\.initLogTraceInfos\([^)]*\);\r?\n?/g, "\n"],
   [/\s*Log\.setNewThreadId\(\);\r?\n?/g, "\n"],
@@ -59,8 +66,8 @@ const FRAMEWORK_REPLACEMENTS: [RegExp, string][] = [
   // Nettoyer les @Transactional() vides → @Transactional
   [/@Transactional\(\s*\)/g, "@Transactional"],
 
-  // sctx.setRollbackOnly() → throw new RuntimeException("Transaction rollback forced")
-  [/sctx\.setRollbackOnly\(\)/g, 'throw new RuntimeException("Transaction rollback forced")'],
+  // v12.5: sctx/sessionContext.setRollbackOnly() -> TransactionAspectSupport
+  [/(?:sctx|sessionContext|ctx)\.setRollbackOnly\(\)/g, 'TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()'],
 
   // Parser EAI → identité (JSON natif en Spring)
   [/Parser\.unmarshall\(([^)]+)\)/g, "$1"],
@@ -81,6 +88,10 @@ const EAI_IMPORT_PATTERNS: RegExp[] = [
   /import\s+ma\.eai\.commons\..*;\r?\n?/g,
   /import\s+.*FwkRollbackException;\r?\n?/g,
   /import\s+javax\.ejb\.SessionContext;\r?\n?/g,
+  // v12.5: AppLog and PlatformRollbackException imports
+  /import\s+[\w.]*\.AppLog;\r?\n?/g,
+  /import\s+[\w.]*\.PlatformRollbackException;\r?\n?/g,
+  /import\s+com\.nexabank\.fwk\..*;\r?\n?/g,
 ];
 
 // ─── API publique ───────────────────────────────────────────────────────────
@@ -129,7 +140,7 @@ export function hasEaiFrameworkReferences(javaCode: string): {
   const hasEaiLog = /EaiLog\.\w+\(/.test(javaCode);
   const hasLegacyLog = /\bLog\.(info|error|debug|warn)\(/.test(javaCode);
   const hasFwkRollback = /FwkRollbackException/.test(javaCode);
-  const hasSessionContext = /sctx\.setRollbackOnly\(\)/.test(javaCode);
+  const hasSessionContext = /(?:sctx|sessionContext|ctx)\.setRollbackOnly\(\)/.test(javaCode);
   const hasEaiImports = /import\s+ma\.eai\./.test(javaCode);
   const hasParser = /Parser\.(unmarshall|update)\(/.test(javaCode);
 
@@ -137,7 +148,7 @@ export function hasEaiFrameworkReferences(javaCode: string): {
     (javaCode.match(/EaiLog\.\w+\(/g) || []).length +
     (javaCode.match(/\bLog\.(info|error|debug|warn)\(/g) || []).length +
     (javaCode.match(/FwkRollbackException/g) || []).length +
-    (javaCode.match(/sctx\.setRollbackOnly\(\)/g) || []).length +
+    (javaCode.match(/(?:sctx|sessionContext|ctx)\.setRollbackOnly\(\)/g) || []).length +
     (javaCode.match(/Parser\.(unmarshall|update)\(/g) || []).length;
 
   return { hasEaiLog, hasLegacyLog, hasFwkRollback, hasSessionContext, hasEaiImports, hasParser, totalReferences };

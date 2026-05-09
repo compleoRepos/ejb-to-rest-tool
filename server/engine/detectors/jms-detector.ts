@@ -54,17 +54,17 @@ export class JmsDetector implements TechnologyDetector {
     const mappedMatch = content.match(/mappedName\s*=\s*"([^"]+)"/);
     if (mappedMatch && destinationName === "unknown") destinationName = mappedMatch[1];
 
-    // JNDI lookup
-    const jndiMatch = content.match(/lookup\s*\(\s*"([^"]+Queue[^"]*)"\s*\)/);
+    // JNDI lookup (v12.5: also match @Resource(lookup = "...") format)
+    const jndiMatch = content.match(/lookup\s*(?:\(\s*|=\s*)"([^"]+Queue[^"]*)"/) ;
     if (jndiMatch && destinationName === "unknown") destinationName = jndiMatch[1];
-    const topicJndi = content.match(/lookup\s*\(\s*"([^"]*Topic[^"]*)"\s*\)/);
+    const topicJndi = content.match(/lookup\s*(?:\(\s*|=\s*)"([^"]*Topic[^"]*)"/) ;
     if (topicJndi) {
       destinationType = "TOPIC";
       if (destinationName === "unknown") destinationName = topicJndi[1];
     }
 
-    // @Resource(name = "jms/queue/BMCE_NOTIFICATIONS") or @Resource(name = "jms/topic/...")
-    const resourceMatch = content.match(/@Resource\s*\([^)]*name\s*=\s*["']([^"']*jms\/(?:queue|topic)\/[^"']+)["']/);
+    // @Resource(name/lookup = "jms/queue/...") or @Resource(lookup = "java:/jms/...")
+    const resourceMatch = content.match(/@Resource\s*\([^)]*(?:name|lookup)\s*=\s*["']([^"']*(?:jms\/(?:queue|topic)\/|java:\/jms\/)[^"']+)["']/);
     if (resourceMatch && destinationName === "unknown") {
       destinationName = resourceMatch[1];
       if (resourceMatch[1].includes("/topic/")) destinationType = "TOPIC";

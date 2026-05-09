@@ -1,5 +1,5 @@
 /**
- * FrameworkReplacer.ts — v12.4
+ * FrameworkReplacer.ts — v12.5
  * Remplace les références aux frameworks internes (AppLog, EaiLog, PlatformRollbackException, etc.)
  * par leurs équivalents Spring/standard dans les fichiers générés.
  *
@@ -58,6 +58,27 @@ const REPLACEMENT_RULES: ReplacementRule[] = [
     category: 'appLog',
     requiredImport: 'import org.slf4j.Logger;\nimport org.slf4j.LoggerFactory;',
   },
+  // ─── AppLog/EaiLog initialization calls → remove entirely (v12.5) ────────
+  {
+    pattern: /\s*AppLog\.initTrace\s*\([^)]*\)\s*;\s*\n?/g,
+    replacement: '\n',
+    category: 'appLog',
+  },
+  {
+    pattern: /\s*AppLog\.init\w*\s*\([^)]*\)\s*;\s*\n?/g,
+    replacement: '\n',
+    category: 'appLog',
+  },
+  {
+    pattern: /\s*EaiLog\.initLogTraceInfos\s*\([^)]*\)\s*;\s*\n?/g,
+    replacement: '\n',
+    category: 'appLog',
+  },
+  {
+    pattern: /\s*EaiLog\.setNewThreadId\s*\(\s*\)\s*;\s*\n?/g,
+    replacement: '\n',
+    category: 'appLog',
+  },
   // Remove old imports
   {
     pattern: /import\s+[\w.]*\.AppLog\s*;\s*\n?/g,
@@ -84,7 +105,14 @@ const REPLACEMENT_RULES: ReplacementRule[] = [
 
   // ─── setRollbackOnly() → TransactionAspectSupport ─────────────────────────
   {
-    pattern: /(?:sessionContext|ctx|context)\s*\.\s*setRollbackOnly\s*\(\s*\)/g,
+    pattern: /(?:sessionContext|ctx|context|sctx)\s*\.\s*setRollbackOnly\s*\(\s*\)/g,
+    replacement: 'TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()',
+    category: 'setRollbackOnly',
+    requiredImport: 'import org.springframework.transaction.interceptor.TransactionAspectSupport;',
+  },
+  // v12.5: Also match standalone setRollbackOnly() calls (without qualifier)
+  {
+    pattern: /(?:this\.)?setRollbackOnly\s*\(\s*\)/g,
     replacement: 'TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()',
     category: 'setRollbackOnly',
     requiredImport: 'import org.springframework.transaction.interceptor.TransactionAspectSupport;',
@@ -99,6 +127,74 @@ const REPLACEMENT_RULES: ReplacementRule[] = [
     pattern: /\s*@Resource\s+(?:private\s+)?SessionContext\s+\w+\s*;\s*\n?/g,
     replacement: '\n',
     category: 'setRollbackOnly',
+  },
+  // v12.5: Remove @Inject SessionContext fields
+  {
+    pattern: /\s*@Inject\s+(?:private\s+)?SessionContext\s+\w+\s*;\s*\n?/g,
+    replacement: '\n',
+    category: 'setRollbackOnly',
+  },
+
+  // ─── @Schedule → @Scheduled (v12.5) ───────────────────────────────────────
+  {
+    pattern: /@Schedule\s*\(\s*hour\s*=\s*"(\d+)"\s*,\s*minute\s*=\s*"(\d+)"\s*(?:,\s*second\s*=\s*"(\d+)")?\s*\)/g,
+    replacement: '@Scheduled(cron = "0 $2 $1 * * *")',
+    category: 'other',
+    requiredImport: 'import org.springframework.scheduling.annotation.Scheduled;',
+  },
+  {
+    pattern: /@Schedule\s*\([^)]*\)/g,
+    replacement: '@Scheduled(fixedDelay = 60000)',
+    category: 'other',
+    requiredImport: 'import org.springframework.scheduling.annotation.Scheduled;',
+  },
+  {
+    pattern: /import\s+javax\.ejb\.Schedule\s*;\s*\n?/g,
+    replacement: '',
+    category: 'other',
+  },
+  {
+    pattern: /import\s+javax\.ejb\.Timer\s*;\s*\n?/g,
+    replacement: '',
+    category: 'other',
+  },
+
+  // ─── JMS raw API → Spring JmsTemplate/KafkaTemplate (v12.5) ───────────────
+  {
+    pattern: /ConnectionFactory\s+\w+\s*=\s*[^;]+;\s*\n?/g,
+    replacement: '',
+    category: 'other',
+  },
+  {
+    pattern: /Connection\s+\w+\s*=\s*\w+\.createConnection\([^)]*\)\s*;\s*\n?/g,
+    replacement: '',
+    category: 'other',
+  },
+  {
+    pattern: /Session\s+\w+\s*=\s*\w+\.createSession\([^)]*\)\s*;\s*\n?/g,
+    replacement: '',
+    category: 'other',
+  },
+  {
+    pattern: /MessageProducer\s+\w+\s*=\s*[^;]+;\s*\n?/g,
+    replacement: '',
+    category: 'other',
+  },
+  {
+    pattern: /(\w+)\.send\s*\(\s*(\w+)\.createTextMessage\s*\(([^)]+)\)\s*\)/g,
+    replacement: 'jmsTemplate.convertAndSend(destinationName, $3)',
+    category: 'other',
+    requiredImport: 'import org.springframework.jms.core.JmsTemplate;',
+  },
+  {
+    pattern: /import\s+javax\.jms\.[\w*]+\s*;\s*\n?/g,
+    replacement: '',
+    category: 'other',
+  },
+  {
+    pattern: /import\s+jakarta\.jms\.[\w*]+\s*;\s*\n?/g,
+    replacement: '',
+    category: 'other',
   },
 ];
 

@@ -226,7 +226,9 @@ public class BusinessRuleException extends RuntimeException {
   const serviceVarNames = new Map<string, Set<string>>(); // svcType -> variable names used
   for (const uc of ir.useCases) {
     for (const svc of uc.injectedServices) {
-      if (!remoteTypeNames.has(svc.type) && !svc.type.endsWith("DAO") && !svc.type.endsWith("Repository")) {
+      // v12.5: Exclude EJB infrastructure types that should not generate adapters
+      const EJB_INFRA_TYPES = new Set(["SessionContext", "EJBContext", "MessageDrivenContext", "TimerService", "UserTransaction"]);
+      if (!remoteTypeNames.has(svc.type) && !svc.type.endsWith("DAO") && !svc.type.endsWith("Repository") && !EJB_INFRA_TYPES.has(svc.type)) {
         if (!serviceMethodUsages.has(svc.type)) {
           serviceMethodUsages.set(svc.type, new Set());
           serviceVarNames.set(svc.type, new Set());

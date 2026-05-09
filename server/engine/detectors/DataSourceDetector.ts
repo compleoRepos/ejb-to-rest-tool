@@ -408,9 +408,10 @@ export class DataSourceDetector {
           }
         }
         // Détecter le nom de variable associé
+        // v12.5: Support both inline and multi-line @Resource DataSource declarations
         const varMatch = code.match(
           new RegExp(
-            `@Resource[^;]*["']${this.escapeRegex(jndi)}["'][^;]*\\n\\s*\\w+\\s+(\\w+)\\s*;`
+            `@Resource\\s*\\([^)]*["']${this.escapeRegex(jndi)}["'][^)]*\\)\\s*(?:private\\s+)?\\w+\\s+(\\w+)\\s*;`
           )
         );
         if (varMatch) {

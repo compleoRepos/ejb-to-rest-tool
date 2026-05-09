@@ -94,6 +94,17 @@ export function generateDomainService(
       addImportsForRawType(resType, imports, basePackage);
     }
 
+    // v12.5: Detect @Schedule → @Scheduled (EJB Timer → Spring Scheduler)
+    let scheduledAnnotation = "";
+    if (uc.rawSource && /@Schedule\s*\(/.test(uc.rawSource)) {
+      const schedMatch = uc.rawSource.match(/@Schedule\s*\(\s*hour\s*=\s*"(\d+)"\s*,\s*minute\s*=\s*"(\d+)"/);
+      if (schedMatch) {
+        scheduledAnnotation = `    @Scheduled(cron = "0 ${schedMatch[2]} ${schedMatch[1]} * * *")\n`;
+      } else {
+        scheduledAnnotation = "    @Scheduled(fixedDelay = 60000)\n";
+      }
+      imports.add("import org.springframework.scheduling.annotation.Scheduled;");
+    }
     // R7: @Transactional at the right level
     let txAnnotation = "";
     if (uc.transactional) {
@@ -148,7 +159,7 @@ export function generateDomainService(
       : `\n        log.info("Audit trail: transaction ${methodName} completed");\n${returnType !== "void" ? "        return response;" : ""}`;
 
     methods.push(`
-${txAnnotation}    /**
+${scheduledAnnotation}${txAnnotation}    /**
      * ${sanitizeClassName(uc.className)} — ${uc.bianDomain || domain} / ${uc.bianAction || methodName}.${javadocLine}
      * Migrated from legacy UseCase: ${sanitizeClassName(uc.className)}
      */
