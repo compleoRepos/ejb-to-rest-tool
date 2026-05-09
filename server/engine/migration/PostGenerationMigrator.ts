@@ -19,6 +19,7 @@ import type { ProjectIR, UseCaseIR } from "../../java-parser";
 import { MethodTransformer, type MethodContext, type MethodMigrationResult } from "./MethodTransformer";
 import { splitServletBody, isServletBodyMigrable } from "./ServletBodySplitter";
 import { extractEntityFields, generateInlineDtoMapping, generateDtoAndMapper } from "./DtoFieldMapper";
+import { runFrameworkReplacements, type FrameworkReplacerStats } from "./FrameworkReplacer";
 
 export interface PostMigrationStats {
   totalTodosFound: number;
@@ -30,6 +31,7 @@ export interface PostMigrationStats {
   todosByRemoteResolution: number;
   todosKept: number;
   totalTimeMs: number;
+  frameworkReplacements?: FrameworkReplacerStats;
 }
 
 export interface MethodBodyMap {
@@ -292,6 +294,16 @@ export async function runPostGenerationMigration(
 
       methodsProcessed++;
     }
+  }
+
+  // ─── Phase D: Framework Replacements (v12.4) ──────────────────────────────
+  const fwResult = runFrameworkReplacements(files as Array<{ path: string; content: string; technology?: string }>);
+  if (fwResult.stats.totalReplacements > 0) {
+    // Apply the modified content back to original files (preserving category and other fields)
+    for (let i = 0; i < files.length; i++) {
+      files[i].content = fwResult.files[i].content;
+    }
+    stats.frameworkReplacements = fwResult.stats;
   }
 
   stats.totalTimeMs = Date.now() - startTime;

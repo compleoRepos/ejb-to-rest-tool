@@ -1,9 +1,10 @@
 /**
- * Test détaillé des 10 projets bancaires GitHub (batch v2) — moteur v12.3.
+ * Test détaillé des 10 projets bancaires GitHub (batch v2) — moteur v12.4.
  * Capture complète pour rapport ultra-détaillé.
  * v12.1: Inclut PostGenerationMigrator pour remplacer les TODOs par du code migré.
  * v12.2: LLM activé par défaut + inférence entités JDBC.
  * v12.3: ServletBodySplitter + DtoFieldMapper + @Remote resolution enrichie.
+ * v12.4: FrameworkReplacer (AppLog→SLF4J, PlatformRollbackException) + Facade exclusion + JSP detection.
  */
 import * as fs from "fs";
 import * as path from "path";

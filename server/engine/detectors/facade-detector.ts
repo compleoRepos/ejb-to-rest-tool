@@ -38,6 +38,26 @@ const FACTORY_DISPATCH_PATTERNS = [
   /ActionHandlerFactory\.\w+\s*\(/,
 ];
 
+// v12.4: Gateway/Dispatcher class name patterns
+const GATEWAY_NAME_PATTERNS = [
+  /Gateway/i,
+  /Dispatcher/i,
+  /Facade$/i,
+  /Proxy$/i,
+  /Router$/i,
+  /Delegator$/i,
+];
+
+// v12.4: Javadoc/comment indicators of a facade/gateway
+const FACADE_COMMENT_PATTERNS = [
+  /fa[\u00e7c]ade\s+technique/i,
+  /dispatche?\s+(vers|to)/i,
+  /ne\s+contient\s+pas\s+de\s+logique/i,
+  /no\s+business\s+logic/i,
+  /delegates?\s+to/i,
+  /routing\s+(only|layer)/i,
+];
+
 // ─── API publique ───────────────────────────────────────────────────────────
 
 /**
@@ -58,9 +78,23 @@ export function isFacadeEjb(cls: ParsedClassLike): boolean {
 
   // Check 3 : appelle super.process() sans logique propre
   if (src.includes("super.process(")) {
-    // Compter les méthodes publiques non-constructeur
     const publicMethods = (src.match(/public\s+(?!class\b)\w[\w<>,\s]*\s+\w+\s*\(/g) || []).length;
     if (publicMethods <= 2) return true;
+  }
+
+  // v12.4 Check 4 : Gateway/Dispatcher pattern — class name + delegation-only methods
+  const isGatewayName = GATEWAY_NAME_PATTERNS.some(p => p.test(cls.className));
+  const hasFacadeComment = FACADE_COMMENT_PATTERNS.some(p => p.test(src));
+  if (isGatewayName || hasFacadeComment) {
+    // Verify: class has @EJB injections and methods only delegate (no complex logic)
+    const ejbInjections = (src.match(/@EJB/g) || []).length;
+    const publicMethods = (src.match(/public\s+(?!class\b)\w[\w<>,\s]*\s+\w+\s*\(/g) || []).length;
+    // A gateway typically has more injections than methods, or methods are short delegations
+    if (ejbInjections >= 2 && publicMethods <= ejbInjections + 1) {
+      return true;
+    }
+    // Also check if comment explicitly says no business logic
+    if (hasFacadeComment) return true;
   }
 
   return false;
