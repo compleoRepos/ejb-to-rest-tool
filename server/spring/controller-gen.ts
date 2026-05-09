@@ -13,6 +13,7 @@
  */
 
 import type { UseCaseIR, DtoIR, DtoFieldIR } from "../java-parser";
+import { _knownEntityNames as _ctrlKnownEntityNames } from "../spring-generator";
 import {
   type GeneratedFile,
   type HttpConfig,
@@ -27,7 +28,7 @@ export function generateDomainController(
 ): GeneratedFile {
   const controllerName = toPascalCase(domain) + "Controller";
   const serviceName = toPascalCase(domain) + "Service";
-  const serviceVar = domain + "Service";
+  const serviceVar = domain.charAt(0).toLowerCase() + domain.slice(1) + "Service";
   const imports = new Set<string>();
   imports.add("import lombok.RequiredArgsConstructor;");
   imports.add("import lombok.extern.slf4j.Slf4j;");
@@ -101,6 +102,10 @@ export function generateDomainController(
       }
     }
 
+    // v12.7: Determine PathVariable type from voInType for primitives
+    const PRIMITIVE_TYPES = new Set(["int", "long", "Integer", "Long", "String", "double", "float", "boolean", "short"]);
+    const pathVarType = PRIMITIVE_TYPES.has(uc.voInType) ? (uc.voInType === "int" ? "int" : uc.voInType === "long" ? "long" : uc.voInType) : "String";
+
     let paramList = "";
     let methodBodyPrefix = "";
 
@@ -108,7 +113,7 @@ export function generateDomainController(
       // GET methods NEVER have @RequestBody — convert DTO fields to @RequestParam/@RequestHeader
       const paramParts: string[] = [];
       if (hasIdParam) {
-        paramParts.push(`@PathVariable String ${idParamName}`);
+        paramParts.push(`@PathVariable ${pathVarType} ${idParamName}`);
       }
       const contextualFields = new Set(["canal", "codeCanal", "channel", "userId", "idUtilisateur", "userAgent"]);
       const idFields = new Set(["id", "numCompte", "numCarte", "clientId", "numero"]);
@@ -139,9 +144,9 @@ export function generateDomainController(
 ${builderParts.join("\n")}
             .build();\n`;
     } else if (hasIdParam && reqType) {
-      paramList = `@PathVariable String ${idParamName}, @Valid @RequestBody ${reqType} request`;
+      paramList = `@PathVariable ${pathVarType} ${idParamName}, @Valid @RequestBody ${reqType} request`;
     } else if (hasIdParam) {
-      paramList = `@PathVariable String ${idParamName}`;
+      paramList = `@PathVariable ${pathVarType} ${idParamName}`;
     } else if (reqType) {
       paramList = `@Valid @RequestBody ${reqType} request`;
     } else {
@@ -151,7 +156,7 @@ ${builderParts.join("\n")}
         const enumNames = new Set<string>();
         const paramParts: string[] = [];
         if (hasIdParam) {
-          paramParts.push(`@PathVariable String ${idParamName}`);
+          paramParts.push(`@PathVariable ${pathVarType} ${idParamName}`);
         }
         for (const p of legacyParams) {
           const springType = mapToSpringType(p.type, false, enumNames, imports);
@@ -200,6 +205,8 @@ ${builderParts.join("\n")}
     let javadocRaw = (uc as any).useCaseDescription || (uc as any).javadoc || "";
     let javadoc = javadocRaw
       .replace(/[{}]/g, "")          // Remove all braces
+      .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, "'") // Curly/smart quotes → single quote (safe in Java strings)
+      .replace(/[\u2018\u2019\u201A\u201B]/g, "'")             // Smart single quotes → apostrophe
       .replace(/\s+/g, " ")          // Collapse whitespace
       .trim();
     if (javadoc.length > 200) javadoc = javadoc.substring(0, 200) + "...";
@@ -272,20 +279,32 @@ function mapToSpringParamType(field: DtoFieldIR): string {
 // ─── Helper: Extract short summary for @Operation (< 80 chars) ──────────────
 
 function extractShortSummary(description: string, methodName: string, domain: string): string {
+  let result: string;
   if (description) {
     const firstSentence = description.split(/[.:\n]/)[0].trim();
     if (firstSentence.length > 0 && firstSentence.length <= 80) {
-      return firstSentence;
+      result = firstSentence;
+    } else if (firstSentence.length > 80) {
+      result = firstSentence.substring(0, 77) + "...";
+    } else {
+      result = methodName
+        .replace(/([A-Z])/g, " $1")
+        .trim()
+        .replace(/^./, (c) => c.toUpperCase())
+        + " \u2014 " + domain;
     }
-    if (firstSentence.length > 80) {
-      return firstSentence.substring(0, 77) + "...";
-    }
+  } else {
+    result = methodName
+      .replace(/([A-Z])/g, " $1")
+      .trim()
+      .replace(/^./, (c) => c.toUpperCase())
+      + " \u2014 " + domain;
   }
-  return methodName
-    .replace(/([A-Z])/g, " $1")
-    .trim()
-    .replace(/^./, (c) => c.toUpperCase())
-    + " \u2014 " + domain;
+  // Sanitize: escape double quotes and replace smart quotes
+  return result
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, "'")
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/"/g, '\\"');
 }
 
 // ─── FIX B v7.1: Helpers for raw return type inference (controller) ─────────
@@ -299,6 +318,14 @@ const JAVA_BUILTIN_TYPES_CTRL = new Set([
 
 function resolveRawReturnTypeCtrl(rawType: string, imports: Set<string>, basePackage: string): string {
   if (!rawType || rawType === "Void" || rawType === "void") return "Void";
+  // Strip Java modifiers that may leak from method signatures (e.g. "static void")
+  const JAVA_MODIFIERS = /^(public|private|protected|static|final|synchronized|abstract|native|transient|volatile)\s+/;
+  let cleaned = rawType.trim();
+  while (JAVA_MODIFIERS.test(cleaned)) {
+    cleaned = cleaned.replace(JAVA_MODIFIERS, "");
+  }
+  if (!cleaned || cleaned === "void" || cleaned === "Void") return "Void";
+  rawType = cleaned;
 
   const genericMatch = rawType.match(/^(\w+)<(.+)>$/);
   if (genericMatch) {
@@ -337,7 +364,12 @@ function resolveRawReturnTypeCtrl(rawType: string, imports: Set<string>, basePac
 function addImportsForRawTypeCtrl(resType: string, imports: Set<string>, basePackage: string): void {
   if (resType.includes("<")) return;
   if (JAVA_BUILTIN_TYPES_CTRL.has(resType)) return;
-  imports.add(`import ${basePackage}.dto.${resType};`);
+  // v12.7: Use entity.* if the type is a known generated entity, otherwise dto.*
+  if (_ctrlKnownEntityNames.has(resType)) {
+    imports.add(`import ${basePackage}.entity.${resType};`);
+  } else {
+    imports.add(`import ${basePackage}.dto.${resType};`);
+  }
 }
 
 

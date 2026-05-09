@@ -692,7 +692,12 @@ function extractBusinessMethods(content: string, className: string): DirectEjbMe
   let m;
   while ((m = methodRegex.exec(content)) !== null) {
     const javadocRaw = m[1] || "";
-    const returnType = m[2].replace(m[3], "").trim();
+    // v12.7: Strip Java modifiers (static, final, etc.) that leak into return type capture
+    let returnType = m[2].replace(m[3], "").trim();
+    returnType = returnType.replace(/^(static|final|synchronized|abstract|native)\s+/g, "").trim();
+    while (/^(static|final|synchronized|abstract|native)\s+/.test(returnType)) {
+      returnType = returnType.replace(/^(static|final|synchronized|abstract|native)\s+/, "").trim();
+    }
     const name = m[3];
     const paramsStr = m[4];
     const throwsStr = m[5] || "";
@@ -890,7 +895,18 @@ function isService(content: string, className: string): boolean {
 }
 
 function isEnum(content: string): boolean {
-  return /public\s+enum\s+\w+/.test(content);
+  // Must have a top-level public enum (not an inner enum inside a class)
+  const hasPublicEnum = /public\s+enum\s+\w+/.test(content);
+  if (!hasPublicEnum) return false;
+  // If file also has a public class/interface, the enum is inner — not a standalone enum file
+  const hasPublicClass = /public\s+(abstract\s+)?(class|interface)\s+\w+/.test(content);
+  if (hasPublicClass) {
+    // Check if enum appears BEFORE the class (top-level enum)
+    const enumPos = content.search(/public\s+enum\s+\w+/);
+    const classPos = content.search(/public\s+(abstract\s+)?(class|interface)\s+\w+/);
+    return enumPos < classPos; // Only enum if it's the primary declaration
+  }
+  return true;
 }
 
 function isException(className: string, content: string): boolean {
@@ -898,6 +914,8 @@ function isException(className: string, content: string): boolean {
 }
 
 function isValidator(className: string, content: string): boolean {
+  // v12.7: Exclude JSP TagLibraryValidator — these are NOT Bean Validation validators
+  if (/TagLibraryValidator/.test(content)) return false;
   return /Validator\b/.test(className) || (/@interface/.test(content) && /Valid/.test(className));
 }
 
@@ -1686,15 +1704,19 @@ function parseEnum(file: JavaFile): EnumIR {
   const values: string[] = [];
 
   // Extract enum values
-  const enumBody = content.match(/enum\s+\w+\s*\{([^}]+)\}/s);
+  const enumBody = content.match(/enum\s+\w+[^{]*\{([\s\S]*?)\}/s);
   if (enumBody) {
     const body = enumBody[1];
     // Enum values are before the first semicolon or method
     const valuesSection = body.split(";")[0];
-    const valRegex = /(\w+)/g;
+    // Match only uppercase identifiers at the start of each value declaration
+    // Handles: SIMPLE, WITH_ARGS(1, "x"), WITH_BODY { ... }
+    const valRegex = /([A-Z][A-Z0-9_]*)\s*(?:\(|,|$|\s)/gm;
     let vm;
     while ((vm = valRegex.exec(valuesSection)) !== null) {
-      values.push(vm[1]);
+      if (vm[1] && !values.includes(vm[1])) {
+        values.push(vm[1]);
+      }
     }
   }
 
@@ -1746,7 +1768,8 @@ function parseRemoteInterface(file: JavaFile): RemoteInterfaceIR {
   const methods: RemoteMethodIR[] = [];
 
   // Extract methods
-  const methodRegex = /(?:@RolesAllowed\(\{([^}]+)\}\)\s+)?(?:public\s+)?([\w<>,\s\[\]]+?)\s+(\w+)\s*\(([^)]*)\)\s*;/g;
+  // v12.7: Fixed regex to use multiline + ^\s* to prevent 'public' leaking into returnType
+  const methodRegex = /^\s*(?:@RolesAllowed\(\{([^}]+)\}\)\s+)?(?:public\s+)?([\w<>,\[\]]+(?:<[^>]+>)?)\s+(\w+)\s*\(([^)]*)\)\s*(?:throws\s+[\w,\s]+)?\s*;/gm;
   let mm;
   while ((mm = methodRegex.exec(content)) !== null) {
     const rolesStr = mm[1] || "";

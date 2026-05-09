@@ -64,6 +64,10 @@ import { scoreGeneration, generateQualitySection, type QualityReport } from "./e
 import { generateBianMappingReport, generateArchitectureReport, generateMigrationSummaryReport } from "./spring/report-gen";
 import { generateStandardMappingReport } from "./spring/report-gen-standard";
 
+// v12.7: Global set of entity class names known at generation time
+// Used by service-gen and controller-gen to decide entity vs dto imports
+export const _knownEntityNames = new Set<string>();
+
 // --- Main Generator (Orchestrator) ---
 
 export function generateSpringBootProject(ir: ProjectIR, reportContext?: MigrationReportContext): GenerationResult {
@@ -155,7 +159,7 @@ export function generateSpringBootProject(ir: ProjectIR, reportContext?: Migrati
 
   // 2. Generate DTOs (Request/Response) -- R9, R10
   for (const dto of ir.dtos) {
-    files.push(generateDto(basePackage, basePath, dto, ir.enums));
+    files.push(generateDto(basePackage, basePath, dto, ir.enums, ir.dtos));
   }
 
   // 3. Generate Enums
@@ -196,6 +200,22 @@ public class BusinessRuleException extends RuntimeException {
   // 5. Generate Validators
   for (const val of ir.validators) {
     files.push(generateValidator(basePackage, basePath, val));
+  }
+
+  // 5b. v12.7: Scan models BEFORE service/controller generation so entity names are known
+  {
+    const rawFilesForScan = (ir as any)._rawFiles ?? [];
+    const modelScan = scanModels(rawFilesForScan.map((f: any) => ({ path: f.path ?? "", content: f.content ?? "" })));
+    if (modelScan.entities.length > 0) {
+      const entityFiles = generateEntities(modelScan, basePackage, basePath);
+      files.push(...entityFiles);
+      warnings.push(`[v8.3] Models: ${modelScan.entities.length} entities, ${modelScan.dtos.length} DTOs, ${modelScan.enums.length} enums detected`);
+    }
+    // Store entity names globally so addImportsForRawType can use them
+    _knownEntityNames.clear();
+    for (const e of modelScan.entities) {
+      _knownEntityNames.add(e.className);
+    }
   }
 
   // 6. Generate Services (one per domain) -- R6, R7, R8
@@ -334,14 +354,6 @@ public class BusinessRuleException extends RuntimeException {
         files.push(restFile);
         warnings.push(`[v8.3] HTTP client: ${fClassName} → ${detection.methods.length} methods migrated to RestTemplate`);
       }
-    }
-
-    // v8.3 STEP 5: Model → Entity — scan all packages for entities
-    const modelScan = scanModels(rawFiles.map((f: any) => ({ path: f.path ?? "", content: f.content ?? "" })));
-    if (modelScan.entities.length > 0) {
-      const entityFiles = generateEntities(modelScan, basePackage, basePath);
-      files.push(...entityFiles);
-      warnings.push(`[v8.3] Models: ${modelScan.entities.length} entities, ${modelScan.dtos.length} DTOs, ${modelScan.enums.length} enums detected`);
     }
 
     // v8.3 STEP 6: Envelope → DTO — analyze handlers for Envelope patterns

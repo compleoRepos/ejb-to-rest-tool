@@ -38,6 +38,8 @@ export class ImportResolver {
     "Optional":       "java.util.Optional",
     "Arrays":         "java.util.Arrays",
     "Collections":    "java.util.Collections",
+    "Future":         "java.util.concurrent.Future",
+    "CompletableFuture": "java.util.concurrent.CompletableFuture",
     "Date":           "java.util.Date",
     "UUID":           "java.util.UUID",
     "Objects":        "java.util.Objects",
@@ -197,6 +199,13 @@ export class ImportResolver {
       usedTypes.add(match[1]);
     }
 
+    // Detect the class/enum/interface declared in this file and exclude it from imports
+    const declMatch = javaCode.match(/(?:public\s+)?(?:class|enum|interface|abstract\s+class)\s+([A-Z][a-zA-Z0-9]*)/);
+    const declaredClassName = declMatch ? declMatch[1] : null;
+    if (declaredClassName) {
+      usedTypes.delete(declaredClassName);
+    }
+
     // Chercher dans les mappings connus
     for (const typeName of usedTypes) {
       for (const map of allMaps) {
@@ -216,7 +225,8 @@ export class ImportResolver {
         // Check both original and mapped names
         const mappedName = dto.className
           .replace(/VoIn$/, "RequestDTO")
-          .replace(/VoOut$/, "ResponseDTO");
+          .replace(/VoOut$/, "ResponseDTO")
+          .replace(/Dto$/, "DTO"); // Normalize XxxDto → XxxDTO
 
         if (usedTypes.has(mappedName)) {
           const imp = `import ${packageName}.dto.${mappedName};`;
@@ -224,9 +234,14 @@ export class ImportResolver {
             needed.add(imp);
           }
         }
-        // Also check the original DTO name
+        // Also check the original DTO name — map it to the generated name
         if (usedTypes.has(dto.className)) {
-          const imp = `import ${packageName}.dto.${dto.className};`;
+          // The generated file uses the normalized name (XxxDTO), not the original (XxxDto)
+          const normalizedName = dto.className
+            .replace(/VoIn$/, "RequestDTO")
+            .replace(/VoOut$/, "ResponseDTO")
+            .replace(/Dto$/, "DTO");
+          const imp = `import ${packageName}.dto.${normalizedName};`;
           if (!existingImports.has(imp)) {
             needed.add(imp);
           }
@@ -246,7 +261,7 @@ export class ImportResolver {
       // 4. Ajouter les imports pour les enums du projet
       for (const en of projectIR.enums ?? []) {
         if (usedTypes.has(en.className)) {
-          const imp = `import ${packageName}.model.${en.className};`;
+          const imp = `import ${packageName}.enums.${en.className};`;
           if (!existingImports.has(imp)) {
             needed.add(imp);
           }

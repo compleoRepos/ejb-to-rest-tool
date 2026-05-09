@@ -215,7 +215,6 @@ import java.util.Map;
  * Migrated from EJB @Inject to Spring @Service (Adapter pattern).
  * ${methods.length} method(s) migrated — implement core banking integration.
  *
- * @see <a href="https://docs.spring.io/spring-framework/reference/web/webflux-webclient.html">WebClient docs</a>
  */
 @Slf4j
 @Service

@@ -204,7 +204,19 @@ export class BusinessLogicTransformer {
       let lastSetterIdx = -1;
       let returnIdx = -1;
       const returnRe = new RegExp(`^\\s*return\\s+${this.escapeRegex(outputVar)}\\s*;`);
+      // v12.7: Skip matches inside string literals to avoid false positives
       const outputRefRe = new RegExp(`\\b${this.escapeRegex(outputVar)}\\.`);
+      const isInsideString = (line: string): boolean => {
+        // Check if the outputVar match is inside a string literal
+        const idx = line.search(outputRefRe);
+        if (idx < 0) return false;
+        // Count unescaped quotes before the match position
+        let inString = false;
+        for (let c = 0; c < idx; c++) {
+          if (line[c] === '"' && (c === 0 || line[c-1] !== '\\')) inString = !inString;
+        }
+        return inString;
+      };
       
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].includes("builder.") && lines[i].includes("(")) lastSetterIdx = i;
@@ -215,7 +227,7 @@ export class BusinessLogicTransformer {
       let hasPostSetterRef = false;
       if (lastSetterIdx >= 0 && returnIdx > lastSetterIdx) {
         for (let i = lastSetterIdx + 1; i < returnIdx; i++) {
-          if (outputRefRe.test(lines[i])) {
+          if (outputRefRe.test(lines[i]) && !isInsideString(lines[i])) {
             hasPostSetterRef = true;
             break;
           }
@@ -227,7 +239,7 @@ export class BusinessLogicTransformer {
         const resultDecl = `        ${resolvedCtx.responseDtoClass} result = builder.build();`;
         let insertIdx = -1;
         for (let i = lastSetterIdx + 1; i < returnIdx; i++) {
-          if (outputRefRe.test(lines[i])) {
+          if (outputRefRe.test(lines[i]) && !isInsideString(lines[i])) {
             insertIdx = i;
             break;
           }
@@ -266,9 +278,18 @@ export class BusinessLogicTransformer {
         // Insert result = builder.build() before the first remaining reference
         const orphanLines = result.split("\n");
         const orphanRefRe = new RegExp(`\\b${this.escapeRegex(outputVar)}\\.`);
+        const isInsideStringOrphan = (line: string): boolean => {
+          const idx = line.search(orphanRefRe);
+          if (idx < 0) return false;
+          let inStr = false;
+          for (let c = 0; c < idx; c++) {
+            if (line[c] === '"' && (c === 0 || line[c-1] !== '\\')) inStr = !inStr;
+          }
+          return inStr;
+        };
         let orphanInsertIdx = -1;
         for (let i = 0; i < orphanLines.length; i++) {
-          if (orphanRefRe.test(orphanLines[i])) {
+          if (orphanRefRe.test(orphanLines[i]) && !isInsideStringOrphan(orphanLines[i])) {
             orphanInsertIdx = i;
             break;
           }
@@ -321,6 +342,14 @@ export class BusinessLogicTransformer {
       ""
     );
     result = result.replace(
+      /private\s+static\s+final\s+Logger\s+logger\s*=\s*[^;]+;\n?/g,
+      ""
+    );
+    result = result.replace(
+      /(?:private|protected|public)?\s*(?:static\s+)?(?:final\s+)?Logger\s+\w+\s*=\s*[^;]+;\n?/g,
+      ""
+    );
+    result = result.replace(
       /private\s+static\s+final\s+EaiLog\s+\w+\s*=\s*[^;]+;\n?/g,
       ""
     );
@@ -334,16 +363,23 @@ export class BusinessLogicTransformer {
 
     // T6e: Migrer log.log(Level.XXX, msg[, exception]) et LOG.log(Level.XXX, msg[, exception]) → SLF4J
     const levelMap: Record<string, string> = { WARNING: "warn", SEVERE: "error", INFO: "info", FINE: "debug", FINER: "trace", FINEST: "trace" };
-    // Pattern 1: (log|LOG).log(Level.XXX, msg, exception) → log.xxx(msg, exception)
+    // Pattern 1: (log|LOG|logger).log(Level.XXX, msg, exception) → log.xxx(msg, exception)
     result = result.replace(
-      /\b(?:log|LOG)\.log\s*\(\s*Level\.(WARNING|SEVERE|INFO|FINE|FINER|FINEST)\s*,\s*("(?:[^"\\]|\\.)*"[^,)]*),\s*(\w+)\s*\)/g,
+      /\b(?:log|LOG|logger)\.log\s*\(\s*Level\.(WARNING|SEVERE|INFO|FINE|FINER|FINEST)\s*,\s*("(?:[^"\\]|\\.)*"[^,)]*),\s*(\w+)\s*\)/g,
       (_, level: string, msg: string, ex: string) => {
         return `log.${levelMap[level] ?? "info"}(${msg.trim()}, ${ex})`;
       }
     );
-    // Pattern 2: (log|LOG).log(Level.XXX, msg) sans exception → log.xxx(msg)
+    // Pattern 2: (log|LOG|logger).log(Level.XXX, msg) sans exception → log.xxx(msg)
     result = result.replace(
-      /\b(?:log|LOG)\.log\s*\(\s*Level\.(WARNING|SEVERE|INFO|FINE|FINER|FINEST)\s*,\s*("(?:[^"\\]|\\.)*"[^)]*)\s*\)/g,
+      /\b(?:log|LOG|logger)\.log\s*\(\s*Level\.(WARNING|SEVERE|INFO|FINE|FINER|FINEST)\s*,\s*("(?:[^"\\]|\\.)*"[^)]*)\s*\)/g,
+      (_, level: string, msg: string) => {
+        return `log.${levelMap[level] ?? "info"}(${msg.trim()})`;
+      }
+    );
+    // Pattern 3: Multiline logger.log(Level.XXX,\n"msg") — collapse and migrate
+    result = result.replace(
+      /\b(?:log|LOG|logger)\.log\s*\(\s*Level\.(WARNING|SEVERE|INFO|FINE|FINER|FINEST)\s*,\s*\n\s*("(?:[^"\\]|\\.)*"[^)]*)\s*\)/g,
       (_, level: string, msg: string) => {
         return `log.${levelMap[level] ?? "info"}(${msg.trim()})`;
       }
@@ -565,7 +601,8 @@ export class BusinessLogicTransformer {
     }
     // v8.8: Skip voIn variable declaration replacement when voInClass === voOutClass
     // to prevent overwriting the voOut replacement (e.g., Envelope varName = → Void varName =)
-    if (resolvedCtx.voInClass && resolvedCtx.voInClass !== resolvedCtx.voOutClass) {
+    // v12.7: Also skip when requestDtoClass is Void — replacing Student with Void is destructive
+    if (resolvedCtx.voInClass && resolvedCtx.voInClass !== resolvedCtx.voOutClass && resolvedCtx.requestDtoClass !== "Void") {
       result = result.replace(
         new RegExp(`\\b${this.escapeRegex(resolvedCtx.voInClass)}\\s+(\\w+)\\s*=`, 'g'),
         `${resolvedCtx.requestDtoClass} $1 =`
@@ -580,7 +617,8 @@ export class BusinessLogicTransformer {
     }
     // v8.8: Skip voIn global replacement when voInClass === voOutClass
     // to prevent overwriting the voOut replacement (e.g., Envelope→Envelope then Envelope→Void)
-    if (resolvedCtx.voInClass && resolvedCtx.voInClass !== resolvedCtx.voOutClass) {
+    // v12.7: Also skip when requestDtoClass is Void — replacing a concrete type with Void is destructive
+    if (resolvedCtx.voInClass && resolvedCtx.voInClass !== resolvedCtx.voOutClass && resolvedCtx.requestDtoClass !== "Void") {
       result = result.replace(
         new RegExp(`\\b${this.escapeRegex(resolvedCtx.voInClass)}\\b`, 'g'),
         resolvedCtx.requestDtoClass

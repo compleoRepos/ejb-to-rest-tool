@@ -1120,8 +1120,8 @@ ${legacyRules}
       for (const m of fieldTypes) {
         const t = m[1];
         if (/^[A-Z]/.test(t) && !definedTypes.has(t) && !JAVA_STANDARD_TYPES.has(t) && !KNOWN_SPRING_TYPES.has(t)) {
-          // Check if it looks like a Repository or Service
-          if (t.endsWith("Repository") || t.endsWith("Service") || t.endsWith("Mapper")) {
+          // Check if it looks like a Repository, Service, DAO, or Manager
+          if (t.endsWith("Repository") || t.endsWith("Service") || t.endsWith("Mapper") || t.endsWith("DAO") || t.endsWith("Dao") || t.endsWith("Manager")) {
             referencedButMissing.add(t);
           }
         }
@@ -1143,6 +1143,13 @@ ${legacyRules}
       } else if (missingType.endsWith("Mapper")) {
         // Generate a MapStruct Mapper
         generatedContent = `package ${basePackage}.mapper;\n\nimport org.mapstruct.Mapper;\nimport org.mapstruct.MappingConstants;\n\n@Mapper(componentModel = MappingConstants.ComponentModel.SPRING)\npublic interface ${missingType} {\n}\n`;
+      } else if (missingType.endsWith("DAO") || missingType.endsWith("Dao")) {
+        // Generate a DAO stub as a Spring Repository wrapper
+        const entityName = missingType.replace(/DAO$|Dao$/, "");
+        generatedContent = `package ${basePackage}.dao;\n\nimport ${basePackage}.entity.${entityName};\nimport org.springframework.stereotype.Repository;\nimport java.util.List;\nimport java.util.Optional;\n\n/**\n * ${missingType} — DAO stub migrated from legacy JDBC.\n * TODO: Replace with Spring Data JPA Repository if appropriate.\n */\n@Repository\npublic class ${missingType} {\n\n    public ${entityName} save(${entityName} entity) {\n        // TODO: Implement persistence\n        return entity;\n    }\n\n    public ${entityName} findById(Long id) {\n        // TODO: Implement query\n        return null;\n    }\n\n    public List<${entityName}> findAll() {\n        // TODO: Implement query\n        return List.of();\n    }\n\n    public ${entityName} findByEmail(String email) {\n        // TODO: Implement query\n        return null;\n    }\n\n    public boolean delete(Long id) {\n        // TODO: Implement delete\n        return true;\n    }\n\n    public ${entityName} update(${entityName} entity) {\n        // TODO: Implement update\n        return entity;\n    }\n}\n`;
+      } else if (missingType.endsWith("Manager")) {
+        // Generate a Manager stub
+        generatedContent = `package ${basePackage}.common;\n\nimport org.springframework.stereotype.Component;\n\n/**\n * ${missingType} — Manager stub migrated from legacy code.\n * TODO: Implement required functionality.\n */\n@Component\npublic class ${missingType} {\n\n    public static void shutdown() {\n        // TODO: Implement shutdown logic\n    }\n}\n`;
       } else {
         // Generate a basic interface
         generatedContent = `package ${basePackage}.common;\n\n/**\n * Interface générée automatiquement.\n * TODO: Implémenter les méthodes nécessaires.\n */\npublic interface ${missingType} {\n}\n`;
@@ -1151,7 +1158,9 @@ ${legacyRules}
       if (generatedContent) {
         const subDir = missingType.endsWith("Repository") ? "repository"
           : missingType.endsWith("Service") ? "service"
-          : missingType.endsWith("Mapper") ? "mapper" : "common";
+          : missingType.endsWith("Mapper") ? "mapper"
+          : (missingType.endsWith("DAO") || missingType.endsWith("Dao")) ? "dao"
+          : "common";
         const newPath = `src/main/java/${basePackage.replace(/\./g, "/")}/${subDir}/${missingType}.java`;
 
         project.push({

@@ -235,22 +235,47 @@ function generateEntityFile(entity: ModelClassification, basePackage: string): s
   const idFieldName = idField?.name ?? "id";
   const idFieldType = idField?.type ?? "Long";
 
-  const fieldsCode = entity.fields
+  // v12.7: Deduplicate fields by name (keep first occurrence)
+  // Also filter out serialVersionUID and static/final fields
+  const seenFieldNames = new Set<string>();
+  const EXCLUDED_FIELDS = new Set(['serialVersionUID', 'serialversionuid']);
+  const uniqueFields = entity.fields.filter(f => {
+    if (seenFieldNames.has(f.name)) return false;
+    if (EXCLUDED_FIELDS.has(f.name)) return false;
+    seenFieldNames.add(f.name);
+    return true;
+  });
+
+  // v12.7: Only the first @Id field gets @Id + @GeneratedValue; others are regular columns
+  let idAlreadyAssigned = false;
+  const fieldsCode = uniqueFields
     .map(f => {
       const annotations: string[] = [];
-      if (f.isId) {
+      if (f.isId && !idAlreadyAssigned) {
         annotations.push("    @Id");
         annotations.push("    @GeneratedValue(strategy = GenerationType.IDENTITY)");
+        idAlreadyAssigned = true;
       }
       annotations.push(`    @Column(name = "${f.columnName}")`);
-      return `${annotations.join("\n")}\n    private ${mapJpaType(f.type)} ${f.name};`;
+      // Remove 'final' from field type (incompatible with @NoArgsConstructor/@Builder)
+      const cleanType = mapJpaType(f.type).replace(/\bfinal\s+/, '');
+      return `${annotations.join("\n")}\n    private ${cleanType} ${f.name};`;
     })
     .join("\n\n");
+
+  // v12.7: Collect additional imports based on field types
+  const additionalImports: string[] = [];
+  const allFieldTypes = uniqueFields.map(f => mapJpaType(f.type));
+  if (allFieldTypes.includes("LocalDateTime")) additionalImports.push("import java.time.LocalDateTime;");
+  if (allFieldTypes.includes("LocalDate")) additionalImports.push("import java.time.LocalDate;");
+  if (allFieldTypes.includes("BigDecimal")) additionalImports.push("import java.math.BigDecimal;");
+  if (allFieldTypes.includes("BigInteger")) additionalImports.push("import java.math.BigInteger;");
+  const extraImports = additionalImports.length > 0 ? additionalImports.join("\n") + "\n" : "";
 
   return `package ${basePackage}.entity;
 
 import jakarta.persistence.*;
-import lombok.Data;
+${extraImports}import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -282,5 +307,10 @@ function mapJpaType(type: string): string {
     .replace(/^long$/, "Long")
     .replace(/^double$/, "Double")
     .replace(/^boolean$/, "Boolean")
-    .replace(/^float$/, "Float");
+    .replace(/^float$/, "Float")
+    .replace(/^DateTime$/, "LocalDateTime")
+    .replace(/^Timestamp$/, "LocalDateTime")
+    .replace(/^java\.sql\.Timestamp$/, "LocalDateTime")
+    .replace(/^java\.util\.Date$/, "LocalDateTime")
+    .replace(/^Date$/, "LocalDate");
 }

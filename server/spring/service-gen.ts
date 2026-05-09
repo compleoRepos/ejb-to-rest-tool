@@ -5,6 +5,7 @@
  */
 
 import type { ProjectIR, UseCaseIR, DtoIR } from "../java-parser";
+import { _knownEntityNames as _svcKnownEntityNames } from "../spring-generator";
 import {
   BusinessLogicTransformer,
   extractExecuteBody,
@@ -69,8 +70,12 @@ export function generateDomainService(
     }
   }
 
+  // v12.7: Deduplicate useCases by methodName — keep the first occurrence (best transformation)
+  const seenMethodNames = new Set<string>();
   for (const uc of useCases) {
     const methodName = toMethodName(uc.className);
+    if (seenMethodNames.has(methodName)) continue;
+    seenMethodNames.add(methodName);
     const reqDto = dtoMap.get(uc.voInType);
     const resDto = dtoMap.get(uc.voOutType);
 
@@ -155,9 +160,14 @@ export function generateDomainService(
 
     const methodBody = generateServiceMethodBody(uc, reqDto, resDto, reqType, resType);
     const isMigrated = methodBody.includes("return builder.build()") || methodBody.includes("Migrated from:");
+    // v12.7: Always add return statement for non-void methods, even for structured stubs
+    const needsReturn = returnType !== "void" && !methodBody.includes("return ");
+    const returnStmt = needsReturn
+      ? `\n        return ${returnType === "String" ? "\"\"" : returnType === "int" || returnType === "long" || returnType === "double" || returnType === "float" ? "0" : returnType === "boolean" ? "false" : "null"};`
+      : "";
     const endingLines = isMigrated
-      ? ""
-      : `\n        log.info("Audit trail: transaction ${methodName} completed");\n${returnType !== "void" ? "        return response;" : ""}`;
+      ? returnStmt
+      : `\n        log.info("Audit trail: transaction ${methodName} completed");\n${returnType !== "void" ? `        return ${returnType === "String" ? "\"\"" : returnType === "int" || returnType === "long" || returnType === "double" || returnType === "float" ? "0" : returnType === "boolean" ? "false" : "null"};` : ""}`;
 
     methods.push(`
 ${scheduledAnnotation}${txAnnotation}    /**
@@ -185,14 +195,26 @@ ${methodBody}${endingLines}
   }
 
   // Separate local and cross-module dependencies
+  // v12.7: Map EJB/JMS infrastructure types to their adapter equivalents
+  const EJB_TO_ADAPTER: Record<string, string> = {
+    "JMSContext": "JMSContextAdapter",
+    "ConnectionFactory": "ConnectionFactoryAdapter",
+    "QueueConnectionFactory": "QueueConnectionFactoryAdapter",
+    "TopicConnectionFactory": "TopicConnectionFactoryAdapter",
+  };
   const localFields: string[] = [];
   const crossModuleFields: string[] = [];
   for (const [, svc] of allInjected) {
-    const fieldName = svc.type.charAt(0).toLowerCase() + svc.type.slice(1);
+    const resolvedType = EJB_TO_ADAPTER[svc.type] ?? svc.type;
+    const fieldName = resolvedType.charAt(0).toLowerCase() + resolvedType.slice(1);
     if (svc.crossModule) {
-      crossModuleFields.push(`    /** Cross-module dependency from ${svc.sourceModule ?? "external"} */\n    private final ${svc.type} ${fieldName};`);
+      crossModuleFields.push(`    /** Cross-module dependency from ${svc.sourceModule ?? "external"} */\n    private final ${resolvedType} ${fieldName};`);
     } else {
-      localFields.push(`    private final ${svc.type} ${fieldName};`);
+      localFields.push(`    private final ${resolvedType} ${fieldName};`);
+    }
+    // Add import for adapter if mapped
+    if (EJB_TO_ADAPTER[svc.type]) {
+      imports.add(`import ${basePackage}.adapter.${resolvedType};`);
     }
   }
   const injectedFields = [...localFields, ...crossModuleFields];
@@ -632,6 +654,17 @@ const JAVA_BUILTIN_TYPES = new Set([
 function resolveRawReturnType(rawType: string, imports: Set<string>, basePackage: string): string {
   if (!rawType || rawType === "Void" || rawType === "void") return "Void";
 
+  // v12.7: Strip Java modifiers that may leak from method signatures (static, final, synchronized, etc.)
+  const JAVA_MODIFIERS = /^(public|private|protected|static|final|synchronized|abstract|native|transient|volatile)\s+/;
+  let cleaned = rawType;
+  while (JAVA_MODIFIERS.test(cleaned)) {
+    cleaned = cleaned.replace(JAVA_MODIFIERS, "");
+  }
+  if (cleaned !== rawType) {
+    rawType = cleaned;
+    if (!rawType || rawType === "Void" || rawType === "void") return "Void";
+  }
+
   // Generic types: List<String>, List<CompteDTO>, Set<X>, Map<K,V>
   const genericMatch = rawType.match(/^(\w+)<(.+)>$/);
   if (genericMatch) {
@@ -692,8 +725,12 @@ function addImportsForRawType(resType: string, imports: Set<string>, basePackage
   // Java builtins — imports already added by resolveRawReturnType
   if (JAVA_BUILTIN_TYPES.has(resType)) return;
 
-  // DTO class — add import from dto package
-  imports.add(`import ${basePackage}.dto.${resType};`);
+  // v12.7: Use entity.* if the type is a known generated entity, otherwise dto.*
+  if (_svcKnownEntityNames.has(resType)) {
+    imports.add(`import ${basePackage}.entity.${resType};`);
+  } else {
+    imports.add(`import ${basePackage}.dto.${resType};`);
+  }
 }
 
 /**

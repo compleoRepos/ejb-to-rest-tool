@@ -255,7 +255,7 @@ export class LlmUseCaseDetector {
           description: javadoc.replace(/\s*\*\s*/g, " ").trim() || `${methodName} — from ${className}`,
           domain,
           sourceFile: file.path,
-          rawSource: content.substring(m.index!, Math.min(m.index! + 300, content.length)),
+          rawSource: content,
           parameters,
           confidence: "medium",
           detectionMethod: "service_method",
@@ -400,6 +400,18 @@ export class LlmUseCaseDetector {
   }
 
   private toUseCaseIR(detected: DetectedUseCase): UseCaseIR {
+    // v12.7: Extract field-level dependencies from source as injectedServices
+    const injectedServices: { name: string; type: string }[] = [];
+    const fieldRegex = /private\s+(?:final\s+)?(\w+)\s+(\w+)\s*[=;]/g;
+    let fm;
+    while ((fm = fieldRegex.exec(detected.rawSource)) !== null) {
+      const type = fm[1];
+      const name = fm[2];
+      // Only include types that look like services/DAOs (UpperCamelCase, not primitives)
+      if (/^[A-Z]/.test(type) && !/^(String|Integer|Long|Double|Boolean|Float|List|Map|Set|Date|BigDecimal)$/.test(type)) {
+        injectedServices.push({ name, type });
+      }
+    }
     return {
       className: detected.className,
       packageName: this.extractPackage(detected.rawSource) || "com.legacy",
@@ -410,7 +422,7 @@ export class LlmUseCaseDetector {
       voOutType: detected.voOutType,
       useCaseDescription: detected.description,
       javadoc: "",
-      injectedServices: [],
+      injectedServices,
       transactional: null,
       exceptionsCaught: [],
       exceptionsThrown: [],
