@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { CompleoEngine, SourceFile } from "./server/engine/CompleoEngine";
 
-const projDir = "/tmp/test-projects/proj-04-bookstore";
+const projDir = "/tmp/test-projects/proj-11-nexabank-core";
 
 function readJavaFiles(dir: string): SourceFile[] {
   const files: SourceFile[] = [];
@@ -29,21 +29,25 @@ async function main() {
   const genResult = await engine.generate(analysisResult.ir, undefined, undefined, analysisResult.multiTech?.generatedFiles || []);
   const generatedFiles = genResult.files || [];
   
-  const ctrl = generatedFiles.find(f => f.path.includes('GeneralController'));
-  if (ctrl) {
-    const lines = ctrl.content.split('\n');
-    console.log(`=== ${ctrl.path.split('/').pop()} (lines 35-55) ===`);
-    for (let i = Math.max(0, 34); i < Math.min(lines.length, 55); i++) {
-      console.log(`${i+1}: ${lines[i]}`);
+  // Check SwiftController and SwiftService for PaymentRequest references
+  for (const f of generatedFiles) {
+    if (f.path.includes('Swift') || f.path.includes('Prelevement') || f.path.includes('Virement')) {
+      if (f.content.includes('PaymentRequest')) {
+        const lines = f.content.split('\n');
+        console.log(`\n=== ${f.path.split('/').pop()} ===`);
+        for (let i = 0; i < Math.min(lines.length, 15); i++) {
+          console.log(`${i+1}: ${lines[i]}`);
+        }
+      }
     }
   }
   
-  // Also check BillingController for jdbc-monolith
-  const billingCtrl = generatedFiles.find(f => f.path.includes('BillingController'));
-  if (billingCtrl) {
-    const lines = billingCtrl.content.split('\n');
-    console.log(`\n=== ${billingCtrl.path.split('/').pop()} (lines 33-60) ===`);
-    for (let i = Math.max(0, 32); i < Math.min(lines.length, 60); i++) {
+  // Check for CarteBancaireController with the serviceVar fix
+  const cbCtrl = generatedFiles.find(f => f.path.includes('CarteBancaire'));
+  if (cbCtrl) {
+    const lines = cbCtrl.content.split('\n');
+    console.log(`\n=== ${cbCtrl.path.split('/').pop()} (first 35 lines) ===`);
+    for (let i = 0; i < Math.min(lines.length, 35); i++) {
       console.log(`${i+1}: ${lines[i]}`);
     }
   }

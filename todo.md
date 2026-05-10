@@ -483,3 +483,19 @@
 - [x] Ajouter JSF/PrimeFaces comme 5e option frontend (JoinFaces + PrimeFaces DataTable + Managed Beans)
 - [x] Générer les fragments Thymeleaf (nav.html, pagination.html) + pages CRUD par entité détectée
 - [x] Tests : 128 unit + 134 no-regression + 68 compilation + 14 frontend + 17 JMS + 9 session = tous passés
+## v12.8 — Benchmark Maven Compile (8/13 PASS)
+- [x] Fix controller-gen: resType correct (BigDecimal au lieu de String) via voOutType analysis
+- [x] Fix controller-gen: boxing primitifs pour ResponseEntity<> (int→Integer, etc.)
+- [x] Fix autofix: heuristiques conservatrices pour inferControllerParamType (éviter faux LocalDateTime)
+- [x] Fix autofix: import automatique pour types inférés (BigDecimal, LocalDateTime) dans controllers
+- [x] Fix autofix: import automatique pour types inférés dans services
+- [x] Fix JMS transformer: nettoyage des blocs try-catch orphelins après remplacement ObjectMessage
+- [x] Fix controller-gen: sanitisation serviceVar pour noms avec hyphens (carte-bancaire→carteBancaire)
+- [x] Fix autofix: Case 5 pour X→String dans arguments de méthode (LocalDateTime.parse)
+- [x] Fix autofix: best-state logic — toujours utiliser le meilleur état si le final est pire
+- [x] Nettoyage debug logs (CTRL-GEN-DEBUG supprimé)
+- [ ] Problème persistant: bookstore "illegal start of type" dans GeneralController (JMS dans controller)
+- [ ] Problème persistant: jdbc-monolith "illegal start of type" dans BillingController
+- [ ] Problème persistant: nexabank-core 62 erreurs (méthodes manquantes dans VirementService)
+- [ ] Problème persistant: telecom-billing "LocalDateTime cannot be converted to String" (Case 5 non déclenché)
+- [ ] Problème persistant: insurance-claims-large "cannot find symbol - class LocalDateTime" (import timing)

@@ -28,7 +28,9 @@ export function generateDomainController(
 ): GeneratedFile {
   const controllerName = toPascalCase(domain) + "Controller";
   const serviceName = toPascalCase(domain) + "Service";
-  const serviceVar = domain.charAt(0).toLowerCase() + domain.slice(1) + "Service";
+  // v12.8: Sanitize serviceVar to remove hyphens and invalid Java identifier chars
+  const rawServiceVar = domain.charAt(0).toLowerCase() + domain.slice(1) + "Service";
+  const serviceVar = rawServiceVar.replace(/-([a-z])/g, (_, c) => c.toUpperCase()).replace(/[^a-zA-Z0-9_$]/g, '');
   const imports = new Set<string>();
   imports.add("import lombok.RequiredArgsConstructor;");
   imports.add("import lombok.extern.slf4j.Slf4j;");
@@ -104,7 +106,10 @@ export function generateDomainController(
 
     // v12.7: Determine PathVariable type from voInType for primitives
     const PRIMITIVE_TYPES = new Set(["int", "long", "Integer", "Long", "String", "double", "float", "boolean", "short"]);
-    const pathVarType = PRIMITIVE_TYPES.has(uc.voInType) ? (uc.voInType === "int" ? "int" : uc.voInType === "long" ? "long" : uc.voInType) : "String";
+    // Bloc 4A v12.8: Always use Long for @PathVariable (Spring convention, avoids Long→int mismatch)
+    const pathVarType = (uc.voInType === "int" || uc.voInType === "Integer" || uc.voInType === "long" || uc.voInType === "Long")
+      ? "Long"
+      : PRIMITIVE_TYPES.has(uc.voInType) ? uc.voInType : "Long";
 
     let paramList = "";
     let methodBodyPrefix = "";
@@ -180,12 +185,20 @@ ${builderParts.join("\n")}
       serviceCallArgs = legacyParamsCtrl.map(p => p.name).join(", ");
     }
 
+    // Bloc 4A v12.8: Box primitives for generic type parameters (Java doesn't allow ResponseEntity<int>)
+    const PRIMITIVE_TO_WRAPPER: Record<string, string> = {
+      'int': 'Integer', 'long': 'Long', 'double': 'Double',
+      'float': 'Float', 'boolean': 'Boolean', 'byte': 'Byte',
+      'short': 'Short', 'char': 'Character', 'void': 'Void',
+    };
+    const resultVarType = PRIMITIVE_TO_WRAPPER[resType] || resType;
+
     // FIX v5.8.2: Use httpConfig.responseStatus for proper HTTP status codes
     let responseStatement: string;
     if (httpConfig.responseStatus === 201) {
       imports.add("import org.springframework.http.HttpStatus;");
       responseStatement = resType !== "Void"
-        ? `        ${resType} result = ${serviceVar}.${methodName}(${serviceCallArgs});
+        ? `        ${resultVarType} result = ${serviceVar}.${methodName}(${serviceCallArgs});
         return ResponseEntity.status(HttpStatus.CREATED).body(result);`
         : `        ${serviceVar}.${methodName}(${serviceCallArgs});
         return ResponseEntity.status(HttpStatus.CREATED).build();`;
@@ -194,7 +207,7 @@ ${builderParts.join("\n")}
         return ResponseEntity.noContent().build();`;
     } else {
       responseStatement = resType !== "Void"
-        ? `        ${resType} result = ${serviceVar}.${methodName}(${serviceCallArgs});
+        ? `        ${resultVarType} result = ${serviceVar}.${methodName}(${serviceCallArgs});
         return ResponseEntity.ok(result);`
         : `        ${serviceVar}.${methodName}(${serviceCallArgs});
         return ResponseEntity.ok().build();`;
@@ -216,7 +229,25 @@ ${builderParts.join("\n")}
     const basePath2 = `/api/v1/${pluralize(domain.toLowerCase())}`;
     const fullPath = `${basePath2}${endpointPath}`;
     const httpAnnotation = getHttpAnnotation(httpMethod, endpointPath || "/" + methodName.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase());
-    const returnGeneric = resType !== "Void" ? resType : "Void";
+    const rawReturnGeneric = resType !== "Void"
+      ? (PRIMITIVE_TO_WRAPPER[resType] || resType)
+      : "Void";
+    // Defensive: strip spaces and invalid chars from generic type (LLM may include method name)
+    let returnGeneric = rawReturnGeneric.split(/\s+/)[0].replace(/[^\w<>,\[\]?]/g, "");
+    // Fix unbalanced angle brackets (LLM may include trailing '>')
+    const openBrackets = (returnGeneric.match(/</g) || []).length;
+    const closeBrackets = (returnGeneric.match(/>/g) || []).length;
+    if (closeBrackets > openBrackets) {
+      for (let i = 0; i < closeBrackets - openBrackets; i++) {
+        const lastIdx = returnGeneric.lastIndexOf('>');
+        if (lastIdx >= 0) returnGeneric = returnGeneric.slice(0, lastIdx) + returnGeneric.slice(lastIdx + 1);
+      }
+    } else if (openBrackets > closeBrackets) {
+      for (let i = 0; i < openBrackets - closeBrackets; i++) {
+        const firstIdx = returnGeneric.indexOf('<');
+        if (firstIdx >= 0) returnGeneric = returnGeneric.slice(0, firstIdx) + returnGeneric.slice(firstIdx + 1);
+      }
+    }
 
     endpoints.push(`
     /**

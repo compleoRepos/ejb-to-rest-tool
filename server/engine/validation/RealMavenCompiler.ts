@@ -146,7 +146,6 @@ export function compileWithMaven(
       rawOutput: rawOutput.length > 5000 ? rawOutput.slice(-5000) : rawOutput,
     };
   } finally {
-    // Cleanup
     if (!options.keepTempDir) {
       try { rmSync(tempDir, { recursive: true, force: true }); } catch {}
     }
