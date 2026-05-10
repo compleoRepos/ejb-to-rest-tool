@@ -101,6 +101,41 @@ function applyFixes(
   let result = [...files.map(f => ({ ...f }))];
   const actions: FixAction[] = [];
 
+  // 0. javax → jakarta migration for Spring Boot 3.x compatibility
+  const javaxPackages = [
+    { from: 'javax.mail', to: 'jakarta.mail' },
+    { from: 'javax.jms', to: 'jakarta.jms' },
+    { from: 'javax.persistence', to: 'jakarta.persistence' },
+    { from: 'javax.ejb', to: 'jakarta.ejb' },
+    { from: 'javax.annotation', to: 'jakarta.annotation' },
+    { from: 'javax.inject', to: 'jakarta.inject' },
+  ];
+  const needsJavaxMigration = errors.some(e =>
+    e.message.includes('does not exist') &&
+    javaxPackages.some(p => e.message.includes(p.from))
+  );
+  if (needsJavaxMigration) {
+    for (let fi = 0; fi < result.length; fi++) {
+      let content = result[fi].content;
+      let changed = false;
+      for (const pkg of javaxPackages) {
+        if (content.includes(pkg.from)) {
+          content = content.replace(new RegExp(pkg.from.replace('.', '\\.'), 'g'), pkg.to);
+          changed = true;
+        }
+      }
+      if (changed) {
+        result[fi] = { ...result[fi], content };
+        actions.push({
+          iteration,
+          type: 'FIX_SYNTAX',
+          file: result[fi].path,
+          description: `Migrated javax.* → jakarta.* imports in ${result[fi].path.split('/').pop()}`,
+        });
+      }
+    }
+  }
+
   // 1. Fix missing packages → generate stub classes
   const packageFixes = fixMissingPackages(result, errors, iteration);
   result = packageFixes.files;
@@ -222,11 +257,19 @@ function fixMissingSymbols(
   const result = [...files.map(f => ({ ...f }))];
 
   // Find "cannot find symbol" errors for classes
-  const symbolErrors = errors.filter(e =>
-    e.message.includes("cannot find symbol") &&
-    !e.message.includes("method") &&
-    !e.message.includes("variable")
-  );
+  const symbolErrors = errors.filter(e => {
+    if (!e.message.includes("cannot find symbol")) return false;
+    if (e.message.includes("method")) return false;
+    if (e.message.includes("variable")) {
+      // Include utility classes referenced as variables (e.g., DateTimeUtils.method())
+      const varMatch = e.message.match(/variable\s+(\w+)/);
+      if (varMatch && /^[A-Z]/.test(varMatch[1]) && /(?:Utils|Util|Helper|Helpers|Constants)$/.test(varMatch[1])) {
+        return true;
+      }
+      return false;
+    }
+    return true;
+  });
 
   // Build class registry
   const classRegistry = new Map<string, string>();
@@ -242,13 +285,21 @@ function fixMissingSymbols(
 
   // For each file with symbol errors, try to add missing imports
   for (const err of symbolErrors) {
-    const fileIdx = result.findIndex(f => f.path.includes(err.file));
+    let fileIdx = result.findIndex(f => f.path.endsWith('/' + err.file));
+    if (fileIdx === -1) fileIdx = result.findIndex(f => f.path.includes(err.file));
     if (fileIdx === -1) continue;
 
     const file = result[fileIdx];
     // Extract the missing symbol name from context
     // Format: "cannot find symbol - class Xxx" or "cannot find symbol" with "symbol: class Xxx"
-    const symbolMatch = err.message.match(/(?:symbol:\s*class|cannot find symbol\s*-\s*class)\s+(\w+)/);
+    let symbolMatch = err.message.match(/(?:symbol:\s*class|cannot find symbol\s*-\s*class)\s+(\w+)/);
+    if (!symbolMatch) {
+      // Also match utility classes referenced as variables
+      const varMatch = err.message.match(/(?:symbol:\s*variable|cannot find symbol\s*-\s*variable)\s+(\w+)/);
+      if (varMatch && /^[A-Z]/.test(varMatch[1]) && /(?:Utils|Util|Helper|Helpers|Constants)$/.test(varMatch[1])) {
+        symbolMatch = varMatch;
+      }
+    }
     if (!symbolMatch) continue;
 
     const missingClass = symbolMatch[1];
@@ -281,12 +332,50 @@ function fixMissingSymbols(
   // v12.7: Generate stubs for classes referenced but not found anywhere
   const basePackage = findBasePackage(result);
   for (const err of symbolErrors) {
-    const symbolMatch = err.message.match(/(?:symbol:\s*class|cannot find symbol\s*-\s*class)\s+(\w+)/);
+    // Match both "class X" and "variable X" when X looks like a utility class name
+    let symbolMatch = err.message.match(/(?:symbol:\s*class|cannot find symbol\s*-\s*class)\s+(\w+)/);
+    if (!symbolMatch) {
+      // Also detect utility classes referenced as variables (e.g., DateTimeUtils.method())
+      const varMatch = err.message.match(/(?:symbol:\s*variable|cannot find symbol\s*-\s*variable)\s+(\w+)/);
+      if (varMatch && /^[A-Z]/.test(varMatch[1]) && /(?:Utils|Util|Helper|Helpers|Constants)$/.test(varMatch[1])) {
+        symbolMatch = varMatch;
+      }
+    }
     if (!symbolMatch) continue;
     const missingClass = symbolMatch[1];
     if (classRegistry.has(missingClass)) continue;
     // Skip Java standard types
-    const JAVA_BUILTINS = new Set(['String', 'Integer', 'Long', 'Double', 'Float', 'Boolean', 'Object', 'Void', 'Class', 'Byte', 'Short', 'Character', 'Number']);
+    const JAVA_BUILTINS = new Set([
+      // Primitive wrappers
+      'String', 'Integer', 'Long', 'Double', 'Float', 'Boolean', 'Object', 'Void', 'Class', 'Byte', 'Short', 'Character', 'Number',
+      // java.util
+      'List', 'Map', 'Set', 'Collection', 'ArrayList', 'HashMap', 'HashSet', 'LinkedList',
+      'Properties', 'Enumeration', 'Iterator', 'Optional', 'Collections', 'Arrays',
+      'Date', 'Calendar', 'UUID', 'Random', 'Timer', 'TimerTask',
+      // java.text
+      'DateFormat', 'SimpleDateFormat', 'NumberFormat', 'DecimalFormat',
+      // java.io
+      'File', 'InputStream', 'OutputStream', 'Reader', 'Writer', 'Serializable',
+      'IOException', 'FileInputStream', 'FileOutputStream', 'BufferedReader', 'PrintWriter',
+      // java.math
+      'BigDecimal', 'BigInteger',
+      // java.time
+      'LocalDate', 'LocalDateTime', 'LocalTime', 'Instant', 'Duration', 'ZonedDateTime',
+      // javax.mail / jakarta.mail
+      'Session', 'Message', 'MimeMessage', 'Transport', 'InternetAddress', 'MessagingException',
+      'MimeBodyPart', 'MimeMultipart', 'Multipart',
+      // javax.jms / jakarta.jms
+      'JMSContext', 'JMSConsumer', 'JMSProducer', 'JMSException', 'TextMessage', 'ObjectMessage',
+      'ConnectionFactory', 'Queue', 'Topic', 'Destination',
+      // javax.persistence / jakarta.persistence
+      'EntityManager', 'EntityManagerFactory', 'TypedQuery', 'CriteriaBuilder',
+      'CriteriaQuery', 'Root', 'Predicate', 'PersistenceContext',
+      // Common Java EE
+      'EJBException', 'AsyncResult', 'Future', 'Callable', 'Runnable',
+      'Logger', 'Level', 'LogManager',
+      // Servlet
+      'HttpServletRequest', 'HttpServletResponse', 'HttpSession', 'ServletContext',
+    ]);
     if (JAVA_BUILTINS.has(missingClass)) continue;
     // Determine what kind of stub to generate
     let stubContent: string;
@@ -294,7 +383,48 @@ function fixMissingSymbols(
     if (missingClass.endsWith('DAO') || missingClass.endsWith('Dao')) {
       subDir = 'dao';
       const entityName = missingClass.replace(/DAO$|Dao$/, '');
-      stubContent = `package ${basePackage}.${subDir};\n\nimport org.springframework.stereotype.Repository;\nimport java.util.List;\n\n/**\n * ${missingClass} — Auto-generated DAO stub.\n * @generated by Compleo v12.7 auto-fix\n */\n@Repository\npublic class ${missingClass} {\n\n    public Object findById(Long id) { return null; }\n    public Object findByCustomerId(Long customerId) { return null; }\n    public List<Object> findAll() { return List.of(); }\n    public Object save(Object entity) { return entity; }\n    public Object findByEmail(String email) { return null; }\n    public boolean delete(Long id) { return true; }\n    public Object update(Object entity) { return entity; }\n}\n`;
+      // Infer the actual return type from usage context.
+      // If code does: SomeType x = daoField.findById(...), the DAO should return SomeType.
+      // This handles cases where the transformer renames BillingCategoryDAO to CategoryDAO
+      // but the code still expects BillingCategory.
+      let inferredType = entityName;
+      const daoFieldPattern = new RegExp(`(?:private|protected)\\s+${missingClass}\\s+(\\w+)`);
+      for (const f of result) {
+        const fieldMatch = f.content.match(daoFieldPattern);
+        if (fieldMatch) {
+          const fieldName = fieldMatch[1];
+          // Look for: TypeName varName = fieldName.findById(...) or fieldName.findByXxx(...)
+          const usagePattern = new RegExp(`(\\w+)\\s+\\w+\\s*=\\s*${fieldName}\\.find\\w+\\(`, 'g');
+          let usageMatch;
+          const usedTypes = new Set<string>();
+          while ((usageMatch = usagePattern.exec(f.content)) !== null) {
+            const typeName = usageMatch[1];
+            // Skip common non-entity types
+            if (!['List', 'Set', 'Map', 'String', 'int', 'long', 'boolean', 'void', 'Object', 'var', 'final'].includes(typeName)) {
+              usedTypes.add(typeName);
+            }
+          }
+          if (usedTypes.size === 1) {
+            inferredType = [...usedTypes][0];
+          }
+          break;
+        }
+      }
+      const entityFile = result.find(f => f.path.endsWith(`/${inferredType}.java`));
+      const entityInRegistry = classRegistry.has(inferredType);
+      const returnType = inferredType;
+      let importEntity = '';
+      if (entityFile) {
+        const pathParts = entityFile.path.replace('src/main/java/', '').replace('.java', '').replace(/\//g, '.');
+        importEntity = `import ${pathParts};\n`;
+      } else if (entityInRegistry) {
+        const entityPkg = classRegistry.get(entityName);
+        if (entityPkg) {
+          importEntity = `import ${entityPkg}.${entityName};\n`;
+        }
+      }
+      // If entity doesn't exist yet, don't add import - let ADD_IMPORT fix handle it later
+      stubContent = `package ${basePackage}.${subDir};\n\nimport org.springframework.stereotype.Repository;\nimport java.util.List;\nimport java.util.Collections;\n${importEntity}\n/**\n * ${missingClass} \u2014 Auto-generated DAO stub.\n * @generated by Compleo v12.7 auto-fix\n */\n@Repository\npublic class ${missingClass} {\n\n    public ${returnType} findById(Long id) { return null; }\n    public ${returnType} findById(int id) { return null; }\n    public List<${returnType}> findByCustomerId(Long customerId) { return Collections.emptyList(); }\n    public List<${returnType}> findByUserId(Long userId) { return Collections.emptyList(); }\n    public List<${returnType}> findAll() { return Collections.emptyList(); }\n    public ${returnType} save(${returnType} entity) { return entity; }\n    public ${returnType} findByEmail(String email) { return null; }\n    public boolean delete(Long id) { return true; }\n    public ${returnType} update(${returnType} entity) { return entity; }\n}\n`;
     } else if (missingClass.endsWith('Manager')) {
       subDir = 'common';
       stubContent = `package ${basePackage}.${subDir};\n\nimport org.springframework.stereotype.Component;\n\n/**\n * ${missingClass} — Auto-generated Manager stub.\n * @generated by Compleo v12.7 auto-fix\n */\n@Component\npublic class ${missingClass} {\n    public static void shutdown() {}\n}\n`;
@@ -303,16 +433,52 @@ function fixMissingSymbols(
       stubContent = `package ${basePackage}.${subDir};\n\n/**\n * ${missingClass} — Auto-generated exception stub.\n * @generated by Compleo v12.7 auto-fix\n */\npublic class ${missingClass} extends RuntimeException {\n    public ${missingClass}() { super(); }\n    public ${missingClass}(String message) { super(message); }\n    public ${missingClass}(String message, Throwable cause) { super(message, cause); }\n}\n`;
     } else if (missingClass.endsWith('Utils') || missingClass.endsWith('Util') || missingClass.endsWith('Helper')) {
       subDir = 'common';
-      stubContent = `package ${basePackage}.${subDir};\n\nimport java.time.LocalDate;\nimport java.time.LocalDateTime;\n\n/**\n * ${missingClass} — Auto-generated utility stub.\n * @generated by Compleo v12.7 auto-fix\n */\npublic class ${missingClass} {\n    public static LocalDateTime getCurrentDateAndLog() { return LocalDateTime.now(); }\n    public static String format(Object obj) { return obj != null ? obj.toString() : ""; }\n}\n`;
+      stubContent = `package ${basePackage}.${subDir};
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.DayOfWeek;
+
+/**
+ * ${missingClass} \u2014 Auto-generated utility stub.
+ * @generated by Compleo v12.7 auto-fix
+ */
+public class ${missingClass} {
+
+    private ${missingClass}() {}
+
+    public static LocalDateTime getCurrentDateAndLog() { return LocalDateTime.now(); }
+
+    public static int getMonthOfYear() { return LocalDate.now().getMonthValue(); }
+    public static int getMonthOfYear(LocalDate date) { return date != null ? date.getMonthValue() : 0; }
+
+    public static boolean isWorkingDay(LocalDate date) {
+        if (date == null) return false;
+        DayOfWeek dow = date.getDayOfWeek();
+        return dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY;
+    }
+
+    public static boolean isWeekend(LocalDate date) { return !isWorkingDay(date); }
+
+    public static String format(Object obj) { return obj != null ? obj.toString() : ""; }
+
+    public static LocalDate parse(String dateStr) { return dateStr != null ? LocalDate.parse(dateStr) : null; }
+}
+`;
     } else {
       // Check if the missing class is used as a field type in an @Entity file
-      const isEntityRef = result.some(f => {
-        if (!f.content.includes('@Entity')) return false;
-        // Check if the class is used as a type in this entity
+      // OR if there's a DAO that references it (e.g., CategoryDAO → Category is an entity)
+      const hasDaoForClass = result.some(f => 
+        f.path.endsWith(`/${missingClass}DAO.java`) || f.path.endsWith(`/${missingClass}Dao.java`)
+      );
+      const isEntityRef = hasDaoForClass || result.some(f => {
+        if (!f.content.includes('@Entity') && !f.content.includes('@Repository')) return false;
+        // Check if the class is used as a type in this entity or DAO
         return f.content.includes(`private ${missingClass} `) || 
                f.content.includes(`private List<${missingClass}>`) ||
                f.content.includes(`private Set<${missingClass}>`) ||
-               f.content.includes(`<${missingClass}>`);
+               f.content.includes(`<${missingClass}>`) ||
+               f.content.includes(`import`) && f.content.includes(`.${missingClass};`);
       });
       if (isEntityRef) {
         subDir = 'entity';
@@ -392,10 +558,42 @@ function fixSyntaxErrors(
   const actions: FixAction[] = [];
   const result = [...files.map(f => ({ ...f }))];
 
+  // Pre-pass: Apply Joda-Time replacements globally on ALL files (not just those with syntax errors)
+  // This fixes getMonthOfYear() etc. which appear as "cannot find symbol" not "syntax error"
+  const jodaGlobalReplacements: [RegExp, string][] = [
+    [/\.getMonthOfYear\(\)/g, '.getMonthValue()'],
+    [/\.getDayOfMonth\(\)/g, '.getDayOfMonth()'],
+    [/\.getYear\(\)/g, '.getYear()'],
+    [/\.getHourOfDay\(\)/g, '.getHour()'],
+    [/\.getMinuteOfHour\(\)/g, '.getMinute()'],
+    [/\.getSecondOfMinute\(\)/g, '.getSecond()'],
+    [/\.getMillisOfSecond\(\)/g, '.getNano()'],
+    [/\.toDateTime\(\)/g, ''],
+  ];
+  for (let i = 0; i < result.length; i++) {
+    let content = result[i].content;
+    let changed = false;
+    for (const [pattern, replacement] of jodaGlobalReplacements) {
+      if (pattern.test(content)) {
+        content = content.replace(pattern, replacement);
+        changed = true;
+      }
+    }
+    if (changed) {
+      result[i] = { ...result[i], content };
+      actions.push({
+        iteration,
+        type: 'FIX_SYNTAX',
+        file: result[i].path,
+        description: `Applied Joda-Time API replacements in ${result[i].path.split('/').pop()}`,
+      });
+    }
+  }
+
   // Group syntax errors by file
   const syntaxByFile = new Map<string, MavenCompileError[]>();
   for (const err of errors) {
-    if (err.message.includes("expected") || err.message.includes("illegal") || err.message.includes("not a statement")) {
+    if (err.message.includes("expected") || err.message.includes("illegal") || err.message.includes("not a statement") || err.message.includes("unexpected type")) {
       const existing = syntaxByFile.get(err.file) || [];
       existing.push(err);
       syntaxByFile.set(err.file, existing);
@@ -403,11 +601,27 @@ function fixSyntaxErrors(
   }
 
   for (const [fileName, fileErrors] of syntaxByFile) {
-    const fileIdx = result.findIndex(f => f.path.includes(fileName));
+    let fileIdx = result.findIndex(f => f.path.endsWith('/' + fileName));
+    if (fileIdx === -1) fileIdx = result.findIndex(f => f.path.includes(fileName));
     if (fileIdx === -1) continue;
 
     let content = result[fileIdx].content;
     let fixed = false;
+
+    // Fix 0: Primitive types in generics (ResponseEntity<double> → ResponseEntity<Double>)
+    // Java does not allow primitive types as generic type arguments
+    const primitiveToWrapper: Record<string, string> = {
+      'int': 'Integer', 'double': 'Double', 'float': 'Float',
+      'long': 'Long', 'boolean': 'Boolean', 'char': 'Character',
+      'byte': 'Byte', 'short': 'Short'
+    };
+    for (const [prim, wrapper] of Object.entries(primitiveToWrapper)) {
+      const primGenericRegex = new RegExp(`<${prim}>`, 'g');
+      if (primGenericRegex.test(content)) {
+        content = content.replace(primGenericRegex, `<${wrapper}>`);
+        fixed = true;
+      }
+    }
 
     // Fix 1: Enhanced for-each with type in parentheses → fix syntax
     // Pattern: for (Type item : collection) where Type has generics issue
@@ -479,6 +693,25 @@ function fixSyntaxErrors(
       return '';
     });
 
+    // Fix 8: Joda-Time API replacements (common in legacy code)
+    const jodaReplacements: [RegExp, string][] = [
+      [/\.getMonthOfYear\(\)/g, '.getMonthValue()'],
+      [/\.getDayOfMonth\(\)/g, '.getDayOfMonth()'],
+      [/\.getYear\(\)/g, '.getYear()'],
+      [/\.getHourOfDay\(\)/g, '.getHour()'],
+      [/\.getMinuteOfHour\(\)/g, '.getMinute()'],
+      [/\.getSecondOfMinute\(\)/g, '.getSecond()'],
+      [/\.getMillisOfSecond\(\)/g, '.getNano()'],
+      [/\.toDateTime\(\)/g, ''],
+      [/\.toLocalDate\(\)/g, '.toLocalDate()'],
+    ];
+    for (const [pattern, replacement] of jodaReplacements) {
+      if (pattern.test(content)) {
+        content = content.replace(pattern, replacement);
+        fixed = true;
+      }
+    }
+
     if (content !== result[fileIdx].content) {
       result[fileIdx] = { ...result[fileIdx], content };
       actions.push({
@@ -541,11 +774,11 @@ function fixMissingDependencies(
     });
   }
 
-  // Check for missing mail package
+  // Check for missing mail package — detect from errors OR source imports
   const needsMail = errors.some(e =>
     e.message.includes("javax.mail") && e.message.includes("does not exist")
-  );
-  if (needsMail && !pom.includes("spring-boot-starter-mail")) {
+  ) || result.some(f => f.content.includes("import javax.mail") || f.content.includes("import jakarta.mail"));
+  if (needsMail && !pom.includes("spring-boot-starter-mail") && !pom.includes("javax.mail") && !pom.includes("jakarta.mail")) {
     pom = addDependencyToPom(pom, "org.springframework.boot", "spring-boot-starter-mail", undefined);
     modified = true;
     actions.push({
@@ -553,6 +786,66 @@ function fixMissingDependencies(
       type: "ADD_DEPENDENCY",
       file: "pom.xml",
       description: "Added spring-boot-starter-mail dependency",
+    });
+  }
+
+  // Check for missing JMS package
+  const needsJms = errors.some(e =>
+    (e.message.includes("javax.jms") || e.message.includes("jakarta.jms")) && e.message.includes("does not exist")
+  ) || result.some(f => f.content.includes("import javax.jms") || f.content.includes("import jakarta.jms"));
+  if (needsJms && !pom.includes("spring-boot-starter-activemq") && !pom.includes("javax.jms") && !pom.includes("jakarta.jms")) {
+    pom = addDependencyToPom(pom, "org.springframework.boot", "spring-boot-starter-activemq", undefined);
+    modified = true;
+    actions.push({
+      iteration,
+      type: "ADD_DEPENDENCY",
+      file: "pom.xml",
+      description: "Added spring-boot-starter-activemq (JMS) dependency",
+    });
+  }
+
+  // Check for missing JPA/persistence package
+  const needsJpa = errors.some(e =>
+    (e.message.includes("javax.persistence") || e.message.includes("jakarta.persistence")) && e.message.includes("does not exist")
+  ) || result.some(f => f.content.includes("import javax.persistence") || f.content.includes("import jakarta.persistence"));
+  if (needsJpa && !pom.includes("spring-boot-starter-data-jpa") && !pom.includes("javax.persistence") && !pom.includes("jakarta.persistence-api")) {
+    pom = addDependencyToPom(pom, "org.springframework.boot", "spring-boot-starter-data-jpa", undefined);
+    modified = true;
+    actions.push({
+      iteration,
+      type: "ADD_DEPENDENCY",
+      file: "pom.xml",
+      description: "Added spring-boot-starter-data-jpa dependency",
+    });
+  }
+
+  // Check for missing EJB/CDI package
+  const needsEjb = errors.some(e =>
+    (e.message.includes("javax.ejb") || e.message.includes("jakarta.ejb")) && e.message.includes("does not exist")
+  ) || result.some(f => f.content.includes("import javax.ejb") || f.content.includes("import jakarta.ejb"));
+  if (needsEjb && !pom.includes("jakarta.ejb-api") && !pom.includes("javax.ejb")) {
+    pom = addDependencyToPom(pom, "jakarta.ejb", "jakarta.ejb-api", "4.0.1");
+    modified = true;
+    actions.push({
+      iteration,
+      type: "ADD_DEPENDENCY",
+      file: "pom.xml",
+      description: "Added jakarta.ejb-api dependency",
+    });
+  }
+
+  // Check for missing CDI/inject package
+  const needsCdi = errors.some(e =>
+    (e.message.includes("javax.enterprise") || e.message.includes("jakarta.enterprise")) && e.message.includes("does not exist")
+  ) || result.some(f => f.content.includes("import javax.enterprise") || f.content.includes("import jakarta.enterprise"));
+  if (needsCdi && !pom.includes("jakarta.enterprise.cdi-api") && !pom.includes("javax.enterprise")) {
+    pom = addDependencyToPom(pom, "jakarta.enterprise", "jakarta.enterprise.cdi-api", "4.0.1");
+    modified = true;
+    actions.push({
+      iteration,
+      type: "ADD_DEPENDENCY",
+      file: "pom.xml",
+      description: "Added jakarta.enterprise.cdi-api dependency",
     });
   }
 
@@ -660,8 +953,9 @@ public class ${className} {
 `;
   }
 
-  // If it's a DAO class, add basic methods
+  // If it's a DAO class, add basic methods with typed returns
   if (className.endsWith('DAO') || className.endsWith('Dao')) {
+    const entityName = className.replace(/DAO$|Dao$/, '');
     return `package ${pkg};
 
 import java.util.List;
@@ -678,10 +972,49 @@ public class ${className} {
     public ${className}() {}
 
     public List<Object> findAll() { return Collections.emptyList(); }
+    public List<Object> findByCustomerId(Long customerId) { return Collections.emptyList(); }
+    public List<Object> findByUserId(Long userId) { return Collections.emptyList(); }
     public Object findById(Long id) { return null; }
+    public Object findById(int id) { return null; }
     public Object save(Object entity) { return entity; }
     public void delete(Long id) {}
     public Object getConnection() { return null; }
+}
+`;
+  }
+
+  // If it's a Utils class
+  if (className.endsWith('Utils') || className.endsWith('Util') || className.endsWith('Helper')) {
+    return `package ${pkg};
+
+import java.time.LocalDate;
+import java.time.DayOfWeek;
+
+/**
+ * Auto-generated utility stub for ${className}.
+ * @generated by Compleo v12.7 auto-fix
+ */
+public class ${className} {
+
+    private ${className}() {}
+
+    public static boolean isWorkingDay(LocalDate date) {
+        if (date == null) return false;
+        DayOfWeek dow = date.getDayOfWeek();
+        return dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY;
+    }
+
+    public static boolean isWeekend(LocalDate date) {
+        return !isWorkingDay(date);
+    }
+
+    public static String format(Object date) {
+        return date != null ? date.toString() : "";
+    }
+
+    public static LocalDate parse(String dateStr) {
+        return dateStr != null ? LocalDate.parse(dateStr) : null;
+    }
 }
 `;
   }
@@ -818,13 +1151,20 @@ function fixMissingVariables(
   }
 
   for (const [fileName, missingVars] of errorsByFile) {
-    const fileIdx = result.findIndex(f => f.path.includes(fileName));
+    let fileIdx = result.findIndex(f => f.path.endsWith('/' + fileName));
+    if (fileIdx === -1) fileIdx = result.findIndex(f => f.path.includes(fileName));
     if (fileIdx === -1) continue;
 
     let content = result[fileIdx].content;
     let modified = false;
 
     for (const varName of missingVars) {
+      // Case 0: Utility class used as variable (e.g., DateTimeUtils.method()) — skip, let fixMissingSymbols handle it
+      if (varName.endsWith('Utils') || varName.endsWith('Util') || varName.endsWith('Helper') || varName.endsWith('Helpers')) {
+        // These are static utility classes, not variables. They need an import, not a field.
+        // fixMissingSymbols will generate the stub class and fixImportErrors will add the import.
+        continue;
+      }
       // Case 1: Missing service/DAO/Manager field
       if (varName.endsWith('Service') || varName.endsWith('service') || varName.endsWith('DAO') || varName.endsWith('Dao') || varName.endsWith('dao') || varName.endsWith('Manager') || varName.endsWith('manager') || varName.endsWith('Repository') || varName.endsWith('repository')) {
         const typeName = varName.charAt(0).toUpperCase() + varName.slice(1);
@@ -844,6 +1184,31 @@ function fixMissingVariables(
               file: result[fileIdx].path,
               description: `Added missing service field: ${typeName} ${varName}`,
             });
+          }
+        }
+      }
+      // Case 1b: Logger injection (log, logger, LOG, LOGGER)
+      else if (/^(log|logger|LOG|LOGGER)$/.test(varName)) {
+        // Add SLF4J Logger field
+        const classMatch = content.match(/public\s+class\s+(\w+)/);
+        if (classMatch) {
+          const className = classMatch[1];
+          const loggerDecl = `private static final org.slf4j.Logger ${varName} = org.slf4j.LoggerFactory.getLogger(${className}.class);`;
+          if (!content.includes(loggerDecl) && !content.includes(`Logger ${varName}`)) {
+            const classOpenMatch = content.match(/(public\s+class\s+\w+[^{]*\{)/);
+            if (classOpenMatch) {
+              content = content.replace(
+                classOpenMatch[1],
+                `${classOpenMatch[1]}\n    ${loggerDecl}\n`
+              );
+              modified = true;
+              actions.push({
+                iteration,
+                type: 'FIX_SYNTAX',
+                file: result[fileIdx].path,
+                description: `Added SLF4J Logger field '${varName}' to ${className}`,
+              });
+            }
           }
         }
       }
@@ -1000,7 +1365,8 @@ function fixMissingMethods(
 
   // For each file with method errors, find what service fields exist and what methods are called
   for (const [fileName, fileErrors] of errorsByFile) {
-    const fileIdx = result.findIndex(f => f.path.includes(fileName));
+    let fileIdx = result.findIndex(f => f.path.endsWith('/' + fileName));
+    if (fileIdx === -1) fileIdx = result.findIndex(f => f.path.includes(fileName));
     if (fileIdx === -1) continue;
     const content = result[fileIdx].content;
 
@@ -1055,16 +1421,22 @@ function fixMissingMethods(
 
       // Check if method already exists in target
       const targetContent = result[targetFileIdx].content;
-      if (targetContent.includes(`${methodName}(`)) continue;
+      // For self-calls, use strict declaration regex to avoid matching the call itself
+      // For calls on other classes, use simple includes (more conservative)
+      const isSelfCall = (targetFileIdx === fileIdx);
+      if (isSelfCall) {
+        const methodDeclRegex = new RegExp(`(?:public|private|protected)\\s+\\S+\\s+${methodName}\\s*\\(`);
+        if (methodDeclRegex.test(targetContent)) continue;
+      } else {
+        if (targetContent.includes(`${methodName}(`)) continue;
+      }
 
-      // Generate stub method
+      // Generate stub method — use Object for parameters to allow polymorphism
       const params = paramTypes.split(',').filter(p => p.trim()).map((p, i) => {
-        const typeParts = p.trim().split('.');
-        const simpleType = typeParts[typeParts.length - 1];
-        return `${simpleType} arg${i}`;
+        return `Object arg${i}`;
       }).join(', ');
 
-      // Infer return type from method name
+      // Infer return type from method name and context
       let returnType = 'Object';
       let returnValue = 'null';
       if (methodName.startsWith('findAll') || methodName.startsWith('getAll') || methodName.startsWith('list')) {
@@ -1073,9 +1445,18 @@ function fixMissingMethods(
       } else if (methodName === 'delete' || methodName === 'remove') {
         returnType = 'void';
         returnValue = '';
-      } else if (methodName === 'count') {
+      } else if (methodName === 'count' || methodName.startsWith('count')) {
         returnType = 'long';
         returnValue = '0L';
+      } else if (methodName.startsWith('is') || methodName.startsWith('has') || methodName.startsWith('can')) {
+        returnType = 'boolean';
+        returnValue = 'false';
+      } else if (methodName.startsWith('get') && (methodName.toLowerCase().includes('date') || methodName.toLowerCase().includes('time'))) {
+        returnType = 'String';
+        returnValue = 'java.time.LocalDate.now().toString()';
+      } else if (methodName.startsWith('get') || methodName.startsWith('find') || methodName.startsWith('load')) {
+        returnType = 'Object';
+        returnValue = 'null';
       }
 
       const returnStatement = returnValue ? `        return ${returnValue};\n` : '';
@@ -1122,7 +1503,8 @@ function fixIncompatibleTypes(
   }
 
   for (const [fileName, fileErrors] of typeErrorsByFile) {
-    const fileIdx = result.findIndex(f => f.path.includes(fileName));
+    let fileIdx = result.findIndex(f => f.path.endsWith('/' + fileName));
+    if (fileIdx === -1) fileIdx = result.findIndex(f => f.path.includes(fileName));
     if (fileIdx === -1) continue;
 
     let content = result[fileIdx].content;
@@ -1132,8 +1514,43 @@ function fixIncompatibleTypes(
     // Process errors in reverse line order to avoid offset issues
     const sortedErrors = [...fileErrors].sort((a, b) => (b.line || 0) - (a.line || 0));
 
+    // Pre-pass: detect swapped arguments (A→B and B→A on same line)
+    const swapPairs = new Map<number, { typeA: string; typeB: string }>();
+    for (let i = 0; i < sortedErrors.length; i++) {
+      const e1 = sortedErrors[i];
+      if (!e1.line) continue;
+      const m1 = e1.message.match(/incompatible types:\s*([\w.]+)\s+cannot be converted to\s+([\w.]+)/);
+      if (!m1) continue;
+      for (let j = i + 1; j < sortedErrors.length; j++) {
+        const e2 = sortedErrors[j];
+        if (e2.line !== e1.line) continue;
+        const m2 = e2.message.match(/incompatible types:\s*([\w.]+)\s+cannot be converted to\s+([\w.]+)/);
+        if (!m2) continue;
+        // Check if it's A→B and B→A (swap)
+        if (m1[1] === m2[2] && m1[2] === m2[1]) {
+          swapPairs.set(e1.line, { typeA: m1[1].split('.').pop()!, typeB: m1[2].split('.').pop()! });
+        }
+      }
+    }
+
+    // Apply swaps first
+    for (const [lineNum, { typeA, typeB }] of swapPairs) {
+      const li = lineNum - 1;
+      if (li < 0 || li >= lines.length) continue;
+      const ln = lines[li];
+      // Find a method call with two arguments and swap them
+      const methodMatch = ln.match(/(\w+\.\w+)\(([^,]+),\s*([^)]+)\)/);
+      if (methodMatch) {
+        const [full, method, arg1, arg2] = methodMatch;
+        lines[li] = ln.replace(full, `${method}(${arg2.trim()}, ${arg1.trim()})`);
+        modified = true;
+      }
+    }
+
     for (const err of sortedErrors) {
       if (!err.line) continue;
+      // Skip errors that were handled by swap
+      if (swapPairs.has(err.line)) continue;
       const lineIdx = err.line - 1;
       if (lineIdx < 0 || lineIdx >= lines.length) continue;
       const line = lines[lineIdx];
@@ -1172,6 +1589,25 @@ function fixIncompatibleTypes(
         }
       }
 
+      // Pattern: X cannot be converted to List<X> (single entity assigned to list)
+      const singleToListMatch = err.message.match(/([\w.]+)\s+cannot be converted to\s+java\.util\.List<\1>/);
+      if (!singleToListMatch) {
+        // Try alternate form: com.pkg.X cannot be converted to java.util.List<com.pkg.X>
+        const altListMatch = err.message.match(/([\w.]+)\s+cannot be converted to\s+java\.util\.List<([\w.]+)>/);
+        if (altListMatch && altListMatch[1] === altListMatch[2]) {
+          const assignMatch = line.match(/(\w+(?:<[^>]+>)?)\s+(\w+)\s*=\s*(.+);/);
+          if (assignMatch) {
+            const rhs = assignMatch[3];
+            lines[lineIdx] = line.replace(
+              `${assignMatch[1]} ${assignMatch[2]} = ${rhs}`,
+              `${assignMatch[1]} ${assignMatch[2]} = java.util.Collections.singletonList(${rhs})`
+            );
+            modified = true;
+            continue;
+          }
+        }
+      }
+
       // Pattern: Object cannot be converted to X
       const objMatch = err.message.match(/java\.lang\.Object\s+cannot be converted to\s+([\w.]+)/);
       if (objMatch) {
@@ -1198,21 +1634,148 @@ function fixIncompatibleTypes(
           modified = true;
           continue;
         }
+        // Fallback: if the line contains a method call, try to add cast before the call
+        const methodCallMatch = line.match(/(\w+\.\w+\([^)]*\))/);
+        if (methodCallMatch) {
+          lines[lineIdx] = line.replace(
+            methodCallMatch[1],
+            `(${targetType}) ${methodCallMatch[1]}`
+          );
+          modified = true;
+          continue;
+        }
       }
 
       // Pattern: String cannot be converted to X (common in controllers)
       const strMatch = err.message.match(/java\.lang\.String\s+cannot be converted to\s+([\w.]+)/);
       if (strMatch) {
-        // Change the parameter type to String or add a conversion
-        // For now, just suppress by changing the variable type
         const targetType = strMatch[1].split('.').pop() || strMatch[1];
+        // Case A: Assignment — change type to Object
         const assignMatch = line.match(/(\w+(?:<[^>]+>)?)\s+(\w+)\s*=\s*(.+);/);
         if (assignMatch && assignMatch[1] === targetType) {
-          // Change type to String
           lines[lineIdx] = line.replace(`${targetType} ${assignMatch[2]}`, `Object ${assignMatch[2]}`);
           modified = true;
           continue;
         }
+        // Case B: Controller — change @RequestParam String to @RequestBody TargetType
+        if (content.includes('@RestController') || content.includes('@Controller')) {
+          for (let k = lineIdx; k >= Math.max(0, lineIdx - 20); k--) {
+            const paramLine = lines[k];
+            if (paramLine.match(/public\s+\S+\s+\w+\s*\(/)) {
+              const rpMatch = paramLine.match(/@RequestParam\s+String\s+(\w+)/);
+              if (rpMatch) {
+                lines[k] = paramLine.replace(
+                  `@RequestParam String ${rpMatch[1]}`,
+                  `@RequestBody ${targetType} ${rpMatch[1]}`
+                );
+                modified = true;
+              }
+              break;
+            }
+          }
+          continue;
+        }
+        // Case C: Service — change String parameter type to target type
+        for (let k = lineIdx; k >= Math.max(0, lineIdx - 20); k--) {
+          const paramLine = lines[k];
+          if (paramLine.match(/public\s+\S+\s+\w+\s*\(/)) {
+            const strParamMatch = paramLine.match(/String\s+(\w+)/);
+            if (strParamMatch) {
+              lines[k] = paramLine.replace(
+                `String ${strParamMatch[1]}`,
+                `${targetType} ${strParamMatch[1]}`
+              );
+              modified = true;
+            }
+            break;
+          }
+        }
+        continue;
+      }
+
+      // Pattern: Long cannot be converted to int
+      const longToIntMatch = err.message.match(/java\.lang\.Long\s+cannot be converted to\s+int/);
+      if (longToIntMatch) {
+        // Case 1: Variable declaration: int varName = ...
+        const intVarMatch = line.match(/\bint\s+(\w+)\s*=/);
+        if (intVarMatch) {
+          lines[lineIdx] = line.replace(`int ${intVarMatch[1]}`, `long ${intVarMatch[1]}`);
+          modified = true;
+          continue;
+        }
+        // Case 2: @PathVariable int on the same line
+        const pathVarIntMatch = line.match(/@PathVariable\s+int\s+(\w+)/);
+        if (pathVarIntMatch) {
+          lines[lineIdx] = line.replace(`@PathVariable int ${pathVarIntMatch[1]}`, `@PathVariable Long ${pathVarIntMatch[1]}`);
+          modified = true;
+          continue;
+        }
+        // Case 3: Method parameter (int paramName) on the same line
+        if (line.match(/\(.*\bint\s+\w+/) && line.includes('public ')) {
+          lines[lineIdx] = line.replace(/\bint\b/, 'Long');
+          modified = true;
+          continue;
+        }
+        // Case 4: The error is on a line with a method call passing Long to int param
+        // Find the method being called and change its stub to accept Long
+        const methodCallOnLine = line.match(/(\w+)\.(\w+)\(/);
+        if (methodCallOnLine) {
+          const serviceName = methodCallOnLine[1];
+          const methodName = methodCallOnLine[2];
+          // Find the service class file and change the method's int param to Long
+          for (let fi = 0; fi < result.length; fi++) {
+            const f = result[fi];
+            // Match service class by field name pattern
+            if (f.content.includes(`public`) && f.content.includes(methodName)) {
+              const fLines = f.content.split('\n');
+              for (let li = 0; li < fLines.length; li++) {
+                if (fLines[li].includes(methodName) && fLines[li].includes('int ') && fLines[li].includes('public')) {
+                  fLines[li] = fLines[li].replace(/\bint\b/, 'Long');
+                  result[fi] = { ...f, content: fLines.join('\n') };
+                  modified = true;
+                  break;
+                }
+              }
+              if (modified) break;
+            }
+          }
+          if (modified) continue;
+        }
+        // Case 5: Look at the method signature above for @PathVariable int
+        for (let k = lineIdx; k >= Math.max(0, lineIdx - 10); k--) {
+          const sigLine = lines[k];
+          const pvIntMatch = sigLine.match(/@PathVariable\s+int\s+(\w+)/);
+          if (pvIntMatch) {
+            lines[k] = sigLine.replace(`@PathVariable int ${pvIntMatch[1]}`, `@PathVariable Long ${pvIntMatch[1]}`);
+            modified = true;
+            break;
+          }
+        }
+        continue;
+      }
+
+      // Pattern: inference variable T has incompatible bounds (equality: X, lower: Object)
+      // This happens when ResponseEntity<X> receives an Object value
+      const inferenceMatch = err.message.match(/inference variable \w+ has incompatible bounds/);
+      if (inferenceMatch) {
+        // Find the ResponseEntity.ok(result) pattern and add a cast
+        const reMatch = line.match(/ResponseEntity\.ok\((.+?)\)/);
+        if (reMatch) {
+          // Find the return type from method signature above
+          for (let k = lineIdx; k >= Math.max(0, lineIdx - 10); k--) {
+            const sigMatch = lines[k].match(/ResponseEntity<(\w+)>/);
+            if (sigMatch) {
+              const targetType = sigMatch[1];
+              lines[lineIdx] = line.replace(
+                `ResponseEntity.ok(${reMatch[1]})`,
+                `ResponseEntity.ok((${targetType}) ${reMatch[1]})`
+              );
+              modified = true;
+              break;
+            }
+          }
+        }
+        continue;
       }
     }
 

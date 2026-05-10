@@ -74,6 +74,23 @@ export class ImportResolver {
     "Base64":         "java.util.Base64",
     "Charset":        "java.nio.charset.Charset",
     "StandardCharsets": "java.nio.charset.StandardCharsets",
+    "Properties":     "java.util.Properties",
+    "Enumeration":    "java.util.Enumeration",
+    "Calendar":       "java.util.Calendar",
+    "Random":         "java.util.Random",
+    "DateFormat":     "java.text.DateFormat",
+    "File":           "java.io.File",
+    "FileInputStream": "java.io.FileInputStream",
+    "FileOutputStream": "java.io.FileOutputStream",
+    "PrintWriter":    "java.io.PrintWriter",
+    "Logger":         "java.util.logging.Logger",
+    "Level":          "java.util.logging.Level",
+    "Callable":       "java.util.concurrent.Callable",
+    "ExecutorService": "java.util.concurrent.ExecutorService",
+    "TimeUnit":       "java.util.concurrent.TimeUnit",
+    "AtomicInteger":  "java.util.concurrent.atomic.AtomicInteger",
+    "AtomicLong":     "java.util.concurrent.atomic.AtomicLong",
+    "Collection":     "java.util.Collection",
   };
 
   private static readonly SPRING_IMPORTS: Record<string, string> = {
