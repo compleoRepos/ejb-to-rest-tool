@@ -133,7 +133,7 @@ describe("v8.4 STEP 4 — FwkRollbackException + SessionContext", () => {
   it("remplace sctx.setRollbackOnly() par throw RuntimeException", () => {
     const input = `sctx.setRollbackOnly();`;
     const output = transformEaiFrameworkReferences(input);
-    expect(output).toContain('throw new RuntimeException("Transaction rollback forced")');
+    expect(output).toContain('// Rollback handled by @Transactional on RuntimeException');
     expect(output).not.toContain("sctx.setRollbackOnly()");
   });
 

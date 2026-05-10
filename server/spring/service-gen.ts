@@ -181,12 +181,13 @@ ${methodBody}${endingLines}
   }
 
   // R6: Collect all injected services for constructor injection
-  const allInjected = new Map<string, { type: string; crossModule?: boolean; sourceModule?: string }>();
+  const allInjected = new Map<string, { type: string; originalName?: string; crossModule?: boolean; sourceModule?: string }>();
   for (const uc of useCases) {
     for (const svc of uc.injectedServices) {
       if (!allInjected.has(svc.type)) {
         allInjected.set(svc.type, {
           type: svc.type,
+          originalName: (svc as any).name || undefined,
           crossModule: (svc as any).crossModule ?? false,
           sourceModule: (svc as any).sourceModule,
         });
@@ -206,7 +207,8 @@ ${methodBody}${endingLines}
   const crossModuleFields: string[] = [];
   for (const [, svc] of allInjected) {
     const resolvedType = EJB_TO_ADAPTER[svc.type] ?? svc.type;
-    const fieldName = resolvedType.charAt(0).toLowerCase() + resolvedType.slice(1);
+    // v12.10: Preserve original field name from source to avoid mismatches in body code
+    const fieldName = svc.originalName || (resolvedType.charAt(0).toLowerCase() + resolvedType.slice(1));
     if (svc.crossModule) {
       crossModuleFields.push(`    /** Cross-module dependency from ${svc.sourceModule ?? "external"} */\n    private final ${resolvedType} ${fieldName};`);
     } else {
@@ -218,6 +220,50 @@ ${methodBody}${endingLines}
     }
   }
   const injectedFields = [...localFields, ...crossModuleFields];
+
+  // v12.10: Detect repository usage in method bodies and add repository field
+  const allMethodsJoined = methods.join("\n");
+  const usesRepository = /\brepository\./.test(allMethodsJoined);
+  let detectedEntityName = "";
+  if (usesRepository) {
+    // Strategy 1: Detect from List<Entity> patterns in generated method bodies
+    const entityMatch = allMethodsJoined.match(/List<(\w+)>/);
+    if (entityMatch && entityMatch[1] !== "String" && entityMatch[1] !== "Object") {
+      detectedEntityName = entityMatch[1];
+    }
+    // Strategy 2: Scan UseCase rawSource for em.find(Entity.class, ...) patterns
+    if (!detectedEntityName) {
+      for (const uc of useCases) {
+        if (uc.rawSource) {
+          const emFindMatch = uc.rawSource.match(/(?:em|entityManager)\.find\s*\(\s*(\w+)\.class/);
+          if (emFindMatch) {
+            detectedEntityName = emFindMatch[1];
+            break;
+          }
+          // Also try em.persist(varName) where varName type is declared
+          const persistMatch = uc.rawSource.match(/(?:em|entityManager)\.persist\s*\(\s*(\w+)\s*\)/);
+          if (persistMatch) {
+            const varName = persistMatch[1];
+            const typeMatch = uc.rawSource.match(new RegExp(`(\\w+)\\s+${varName}\\s*[=;]`));
+            if (typeMatch && typeMatch[1] !== "var" && typeMatch[1] !== "Object") {
+              detectedEntityName = typeMatch[1];
+              break;
+            }
+          }
+        }
+      }
+    }
+    // Strategy 3: Use domain name as last resort (better than "Entity" which conflicts with JPA)
+    if (!detectedEntityName) {
+      detectedEntityName = domain.charAt(0).toUpperCase() + domain.slice(1) + "Entity";
+    }
+    const repoType = `${detectedEntityName}Repository`;
+    // Field name MUST be "repository" to match T11 transformer output
+    if (!injectedFields.some(f => f.includes("Repository"))) {
+      injectedFields.push(`    private final ${repoType} repository;`);
+      imports.add(`import ${basePackage}.repository.${repoType};`);
+    }
+  }
 
   return {
     path: `${basePath}/service/${serviceName}.java`,

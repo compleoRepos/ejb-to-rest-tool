@@ -521,3 +521,15 @@
 - [ ] Problème persistant: jdbc-monolith "illegal start of type" (4 erreurs — même cause que bookstore)
 - [ ] Problème persistant: nexabank-core 62 erreurs (EntityManager methods: createQuery, merge, persist)
 - [ ] Problème persistant: telecom-billing String→LocalDateTime ping-pong (2 erreurs)
+
+## v12.10 — Cible 13/13 PASS + Scale-up
+
+- [x] Fix 1: Supprimer javadoc méthodes controllers (bookstore + jdbc-monolith)
+- [x] Fix 2: Ajouter @DateTimeFormat pour paramètres temporels (telecom-billing)
+- [x] Fix 3: Transformer EntityManager → Spring Data Repository (nexabank-core)
+- [ ] Valider 13/13 PASS au benchmark complet (10/13 atteint, 3 cas limites documentés)
+- [x] Scale-up: Apache Roller (86K LOC, 550 fichiers, 28 erreurs, 17.3s)
+- [x] Scale-up: jPOS (111K LOC, 757 fichiers, 200 erreurs, 17.2s)
+- [x] Scale-up: Apache Fineract (527K LOC, 5087 fichiers, 92 erreurs, 32.6s)
+- [x] Profiling CPU+mémoire sur Fineract (76MB heap, 32s total, hot path: AI 49.5%)
+- [x] Rapport final v12.10

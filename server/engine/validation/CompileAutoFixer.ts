@@ -115,11 +115,103 @@ export function autoFixAndCompile(
     if (currentResult.status === "PASS") break;
   }
 
-  // v12.8: ALWAYS use the best state if it has fewer errors than the final state
-  // This handles cases where errors increased in early iterations without triggering the safety guard
+  // v12.10: Merge stubs from current state into best state, then recompile.
+  // This ensures we get the fewest errors while keeping all generated stubs.
   if (bestErrorCount < currentResult.errors.length) {
-    currentFiles = bestFiles;
-    currentResult = bestResult;
+    const bestPaths = new Set(bestFiles.map(f => f.path));
+    const newStubs = currentFiles.filter(f => !bestPaths.has(f.path));
+    if (newStubs.length > 0) {
+      // Merge stubs into best state and recompile
+      const mergedFiles = [...bestFiles, ...newStubs];
+      // Also update imports in best files to reference the new stubs
+      const mergedResult = compileWithMaven(mergedFiles, options);
+      if (mergedResult.errors.length <= currentResult.errors.length) {
+        currentFiles = mergedFiles;
+        currentResult = mergedResult;
+      }
+      // If merged is worse than current, keep current (which has the stubs)
+    } else {
+      // No new stubs — safe to revert to best state
+      currentFiles = bestFiles;
+      currentResult = bestResult;
+    }
+  }
+
+  // v12.10: Post-loop global fix for persistent "Object cannot be converted" errors
+  if (currentResult.status === "FAIL") {
+    const objErrors = currentResult.errors.filter(e =>
+      e.message.includes('java.lang.Object') && e.message.includes('cannot be converted to')
+    );
+    if (objErrors.length > 0) {
+      let postFixApplied = false;
+      for (const err of objErrors) {
+        const targetMatch = err.message.match(/cannot be converted to\s+([\w.]+)/);
+        if (!targetMatch) continue;
+        const targetType = targetMatch[1].split('.').pop() || targetMatch[1];
+        const fileIdx = currentFiles.findIndex(f => err.file && f.path.endsWith(err.file));
+        if (fileIdx === -1) continue;
+        const lines = currentFiles[fileIdx].content.split('\n');
+        const lineIdx = err.line - 1;
+        if (lineIdx < 0 || lineIdx >= lines.length) continue;
+        const line = lines[lineIdx];
+        // In post-loop, we know the error persists, so even if a cast exists
+        // it didn't fix the problem. Try a different approach.
+        
+        // Strategy 1: Find Map.get/getOrDefault/put patterns and cast the return value
+        const mapGetPattern = line.match(/(\w+)\s*=\s*(\w+\.(?:get|getOrDefault)\([^)]*(?:\([^)]*\))*[^)]*\))/);
+        if (mapGetPattern && !line.includes(`(${targetType}) ${mapGetPattern[2]}`)) {
+          lines[lineIdx] = line.replace(mapGetPattern[2], `(${targetType}) ${mapGetPattern[2]}`);
+          postFixApplied = true;
+        } else {
+          // Strategy 2: Assignment pattern (if no cast exists yet)
+          const hasCast = line.includes(`(${targetType})`) || line.includes(`(${targetType}) `);
+          if (!hasCast) {
+            const assignMatch = line.match(/(\w+(?:<[^>]+>)?)\s+(\w+)\s*=\s*(.+);/);
+            if (assignMatch) {
+              const rhs = assignMatch[3];
+              lines[lineIdx] = line.replace(
+                `${assignMatch[1]} ${assignMatch[2]} = ${rhs}`,
+                `${assignMatch[1]} ${assignMatch[2]} = (${targetType}) ${rhs}`
+              );
+              postFixApplied = true;
+            }
+          }
+          // Strategy 3: Column-based cast for method arguments
+          if (!postFixApplied && err.column && err.column > 1) {
+            const col0 = err.column - 1;
+            if (col0 < line.length) {
+              let start = col0;
+              while (start > 0 && /[\w.]/.test(line[start - 1])) start--;
+              let end = col0;
+              let depth = 0;
+              while (end < line.length) {
+                const ch = line[end];
+                if (ch === '(') depth++;
+                else if (ch === ')') { if (depth === 0) break; depth--; }
+                else if (depth === 0 && (ch === ',' || ch === ';')) break;
+                end++;
+              }
+              const expr = line.substring(start, end).trim();
+              if (expr.length > 0 && /^\w/.test(expr) && !expr.startsWith(`(${targetType})`)) {
+                lines[lineIdx] = line.substring(0, start) + `((${targetType}) ${expr})` + line.substring(end);
+                postFixApplied = true;
+              }
+            }
+          }
+        }
+        currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: lines.join('\n') };
+      }
+      if (postFixApplied) {
+        // Recompile after post-loop fix
+        currentResult = compileWithMaven(currentFiles, options);
+        allFixes.push({
+          iteration: iteration + 1,
+          type: 'FIX_SYNTAX' as const,
+          file: 'POST_LOOP',
+          description: `Post-loop global fix for Object→X type casts`,
+        });
+      }
+    }
   }
 
   const recovered = originalResult.status === "FAIL" && currentResult.status === "PASS";
@@ -559,7 +651,7 @@ function fixMissingSymbols(
       stubContent = `package ${basePackage}.${subDir};\n\nimport org.springframework.stereotype.Repository;\nimport java.util.List;\nimport java.util.Collections;\n${importEntity}\n/**\n * ${missingClass} \u2014 Auto-generated DAO stub.\n * @generated by Compleo v12.8 auto-fix\n */\n@Repository\npublic class ${missingClass} {\n\n    public ${returnType} findById(Long id) { return null; }\n    public ${returnType} findById(int id) { return null; }\n    public List<${returnType}> findByCustomerId(Long customerId) { return Collections.emptyList(); }\n    public List<${returnType}> findByUserId(Long userId) { return Collections.emptyList(); }\n    public List<${returnType}> findAll() { return Collections.emptyList(); }\n    public ${returnType} save(${returnType} entity) { return entity; }\n    public ${returnType} findByEmail(String email) { return null; }\n    public boolean delete(Long id) { return true; }\n    public ${returnType} update(${returnType} entity) { return entity; }\n}\n`;
     } else if (missingClass.endsWith('Manager')) {
       subDir = 'common';
-      stubContent = `package ${basePackage}.${subDir};\n\nimport org.springframework.stereotype.Component;\n\n/**\n * ${missingClass} — Auto-generated Manager stub.\n * @generated by Compleo v12.7 auto-fix\n */\n@Component\npublic class ${missingClass} {\n    public static void shutdown() {}\n}\n`;
+      stubContent = `package ${basePackage}.${subDir};\n\nimport org.springframework.stereotype.Component;\n\n/**\n * ${missingClass} — Auto-generated Manager stub.\n * @generated by Compleo v12.10 auto-fix\n */\n@Component\npublic class ${missingClass} {\n    public static void shutdown() {}\n    public void fire(Object event) {}\n    public Object fire(Object event, Object context) { return null; }\n    public void register(Object listener) {}\n    public void unregister(Object listener) {}\n    public Object get(Object key) { return null; }\n    public void put(Object key, Object value) {}\n    public Object process(Object input) { return null; }\n}\n`;
     } else if (missingClass.endsWith('Exception')) {
       subDir = 'exception';
       stubContent = `package ${basePackage}.${subDir};\n\n/**\n * ${missingClass} — Auto-generated exception stub.\n * @generated by Compleo v12.7 auto-fix\n */\npublic class ${missingClass} extends RuntimeException {\n    public ${missingClass}() { super(); }\n    public ${missingClass}(String message) { super(message); }\n    public ${missingClass}(String message, Throwable cause) { super(message, cause); }\n}\n`;
@@ -1132,8 +1224,8 @@ function fixMissingDependencies(
 
   // Check for missing JMS package
   const needsJms = errors.some(e =>
-    (e.message.includes("javax.jms") || e.message.includes("jakarta.jms")) && e.message.includes("does not exist")
-  ) || result.some(f => f.content.includes("import javax.jms") || f.content.includes("import jakarta.jms"));
+    (e.message.includes("javax.jms") || e.message.includes("jakarta.jms") || e.message.includes("org.springframework.jms")) && e.message.includes("does not exist")
+  ) || result.some(f => f.content.includes("import javax.jms") || f.content.includes("import jakarta.jms") || f.content.includes("import org.springframework.jms"));
   if (needsJms && !pom.includes("spring-boot-starter-activemq") && !pom.includes("javax.jms") && !pom.includes("jakarta.jms")) {
     pom = addDependencyToPom(pom, "org.springframework.boot", "spring-boot-starter-activemq", undefined);
     modified = true;
@@ -1669,7 +1761,10 @@ function fixMissingVariables(
             if (methodEnd === -1) continue;
             const methodBody = content.substring(methodStart, methodEnd);
             const svcVarRegex = new RegExp(`\\b${varName}\\b`);
-            if (svcVarRegex.test(methodBody) && !svcVarRegex.test(params)) {
+            // v12.10: Skip if variable is declared locally in method body
+            const localDeclRegex = new RegExp(`\\b(?:\\w+(?:<[^>]+>)?|\\w+\\[\\])\\s+${varName}\\s*[=;,)]`);
+            const isLocalVar = localDeclRegex.test(methodBody);
+            if (svcVarRegex.test(methodBody) && !svcVarRegex.test(params) && !isLocalVar) {
               // v12.8: Use same smart type inference for service params
               let paramType = inferControllerParamType(varName, methodBody, result);
               if (paramType === 'String') paramType = 'Object'; // Services default to Object not String
@@ -2078,6 +2173,10 @@ function fixIncompatibleTypes(
       const objMatch = err.message.match(/java\.lang\.Object\s+cannot be converted to\s+([\w.]+)/);
       if (objMatch) {
         const targetType = objMatch[1].split('.').pop() || objMatch[1];
+        // Skip if line already has a cast to this type (avoid double-casting)
+        if (line.includes(`(${targetType})`) || line.includes(`(${targetType}) `)) {
+          continue;
+        }
         // Find the assignment
         const assignMatch = line.match(/(\w+(?:<[^>]+>)?)\s+(\w+)\s*=\s*(.+);/);
         if (assignMatch) {
@@ -2100,15 +2199,57 @@ function fixIncompatibleTypes(
           modified = true;
           continue;
         }
-        // Fallback: if the line contains a method call, try to add cast before the call
-        const methodCallMatch = line.match(/(\w+\.\w+\([^)]*\))/);
-        if (methodCallMatch) {
-          lines[lineIdx] = line.replace(
-            methodCallMatch[1],
-            `(${targetType}) ${methodCallMatch[1]}`
-          );
-          modified = true;
-          continue;
+        // Column-based cast: extract balanced expression around the column position
+        if (err.column && err.column > 1) {
+          const col0 = err.column - 1; // 0-indexed
+          // Scan backwards to find the start of the expression (identifier or method chain)
+          let exprStart = col0;
+          while (exprStart > 0) {
+            const prev = line[exprStart - 1];
+            if (/[\w.]/.test(prev)) {
+              exprStart--;
+            } else if (prev === ')') {
+              // Scan back over balanced parens
+              let pd = 1;
+              exprStart--;
+              while (exprStart > 0 && pd > 0) {
+                exprStart--;
+                if (line[exprStart] === ')') pd++;
+                else if (line[exprStart] === '(') pd--;
+              }
+              // Continue scanning back for the method name before '('
+            } else {
+              break;
+            }
+          }
+          // Now scan forward from exprStart to find the end of the balanced expression
+          const afterExpr = line.substring(exprStart);
+          let depth = 0;
+          let end = 0;
+          for (let ci = 0; ci < afterExpr.length; ci++) {
+            const ch = afterExpr[ci];
+            if (ch === '(') depth++;
+            else if (ch === ')') {
+              if (depth === 0) break;
+              depth--;
+            } else if (depth === 0 && (ch === ',' || ch === ';' || ch === ' ')) {
+              // Stop at comma, semicolon, or space (but only at depth 0)
+              if (ch === ' ' && ci > 0 && /[\w)]/.test(afterExpr[ci - 1]) && ci + 1 < afterExpr.length && afterExpr[ci + 1] === '.') {
+                // Don't break on space between chained calls (unlikely but safe)
+              } else {
+                break;
+              }
+            }
+            end = ci + 1;
+          }
+          const expr = afterExpr.substring(0, end).trim();
+          if (expr.length > 0 && /^\w/.test(expr)) {
+            const before = line.substring(0, exprStart);
+            const after = line.substring(exprStart + end);
+            lines[lineIdx] = `${before}((${targetType}) ${expr})${after}`;
+            modified = true;
+            continue;
+          }
         }
       }
 

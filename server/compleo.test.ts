@@ -932,14 +932,16 @@ describe("FIX 4: Controller javadoc is present (replaces @Operation)", () => {
     expect(controller!.content).toContain("*/");
   });
 
-  it("controller javadoc includes HTTP method and path", () => {
+  it("controller class javadoc is present but method javadoc is removed", () => {
     const ir = parseEjbProject(createTestFiles(), SAMPLE_POM, SAMPLE_BIAN);
     const result = generateSpringBootProject(ir);
     const controller = result.files.find(f => f.category === "controller");
     expect(controller).toBeDefined();
-    // Javadoc should contain the HTTP method (GET, POST, etc.)
-    const hasHttpMethod = /\/\*\*\s*(GET|POST|PUT|DELETE|PATCH)/.test(controller!.content);
-    expect(hasHttpMethod).toBe(true);
+    // Class-level javadoc should still be present
+    expect(controller!.content).toContain("REST API for");
+    // Method-level javadoc (/** GET /path */) should NOT be present
+    const hasMethodJavadoc = /\/\*\*\s*(GET|POST|PUT|DELETE|PATCH)\s+\//.test(controller!.content);
+    expect(hasMethodJavadoc).toBe(false);
   });
 });
 

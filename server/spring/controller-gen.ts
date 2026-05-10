@@ -138,7 +138,14 @@ export function generateDomainController(
           paramParts.push(`@RequestHeader(value = "${headerName}", required = ${isRequired}) String ${fieldName}`);
         } else {
           imports.add("import org.springframework.web.bind.annotation.RequestParam;");
-          paramParts.push(`@RequestParam(required = ${isRequired}) ${mapToSpringParamType(field)} ${fieldName}`);
+          const paramType = mapToSpringParamType(field);
+          const TEMPORAL_TYPES = new Set(["LocalDateTime", "LocalDate", "ZonedDateTime", "Instant", "java.time.LocalDateTime", "java.time.LocalDate", "java.time.ZonedDateTime", "java.time.Instant"]);
+          if (TEMPORAL_TYPES.has(paramType) || TEMPORAL_TYPES.has(field.resolvedType || field.type)) {
+            imports.add("import org.springframework.format.annotation.DateTimeFormat;");
+            paramParts.push(`@RequestParam(required = ${isRequired}) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) ${paramType} ${fieldName}`);
+          } else {
+            paramParts.push(`@RequestParam(required = ${isRequired}) ${paramType} ${fieldName}`);
+          }
         }
         builderParts.push(`            .${fieldName}(${fieldName})`);
       }
@@ -149,29 +156,43 @@ ${builderParts.join("\n")}
             .build();\n`;
     } else if (hasIdParam && reqType) {
       paramList = `@PathVariable ${pathVarType} ${idParamName}, @Valid @RequestBody ${reqType} request`;
-    } else if (hasIdParam) {
-      paramList = `@PathVariable ${pathVarType} ${idParamName}`;
     } else if (reqType) {
       paramList = `@Valid @RequestBody ${reqType} request`;
     } else {
-      // FIX E v7.3: Use legacy method parameters when no DTO wrapper exists
+      // FIX E v7.3 + v12.10: Use legacy method parameters when no DTO wrapper exists
+      // Also handles hasIdParam case (previously skipped legacyParams)
       const legacyParams = (uc as any).methodParameters as { name: string; type: string }[] | undefined;
+      const paramParts: string[] = [];
+      if (hasIdParam) {
+        paramParts.push(`@PathVariable ${pathVarType} ${idParamName}`);
+      }
       if (legacyParams && legacyParams.length > 0) {
         const enumNames = new Set<string>();
-        const paramParts: string[] = [];
-        if (hasIdParam) {
-          paramParts.push(`@PathVariable ${pathVarType} ${idParamName}`);
-        }
         for (const p of legacyParams) {
+          // Skip the id param if already added as @PathVariable
+          if (hasIdParam && p.name === idParamName) continue;
           const springType = mapToSpringType(p.type, false, enumNames, imports);
           addImportsForRawTypeCtrl(springType, imports, basePackage);
+          const TEMPORAL_TYPES_LEG = new Set(["LocalDateTime", "LocalDate", "ZonedDateTime", "Instant"]);
           if (httpMethod === "GET") {
             imports.add("import org.springframework.web.bind.annotation.RequestParam;");
-            paramParts.push(`@RequestParam ${springType} ${p.name}`);
+            if (TEMPORAL_TYPES_LEG.has(springType)) {
+              imports.add("import org.springframework.format.annotation.DateTimeFormat;");
+              paramParts.push(`@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) ${springType} ${p.name}`);
+            } else {
+              paramParts.push(`@RequestParam ${springType} ${p.name}`);
+            }
           } else {
-            paramParts.push(`${springType} ${p.name}`);
+            if (TEMPORAL_TYPES_LEG.has(springType)) {
+              imports.add("import org.springframework.format.annotation.DateTimeFormat;");
+              paramParts.push(`@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) ${springType} ${p.name}`);
+            } else {
+              paramParts.push(`@RequestParam ${springType} ${p.name}`);
+            }
           }
         }
+      }
+      if (paramParts.length > 0) {
         paramList = paramParts.join(", ");
       }
     }
@@ -255,8 +276,9 @@ ${builderParts.join("\n")}
     const rawReturnGeneric = resType !== "Void"
       ? (PRIMITIVE_TO_WRAPPER[resType] || resType)
       : "Void";
-    // Defensive: strip spaces and invalid chars from generic type (LLM may include method name)
-    let returnGeneric = rawReturnGeneric.split(/\s+/)[0].replace(/[^\w<>,\[\]?]/g, "");
+    // Defensive: strip invalid chars from generic type (LLM may include method name)
+    // v12.10: Don't split by whitespace — generic types like "Map<String, X>" contain spaces
+    let returnGeneric = rawReturnGeneric.trim().replace(/[^\w<>,\s\[\]?]/g, "").replace(/\s+/g, "");
     // Fix unbalanced angle brackets (LLM may include trailing '>')
     const openBrackets = (returnGeneric.match(/</g) || []).length;
     const closeBrackets = (returnGeneric.match(/>/g) || []).length;
@@ -273,7 +295,6 @@ ${builderParts.join("\n")}
     }
 
     endpoints.push(`
-    /** ${httpMethod} ${fullPath} */
     ${httpAnnotation}
     public ResponseEntity<${returnGeneric}> ${methodName}(${paramList}) {
         log.info("${httpMethod} ${fullPath}");
@@ -318,6 +339,12 @@ function mapToSpringParamType(field: DtoFieldIR): string {
   if (t === "Integer" || t === "int") return "Integer";
   if (t === "Double" || t === "double") return "Double";
   if (t === "Boolean" || t === "boolean") return "Boolean";
+  // v12.10: Preserve temporal types for @DateTimeFormat annotation
+  if (t === "LocalDateTime" || t === "java.time.LocalDateTime") return "LocalDateTime";
+  if (t === "LocalDate" || t === "java.time.LocalDate") return "LocalDate";
+  if (t === "ZonedDateTime" || t === "java.time.ZonedDateTime") return "ZonedDateTime";
+  if (t === "Instant" || t === "java.time.Instant") return "Instant";
+  if (t === "Date" || t === "java.util.Date") return "LocalDateTime";
   if (t.startsWith("List<")) return "String"; // Simplified: pass as comma-separated string
   return "String";
 }

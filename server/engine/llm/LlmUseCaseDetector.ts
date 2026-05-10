@@ -341,8 +341,12 @@ export class LlmUseCaseDetector {
       if (inputStr) {
         // Find the type of the first argument variable
         const firstArg = inputStr.split(",")[0]?.trim();
-        const argTypeMatch = body.match(new RegExp(`(\\w[\\w<>,]*)\\s+${firstArg}\\s*[=;]`));
-        const inputType = argTypeMatch ? argTypeMatch[1].trim() : firstArg;
+        // Only use firstArg in regex if it's a simple identifier (no parens, operators, etc.)
+        let inputType = firstArg;
+        if (/^\w+$/.test(firstArg)) {
+          const argTypeMatch = body.match(new RegExp(`(\\w[\\w<>,]*)\\s+${firstArg}\\s*[=;]`));
+          if (argTypeMatch) inputType = argTypeMatch[1].trim();
+        }
         return {
           outputType,
           inputType,

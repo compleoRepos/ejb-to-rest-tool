@@ -626,11 +626,53 @@ export class BusinessLogicTransformer {
     }
 
 
-    // ─── T11: EntityManager → Disabled (causes cascading errors in complex projects) ───
-    // The autofix handles remaining EntityManager references via stub generation instead.
-    // em.flush() → // flush handled by Spring JPA
+    // ─── T11: EntityManager → Spring Data Repository (v12.10) ───
+    // em.find(Entity.class, id) → repository.findById(id).orElse(null)
+    result = result.replace(
+      /(?:em|entityManager)\.find\s*\(\s*(\w+)\.class\s*,\s*([^)]+)\)/g,
+      'repository.findById($2).orElse(null)'
+    );
+    // em.persist(entity) → repository.save(entity)
+    result = result.replace(
+      /(?:em|entityManager)\.persist\s*\(([^)]+)\)/g,
+      'repository.save($1)'
+    );
+    // em.merge(entity) → repository.save(entity)
+    result = result.replace(
+      /(?:em|entityManager)\.merge\s*\(([^)]+)\)/g,
+      'repository.save($1)'
+    );
+    // em.remove(entity) → repository.delete(entity)
+    result = result.replace(
+      /(?:em|entityManager)\.remove\s*\(([^)]+)\)/g,
+      'repository.delete($1)'
+    );
+    // em.createQuery(...).getSingleResult() → repository.findOne(...) placeholder
+    result = result.replace(
+      /(?:em|entityManager)\.createQuery\s*\((?:[^)"']|"[^"]*"|'[^']*'|\([^)]*\))*\)\s*(?:\.setParameter\s*\((?:[^)"']|"[^"]*"|'[^']*'|\([^)]*\))*\)\s*)*\.getSingleResult\s*\(\)/g,
+      'repository.count() /* TODO: migrate JPQL query to Spring Data method */'
+    );
+    // em.createQuery(...).getResultList() → repository.findAll() placeholder
+    result = result.replace(
+      /(?:em|entityManager)\.createQuery\s*\((?:[^)"']|"[^"]*"|'[^']*'|\([^)]*\))*\)\s*(?:\.setParameter\s*\((?:[^)"']|"[^"]*"|'[^']*'|\([^)]*\))*\)\s*)*\.getResultList\s*\(\)/g,
+      'repository.findAll() /* TODO: migrate JPQL query to Spring Data method */'
+    );
+    // em.createNamedQuery(...).getResultList() → repository.findAll() placeholder
+    result = result.replace(
+      /(?:em|entityManager)\.createNamedQuery\s*\((?:[^)"']|"[^"]*"|'[^']*')*\)\s*\.getResultList\s*\(\)/g,
+      'repository.findAll() /* TODO: migrate named query to Spring Data method */'
+    );
+    // em.createNamedQuery(...).getSingleResult() → repository placeholder
+    result = result.replace(
+      /(?:em|entityManager)\.createNamedQuery\s*\((?:[^)"']|"[^"]*"|'[^']*')*\)\s*\.getSingleResult\s*\(\)/g,
+      'repository.count() /* TODO: migrate named query to Spring Data method */'
+    );
+    // em.flush() → comment
     result = result.replace(/(?:em|entityManager)\.flush\s*\(\)\s*;/g,
       '// flush handled by Spring JPA');
+    // em.clear() → comment
+    result = result.replace(/(?:em|entityManager)\.clear\s*\(\)\s*;/g,
+      '// clear handled by Spring JPA');
     // em.getTransaction().begin/commit/rollback → remove (handled by @Transactional)
     result = result.replace(/(?:em|entityManager)\.getTransaction\s*\(\)\s*\.\s*(?:begin|commit|rollback)\s*\(\)\s*;/g,
       '// Transaction handled by @Transactional');
@@ -641,6 +683,35 @@ export class BusinessLogicTransformer {
     result = result.replace(/\s*(?:@PersistenceContext\s+)?private\s+EntityManager\s+\w+\s*;/g, '');
     // Remove @Resource SessionContext declarations
     result = result.replace(/\s*@Resource\s+private\s+SessionContext\s+\w+\s*;/g, '');
+
+    // Catch-all: replace any remaining line containing em.xxx(...) with a comment + throw/null
+    // This handles all remaining patterns: standalone, assignments, returns, casts, etc.
+    result = result.replace(
+      /^(\s*)(.*)\b(?:em|entityManager)\.\w+\s*\([^;\n]*;?/gm,
+      (match, indent, prefix) => {
+        const trimmedPrefix = prefix.trim();
+        if (!trimmedPrefix || trimmedPrefix === '{') {
+          // Standalone statement
+          return `${indent}throw new UnsupportedOperationException("TODO: migrate EntityManager usage to Spring Data");`;
+        } else if (trimmedPrefix.startsWith('return')) {
+          // Return statement (possibly with cast)
+          return `${indent}return null; /* TODO: migrate EntityManager usage to Spring Data */`;
+        } else if (trimmedPrefix.includes('=') || /^\w+(?:<[^>]*>)?\s+\w+/.test(trimmedPrefix)) {
+          // Assignment or variable declaration
+          const eqIdx = trimmedPrefix.indexOf('=');
+          if (eqIdx >= 0) {
+            return `${indent}${prefix.substring(0, prefix.indexOf('=') + 1)} null; /* TODO: migrate EntityManager usage to Spring Data */`;
+          }
+          // Variable declaration without explicit =
+          const declMatch = trimmedPrefix.match(/^(\w+(?:<[^>]*>)?\s+\w+)/);
+          if (declMatch) {
+            return `${indent}${declMatch[1]} = null; /* TODO: migrate EntityManager usage to Spring Data */`;
+          }
+        }
+        // Fallback: comment out the line
+        return `${indent}/* TODO: migrate EntityManager usage */ // ${match.trim()}`;
+      }
+    );
 
     // ─── Nettoyage final ───
     result = result.replace(/\blog\.info\(/g, "log.info(");
