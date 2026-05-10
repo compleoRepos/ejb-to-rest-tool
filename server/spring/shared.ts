@@ -97,17 +97,33 @@ export function toPascalCase(str: string): string {
     .join("");
 }
 
+const JAVA_RESERVED_WORDS = new Set([
+  'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch', 'char',
+  'class', 'const', 'continue', 'default', 'do', 'double', 'else', 'enum',
+  'extends', 'final', 'finally', 'float', 'for', 'goto', 'if', 'implements',
+  'import', 'instanceof', 'int', 'interface', 'long', 'native', 'new',
+  'package', 'private', 'protected', 'public', 'return', 'short', 'static',
+  'strictfp', 'super', 'switch', 'synchronized', 'this', 'throw', 'throws',
+  'transient', 'try', 'void', 'volatile', 'while', 'var', 'yield', 'record',
+  'sealed', 'permits', 'null', 'true', 'false',
+]);
+
 export function toMethodName(className: string): string {
   // FIX D v5.7.2: Strip ClassName_ prefix from direct EJB UseCases
   // e.g. "CompteEJB_consulterSolde" → "consulterSolde"
   if (className.includes("_")) {
     const methodPart = className.split("_").slice(1).join("_");
     if (methodPart) {
-      return methodPart.charAt(0).toLowerCase() + methodPart.slice(1);
+      let name = methodPart.charAt(0).toLowerCase() + methodPart.slice(1);
+      if (JAVA_RESERVED_WORDS.has(name)) name = 'do' + name.charAt(0).toUpperCase() + name.slice(1);
+      return name;
     }
   }
-  const name = className.replace(/UC$/, "").replace(/UseCase$/, "");
-  return name.charAt(0).toLowerCase() + name.slice(1);
+  const raw = className.replace(/UC$/, "").replace(/UseCase$/, "");
+  let name = raw.charAt(0).toLowerCase() + raw.slice(1);
+  // v12.9: Prevent Java reserved words as method names
+  if (JAVA_RESERVED_WORDS.has(name)) name = 'do' + name.charAt(0).toUpperCase() + name.slice(1);
+  return name;
 }
 
 /**

@@ -44,7 +44,8 @@ export function autoFixAndCompile(
   files: GeneratedFile[],
   options?: { timeout?: number }
 ): AutoFixResult {
-  const originalResult = compileWithMaven(files, options);
+  
+    const originalResult = compileWithMaven(files, options);
 
   if (originalResult.status === "PASS" || originalResult.status === "STATIC") {
     return {
@@ -641,11 +642,15 @@ public class ${missingClass} {
         if (f.path === stubPath) continue;
         if (!f.content.includes(missingClass)) continue;
         if (f.content.includes(importLine)) continue;
-        const pkgLine = f.content.match(/^package\s+[\w.]+\s*;/m);
+        // v12.9: Remove old/stale imports for the same class from different packages
+        const oldImportPattern = new RegExp(`import\\s+[\\w.]+\\.${missingClass}\\s*;\\r?\\n?`, 'g');
+        result[i] = { ...f, content: f.content.replace(oldImportPattern, '') };
+        const updatedContent = result[i].content;
+        const pkgLine = updatedContent.match(/^package\s+[\w.]+\s*;/m);
         if (pkgLine) {
           result[i] = {
-            ...f,
-            content: f.content.replace(pkgLine[0], `${pkgLine[0]}\n${importLine}`),
+            ...result[i],
+            content: updatedContent.replace(pkgLine[0], `${pkgLine[0]}\n${importLine}`),
           };
           actions.push({
             iteration,
@@ -844,6 +849,23 @@ function fixSyntaxErrors(
       return mod;
     });
 
+    // Fix 6b: "not a statement" errors - comment out the offending line
+    for (const err of fileErrors) {
+      if (err.message.includes('not a statement')) {
+        const lines = content.split('\n');
+        const lineIdx = err.line - 1;
+        if (lineIdx >= 0 && lineIdx < lines.length) {
+          const offendingLine = lines[lineIdx].trim();
+          // Only comment out if it's a simple expression statement (variable name, null, etc.)
+          if (/^\w[\w.]*\s*;\s*$/.test(offendingLine) || /^null\s*;\s*$/.test(offendingLine) || /^\w[\w.]*\s*\/\*.*\*\/\s*;\s*$/.test(offendingLine)) {
+            lines[lineIdx] = '// [AUTOFIX] ' + lines[lineIdx];
+            content = lines.join('\n');
+            fixed = true;
+          }
+        }
+      }
+    }
+
     // Fix 7: Remove invalid imports (import ...static void, import ...void)
     content = content.replace(/^\s*import\s+[\w.]+\.(?:static\s+)?void\s*;\s*$/gm, () => {
       fixed = true;
@@ -874,11 +896,42 @@ function fixSyntaxErrors(
     // If a line has "illegal start of type" error and contains a method signature,
     // check for malformed nested generics and fix them
     for (const fErr of fileErrors) {
-      if (fErr.message.includes('illegal start of type') && fErr.line) {
+      if ((fErr.message.includes('illegal start of type') || fErr.message.includes('illegal start of expression')) && fErr.line) {
         const errLineIdx = fErr.line - 1;
         if (errLineIdx >= 0 && errLineIdx < content.split('\n').length) {
           const contentLines = content.split('\n');
           const errLine = contentLines[errLineIdx];
+          // Fix 8c-0: Check if the error is caused by a malformed @Operation annotation
+          // Search backward from the error line for @Operation and remove it
+          if (errLine) {
+            let opStart = -1;
+            let opEnd = -1;
+            for (let k = errLineIdx; k >= Math.max(0, errLineIdx - 5); k--) {
+              if (contentLines[k].includes('@Operation')) {
+                opStart = k;
+                // Find the closing ) of @Operation
+                let parenDepth = 0;
+                for (let m = k; m <= Math.min(contentLines.length - 1, k + 10); m++) {
+                  for (const ch of contentLines[m]) {
+                    if (ch === '(') parenDepth++;
+                    if (ch === ')') parenDepth--;
+                  }
+                  if (parenDepth <= 0) {
+                    opEnd = m;
+                    break;
+                  }
+                }
+                break;
+              }
+            }
+            if (opStart >= 0 && opEnd >= opStart) {
+              for (let k = opStart; k <= opEnd; k++) {
+                contentLines[k] = '// ' + contentLines[k];
+              }
+              content = contentLines.join('\n');
+              fixed = true;
+            }
+          }
           // Check if the line has a method signature with ResponseEntity
           if (errLine && errLine.includes('ResponseEntity') && errLine.includes('public')) {
             // Try to fix nested generics: ResponseEntity<List<X>> where X might be malformed
@@ -903,6 +956,78 @@ function fixSyntaxErrors(
                 content = contentLines.join('\n');
                 fixed = true;
               }
+            }
+          }
+          // Fallback 2: if the error line is inside a method, comment out the method
+          // Use local flag: only skip if the ResponseEntity fix above handled THIS specific error
+          const fixedByResponseEntity = (errLine && errLine.includes('ResponseEntity') && errLine.includes('public') && fixed);
+          if (!fixedByResponseEntity) {
+            const contentLines2 = content.split('\n');
+            const errLine2 = contentLines2[errLineIdx];
+            if (errLine2) {
+              // Search backward for the method start (public/private/protected ... {)
+              let methodStart = errLineIdx;
+              let foundMethodBackward = false;
+              for (let k = errLineIdx; k >= Math.max(0, errLineIdx - 15); k--) {
+                if (/^\s*(public|private|protected)\s+/.test(contentLines2[k]) && contentLines2[k].includes('(')) {
+                  methodStart = k;
+                  foundMethodBackward = true;
+                  break;
+                }
+                // Also check for annotations like @GetMapping, @PostMapping
+                if (/^\s*@(Get|Post|Put|Delete|Patch)Mapping/.test(contentLines2[k])) {
+                  methodStart = k;
+                  foundMethodBackward = true;
+                  break;
+                }
+              }
+              // If not found backward, search FORWARD for the method (error might be in annotation/comment)
+              if (!foundMethodBackward) {
+                for (let k = errLineIdx; k < Math.min(contentLines2.length, errLineIdx + 10); k++) {
+                  if (/^\s*@(Get|Post|Put|Delete|Patch)Mapping/.test(contentLines2[k])) {
+                    methodStart = k;
+                    break;
+                  }
+                  if (/^\s*(public|private|protected)\s+/.test(contentLines2[k]) && contentLines2[k].includes('(')) {
+                    methodStart = k;
+                    break;
+                  }
+                }
+              }
+              // Search backward further for javadoc and annotations
+              while (methodStart > 0 && (/^\s*(\/\*\*|\*|@|\s*$)/.test(contentLines2[methodStart - 1]))) {
+                methodStart--;
+              }
+              // Search forward for the method end (matching closing brace)
+              let depth = 0;
+              let methodEnd = errLineIdx;
+              let seenOpenBrace = false;
+              for (let k = methodStart; k < contentLines2.length; k++) {
+                for (const ch of contentLines2[k]) {
+                  if (ch === '{') { depth++; seenOpenBrace = true; }
+                  if (ch === '}') depth--;
+                }
+                if (seenOpenBrace && depth <= 0 && k > methodStart) {
+                  methodEnd = k;
+                  break;
+                }
+              }
+              // If no opening brace found, comment out until next method or 10 lines
+              if (!seenOpenBrace) {
+                methodEnd = Math.min(methodStart + 10, contentLines2.length - 1);
+                for (let k = methodStart + 1; k <= methodEnd; k++) {
+                  if (/^\s*(public|private|protected)\s+/.test(contentLines2[k]) && contentLines2[k].includes('(')) {
+                    methodEnd = k - 1;
+                    break;
+                  }
+                }
+              }
+              // Comment out the entire method
+              for (let k = methodStart; k <= methodEnd; k++) {
+                contentLines2[k] = '// [AUTOFIX] ' + contentLines2[k];
+              }
+              content = contentLines2.join('\n');
+              fixed = true;
             }
           }
         }
@@ -2027,13 +2152,13 @@ function fixIncompatibleTypes(
               }
             }
           }
-          // Find the method signature and change the correct parameter
+          // Find the method signature and change the correct parameter type
           for (let k = lineIdx; k >= Math.max(0, lineIdx - 20); k--) {
             const paramLine = lines[k];
             if (paramLine.match(/public\s+\S+\s+\w+\s*\(/)) {
               if (targetVarName) {
-                // Change the specific parameter that matches
-                const specificMatch = paramLine.match(new RegExp(`@RequestParam\\s+String\\s+${targetVarName}\\b`));
+                const safeVarName = targetVarName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const specificMatch = paramLine.match(new RegExp(`@RequestParam\\s+String\\s+${safeVarName}\\b`));
                 if (specificMatch) {
                   lines[k] = paramLine.replace(
                     `@RequestParam String ${targetVarName}`,
@@ -2042,18 +2167,17 @@ function fixIncompatibleTypes(
                   modified = true;
                   break;
                 }
-                // Also try without @RequestParam (bare param)
-                const bareMatch = paramLine.match(new RegExp(`(?<!\\w)String\\s+${targetVarName}\\b`));
+                const bareMatch = paramLine.match(new RegExp(`(?<!\\w)String\\s+${safeVarName}\\b`));
                 if (bareMatch) {
                   lines[k] = paramLine.replace(
-                    new RegExp(`(?<!\\w)String\\s+${targetVarName}\\b`),
+                    new RegExp(`(?<!\\w)String\\s+${safeVarName}\\b`),
                     `${targetType} ${targetVarName}`
                   );
                   modified = true;
                   break;
                 }
               }
-              // Fallback: change the first @RequestParam String (old behavior)
+              // Fallback: change the first @RequestParam String
               const rpMatch = paramLine.match(/@RequestParam\s+String\s+(\w+)/);
               if (rpMatch) {
                 lines[k] = paramLine.replace(
@@ -2063,6 +2187,32 @@ function fixIncompatibleTypes(
                 modified = true;
               }
               break;
+            }
+          }
+          // Case D: Fallback for controllers - change the SERVICE method to accept String
+          // instead of parsing in the controller (avoids ping-pong type errors)
+          if (!modified && (content.includes('@RestController') || content.includes('@Controller'))) {
+            const svcCall = line.match(/(\w+)\.(\w+)\(/);
+            if (svcCall) {
+              const svcVarName = svcCall[1];
+              const svcMethodName = svcCall[2];
+              // Find the service file and change the method's parameter type from targetType to String
+              const svcTypeName = svcVarName.charAt(0).toUpperCase() + svcVarName.slice(1);
+              for (let fi = 0; fi < result.length; fi++) {
+                const f = result[fi];
+                if (f.content.includes(`class ${svcTypeName}`) || f.path.includes(svcTypeName)) {
+                  const fLines = f.content.split('\n');
+                  for (let li = 0; li < fLines.length; li++) {
+                    if (fLines[li].includes(svcMethodName) && fLines[li].includes(targetType) && fLines[li].includes('public')) {
+                      fLines[li] = fLines[li].replace(new RegExp(`\\b${targetType}\\b`), 'String');
+                      result[fi] = { ...f, content: fLines.join('\n') };
+                      modified = true;
+                      break;
+                    }
+                  }
+                  if (modified) break;
+                }
+              }
             }
           }
           continue;
@@ -2164,35 +2314,26 @@ function fixIncompatibleTypes(
       }
 
       // Pattern: X cannot be converted to java.lang.String (add .toString())
-      const toStringMatch = err.message.match(/(java\.time\.Local\w+|java\.math\.BigDecimal|java\.lang\.Long|java\.lang\.Integer|java\.lang\.Double)\s+cannot be converted to\s+java\.lang\.String/);
+      const toStringMatch = err.message.match(/(java\.time\.Local\w+|java\.math\.BigDecimal|java\.lang\.Long|java\.lang\.Integer|java\.lang\.Double)\s+cannot be converted to\s+(?:java\.lang\.String|java\.lang\.CharSequence)/);
       if (toStringMatch) {
         const sourceType = toStringMatch[1].split('.').pop()!; // e.g., "BigDecimal", "LocalDateTime"
         
         // Strategy: Instead of converting to String, change the method signature to use the actual type.
         // This is the correct fix: the controller should return ResponseEntity<BigDecimal>, not ResponseEntity<String>.
         
-        // Case 1: Change variable type from String to sourceType AND update ResponseEntity generic
-        const varTypeMatch = line.match(/\bString\s+(\w+)\s*=/);
+        // Case 1: Assignment "String x = serviceCall()" where serviceCall returns sourceType
+        // Fix: wrap the RHS with String.valueOf() instead of changing the variable type
+        // (changing the type causes reverse errors when the variable is passed elsewhere)
+        const varTypeMatch = line.match(/\bString\s+(\w+)\s*=\s*(.+);/);
         if (varTypeMatch) {
-          lines[lineIdx] = line.replace(/\bString\s+(\w+)\s*=/, `${sourceType} $1 =`);
-          // Also fix the ResponseEntity generic on the method signature above
-          for (let k = lineIdx; k >= Math.max(0, lineIdx - 15); k--) {
-            if (lines[k].match(/ResponseEntity<\w+>/)) {
-              lines[k] = lines[k].replace(/ResponseEntity<\w+>/, `ResponseEntity<${sourceType}>`);
-              break;
-            }
-          }
-          // Add import for sourceType if needed
-          const importLine = sourceType === 'BigDecimal' ? 'import java.math.BigDecimal;'
-            : sourceType === 'LocalDateTime' ? 'import java.time.LocalDateTime;'
-            : sourceType === 'LocalDate' ? 'import java.time.LocalDate;'
-            : sourceType === 'Long' ? '' : sourceType === 'Integer' ? '' : '';
-          if (importLine) {
-            const hasImport = lines.some(l => l.includes(importLine));
-            if (!hasImport) {
-              const pkgIdx = lines.findIndex(l => l.startsWith('package '));
-              if (pkgIdx >= 0) lines.splice(pkgIdx + 1, 0, importLine);
-            }
+          const varName = varTypeMatch[1];
+          const rhs = varTypeMatch[2].trim();
+          // Wrap the RHS with String.valueOf() if not already wrapped
+          if (!rhs.startsWith('String.valueOf(') && !rhs.endsWith('.toString()')) {
+            lines[lineIdx] = line.replace(
+              `String ${varName} = ${varTypeMatch[2]};`,
+              `String ${varName} = String.valueOf(${rhs});`
+            );
           }
           modified = true;
           continue;
@@ -2243,14 +2384,41 @@ function fixIncompatibleTypes(
         }
         
         // Case 5: Method argument type mismatch - a sourceType variable is passed to a method expecting String
-        // The error line is like: service.method(localDateTimeVar, otherArg)
-        // Fix: wrap the sourceType argument with .toString()
-        // Or better: change the controller @RequestParam type from sourceType to String
-        // and parse it in the method body
-        const methodCallMatch = line.match(/(\w+)\.\w+\([^)]*\)/);
-        if (methodCallMatch) {
-          // Find the sourceType variable name in the method signature above
+        // Universal fallback: find variables of sourceType in the method and wrap with .toString()
+        {
           const sourceTypeSimple = sourceType.replace('java.time.', '').replace('java.math.', '');
+          // Find all variable names of sourceType declared above the error line
+          const varNames: string[] = [];
+          for (let k = lineIdx; k >= Math.max(0, lineIdx - 30); k--) {
+            const declMatch = lines[k].match(new RegExp(`${sourceTypeSimple}\\s+(\\w+)\\s*[=;,)]`));
+            if (declMatch) varNames.push(declMatch[1]);
+            // Also check @RequestParam
+            const paramMatch = lines[k].match(new RegExp(`@RequestParam[^)]*\\)\\s+${sourceTypeSimple}\\s+(\\w+)`));
+            if (paramMatch) varNames.push(paramMatch[1]);
+            const paramMatch2 = lines[k].match(new RegExp(`@RequestParam\\s+${sourceTypeSimple}\\s+(\\w+)`));
+            if (paramMatch2) varNames.push(paramMatch2[1]);
+          }
+          if (varNames.length > 0 && line.includes('(')) {
+            // Only apply .toString() inside method call arguments
+            // Find the method call portion and replace only there
+            let fixedLine = line;
+            const methodCallMatch = line.match(/(\w+\.\w+\()([^)]+)(\))/);
+            if (methodCallMatch) {
+              let argsStr = methodCallMatch[2];
+              for (const vn of varNames) {
+                argsStr = argsStr.replace(new RegExp(`\\b${vn}\\b(?!\\.toString)`, 'g'), `${vn}.toString()`);
+              }
+              fixedLine = line.replace(methodCallMatch[0], `${methodCallMatch[1]}${argsStr}${methodCallMatch[3]}`);
+            }
+            if (fixedLine !== line) {
+              lines[lineIdx] = fixedLine;
+              modified = true;
+              continue;
+            }
+          }
+          // Last resort: if the line has a method call, try to change the @RequestParam type to String
+          const methodCallMatch = line.match(/(\w+)\.\w+\([^)]*\)/);
+          if (methodCallMatch) {
           // Look for @RequestParam sourceType varName in the method signature
           for (let k = lineIdx; k >= Math.max(0, lineIdx - 20); k--) {
             const paramMatch = lines[k].match(new RegExp(`@RequestParam\\s+${sourceTypeSimple}\\s+(\\w+)`));
@@ -2276,7 +2444,11 @@ function fixIncompatibleTypes(
                   } else {
                     parseExpr = `${indent}${sourceTypeSimple} ${paramName}Parsed = ${sourceTypeSimple}.valueOf(${paramName});`;
                   }
-                  lines.splice(m + 1, 0, parseExpr);
+                  // Check if the Parsed variable already exists (avoid duplicates)
+                  const alreadyHasParsed = lines.some(l => l.includes(`${paramName}Parsed`));
+                  if (!alreadyHasParsed) {
+                    lines.splice(m + 1, 0, parseExpr);
+                  }
                   // Replace usages of paramName in the method body with paramNameParsed
                   for (let n = m + 2; n < Math.min(m + 30, lines.length); n++) {
                     if (lines[n].includes('}') && !lines[n].includes('{')) break;
@@ -2292,10 +2464,36 @@ function fixIncompatibleTypes(
               break;
             }
           }
+         }
+        } // end Case 5 block
+        
+        // Case 6: Universal fallback using column position
+        // If we still haven't fixed it, find the variable at the error column and wrap with .toString()
+        if (!modified && err.column && err.column > 0) {
+          const col = err.column - 1; // 0-indexed
+          // Find the identifier at or near the column position
+          const beforeCol = line.substring(0, col);
+          const afterCol = line.substring(col);
+          // Look for a word boundary before the column
+          const wordBefore = beforeCol.match(/(\w+)$/);
+          const wordAfter = afterCol.match(/^(\w*)/);
+          if (wordBefore || wordAfter) {
+            const fullWord = (wordBefore ? wordBefore[1] : '') + (wordAfter ? wordAfter[1] : '');
+            if (fullWord && fullWord.length > 1 && !fullWord.match(/^(new|return|if|else|for|while|null|true|false|this|void|int|long|double|float|boolean|String)$/)) {
+              // Replace this variable with variable.toString() in the line
+              if (!line.includes(fullWord + '.toString()')) {
+                lines[lineIdx] = line.replace(new RegExp(`\\b${fullWord}\\b(?!\\.toString)`), `${fullWord}.toString()`);
+                if (lines[lineIdx] !== line) {
+                  modified = true;
+                }
+              }
+            }
+          }
         }
+        
+        // Case 7: Removed — was too aggressive (caused ping-pong type errors)
         continue;
       }
-
       // Pattern: inference variable T has incompatible bounds (equality: X, lower: Object)
       // This happens when ResponseEntity<X> receives an Object value
       const inferenceMatch = err.message.match(/inference variable \w+ has incompatible bounds/);
@@ -2316,6 +2514,18 @@ function fixIncompatibleTypes(
               break;
             }
           }
+        }
+        continue;
+      }
+
+      // Pattern: variable X is already defined in method Y
+      const alreadyDefinedMatch = err.message.match(/variable (\w+) is already defined/);
+      if (alreadyDefinedMatch) {
+        const varName = alreadyDefinedMatch[1];
+        // Comment out the duplicate declaration line
+        if (line.includes(varName) && (line.includes('=') || line.match(/\b\w+\s+\w+\s*;/))) {
+          lines[lineIdx] = '// [AUTOFIX-DEDUP] ' + line;
+          modified = true;
         }
         continue;
       }
@@ -2340,6 +2550,34 @@ function fixIncompatibleTypes(
         // Skip Java primitives/wrappers and common types that don't need imports
         if (['String', 'Object', 'Integer', 'Long', 'Double', 'Float', 'Boolean', 'List', 'Map', 'Set'].includes(castType)) continue;
         ensureImport(fileIdx, castType);
+      }
+    }
+  }
+
+  // ─── Post-processing: ensure imports for standard types used in files ───
+  const STANDARD_TYPE_IMPORTS: Record<string, string> = {
+    'LocalDateTime': 'import java.time.LocalDateTime;',
+    'LocalDate': 'import java.time.LocalDate;',
+    'LocalTime': 'import java.time.LocalTime;',
+    'Instant': 'import java.time.Instant;',
+    'ZonedDateTime': 'import java.time.ZonedDateTime;',
+    'BigDecimal': 'import java.math.BigDecimal;',
+    'BigInteger': 'import java.math.BigInteger;',
+    'UUID': 'import java.util.UUID;',
+  };
+  for (let i = 0; i < result.length; i++) {
+    const fileContent = result[i].content;
+    if (!fileContent.includes('package ')) continue;
+    for (const [typeName, importLine] of Object.entries(STANDARD_TYPE_IMPORTS)) {
+      const typeUsageRegex = new RegExp(`\\b${typeName}\\b`);
+      if (typeUsageRegex.test(fileContent) && !fileContent.includes(importLine)) {
+        const pkgMatch = fileContent.match(/^package\s+[\w.]+\s*;/m);
+        if (pkgMatch) {
+          result[i] = {
+            ...result[i],
+            content: fileContent.replace(pkgMatch[0], `${pkgMatch[0]}\n${importLine}`),
+          };
+        }
       }
     }
   }

@@ -28,7 +28,7 @@ describe("Controller generation", () => {
     expect(ctrl!.content).toContain("@Tag");
   });
 
-  it("génère un endpoint avec @Operation OpenAPI", () => {
+  it("génère un endpoint avec javadoc descriptif", () => {
     const src = `
       package com.bank.compte;
       import javax.ejb.Stateless;
@@ -42,7 +42,9 @@ describe("Controller generation", () => {
     ]);
     const gen = generateSpringBootProject(ir);
     const ctrl = gen.files.find((f) => f.category === "controller");
-    expect(ctrl!.content).toContain("@Operation");
+    // @Operation removed (caused compilation errors with special chars in summary)
+    // Controller should have javadoc instead
+    expect(ctrl!.content).toContain("/**");
   });
 
   it("le controller injecte le service correspondant", () => {

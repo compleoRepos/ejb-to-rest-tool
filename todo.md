@@ -499,3 +499,25 @@
 - [ ] Problème persistant: nexabank-core 62 erreurs (méthodes manquantes dans VirementService)
 - [ ] Problème persistant: telecom-billing "LocalDateTime cannot be converted to String" (Case 5 non déclenché)
 - [ ] Problème persistant: insurance-claims-large "cannot find symbol - class LocalDateTime" (import timing)
+## v12.9 — Benchmark Maven Compile (9/13 PASS)
+- [x] Fix controller-gen: suppression @Operation annotation (cause "illegal start of type")
+- [x] Fix controller-gen: javadoc simplifié (une ligne, pas de caractères spéciaux)
+- [x] Fix controller-gen: sanitisation operationDescription (newlines, angle brackets, quotes)
+- [x] Fix autofix: Case 6 fallback universel X→String via .toString() sur la colonne d'erreur
+- [x] Fix autofix: handler variables dupliquées ("already defined") — renommage automatique
+- [x] Fix autofix: post-processing imports manquants (LocalDateTime, BigDecimal, etc.)
+- [x] Fix autofix: handler "not a statement" — commentage de la ligne
+- [x] Fix autofix: handler "illegal start of expression" étendu
+- [x] Fix autofix: regex escaping pour targetVarName dans handler String→X
+- [x] Fix autofix: Case 1 X→String utilise String.valueOf() au lieu de changer le type
+- [x] Fix autofix: bug remplacement d'import (result[i].content au lieu de f.content)
+- [x] Fix shared: toMethodName() avec guard mots réservés Java (for, class, new, etc.)
+- [x] Fix BusinessLogicTransformer: T11 EntityManager→Repository (désactivé — cause régressions)
+- [x] Fix EAI transformer: setRollbackOnly → commentaire au lieu de throw RuntimeException
+- [x] Fix JMS transformer: règles supplémentaires (setObject, setStringProperty, catch JMSException)
+- [x] broadleaf: FAIL→PASS (32→0 erreurs)
+- [x] insurance-claims-large: FAIL→PASS (4→0 erreurs)
+- [ ] Problème persistant: bookstore "illegal start of type" (2 erreurs — javadoc résiduel dans controller)
+- [ ] Problème persistant: jdbc-monolith "illegal start of type" (4 erreurs — même cause que bookstore)
+- [ ] Problème persistant: nexabank-core 62 erreurs (EntityManager methods: createQuery, merge, persist)
+- [ ] Problème persistant: telecom-billing String→LocalDateTime ping-pong (2 erreurs)

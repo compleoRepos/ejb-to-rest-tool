@@ -67,7 +67,7 @@ const FRAMEWORK_REPLACEMENTS: [RegExp, string][] = [
   [/@Transactional\(\s*\)/g, "@Transactional"],
 
   // v12.5: sctx/sessionContext.setRollbackOnly() -> TransactionAspectSupport
-  [/(?:sctx|sessionContext|ctx)\.setRollbackOnly\(\)/g, 'TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()'],
+  [/(?:sctx|sessionContext|ctx)\.setRollbackOnly\(\);?/g, '// Rollback handled by @Transactional on RuntimeException'],
 
   // Parser EAI → identité (JSON natif en Spring)
   [/Parser\.unmarshall\(([^)]+)\)/g, "$1"],

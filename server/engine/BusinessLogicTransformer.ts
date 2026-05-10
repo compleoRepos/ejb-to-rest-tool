@@ -625,6 +625,23 @@ export class BusinessLogicTransformer {
       );
     }
 
+
+    // ─── T11: EntityManager → Disabled (causes cascading errors in complex projects) ───
+    // The autofix handles remaining EntityManager references via stub generation instead.
+    // em.flush() → // flush handled by Spring JPA
+    result = result.replace(/(?:em|entityManager)\.flush\s*\(\)\s*;/g,
+      '// flush handled by Spring JPA');
+    // em.getTransaction().begin/commit/rollback → remove (handled by @Transactional)
+    result = result.replace(/(?:em|entityManager)\.getTransaction\s*\(\)\s*\.\s*(?:begin|commit|rollback)\s*\(\)\s*;/g,
+      '// Transaction handled by @Transactional');
+    // UserTransaction.begin/commit/rollback → remove
+    result = result.replace(/(?:ut|userTransaction|utx)\.(?:begin|commit|rollback)\s*\(\)\s*;/g,
+      '// Transaction handled by @Transactional');
+    // Remove EntityManager field declarations
+    result = result.replace(/\s*(?:@PersistenceContext\s+)?private\s+EntityManager\s+\w+\s*;/g, '');
+    // Remove @Resource SessionContext declarations
+    result = result.replace(/\s*@Resource\s+private\s+SessionContext\s+\w+\s*;/g, '');
+
     // ─── Nettoyage final ───
     result = result.replace(/\blog\.info\(/g, "log.info(");
     result = result.replace(/\blog\.error\(/g, "log.error(");

@@ -37,7 +37,6 @@ export function generateDomainController(
   imports.add("import org.springframework.http.ResponseEntity;");
   imports.add("import org.springframework.web.bind.annotation.*;");
   imports.add(`import ${basePackage}.service.${serviceName};`);
-  imports.add("import io.swagger.v3.oas.annotations.Operation;");
   imports.add("import io.swagger.v3.oas.annotations.tags.Tag;");
 
   const endpoints: string[] = [];
@@ -218,13 +217,37 @@ ${builderParts.join("\n")}
     let javadocRaw = (uc as any).useCaseDescription || (uc as any).javadoc || "";
     let javadoc = javadocRaw
       .replace(/[{}]/g, "")          // Remove all braces
+      .replace(/[<>]/g, "")          // Remove angle brackets (can break Java parser)
+      .replace(/[\[\]]/g, "")        // Remove square brackets
+      .replace(/[;]/g, "")           // Remove semicolons
       .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, "'") // Curly/smart quotes → single quote (safe in Java strings)
       .replace(/[\u2018\u2019\u201A\u201B]/g, "'")             // Smart single quotes → apostrophe
       .replace(/\s+/g, " ")          // Collapse whitespace
       .trim();
     if (javadoc.length > 200) javadoc = javadoc.substring(0, 200) + "...";
-    const operationSummary = extractShortSummary(javadoc, methodName, domain);
-    const operationDescription = javadoc ? javadoc.replace(/"/g, '\\"') : "";
+    const operationSummary = extractShortSummary(javadoc, methodName, domain)
+      .replace(/[\n\r]/g, " ")
+      .replace(/\\/g, '')          // Remove backslashes (Java escape sequences)
+      .replace(/[<>]/g, '')         // Remove angle brackets (generics confusion)
+      .replace(/[()]/g, '')         // Remove parentheses (annotation confusion)
+      .replace(/[\[\]]/g, '')       // Remove square brackets
+      .replace(/[;{}]/g, '')        // Remove semicolons and braces
+      .replace(/\s+/g, ' ')         // Collapse whitespace
+      .trim();
+    const operationDescription = javadoc
+      ? javadoc
+          .replace(/[\n\r]+/g, ' ')
+          .replace(/\\/g, '')          // Remove backslashes
+          .replace(/[<>]/g, '')         // Remove angle brackets
+          .replace(/[()]/g, '')         // Remove parentheses
+          .replace(/[\[\]]/g, '')       // Remove square brackets
+          .replace(/[;{}]/g, '')        // Remove semicolons and braces
+          .replace(/"/g, '\\"')       // Escape double quotes
+          .replace(/\*\//g, '')         // Remove comment closers
+          .replace(/\s+/g, ' ')         // Collapse whitespace
+          .trim()
+          .substring(0, 200)
+      : "";
 
     const basePath2 = `/api/v1/${pluralize(domain.toLowerCase())}`;
     const fullPath = `${basePath2}${endpointPath}`;
@@ -250,15 +273,7 @@ ${builderParts.join("\n")}
     }
 
     endpoints.push(`
-    /**
-     * ${httpMethod} ${fullPath}
-     * ${uc.bianDomain ? `BIAN: ${uc.bianDomain} / ${uc.bianAction}` : `UseCase: ${uc.className}`}
-     * ${javadoc ? javadoc : ""}
-     */
-    @Operation(
-        summary = "${operationSummary}"${operationDescription ? `,
-        description = "${operationDescription}"` : ""}
-    )
+    /** ${httpMethod} ${fullPath} */
     ${httpAnnotation}
     public ResponseEntity<${returnGeneric}> ${methodName}(${paramList}) {
         log.info("${httpMethod} ${fullPath}");
@@ -394,6 +409,23 @@ function resolveRawReturnTypeCtrl(rawType: string, imports: Set<string>, basePac
 
 function addImportsForRawTypeCtrl(resType: string, imports: Set<string>, basePackage: string): void {
   if (resType.includes("<")) return;
+  // v12.9: Add imports for builtin types that need explicit imports (not in java.lang)
+  const BUILTIN_IMPORTS: Record<string, string> = {
+    'BigDecimal': 'import java.math.BigDecimal;',
+    'BigInteger': 'import java.math.BigInteger;',
+    'LocalDate': 'import java.time.LocalDate;',
+    'LocalDateTime': 'import java.time.LocalDateTime;',
+    'LocalTime': 'import java.time.LocalTime;',
+    'Instant': 'import java.time.Instant;',
+    'ZonedDateTime': 'import java.time.ZonedDateTime;',
+    'Duration': 'import java.time.Duration;',
+    'Date': 'import java.util.Date;',
+    'UUID': 'import java.util.UUID;',
+  };
+  if (BUILTIN_IMPORTS[resType]) {
+    imports.add(BUILTIN_IMPORTS[resType]);
+    return;
+  }
   if (JAVA_BUILTIN_TYPES_CTRL.has(resType)) return;
   // v12.7: Use entity.* if the type is a known generated entity, otherwise dto.*
   if (_ctrlKnownEntityNames.has(resType)) {

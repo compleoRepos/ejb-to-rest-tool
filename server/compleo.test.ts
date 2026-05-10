@@ -919,33 +919,27 @@ describe("FIX 3: No duplicate file paths in generated output", () => {
 // FIX 4 — @Operation summary is short (< 80 chars)
 // ═══════════════════════════════════════════════════════════════
 
-describe("FIX 4: @Operation summary is short", () => {
-  it("@Operation summary is under 80 characters", () => {
+describe("FIX 4: Controller javadoc is present (replaces @Operation)", () => {
+  it("controller has javadoc comments instead of @Operation", () => {
     const ir = parseEjbProject(createTestFiles(), SAMPLE_POM, SAMPLE_BIAN);
     const result = generateSpringBootProject(ir);
     const controller = result.files.find(f => f.category === "controller");
     expect(controller).toBeDefined();
-    // Extract all summary = "..." values
-    const summaryMatches = controller!.content.match(/summary\s*=\s*"([^"]*)"/g) || [];
-    expect(summaryMatches.length).toBeGreaterThan(0);
-    for (const match of summaryMatches) {
-      const value = match.replace(/summary\s*=\s*"/, "").replace(/"$/, "");
-      expect(value.length).toBeLessThanOrEqual(80);
-    }
+    // @Operation was removed because special characters in summary/description
+    // caused "illegal start of type" compilation errors.
+    // Controllers now use simple javadoc comments instead.
+    expect(controller!.content).toContain("/**");
+    expect(controller!.content).toContain("*/");
   });
 
-  it("@Operation has separate description when javadoc is present", () => {
+  it("controller javadoc includes HTTP method and path", () => {
     const ir = parseEjbProject(createTestFiles(), SAMPLE_POM, SAMPLE_BIAN);
-    // Add a useCaseDescription to trigger description field
-    if (ir.useCases.length > 0) {
-      (ir.useCases[0] as any).useCaseDescription = "This is a very long description that explains the full business logic of the virement operation including all edge cases and validation rules.";
-    }
     const result = generateSpringBootProject(ir);
     const controller = result.files.find(f => f.category === "controller");
     expect(controller).toBeDefined();
-    // Should have both summary and description
-    expect(controller!.content).toContain("summary =");
-    expect(controller!.content).toContain("description =");
+    // Javadoc should contain the HTTP method (GET, POST, etc.)
+    const hasHttpMethod = /\/\*\*\s*(GET|POST|PUT|DELETE|PATCH)/.test(controller!.content);
+    expect(hasHttpMethod).toBe(true);
   });
 });
 
