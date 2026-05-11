@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{projectName}} · Migration Report — COMPLEO</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bg: #0A0E0C;
+  --bg-elevated: #0F1411;
+  --surface: #131814;
+  --surface-2: #181E1A;
+  --surface-3: #1E2521;
+  --border: #1F2622;
+  --border-soft: #161B17;
+  --text: #FAFAFA;
+  --text-soft: #B5BDB7;
+  --text-muted: #7A8278;
+  --text-faint: #4E544F;
+  --mint: #3FDEA1;
+  --mint-glow: rgba(63, 222, 161, 0.12);
+  --mint-soft: #5BE5B0;
+  --mint-deep: #2BA77A;
+  --yellow: #F4D03F;
+  --blue: #5DADE2;
+  --red: #E57373;
+  --amber: #F39C5C;
+  --diff-add: rgba(63, 222, 161, 0.12);
+  --diff-add-line: #3FDEA1;
+  --diff-del: rgba(229, 115, 115, 0.10);
+  --diff-del-line: #E57373;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; background: var(--bg); }
+
+body {
+  font-family: 'Geist', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "cv11", "tnum";
+  background-image:
+    radial-gradient(circle at 20% 0%, rgba(63, 222, 161, 0.03) 0%, transparent 40%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+.mono { font-family: 'Geist Mono', monospace; font-feature-settings: "tnum"; }
+code, .code { font-family: 'Geist Mono', monospace; font-size: 0.9em; color: var(--mint); background: var(--surface); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border); }
+
+/* === STATUS BAR === */
+.status-bar {
+  position: sticky; top: 0;
+  background: rgba(10, 14, 12, 0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  z-index: 100;
+  padding: 12px 32px;
+  font-size: 11px;
+  font-family: 'Geist Mono', monospace;
+  color: var(--text-muted);
+  display: flex; align-items: center; gap: 28px;
+}
+.status-bar .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 8px var(--mint-glow); display: inline-block; }
+.status-bar .dot.warn { background: var(--yellow); box-shadow: 0 0 8px rgba(244, 208, 63, 0.3); }
+.status-bar .dot.error { background: var(--red); box-shadow: 0 0 8px rgba(229, 115, 115, 0.3); }
+.status-bar .dot.amber { background: var(--amber); box-shadow: 0 0 8px rgba(243, 156, 92, 0.3); }
+.status-bar .dot.grey { background: #555; box-shadow: none; }
+.status-cell { display: flex; gap: 8px; align-items: center; }
+.status-cell .label { color: var(--text-faint); }
+.status-cell .value { color: var(--text-soft); }
+
+/* === HEADER === */
+.report-header {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 48px 32px 24px;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+
+.report-header::before {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(circle at 0% 0%, rgba(63, 222, 161, 0.06) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.report-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+.brand-mark { font-family: 'Geist Mono', monospace; color: var(--mint); font-weight: 600; font-size: 18px; letter-spacing: -0.02em; }
+.brand-name { font-weight: 700; font-size: 14px; color: var(--text); }
+.brand-divider { width: 1px; height: 14px; background: var(--border); }
+.brand-version { font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--text-muted); padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; }
+
+.project-title-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 32px; flex-wrap: wrap; }
+
+.project-eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: 'Geist Mono', monospace; font-size: 12px;
+  color: var(--mint); margin-bottom: 16px;
+  padding: 6px 12px;
+  background: var(--mint-glow);
+  border: 1px solid rgba(63, 222, 161, 0.2);
+  border-radius: 6px;
+}
+.project-eyebrow::before { content: ">_"; color: var(--mint); font-weight: 600; }
+
+h1.project-title {
+  font-size: clamp(40px, 5vw, 56px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--text);
+}
+h1.project-title .pkg {
+  font-family: 'Geist Mono', monospace;
+  font-size: 0.55em;
+  color: var(--text-muted);
+  display: block;
+  margin-top: 12px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.status-pill-lg {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: 'Geist Mono', monospace; font-size: 13px;
+  padding: 12px 18px; border-radius: 8px;
+  font-weight: 600; letter-spacing: 0.04em;
+  border: 1px solid;
+}
+.status-pill-lg.mint { background: rgba(63, 222, 161, 0.08); color: var(--mint); border-color: rgba(63, 222, 161, 0.3); }
+.status-pill-lg.mint::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 8px var(--mint); }
+.status-pill-lg.yellow { background: rgba(244, 208, 63, 0.08); color: var(--yellow); border-color: rgba(244, 208, 63, 0.3); }
+.status-pill-lg.yellow::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+.status-pill-lg.amber { background: rgba(243, 156, 92, 0.08); color: var(--amber); border-color: rgba(243, 156, 92, 0.3); }
+.status-pill-lg.amber::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+.status-pill-lg.red { background: rgba(229, 115, 115, 0.08); color: var(--red); border-color: rgba(229, 115, 115, 0.3); }
+.status-pill-lg.red::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--red); box-shadow: 0 0 8px var(--red); }
+.status-pill-lg.grey { background: rgba(85, 85, 85, 0.08); color: #999; border-color: rgba(85, 85, 85, 0.3); }
+.status-pill-lg.grey::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #555; }
+
+.project-subtitle { font-size: 17px; color: var(--text-soft); margin-top: 20px; max-width: 700px; line-height: 1.55; }
+
+/* === TABS === */
+.tabs-nav {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 32px;
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 49px;
+  background: rgba(10, 14, 12, 0.95);
+  backdrop-filter: blur(12px);
+  z-index: 50;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs-nav::-webkit-scrollbar { display: none; }
+
+.tab-btn {
+  background: none; border: none;
+  font-family: 'Geist', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 18px 20px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all 0.15s;
+  display: flex; align-items: center; gap: 8px;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+.tab-btn:hover { color: var(--text-soft); }
+.tab-btn.active { color: var(--mint); border-bottom-color: var(--mint); }
+.tab-btn .badge {
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  background: var(--surface);
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  font-weight: 500;
+}
+.tab-btn.active .badge { background: var(--mint-glow); color: var(--mint); border-color: rgba(63, 222, 161, 0.2); }
+.tab-btn .count-warn { color: var(--yellow); background: rgba(244, 208, 63, 0.08); border-color: rgba(244, 208, 63, 0.2); }
+.tab-btn .count-mint { color: var(--mint); background: var(--mint-glow); border-color: rgba(63, 222, 161, 0.2); }
+
+/* === TAB CONTENT === */
+main { max-width: 1120px; margin: 0 auto; padding: 48px 32px 80px; }
+.tab-panel { display: none; animation: fadeIn 0.25s ease; }
+.tab-panel.active { display: block; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+h2 { font-size: 32px; font-weight: 700; line-height: 1.1; letter-spacing: -0.03em; color: var(--text); margin-bottom: 12px; }
+h2 .accent { color: var(--mint); }
+h3 { font-size: 18px; font-weight: 600; line-height: 1.3; letter-spacing: -0.02em; color: var(--text); margin-bottom: 10px; }
+h4 { font-family: 'Geist Mono', monospace; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px; }
+
+.section-eyebrow { display: inline-flex; align-items: center; gap: 10px; font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--mint); margin-bottom: 16px; }
+.section-eyebrow::before { content: ""; width: 16px; height: 1px; background: var(--mint); }
+
+p { color: var(--text-soft); margin-bottom: 12px; }
+.lede { font-size: 16px; color: var(--text-soft); line-height: 1.6; max-width: 800px; margin-bottom: 32px; }
+
+/* === KPI CARDS === */
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 40px; }
+.kpi { background: var(--surface); padding: 28px 24px; }
+.kpi .label { font-family: 'Geist Mono', monospace; font-size: 10px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px; letter-spacing: 0.06em; }
+.kpi .value { font-size: 34px; font-weight: 700; line-height: 1; color: var(--text); letter-spacing: -0.03em; }
+.kpi .value.mint { color: var(--mint); }
+.kpi .value.warn { color: var(--yellow); }
+.kpi .value.red { color: var(--red); }
+.kpi .sub { font-size: 12px; color: var(--text-muted); margin-top: 8px; font-family: 'Geist Mono', monospace; }
+
+/* === PIPELINE TIMELINE === */
+.pipeline { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px 32px; margin-bottom: 32px; }
+.pipeline-title { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 24px; }
+.pipeline-title h3 { margin: 0; }
+.pipeline-title .duration { font-family: 'Geist Mono', monospace; font-size: 13px; color: var(--mint); }
+.pipeline-stages { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; position: relative; }
+.stage { background: var(--bg-elevated); border: 1px solid var(--border); padding: 14px 12px; border-radius: 6px; position: relative; }
+.stage.done { border-color: rgba(63, 222, 161, 0.25); background: linear-gradient(180deg, rgba(63, 222, 161, 0.06) 0%, var(--bg-elevated) 100%); }
+.stage.partial { border-color: rgba(244, 208, 63, 0.25); }
+.stage.error { border-color: rgba(229, 115, 115, 0.25); }
+.stage-num { font-family: 'Geist Mono', monospace; font-size: 10px; color: var(--text-muted); margin-bottom: 6px; }
+.stage-name { font-size: 11px; font-weight: 600; color: var(--text); margin-bottom: 4px; line-height: 1.2; }
+.stage.done .stage-name { color: var(--mint-soft); }
+.stage-stat { font-family: 'Geist Mono', monospace; font-size: 10px; color: var(--text-muted); }
+
+/* === SUMMARY CALLOUTS === */
+.summary-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 32px; }
+.callout { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; position: relative; overflow: hidden; }
+.callout::before { content: ""; position: absolute; top: 0; left: 0; width: 3px; height: 32px; background: var(--mint); }
+.callout.warn::before { background: var(--yellow); }
+.callout h3 { font-size: 16px; margin-bottom: 14px; }
+.callout-stat { font-size: 28px; font-weight: 700; line-height: 1; color: var(--mint); letter-spacing: -0.03em; margin-bottom: 8px; }
+.callout.warn .callout-stat { color: var(--yellow); }
+.callout-list { list-style: none; padding: 0; }
+.callout-list li { padding: 6px 0 6px 16px; position: relative; font-size: 13px; color: var(--text-soft); line-height: 1.5; }
+.callout-list li::before { content: "→"; position: absolute; left: 0; color: var(--text-muted); }
+
+/* === TRANSFORMS === */
+.transforms-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 32px; }
+.filter-chip { font-family: 'Geist Mono', monospace; font-size: 11px; padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); cursor: pointer; transition: all 0.15s; }
+.filter-chip:hover { border-color: var(--text-muted); color: var(--text-soft); }
+.filter-chip.active { background: var(--mint-glow); border-color: rgba(63, 222, 161, 0.3); color: var(--mint); }
+.filter-chip .count { opacity: 0.7; }
+.transform-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; margin-bottom: 16px; }
+.transform-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+.transform-category { font-family: 'Geist Mono', monospace; font-size: 10px; text-transform: uppercase; color: var(--mint); letter-spacing: 0.06em; margin-bottom: 6px; }
+.transform-title { font-size: 16px; font-weight: 600; color: var(--text); }
+.transform-stat { font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--text-muted); padding: 4px 10px; background: var(--surface-2); border-radius: 4px; }
+.transform-rationale { font-size: 13px; color: var(--text-soft); line-height: 1.6; margin-bottom: 20px; }
+.diff-block { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; font-family: 'Geist Mono', monospace; font-size: 12px; line-height: 1.8; overflow-x: auto; }
+.diff-line { display: block; }
+.diff-line.diff-del { background: var(--diff-del); color: var(--diff-del-line); }
+.diff-line.diff-add { background: var(--diff-add); color: var(--diff-add-line); }
+.diff-line.diff-ctx { color: var(--text-muted); }
+
+/* === TODO === */
+.todo-summary { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; margin-bottom: 32px; }
+.todo-summary-stats { display: flex; gap: 32px; margin-top: 16px; }
+.todo-stat .label { font-family: 'Geist Mono', monospace; font-size: 10px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px; }
+.todo-stat .value { font-size: 18px; font-weight: 600; color: var(--text); }
+.todo-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; margin-bottom: 16px; }
+.todo-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+.todo-location { font-family: 'Geist Mono', monospace; font-size: 13px; }
+.todo-location .file { color: var(--mint); }
+.todo-location .lineno { color: var(--text-muted); }
+.todo-title { font-size: 16px; font-weight: 600; color: var(--text); margin-top: 6px; }
+.todo-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+.todo-tag { font-family: 'Geist Mono', monospace; font-size: 10px; padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-muted); }
+.todo-tag.severity-high { color: var(--red); border-color: rgba(229, 115, 115, 0.3); background: rgba(229, 115, 115, 0.06); }
+.todo-tag.severity-medium { color: var(--yellow); border-color: rgba(244, 208, 63, 0.3); background: rgba(244, 208, 63, 0.06); }
+.todo-tag.severity-low { color: var(--mint); border-color: rgba(63, 222, 161, 0.3); background: rgba(63, 222, 161, 0.06); }
+.todo-tag.effort { color: var(--blue); border-color: rgba(93, 173, 226, 0.3); background: rgba(93, 173, 226, 0.06); }
+.todo-diagnostic { font-size: 13px; color: var(--text-soft); line-height: 1.6; margin-bottom: 20px; padding: 16px; background: var(--bg-elevated); border-radius: 8px; border: 1px solid var(--border-soft); }
+.todo-section { margin-bottom: 16px; }
+.todo-section h4 { margin-bottom: 8px; }
+
+/* === MAPPINGS === */
+.mapping-section { margin-bottom: 40px; }
+.mapping-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.mapping-table th { font-family: 'Geist Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--border); }
+.mapping-table td { padding: 12px 16px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+.mapping-table .from { color: var(--text-soft); font-family: 'Geist Mono', monospace; font-size: 12px; }
+.mapping-table .to { color: var(--mint); font-family: 'Geist Mono', monospace; font-size: 12px; }
+.mapping-table .arrow-cell { color: var(--text-faint); text-align: center; width: 32px; }
+.mapping-table .count { font-family: 'Geist Mono', monospace; text-align: right; color: var(--text-muted); }
+
+/* === CODE BLOCK === */
+.code-block { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; font-family: 'Geist Mono', monospace; font-size: 12px; line-height: 1.7; overflow-x: auto; white-space: pre; color: var(--text-soft); margin-bottom: 24px; }
+.code-block.fix { border-color: rgba(63, 222, 161, 0.25); }
+
+/* === FILE TREE === */
+.file-tree { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.file-tree-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+.file-tree-item:last-child { border-bottom: none; }
+.file-path { font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--text-muted); }
+.file-path .ext { color: var(--text); }
+.file-stats { display: flex; gap: 12px; font-family: 'Geist Mono', monospace; font-size: 11px; }
+.file-stats .added { color: var(--mint); }
+.file-stats .removed { color: var(--red); }
+
+/* === COMPILE OUTPUT === */
+.compile-output { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; font-family: 'Geist Mono', monospace; font-size: 12px; line-height: 2; overflow-x: auto; white-space: pre-wrap; }
+.compile-output .lineno { color: var(--text-faint); margin-right: 12px; user-select: none; }
+.compile-output .info { color: var(--text-muted); }
+.compile-output .err { color: var(--red); }
+.compile-output .warn { color: var(--yellow); }
+
+/* === DECISIONS === */
+.decision-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px 28px; margin-bottom: 16px; }
+.decision-q { font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--mint); margin-bottom: 10px; letter-spacing: 0.04em; }
+.decision-q::before { content: "Q. "; }
+.decision-a { font-size: 14px; color: var(--text-soft); line-height: 1.6; }
+.decision-a strong { color: var(--text); font-weight: 600; }
+
+/* === PIPELINE ERROR TAB === */
+.pipeline-error-box { background: rgba(229, 115, 115, 0.06); border: 1px solid rgba(229, 115, 115, 0.3); border-radius: 12px; padding: 28px; margin-bottom: 32px; }
+.pipeline-error-box h3 { color: var(--red); }
+
+/* === LLM FALLBACK BANNER === */
+.llm-fallback-banner { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; font-size: 12px; color: var(--text-muted); margin-top: 40px; text-align: center; }
+
+/* === RESPONSIVE === */
+@media (max-width: 900px) {
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  .pipeline-stages { grid-template-columns: repeat(3, 1fr); }
+  .summary-row { grid-template-columns: 1fr; }
+  .report-header { padding: 32px 20px 20px; }
+  .tabs-nav { padding: 0 20px; }
+  main { padding: 32px 20px 60px; }
+  .status-bar { padding: 10px 20px; gap: 16px; flex-wrap: wrap; }
+  h1.project-title { font-size: 36px; }
+  h2 { font-size: 26px; }
+}
+
+/* === PRINT === */
+@media print {
+  body { background: white !important; color: black !important; }
+  .status-bar, .tabs-nav { display: none; }
+  .tab-panel { display: block !important; page-break-before: always; }
+  .tab-panel:first-of-type { page-break-before: auto; }
+}
+</style>
+
+</head>
+<body>
+
+<!-- STATUS BAR -->
+<div class="status-bar">
+  <div class="status-cell"><span class="dot {{statusDotClass}}"></span><span class="value">{{statusLabel}}</span></div>
+  <div class="status-cell"><span class="label">project</span><span class="value">{{projectName}}</span></div>
+  <div class="status-cell"><span class="label">version</span><span class="value">spring-boot-3.2</span></div>
+  <div class="status-cell"><span class="label">generated</span><span class="value">{{generatedDate}}</span></div>
+  <div class="status-cell"><span class="label">compleo</span><span class="value">v13.3</span></div>
+</div>
+
+<!-- HEADER -->
+<div class="report-header">
+  <div class="report-brand">
+    <span class="brand-mark">&gt;_</span>
+    <span class="brand-name">COMPLEO</span>
+    <span class="brand-divider"></span>
+    <span class="brand-version">migration-report</span>
+  </div>
+
+  <div class="project-eyebrow">project.{{projectName}} · {{projectDomain}}</div>
+
+  <div class="project-title-row">
+    <div>
+      <h1 class="project-title">{{projectName}}<span class="pkg">{{sourcePackage}} → {{targetPackage}}</span></h1>
+      <p class="project-subtitle">{{projectDescription}}</p>
+    </div>
+    <div class="status-pill-lg {{statusPillClass}}">{{statusPillText}}</div>
+  </div>
+</div>
+
+<!-- TABS NAVIGATION -->
+<nav class="tabs-nav">
+  {{#if hasPipelineError}}<button class="tab-btn active" data-tab="pipeline-error">⚠ Erreur Pipeline</button>{{/if}}
+  <button class="tab-btn {{#unless hasPipelineError}}active{{/unless}}" data-tab="synthesis">▸ Synthèse</button>
+  <button class="tab-btn" data-tab="transforms">Transformations <span class="badge">{{transformationCount}}</span></button>
+  <button class="tab-btn" data-tab="todos">TODO résiduels <span class="badge {{todoBadgeClass}}">{{todoCount}}</span></button>
+  <button class="tab-btn" data-tab="mappings">Mappings <span class="badge">{{mappingCount}}</span></button>
+  <button class="tab-btn" data-tab="schema">Schéma &amp; Data <span class="badge">{{schemaTableCount}} tbl</span></button>
+  <button class="tab-btn" data-tab="files">Fichiers <span class="badge">{{fileCount}}</span></button>
+  <button class="tab-btn" data-tab="compile">Compile &amp; Tests</button>
+  <button class="tab-btn" data-tab="decisions">Décisions</button>
+</nav>
+
+<main>
+
+{{#if hasPipelineError}}
+<!-- TAB: PIPELINE ERROR -->
+<div class="tab-panel active" id="tab-pipeline-error">
+  <div class="section-eyebrow">erreur pipeline</div>
+  <h2>Le pipeline a <span class="accent" style="color: var(--red);">rencontré une erreur.</span></h2>
+  <p class="lede">Une exception non-récupérable a interrompu le pipeline à l'étape <code>{{pipelineErrorStage}}</code>. Les artefacts produits avant l'erreur sont disponibles ci-dessous dans les autres onglets.</p>
+  <div class="pipeline-error-box">
+    <h3>{{pipelineErrorStage}}</h3>
+    <p style="margin-top: 12px; color: var(--text-soft);">{{pipelineErrorMessage}}</p>
+    <div class="code-block" style="margin-top: 16px;">{{pipelineErrorStack}}</div>
+  </div>
+  <h3 style="margin-top: 32px;">Recommandation</h3>
+  <ol style="padding-left: 24px; color: var(--text-soft); line-height: 1.8;">
+    <li>Vérifier la connectivité réseau et la disponibilité du LLM</li>
+    <li>Relancer la migration de ce projet isolément</li>
+    <li>Si l'erreur persiste, consulter les logs serveur pour diagnostic approfondi</li>
+  </ol>
+</div>
+{{/if}}
+
+<!-- TAB 1: SYNTHÈSE -->
+<div class="tab-panel {{#unless hasPipelineError}}active{{/unless}}" id="tab-synthesis">
+  <div class="section-eyebrow">overview</div>
+  <h2>{{synthesisTitle}}</h2>
+  <p class="lede">{{synthesisLede}}</p>
+
+  <div class="kpis">
+    <div class="kpi">
+      <div class="label">Fichiers traités</div>
+      <div class="value">{{kpiFilesProcessed}}</div>
+      <div class="sub">{{kpiFilesSub}}</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Lignes générées</div>
+      <div class="value">{{kpiLinesGenerated}}</div>
+      <div class="sub">{{kpiLinesSub}}</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Compile</div>
+      <div class="value {{kpiCompileClass}}">{{kpiCompileValue}}</div>
+      <div class="sub">{{kpiCompileSub}}</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Couverture estimée</div>
+      <div class="value mint">{{kpiCoverageValue}}</div>
+      <div class="sub">{{kpiCoverageSub}}</div>
+    </div>
+  </div>
+
+  <!-- Pipeline -->
+  <div class="pipeline">
+    <div class="pipeline-title">
+      <h3>Pipeline d'exécution</h3>
+      <span class="duration">durée totale · {{pipelineDuration}}</span>
+    </div>
+    <div class="pipeline-stages">
+      {{#each pipelineStages}}
+      <div class="stage {{stageClass}}">
+        <div class="stage-num">{{num}}</div>
+        <div class="stage-name">{{name}}</div>
+        <div class="stage-stat">{{stat}}</div>
+      </div>
+      {{/each}}
+    </div>
+  </div>
+
+  <!-- Done / Left -->
+  <div class="summary-row">
+    <div class="callout">
+      <h3>Ce qui a été fait</h3>
+      <div class="callout-stat">{{transformationCount}}</div>
+      <p style="margin: 0; font-size: 13px;">transformations appliquées automatiquement</p>
+      <ul class="callout-list" style="margin-top: 16px;">
+        {{#each doneHighlights}}
+        <li>{{this}}</li>
+        {{/each}}
+      </ul>
+    </div>
+    <div class="callout warn">
+      <h3>Ce qu'il reste à faire</h3>
+      <div class="callout-stat">{{todoCount}}</div>
+      <p style="margin: 0; font-size: 13px;">TODOs résiduels marqués <code>@CompleoTodo</code> dans le code</p>
+      <ul class="callout-list" style="margin-top: 16px;">
+        {{#each leftHighlights}}
+        <li>{{this}}</li>
+        {{/each}}
+      </ul>
+    </div>
+  </div>
+
+  <h3 style="font-size: 22px; margin-top: 48px; margin-bottom: 16px;">Pour le développeur qui reprend le projet</h3>
+  <ol style="padding-left: 24px; color: var(--text-soft); line-height: 1.8;">
+    <li>Lire l'onglet <strong style="color: var(--text);">TODO résiduels</strong> — fixes courts, copiables tels quels</li>
+    <li>Lancer <code>mvn clean compile</code> — attendu : {{todoCount}} erreurs (les TODOs)</li>
+    <li>Appliquer les fixes → attendu : <code>BUILD SUCCESS</code></li>
+    <li>Lancer <code>mvn test</code> — {{testsTotal}} tests générés, ajuster si besoin</li>
+    <li>Lire l'onglet <strong style="color: var(--text);">Décisions</strong> — comprendre les choix architecturaux de COMPLEO avant d'intervenir sur la logique métier</li>
+  </ol>
+</div>
+
+<!-- TAB 2: TRANSFORMATIONS -->
+<div class="tab-panel" id="tab-transforms">
+  <div class="section-eyebrow">transformations appliquées</div>
+  <h2>{{transformationCount}} transformations <span class="accent">par catégorie.</span></h2>
+  <p class="lede">Chaque transformation est tracée : règle appliquée, occurrences, justification, échantillon avant/après. Toutes ont été validées par le compilateur Maven.</p>
+
+  <div class="transforms-filter">
+    <span class="filter-chip active">Toutes <span class="count">· {{transformationCount}}</span></span>
+    {{#each transformCategories}}
+    <span class="filter-chip">{{name}} <span class="count">· {{count}}</span></span>
+    {{/each}}
+  </div>
+
+  {{#each transformCards}}
+  <div class="transform-card">
+    <div class="transform-header">
+      <div>
+        <div class="transform-category">{{category}}</div>
+        <div class="transform-title">{{title}}</div>
+      </div>
+      <div class="transform-stat">{{occurrences}} occurrences</div>
+    </div>
+    <div class="transform-rationale">{{rationale}}</div>
+    <div class="diff-block">
+      {{#each diffLines}}
+      <span class="diff-line {{cls}}">{{text}}</span>
+      {{/each}}
+    </div>
+  </div>
+  {{/each}}
+
+  {{#if hasMoreTransforms}}
+  <p style="margin-top: 32px; padding: 16px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; font-size: 13px; color: var(--text-muted);">
+    <strong style="color: var(--text);">→ {{remainingTransformCount}} autres transformations</strong> dans les catégories restantes. Tableau complet exportable en JSON via <code>.compleo/transformations.json</code>.
+  </p>
+  {{/if}}
+</div>
+
+<!-- TAB 3: TODO RÉSIDUELS -->
+<div class="tab-panel" id="tab-todos">
+  <div class="section-eyebrow">items à finaliser</div>
+  {{#if hasTodos}}
+  <h2>{{todoCountText}}, <span class="accent">{{todoCountPatch}} patches prêts.</span></h2>
+  <p class="lede">Ces items n'ont pas été résolus automatiquement par COMPLEO. Chacun inclut diagnostic complet et patch suggéré. Application : {{todoEffortTotal}} au total.</p>
+
+  <div class="todo-summary">
+    <h3 style="margin-bottom: 4px;">Récapitulatif</h3>
+    <p style="font-size: 14px; color: var(--text-soft); margin: 0;">{{todoCount}} items, dont {{todoCriticalCount}} critique(s), {{todoMinorCount}} mineur(s).</p>
+    <div class="todo-summary-stats">
+      <div class="todo-stat">
+        <div class="label">Effort estimé</div>
+        <div class="value">{{todoEffortTotal}}</div>
+      </div>
+      <div class="todo-stat">
+        <div class="label">Sévérité max</div>
+        <div class="value">{{todoMaxSeverity}}</div>
+      </div>
+      <div class="todo-stat">
+        <div class="label">Fichiers concernés</div>
+        <div class="value">{{todoFileCount}}</div>
+      </div>
+    </div>
+  </div>
+
+  {{#each todoCards}}
+  <div class="todo-card">
+    <div class="todo-header">
+      <div>
+        <div class="todo-location"><span class="file">{{file}}</span> <span class="lineno">:{{line}}:{{column}}</span></div>
+        <div class="todo-title">{{title}}</div>
+      </div>
+      <div class="todo-meta">
+        <span class="todo-tag severity-{{severity}}">severity · {{severity}}</span>
+        <span class="todo-tag effort">effort · {{effortEstimate}}</span>
+        <span class="todo-tag">category · {{category}}</span>
+      </div>
+    </div>
+    <div class="todo-diagnostic">{{diagnostic}}</div>
+    <div class="todo-section">
+      <h4>Code actuel (généré)</h4>
+      <div class="code-block">{{currentCode}}</div>
+    </div>
+    <div class="todo-section">
+      <h4>Patch suggéré</h4>
+      <div class="code-block fix">{{suggestedFix}}</div>
+    </div>
+    <div class="todo-section">
+      <h4>Pourquoi pas auto-fixé</h4>
+      <p style="font-size: 13px; color: var(--text-muted);">{{whyNotAutoFixed}}</p>
+    </div>
+  </div>
+  {{/each}}
+  {{else}}
+  <h2>Aucun résiduel — <span class="accent">projet 100% compile success.</span></h2>
+  <p class="lede">Tous les fichiers compilent sans erreur. Le projet est prêt pour review et tests d'intégration.</p>
+  <div class="callout" style="border-left: 3px solid var(--mint);">
+    <h3 style="color: var(--mint);">✓ BUILD SUCCESS</h3>
+    <p style="margin-top: 8px; font-size: 14px;">Aucune intervention manuelle requise sur la compilation. Passer directement aux tests fonctionnels.</p>
+  </div>
+  {{/if}}
+</div>
+
+<!-- TAB 4: MAPPINGS -->
+<div class="tab-panel" id="tab-mappings">
+  <div class="section-eyebrow">registre de mappings</div>
+  <h2>{{mappingCount}} mappings <span class="accent">legacy → moderne.</span></h2>
+  <p class="lede">Registre exhaustif des correspondances appliquées : imports, annotations, exceptions. Chaque mapping est traçable et réversible.</p>
+
+  <div class="mapping-section">
+    <h3 style="font-size: 18px; margin-bottom: 16px;">Imports remappés</h3>
+    <table class="mapping-table">
+      <thead>
+        <tr><th>Legacy</th><th></th><th>Moderne</th><th style="text-align:right;">Occurrences</th></tr>
+      </thead>
+      <tbody>
+        {{#each mappingImports}}
+        <tr><td class="from">{{from}}</td><td class="arrow-cell">→</td><td class="to">{{to}}</td><td class="count">{{count}}</td></tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="mapping-section">
+    <h3 style="font-size: 18px; margin-bottom: 16px;">Annotations remappées</h3>
+    <table class="mapping-table">
+      <thead>
+        <tr><th>Legacy</th><th></th><th>Moderne</th><th style="text-align:right;">Occurrences</th></tr>
+      </thead>
+      <tbody>
+        {{#each mappingAnnotations}}
+        <tr><td class="from">{{from}}</td><td class="arrow-cell">→</td><td class="to">{{to}}</td><td class="count">{{count}}</td></tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="mapping-section">
+    <h3 style="font-size: 18px; margin-bottom: 16px;">Exceptions remappées</h3>
+    <table class="mapping-table">
+      <thead>
+        <tr><th>Legacy</th><th></th><th>Moderne</th><th style="text-align:right;">Occurrences</th></tr>
+      </thead>
+      <tbody>
+        {{#each mappingExceptions}}
+        <tr><td class="from">{{from}}</td><td class="arrow-cell">→</td><td class="to">{{to}}</td><td class="count">{{count}}</td></tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- TAB 5: SCHÉMA & DATA -->
+<div class="tab-panel" id="tab-schema">
+  <div class="section-eyebrow">schéma source → cible jpa</div>
+  {{#if hasSchema}}
+  <h2>Le schéma <span class="accent">traduit en entités JPA.</span></h2>
+  <p class="lede">{{schemaLede}}</p>
+
+  <div class="kpis">
+    <div class="kpi"><div class="label">Tables analysées</div><div class="value">{{schemaTableCount}}</div><div class="sub">{{schemaSource}}</div></div>
+    <div class="kpi"><div class="label">Entités JPA générées</div><div class="value mint">{{schemaEntityCount}}</div><div class="sub">@Entity + Repository</div></div>
+    <div class="kpi"><div class="label">Champs mappés</div><div class="value">{{schemaFieldCount}}</div><div class="sub">100% nommés</div></div>
+    <div class="kpi"><div class="label">Relations détectées</div><div class="value">{{schemaRelationCount}}</div><div class="sub">FK → @ManyToOne / @OneToMany</div></div>
+  </div>
+
+  {{#if schemaConventions.length}}
+  <div class="callout" style="margin-bottom: 32px; border-left: 3px solid var(--mint);">
+    <h3 style="font-size: 16px; margin-bottom: 16px;">Conventions détectées → Java</h3>
+    <table class="mapping-table" style="margin-top: 0;">
+      <thead>
+        <tr><th>Préfixe</th><th>Sens métier</th><th></th><th>Convention Java</th><th style="text-align:right;">Occurrences</th></tr>
+      </thead>
+      <tbody>
+        {{#each schemaConventions}}
+        <tr><td class="from">{{prefix}}</td><td style="color: var(--text-soft);">{{meaning}}</td><td class="arrow-cell">→</td><td class="to">{{target}}</td><td class="count">{{count}}</td></tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+  {{/if}}
+
+  <h3 style="font-size: 20px; margin: 40px 0 16px;">Tables source → Entités JPA</h3>
+  <table class="mapping-table">
+    <thead>
+      <tr><th>Table</th><th></th><th>Entité JPA</th><th>Repository</th><th style="text-align:right;">Champs</th></tr>
+    </thead>
+    <tbody>
+      {{#each schemaTables}}
+      <tr><td class="from">{{source}}</td><td class="arrow-cell">→</td><td class="to">{{target}}</td><td style="color: var(--text-soft);">{{repository}}</td><td class="count">{{fieldCount}}</td></tr>
+      {{/each}}
+    </tbody>
+  </table>
+
+  {{#if schemaRelations.length}}
+  <h3 style="font-size: 20px; margin: 48px 0 16px;">Relations détectées (FK → annotations JPA)</h3>
+  <table class="mapping-table">
+    <thead><tr><th>Source</th><th>FK</th><th></th><th>Annotation JPA</th><th>Cible</th></tr></thead>
+    <tbody>
+      {{#each schemaRelations}}
+      <tr><td class="from">{{source}}</td><td style="color: var(--text-muted);">{{fk}}</td><td class="arrow-cell">→</td><td class="to">{{annotation}}</td><td style="color: var(--text-soft);">{{target}}</td></tr>
+      {{/each}}
+    </tbody>
+  </table>
+  {{/if}}
+
+  {{else}}
+  <h2>Aucune analyse schéma — <span class="accent">projet sans accès BD.</span></h2>
+  <p class="lede">Ce projet n'utilise pas d'accès base de données direct ou le Schema Decoder n'a pas pu s'exécuter. Aucune entité JPA n'a été générée.</p>
+  {{/if}}
+</div>
+
+<!-- TAB 6: FICHIERS -->
+<div class="tab-panel" id="tab-files">
+  <div class="section-eyebrow">fichiers modifiés</div>
+  <h2>{{fileCount}} fichiers, <span class="accent">{{filesTransformed}} transformés.</span></h2>
+  <p class="lede">Vue arborescente des fichiers les plus modifiés.</p>
+
+  <h3 style="font-size: 16px; margin-bottom: 16px;">Top {{filesTopCount}} fichiers les plus modifiés</h3>
+  <div class="file-tree">
+    {{#each filesTop}}
+    <div class="file-tree-item">
+      <span class="file-path">{{pathPrefix}}<span class="ext">{{fileName}}</span></span>
+      <div class="file-stats"><span class="added">+{{added}}</span><span class="removed">−{{removed}}</span><span>{{status}}</span></div>
+    </div>
+    {{/each}}
+  </div>
+
+  {{#if hasMoreFiles}}
+  <p style="margin-top: 24px; font-size: 13px; color: var(--text-muted);">
+    → {{remainingFileCount}} autres fichiers. Inventaire complet en <code>.compleo/files-manifest.json</code>.
+  </p>
+  {{/if}}
+</div>
+
+<!-- TAB 7: COMPILE & TESTS -->
+<div class="tab-panel" id="tab-compile">
+  <div class="section-eyebrow">log compile maven</div>
+  <h2>Compile output <span class="accent">final pass.</span></h2>
+  <p class="lede">Sortie verbatim de <code>mvn clean compile</code> après les itérations d'autofix. {{todoCount}} erreurs résiduelles.</p>
+
+  <div class="compile-output">{{compileLogFormatted}}</div>
+
+  <h3 style="font-size: 18px; margin: 40px 0 16px;">Tests générés</h3>
+  <div class="kpis">
+    <div class="kpi"><div class="label">Tests JUnit</div><div class="value">{{testsTotal}}</div><div class="sub">générés par COMPLEO</div></div>
+    <div class="kpi"><div class="label">Tests Controller</div><div class="value">{{testsController}}</div><div class="sub">MockMvc</div></div>
+    <div class="kpi"><div class="label">Tests Service</div><div class="value">{{testsService}}</div><div class="sub">Mockito</div></div>
+    <div class="kpi"><div class="label">Couverture est.</div><div class="value mint">{{testsCoverage}}</div><div class="sub">lignes générées</div></div>
+  </div>
+
+  <p style="margin-top: 24px; font-size: 13px; color: var(--text-muted);">
+    Les tests sont du <strong>scaffolding</strong> — ils valident la structure mais doivent être enrichis par le dev avec des assertions métier réelles.
+  </p>
+</div>
+
+<!-- TAB 8: DÉCISIONS -->
+<div class="tab-panel" id="tab-decisions">
+  <div class="section-eyebrow">choix architecturaux</div>
+  <h2>Pourquoi COMPLEO <span class="accent">a tranché comme ça.</span></h2>
+  <p class="lede">Une migration n'est pas qu'une translation. Cette section trace les décisions structurantes pour que le dev qui reprend le projet comprenne le "pourquoi", pas seulement le "quoi".</p>
+
+  {{#each decisions}}
+  <div class="decision-card">
+    <div class="decision-q">{{question}}</div>
+    <p class="decision-a">{{{answer}}}</p>
+  </div>
+  {{/each}}
+</div>
+
+{{#if llmFallbackUsed}}
+<div class="llm-fallback-banner">Note : enrichissement LLM indisponible lors de la génération — contenu basé sur les règles statiques uniquement.</div>
+{{/if}}
+
+</main>
+
+<script>
+// Tab switching
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const targetTab = btn.getAttribute('data-tab');
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + targetTab).classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+});
+
+// Filter chips (visual only)
+document.querySelectorAll('.filter-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+  });
+});
+</script>
+
+</body>
+</html>

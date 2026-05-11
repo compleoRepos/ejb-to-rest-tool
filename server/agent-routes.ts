@@ -18,6 +18,8 @@ import { getAgent, getAgentStore, type AgentConfig, type AgentEvent } from "./ag
 import * as db from "./db";
 import { getDb } from "./db";
 import archiver from "archiver";
+import { ProjectReportGenerator } from "./engine/report/ProjectReportGenerator";
+import type { ReportInput } from "./engine/report/ProjectReportGenerator";
 import { LearningEngine } from "./learning/LearningEngine";
 import type { ChoiceWithAutoResolve } from "./learning/ConfidenceScorer";
 import { storagePut } from "./storage";
@@ -446,6 +448,35 @@ export function registerAgentRoutes(app: Express) {
           zipEntries.set(fileName, content);
         }
       }
+    }
+
+    // 6. Generate project delivery report (v13.3 — always produces output)
+    try {
+      const reportInput: ReportInput = {
+        projectName: session.config?.options?.projectName || projectName,
+        sourcePackage: (session.config?.options as any)?.sourcePackage || undefined,
+        targetPackage: (session.config?.options as any)?.targetPackage || undefined,
+        projectDomain: (session.config?.options as any)?.projectDomain || undefined,
+        analysisResult: session.analysisResult || undefined,
+        ir: session.ir || undefined,
+        generatedProject: session.generatedProject || undefined,
+        compilationResult: session.compilationResult || undefined,
+        schemaResult: undefined,
+        pipelineError: session.errorMessage ? { stage: session.currentPhase || "unknown", message: session.errorMessage } : null,
+        durationMs: session.updatedAt - session.createdAt,
+        userChoices: session.userChoices?.map(c => ({ ambiguityId: c.ambiguityId, chosenOption: c.choiceId })),
+      };
+      const report = await ProjectReportGenerator.generate(reportInput);
+      zipEntries.set("DELIVERY_REPORT.html", report.html);
+      zipEntries.set(".compleo/transformations.json", report.artifacts.transformationsJson);
+      zipEntries.set(".compleo/todos.json", report.artifacts.todosJson);
+      zipEntries.set(".compleo/files-manifest.json", report.artifacts.filesManifestJson);
+      if (report.artifacts.schemaMappingJson) {
+        zipEntries.set(".compleo/schema-mapping.json", report.artifacts.schemaMappingJson);
+      }
+      console.log(`[Agent] Delivery report generated: status=${report.status}`);
+    } catch (reportErr) {
+      console.warn("[Agent] Report generation failed (non-blocking):", reportErr);
     }
 
     // ─── v10.0: Build ZIP buffer, upload to S3, then serve ──────────────

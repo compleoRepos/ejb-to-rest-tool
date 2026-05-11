@@ -599,3 +599,11 @@
 - [x] Bouton "Rapport HTML" dans WorkspaceAnalysis.tsx
 - [x] 4 tests unitaires (4/4 PASS)
 - [x] Non-régression : 106/114 fichiers PASS (8 FAIL pré-existants, non liés à v13.2)
+
+## v13.3 — ProjectReportGenerator (Rapport HTML livrable par projet)
+- [x] Template HTML Handlebars (project-report.html.template) — fidèle au mockup avis-opere
+- [x] ProjectReportGenerator.ts — 8 renderers, 5 prompts LLM, fallback rule-based, cache
+- [x] Intégration pipeline zip (agent-routes.ts) — DELIVERY_REPORT.html + .compleo/ artifacts
+- [x] 5 tests unitaires (5/5 PASS, 41ms)
+- [x] Pipeline resilience : try/catch global, non-blocking, 5 statuts (Ready/Near-complete/Partial/Needs-review/Pipeline-error)
+- [x] Artifacts JSON : transformations.json, todos.json, files-manifest.json, schema-mapping.json
