@@ -13,7 +13,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Network, Loader2, AlertTriangle, CheckCircle2,
   Layers, ArrowRight, Download, ChevronDown, ChevronUp,
-  GitBranch, Package, Clock, FileCode2, Zap,
+  GitBranch, Package, Clock, FileCode2, Zap, FileText,
 } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -163,15 +163,27 @@ export default function WorkspaceAnalysis({ workspaceId, workspaceName }: Props)
             Analyse complète — {result.graph.projects.length} projets
           </span>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={runAnalysis}
-          disabled={loading}
-          className="text-[oklch(0.6_0.01_250)] border-[oklch(0.25_0.01_250)]"
-        >
-          <Zap className="w-3.5 h-3.5 mr-1" /> Relancer
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              window.open(`/api/workspace/${workspaceId}/report.html`, '_blank');
+            }}
+            className="text-emerald-400 border-emerald-600/40 hover:bg-emerald-600/10"
+          >
+            <FileText className="w-3.5 h-3.5 mr-1" /> Rapport HTML
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={runAnalysis}
+            disabled={loading}
+            className="text-[oklch(0.6_0.01_250)] border-[oklch(0.25_0.01_250)]"
+          >
+            <Zap className="w-3.5 h-3.5 mr-1" /> Relancer
+          </Button>
+        </div>
       </div>
 
       {/* ─── DAG Diagram ─────────────────────────────────────────────────── */}

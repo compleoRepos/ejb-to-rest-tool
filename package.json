@@ -78,6 +78,7 @@
     "express": "^4.21.2",
     "file-saver": "^2.0.5",
     "framer-motion": "^12.23.22",
+    "handlebars": "^4.7.9",
     "input-otp": "^1.4.2",
     "isomorphic-git": "^1.37.5",
     "java-parser": "^3.0.1",

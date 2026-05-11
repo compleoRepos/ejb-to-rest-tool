@@ -27,6 +27,8 @@ import type { ProjectIR } from "./java-parser";
 
 import { generateSpringBootProject } from "./spring-generator";
 import { storagePut } from "./storage";
+import { WorkspaceReportGenerator } from "./engine/workspace/WorkspaceReportGenerator";
+import type { ReportInput } from "./engine/workspace/WorkspaceReportGenerator";
 
 const router = Router();
 const resolver = new CrossModuleResolver();
@@ -644,6 +646,75 @@ router.post("/:id/analyze", async (req: Request, res: Response) => {
     return res.json(response);
   } catch (err: any) {
     console.error("[Workspace] Analyze error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /api/workspace/:id/report.html — Generate HTML report ──────────────────
+
+router.get("/:id/report.html", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database unavailable" });
+
+    // Load workspace
+    const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, id));
+    if (!workspace) return res.status(404).json({ error: "Workspace not found" });
+
+    // Load sessions
+    const sessions = await db.select().from(workspaceSessions).where(eq(workspaceSessions.workspaceId, id));
+    if (sessions.length === 0) {
+      return res.status(400).json({ error: "Workspace has no projects" });
+    }
+
+    // Build workspace map
+    const { DependencyAnalyzer } = await import("./engine/workspace/DependencyAnalyzer");
+    const { MigrationPlanner } = await import("./engine/workspace/MigrationPlanner");
+    type WorkspaceType = import("./engine/workspace/DependencyAnalyzer").Workspace;
+    const workspaceMap: WorkspaceType = new Map();
+
+    for (const session of sessions) {
+      const store = sessionStore.get(session.sessionId);
+      if (!store?.files) continue;
+      const fileMap = new Map<string, string>();
+      for (const [path, content] of Object.entries(store.files)) {
+        if (typeof content === 'string') fileMap.set(path, content);
+      }
+      workspaceMap.set(session.projectName || session.sessionId, fileMap);
+    }
+
+    if (workspaceMap.size === 0) {
+      return res.status(400).json({ error: "No project files found in session store" });
+    }
+
+    // Run analysis
+    const analyzer = new DependencyAnalyzer();
+    const graph = analyzer.analyze(workspaceMap);
+    const planner = new MigrationPlanner();
+    const plan = planner.plan(graph);
+
+    // Generate report
+    const reportGenerator = new WorkspaceReportGenerator();
+    const reportInput: ReportInput = {
+      workspaceName: workspace.name,
+      reportDate: new Date(),
+      reference: `WSA-${new Date().toISOString().slice(0, 10)}`,
+      graph,
+      plan,
+    };
+
+    const { html, warnings } = await reportGenerator.generate(reportInput);
+
+    if (warnings.length > 0) {
+      console.log(`[Workspace Report] Warnings: ${warnings.join(", ")}`);
+    }
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Content-Disposition", `inline; filename="${workspace.name}-audit-report.html"`);
+    return res.send(html);
+  } catch (err: any) {
+    console.error("[Workspace Report] Error:", err);
     return res.status(500).json({ error: err.message });
   }
 });

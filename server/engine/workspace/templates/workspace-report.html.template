@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{workspaceName}} — Workspace Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bg: #0A0E0C;
+  --bg-elevated: #0F1411;
+  --surface: #131814;
+  --surface-2: #181E1A;
+  --surface-3: #1E2521;
+  --border: #1F2622;
+  --border-soft: #161B17;
+  --text: #FAFAFA;
+  --text-soft: #B5BDB7;
+  --text-muted: #7A8278;
+  --text-faint: #4E544F;
+  --mint: #3FDEA1;
+  --mint-glow: rgba(63, 222, 161, 0.12);
+  --mint-soft: #5BE5B0;
+  --mint-deep: #2BA77A;
+  --yellow: #F4D03F;
+  --blue: #5DADE2;
+  --red: #E57373;
+  --amber: #F39C5C;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  scroll-behavior: smooth;
+  background: var(--bg);
+}
+
+body {
+  font-family: 'Geist', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  font-weight: 400;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "cv11", "tnum";
+  background-image:
+    radial-gradient(circle at 20% 0%, rgba(63, 222, 161, 0.04) 0%, transparent 50%),
+    radial-gradient(circle at 80% 60%, rgba(63, 222, 161, 0.02) 0%, transparent 50%);
+  background-attachment: fixed;
+}
+
+.mono { font-family: 'Geist Mono', monospace; font-feature-settings: "tnum"; }
+
+main { max-width: 1120px; margin: 0 auto; padding: 0 32px; }
+
+.status-bar {
+  position: sticky; top: 0;
+  background: rgba(10, 14, 12, 0.92);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  z-index: 100; padding: 12px 32px;
+  font-size: 11px; letter-spacing: 0.04em;
+  font-family: 'Geist Mono', monospace;
+  color: var(--text-muted);
+  display: flex; align-items: center; gap: 28px;
+}
+.status-bar .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 8px var(--mint-glow); display: inline-block; }
+.status-cell { display: flex; gap: 8px; align-items: center; }
+.status-cell .label { color: var(--text-faint); }
+.status-cell .value { color: var(--text-soft); }
+
+.cover {
+  min-height: 95vh; padding: 80px 32px 64px;
+  max-width: 1120px; margin: 0 auto;
+  display: flex; flex-direction: column; justify-content: space-between;
+  position: relative;
+}
+.cover::before {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(circle at 30% 30%, rgba(63, 222, 161, 0.08) 0%, transparent 40%), linear-gradient(180deg, transparent 0%, var(--bg) 90%);
+  pointer-events: none; z-index: -1;
+}
+.cover-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 0 0; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-mark { font-family: 'Geist Mono', monospace; color: var(--mint); font-weight: 600; font-size: 18px; letter-spacing: -0.02em; }
+.brand-name { font-weight: 700; font-size: 14px; letter-spacing: -0.01em; color: var(--text); }
+.brand-divider { width: 1px; height: 14px; background: var(--border); }
+.brand-version { font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--text-muted); padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; }
+.confidential { font-family: 'Geist Mono', monospace; font-size: 11px; letter-spacing: 0.08em; color: var(--red); text-transform: uppercase; }
+.cover-body { padding: 80px 0 64px; }
+.cover-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--mint); margin-bottom: 32px; padding: 6px 12px; background: var(--mint-glow); border: 1px solid rgba(63, 222, 161, 0.2); border-radius: 6px; letter-spacing: 0.02em; }
+.cover-eyebrow::before { content: ">_"; color: var(--mint); font-weight: 600; }
+h1.cover-title { font-size: clamp(48px, 7vw, 88px); font-weight: 700; line-height: 0.96; letter-spacing: -0.04em; color: var(--text); margin-bottom: 24px; max-width: 900px; }
+h1.cover-title .accent { color: var(--mint); display: block; }
+.cover-subtitle { font-size: 20px; line-height: 1.5; color: var(--text-soft); max-width: 720px; font-weight: 400; letter-spacing: -0.01em; }
+.cover-meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-top: 56px; }
+.meta-cell { background: var(--surface); padding: 28px 24px; transition: background 0.2s; }
+.meta-cell:hover { background: var(--surface-2); }
+.meta-cell .label { font-family: 'Geist Mono', monospace; font-size: 10px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px; letter-spacing: 0.06em; }
+.meta-cell .value { font-size: 38px; font-weight: 700; line-height: 1; color: var(--text); letter-spacing: -0.03em; }
+.meta-cell .value-sub { font-size: 12px; color: var(--text-muted); margin-top: 8px; font-family: 'Geist Mono', monospace; }
+.cover-footer { display: flex; justify-content: space-between; align-items: center; font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--text-faint); padding-top: 24px; border-top: 1px solid var(--border); }
+
+section { padding: 96px 0; border-top: 1px solid var(--border); position: relative; }
+.section-eyebrow { display: inline-flex; align-items: center; gap: 10px; font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--mint); margin-bottom: 20px; letter-spacing: 0.02em; }
+.section-eyebrow::before { content: ""; width: 16px; height: 1px; background: var(--mint); }
+h2 { font-size: 44px; font-weight: 700; line-height: 1.05; letter-spacing: -0.03em; color: var(--text); margin-bottom: 20px; max-width: 900px; }
+h2 .accent { color: var(--mint); }
+.lede { font-size: 18px; font-weight: 400; line-height: 1.55; color: var(--text-soft); max-width: 720px; margin-bottom: 48px; letter-spacing: -0.01em; }
+h3 { font-size: 22px; font-weight: 600; line-height: 1.3; letter-spacing: -0.02em; color: var(--text); margin-bottom: 12px; }
+h4 { font-family: 'Geist Mono', monospace; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px; }
+p { margin-bottom: 14px; color: var(--text-soft); max-width: 720px; font-size: 14px; }
+p.intro { font-size: 15px; line-height: 1.65; }
+code, .code { font-family: 'Geist Mono', monospace; font-size: 0.9em; color: var(--mint); background: var(--surface); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border); }
+
+.findings { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 48px; }
+.finding { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 32px; display: flex; flex-direction: column; position: relative; overflow: hidden; transition: all 0.2s; }
+.finding:hover { border-color: var(--mint-deep); background: var(--surface-2); }
+.finding::before { content: ""; position: absolute; top: 0; left: 0; width: 3px; height: 40px; background: var(--mint); border-radius: 0 2px 2px 0; }
+.finding.critical::before { background: var(--red); }
+.finding-num { font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--mint); letter-spacing: 0.08em; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+.finding.critical .finding-num { color: var(--red); }
+.finding-tag { font-family: 'Geist Mono', monospace; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 500; padding: 4px 8px; border-radius: 4px; background: var(--mint-glow); color: var(--mint); border: 1px solid rgba(63, 222, 161, 0.2); }
+.finding.critical .finding-tag { background: rgba(229, 115, 115, 0.1); color: var(--red); border-color: rgba(229, 115, 115, 0.2); }
+.finding h3 { font-size: 19px; margin-bottom: 12px; }
+.finding p { font-size: 14px; line-height: 1.6; flex: 1; margin-bottom: 0; color: var(--text-soft); }
+
+.metrics { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin: 40px 0; }
+.metric { background: var(--surface); padding: 28px 20px; display: flex; flex-direction: column; gap: 6px; transition: background 0.2s; }
+.metric:hover { background: var(--surface-2); }
+.metric-icon { width: 20px; height: 20px; margin-bottom: 12px; color: var(--mint); opacity: 0.8; }
+.metric-value { font-size: 32px; font-weight: 700; line-height: 1; color: var(--text); letter-spacing: -0.03em; font-feature-settings: "tnum"; }
+.metric-label { font-family: 'Geist Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
+
+.dag-container { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 40px; margin-top: 32px; position: relative; overflow: hidden; }
+.dag-container::before { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 50% 0%, var(--mint-glow) 0%, transparent 60%); pointer-events: none; }
+.dag-tier-label { font-family: 'Geist Mono', monospace; font-size: 11px; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 20px; display: flex; align-items: center; gap: 12px; text-transform: uppercase; position: relative; }
+.dag-tier-label .badge { font-size: 10px; padding: 4px 10px; background: var(--mint-glow); color: var(--mint); border: 1px solid rgba(63, 222, 161, 0.2); border-radius: 4px; letter-spacing: 0.06em; font-weight: 600; }
+.dag-tier { display: grid; gap: 12px; margin-bottom: 32px; position: relative; }
+.dag-tier-0 { grid-template-columns: repeat(4, 1fr); }
+.dag-tier-1 { grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.dag-node { background: var(--bg-elevated); border: 1px solid var(--border); padding: 16px 14px; border-radius: 8px; position: relative; transition: all 0.2s ease; }
+.dag-node:hover { border-color: var(--mint-deep); background: var(--surface-2); transform: translateY(-1px); }
+.dag-tier-0 .dag-node { background: linear-gradient(180deg, rgba(63, 222, 161, 0.05) 0%, var(--surface) 100%); border-color: rgba(63, 222, 161, 0.15); }
+.dag-node-name { font-family: 'Geist Mono', monospace; font-size: 12px; font-weight: 500; color: var(--text); margin-bottom: 8px; word-break: break-word; }
+.dag-tier-0 .dag-node-name { color: var(--mint-soft); }
+.dag-node-role { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; line-height: 1.4; }
+.dag-node-stat { font-family: 'Geist Mono', monospace; font-size: 10px; color: var(--mint); letter-spacing: 0.04em; }
+.dag-tier-1 .dag-node-name { font-size: 11px; }
+.dag-tier-1 .dag-node-stat { font-size: 9px; color: var(--text-muted); }
+.dag-arrow { text-align: center; font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--text-muted); margin: -8px 0 24px; letter-spacing: 0.08em; }
+.dag-arrow .icon { color: var(--mint); font-size: 18px; display: block; margin-bottom: 4px; }
+
+.frameworks-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 48px; }
+.framework { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 32px; position: relative; transition: all 0.2s; overflow: hidden; }
+.framework:hover { border-color: var(--mint-deep); background: var(--surface-2); }
+.framework::before { content: ""; position: absolute; top: -50%; right: -20%; width: 200px; height: 200px; background: radial-gradient(circle, var(--mint-glow) 0%, transparent 70%); opacity: 0; transition: opacity 0.3s; }
+.framework:hover::before { opacity: 1; }
+.framework-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border); position: relative; }
+.framework-package { font-family: 'Geist Mono', monospace; font-size: 13px; font-weight: 500; color: var(--mint); margin-bottom: 6px; }
+.framework-title { font-size: 18px; font-weight: 600; color: var(--text); letter-spacing: -0.02em; }
+.framework-imports { font-size: 32px; font-weight: 700; color: var(--text); line-height: 1; letter-spacing: -0.03em; text-align: right; }
+.framework-imports small { display: block; font-family: 'Geist Mono', monospace; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); font-weight: 500; margin-top: 4px; }
+.framework-role { font-size: 14px; line-height: 1.6; color: var(--text-soft); margin-bottom: 20px; }
+.framework-target { font-size: 13px; padding: 14px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-left: 2px solid var(--mint); border-radius: 6px; margin-top: 16px; position: relative; }
+.framework-target .label { font-family: 'Geist Mono', monospace; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mint); display: block; margin-bottom: 6px; font-weight: 600; }
+.framework-target .value { font-family: 'Geist Mono', monospace; font-size: 13px; color: var(--text); }
+.framework-classes { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
+.framework-classes h4 { font-size: 10px; margin-bottom: 12px; }
+.class-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.class-list li { display: flex; justify-content: space-between; align-items: baseline; font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--text-soft); padding: 4px 0; }
+.class-list .count { color: var(--mint); font-weight: 600; font-feature-settings: "tnum"; }
+
+.callflow { margin-top: 32px; padding: 28px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; font-family: 'Geist Mono', monospace; font-size: 12.5px; overflow-x: auto; position: relative; }
+.callflow::before { content: "▸  call-flow.trace"; display: block; font-size: 10px; color: var(--text-muted); margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); letter-spacing: 0.04em; }
+.callflow-line { display: flex; align-items: center; padding: 6px 0; gap: 12px; color: var(--text-soft); }
+.callflow-line .arrow { color: var(--mint); font-weight: 700; }
+.callflow-line .actor { color: var(--text); font-weight: 500; min-width: 130px; }
+.callflow-line .target { color: var(--mint); font-weight: 500; }
+.callflow-comment { color: var(--text-muted); padding: 2px 0 6px 142px; font-size: 11px; font-style: italic; }
+.callflow-comment::before { content: "// "; color: var(--text-faint); }
+
+.timeline { margin-top: 48px; }
+.phase { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 36px; margin-bottom: 20px; display: grid; grid-template-columns: 220px 1fr; gap: 36px; position: relative; transition: all 0.2s; }
+.phase:hover { border-color: var(--mint-deep); }
+.phase-marker { border-right: 1px solid var(--border); padding-right: 28px; }
+.phase-num { font-family: 'Geist Mono', monospace; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mint); font-weight: 600; margin-bottom: 16px; }
+.phase-duration { font-size: 36px; font-weight: 700; color: var(--text); line-height: 1; letter-spacing: -0.03em; }
+.phase-duration small { font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--text-muted); font-weight: 500; margin-left: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+.phase-content h3 { font-size: 22px; margin-bottom: 12px; }
+.phase-content .lede { font-size: 14px; line-height: 1.6; margin-bottom: 24px; max-width: none; color: var(--text-soft); }
+.phase-items { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 20px; }
+.phase-item { font-family: 'Geist Mono', monospace; font-size: 11.5px; padding: 10px 14px; background: var(--bg-elevated); border-left: 2px solid var(--mint-deep); border-radius: 4px; color: var(--text-soft); }
+.phase-rationale { font-size: 13px; line-height: 1.6; color: var(--text-muted); padding: 16px 0 0; border-top: 1px solid var(--border); margin-top: 24px; font-style: italic; }
+
+.projects-grid { margin-top: 40px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.projects-header { display: grid; grid-template-columns: 56px 1fr 140px 110px 90px 100px; padding: 16px 24px; gap: 16px; background: var(--bg-elevated); border-bottom: 1px solid var(--border); font-family: 'Geist Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); font-weight: 600; }
+.projects-header > div:nth-child(4), .projects-header > div:nth-child(5), .projects-header > div:nth-child(6) { text-align: right; }
+.project-row { display: grid; grid-template-columns: 56px 1fr 140px 110px 90px 100px; padding: 20px 24px; border-bottom: 1px solid var(--border-soft); align-items: center; gap: 16px; transition: background 0.15s; }
+.project-row:last-child { border-bottom: none; }
+.project-row:hover { background: var(--surface-2); }
+.project-num { font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--text-faint); font-weight: 500; }
+.project-name { font-family: 'Geist Mono', monospace; font-size: 13px; color: var(--text); font-weight: 500; }
+.project-desc { font-size: 12px; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
+.project-domain { font-family: 'Geist Mono', monospace; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mint); font-weight: 600; }
+.project-metric { font-size: 16px; color: var(--text); font-weight: 600; text-align: right; font-feature-settings: "tnum"; letter-spacing: -0.02em; }
+.project-metric small { font-family: 'Geist Mono', monospace; font-size: 9px; color: var(--text-muted); text-transform: uppercase; font-weight: 500; letter-spacing: 0.08em; display: block; margin-top: 2px; }
+.project-status { text-align: right; }
+.status-pill { display: inline-flex; align-items: center; gap: 6px; font-family: 'Geist Mono', monospace; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; padding: 5px 10px; border-radius: 4px; border: 1px solid; }
+.status-pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; }
+.status-pill.ok { background: var(--mint-glow); color: var(--mint); border-color: rgba(63, 222, 161, 0.2); }
+.status-pill.ok::before { background: var(--mint); box-shadow: 0 0 6px var(--mint); }
+.status-pill.warn { background: rgba(244, 208, 63, 0.08); color: var(--yellow); border-color: rgba(244, 208, 63, 0.2); }
+.status-pill.warn::before { background: var(--yellow); }
+.status-pill.crit { background: rgba(229, 115, 115, 0.08); color: var(--red); border-color: rgba(229, 115, 115, 0.2); }
+.status-pill.crit::before { background: var(--red); }
+
+.risks-list { margin-top: 48px; }
+.risk { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; margin-bottom: 16px; display: grid; grid-template-columns: 80px 1fr 160px; gap: 28px; align-items: start; transition: all 0.2s; }
+.risk:hover { border-color: var(--mint-deep); }
+.risk-level { font-family: 'Geist Mono', monospace; font-size: 32px; font-weight: 700; line-height: 1; letter-spacing: -0.03em; padding: 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; text-align: center; }
+.risk-level.high { color: var(--red); border-color: rgba(229, 115, 115, 0.3); }
+.risk-level.med { color: var(--yellow); border-color: rgba(244, 208, 63, 0.3); }
+.risk-level.low { color: var(--mint); border-color: rgba(63, 222, 161, 0.3); }
+.risk-content h3 { font-size: 18px; margin-bottom: 8px; }
+.risk-content p { font-size: 14px; line-height: 1.6; max-width: none; margin-bottom: 14px; color: var(--text-soft); }
+.risk-mitigation { font-size: 13px; padding: 12px 14px; background: var(--bg-elevated); border-left: 2px solid var(--mint); border-radius: 4px; color: var(--text-soft); line-height: 1.6; }
+.risk-mitigation strong { color: var(--mint); font-weight: 600; }
+.risk-meta { text-align: right; }
+.risk-meta .label { font-family: 'Geist Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
+.risk-meta .value { font-size: 16px; color: var(--text); font-weight: 600; letter-spacing: -0.02em; }
+
+.glossary { margin-top: 40px; columns: 2; column-gap: 32px; }
+.glossary-item { break-inside: avoid; margin-bottom: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+.glossary-term { font-family: 'Geist Mono', monospace; font-size: 13px; font-weight: 600; color: var(--mint); margin-bottom: 8px; }
+.glossary-def { font-size: 13px; color: var(--text-soft); line-height: 1.55; }
+
+footer { border-top: 1px solid var(--border); margin-top: 64px; padding: 48px 32px 64px; max-width: 1120px; margin-left: auto; margin-right: auto; display: flex; justify-content: space-between; font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--text-muted); }
+footer .brand-mark { font-size: 14px; color: var(--mint); }
+
+@media (max-width: 900px) {
+  main, .cover, footer { padding-left: 20px; padding-right: 20px; }
+  .findings { grid-template-columns: 1fr; }
+  .frameworks-grid { grid-template-columns: 1fr; }
+  .cover-meta { grid-template-columns: repeat(2, 1fr); }
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+  .phase { grid-template-columns: 1fr; }
+  .phase-marker { border-right: none; border-bottom: 1px solid var(--border); padding-bottom: 20px; padding-right: 0; }
+  .project-row, .projects-header { grid-template-columns: 32px 1fr 80px; row-gap: 4px; gap: 12px; padding: 16px; }
+  .projects-header > div:nth-child(n+4), .project-row > div:nth-child(n+4) { grid-column: span 3; text-align: left; }
+  .glossary { columns: 1; }
+  .risk { grid-template-columns: 1fr; gap: 16px; }
+  .risk-level { display: inline-block; padding: 8px 16px; }
+  h2 { font-size: 32px; }
+  h1.cover-title { font-size: 48px; }
+  .status-bar { flex-wrap: wrap; gap: 12px; padding: 10px 20px; }
+}
+
+@media print {
+  body { background: white !important; color: black !important; font-size: 10px; background-image: none !important; }
+  .status-bar, .cover-footer .mono::after { display: none; }
+  section { padding: 24px 0; page-break-inside: avoid; }
+  .cover { min-height: auto; }
+  .finding, .framework, .phase, .risk { page-break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+
+<!-- STATUS BAR -->
+<div class="status-bar">
+  <div class="status-cell"><span class="dot"></span><span class="value">v13.2</span></div>
+  <div class="status-cell"><span class="label">LLM</span><span class="value">{{llmStatus}}</span></div>
+  <div class="status-cell"><span class="label">workspace</span><span class="value">{{workspaceSlug}}</span></div>
+  <div class="status-cell"><span class="label">analyzed</span><span class="value">{{reportDate}}</span></div>
+</div>
+
+<!-- COVER -->
+<div class="cover">
+  <div class="cover-header">
+    <div class="brand">
+      <span class="brand-mark">&gt;_</span>
+      <span class="brand-name">COMPLEO</span>
+      <span class="brand-divider"></span>
+      <span class="brand-version">workspace-audit</span>
+    </div>
+    <div class="confidential">&#x25CF; Confidentiel</div>
+  </div>
+
+  <div class="cover-body">
+    <div class="cover-eyebrow">workspace.analyze --target={{workspaceSlug}}</div>
+    <h1 class="cover-title">{{coverTitle}}<br><span class="accent">{{coverSubtitle}}</span></h1>
+    <p class="cover-subtitle">{{executiveSummary}}</p>
+  </div>
+
+  <div class="cover-meta">
+    <div class="meta-cell">
+      <div class="label">P&eacute;rim&egrave;tre</div>
+      <div class="value">{{projectCount}}</div>
+      <div class="value-sub">services {{workspaceSlug}}</div>
+    </div>
+    <div class="meta-cell">
+      <div class="label">Code analys&eacute;</div>
+      <div class="value">{{totalFiles}}</div>
+      <div class="value-sub">fichiers &middot; ~{{totalLocK}}K LOC</div>
+    </div>
+    <div class="meta-cell">
+      <div class="label">Frameworks</div>
+      <div class="value">{{frameworkCount}}</div>
+      <div class="value-sub">couches transverses</div>
+    </div>
+    <div class="meta-cell">
+      <div class="label">Tiers migration</div>
+      <div class="value">{{tierCount}}</div>
+      <div class="value-sub">parall&eacute;lisable T1</div>
+    </div>
+  </div>
+
+  <div class="cover-footer">
+    <span>{{reportMonth}} &middot; {{missionLabel}}</span>
+    <span>Ref. {{reference}}</span>
+  </div>
+</div>
+
+<main>
+
+<!-- EXECUTIVE SUMMARY -->
+<section id="executive">
+  <div class="section-eyebrow">&sect; 01 &mdash; Synth&egrave;se ex&eacute;cutive</div>
+  <h2>{{executiveTitle}}</h2>
+  <p class="lede">{{executiveLede}}</p>
+
+  <div class="findings">
+    {{#each findings}}
+    <div class="finding{{#if isCritical}} critical{{/if}}">
+      <div class="finding-num">FINDING/{{padNum @index}} <span class="finding-tag">{{tag}}</span></div>
+      <h3>{{title}}</h3>
+      <p>{{body}}</p>
+    </div>
+    {{/each}}
+  </div>
+</section>
+
+<!-- METRICS -->
+<section id="metrics">
+  <div class="section-eyebrow">&sect; 02 &mdash; M&eacute;triques workspace</div>
+  <h2>L'empreinte technique <span class="accent">en un coup d'&oelig;il.</span></h2>
+
+  <div class="metrics">
+    <div class="metric">
+      <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      <div class="metric-value">{{totalFiles}}</div>
+      <div class="metric-label">Fichiers Java</div>
+    </div>
+    <div class="metric">
+      <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M2 12h20"/></svg>
+      <div class="metric-value">{{totalLocK}}K</div>
+      <div class="metric-label">Lignes de code</div>
+    </div>
+    <div class="metric">
+      <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+      <div class="metric-value">{{uniqueClasses}}</div>
+      <div class="metric-label">Classes uniques</div>
+    </div>
+    <div class="metric">
+      <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      <div class="metric-value">{{totalImports}}</div>
+      <div class="metric-label">Imports totaux</div>
+    </div>
+    <div class="metric">
+      <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      <div class="metric-value">{{edgeCount}}</div>
+      <div class="metric-label">D&eacute;pendances internes</div>
+    </div>
+  </div>
+</section>
+
+<!-- DAG -->
+<section id="dag">
+  <div class="section-eyebrow">&sect; 03 &mdash; Graphe de d&eacute;pendances</div>
+  <h2>Architecture <span class="accent">en couches.</span></h2>
+  <p class="lede">Le tri topologique r&eacute;v&egrave;le deux niveaux : les frameworks transverses (Tier 0) et les services m&eacute;tier (Tier 1) qui en d&eacute;pendent.</p>
+
+  <div class="dag-container">
+    {{#if tier0Items}}
+    <div class="dag-tier-label">Tier 0 &mdash; Frameworks transverses <span class="badge">Migrer en premier</span></div>
+    <div class="dag-tier dag-tier-0">
+      {{#each tier0Items}}
+      <div class="dag-node">
+        <div class="dag-node-name">{{name}}</div>
+        <div class="dag-node-role">{{role}}</div>
+        <div class="dag-node-stat">{{stat}}</div>
+      </div>
+      {{/each}}
+    </div>
+    <div class="dag-arrow"><span class="icon">&darr;</span>d&eacute;pend de</div>
+    {{/if}}
+
+    <div class="dag-tier-label">Tier 1 &mdash; Services m&eacute;tier <span class="badge">Parall&eacute;lisable</span></div>
+    <div class="dag-tier dag-tier-1">
+      {{#each tier1Items}}
+      <div class="dag-node">
+        <div class="dag-node-name">{{name}}</div>
+        <div class="dag-node-stat">{{stat}}</div>
+      </div>
+      {{/each}}
+    </div>
+  </div>
+</section>
+
+<!-- FRAMEWORKS -->
+<section id="frameworks">
+  <div class="section-eyebrow">&sect; 04 &mdash; Frameworks externes</div>
+  <h2>Les couches <span class="accent">transverses</span> &agrave; migrer.</h2>
+  <p class="lede">Chaque framework est un module Maven propri&eacute;taire partag&eacute; par plusieurs services. Leur migration en premier d&eacute;verrouille le reste du portefeuille.</p>
+
+  <div class="frameworks-grid">
+    {{#each frameworks}}
+    <div class="framework">
+      <div class="framework-header">
+        <div>
+          <div class="framework-package">{{package}}</div>
+          <div class="framework-title">{{title}}</div>
+        </div>
+        <div class="framework-imports">{{imports}}<small>imports</small></div>
+      </div>
+      <div class="framework-role">{{role}}</div>
+      <div class="framework-target">
+        <span class="label">Cible de migration recommand&eacute;e</span>
+        <span class="value">{{target}}</span>
+      </div>
+      <div class="framework-classes">
+        <h4>Top 5 classes</h4>
+        <ul class="class-list">
+          {{#each topClasses}}
+          <li><span>{{name}}</span><span class="count">{{count}}</span></li>
+          {{/each}}
+        </ul>
+      </div>
+    </div>
+    {{/each}}
+  </div>
+</section>
+
+<!-- CALL FLOW -->
+<section id="callflow">
+  <div class="section-eyebrow">&sect; 05 &mdash; Pattern d'appels typique</div>
+  <h2>Comment une requ&ecirc;te <span class="accent">traverse la pile</span>.</h2>
+  <p class="lede">Reconstitution du pattern d'appels standard observ&eacute; dans les {{projectCount}} services. Comprendre ce flux est essentiel pour mod&eacute;liser la transformation Spring sans rupture fonctionnelle.</p>
+
+  <div class="callflow">
+    {{#each callflowLines}}
+    <div class="callflow-line"><span class="actor">{{actor}}</span><span class="arrow">&rarr;</span><span class="target">{{target}}</span></div>
+    {{#if comment}}<div class="callflow-comment">{{comment}}</div>{{/if}}
+    {{/each}}
+  </div>
+
+  <p class="intro" style="margin-top: 32px;">{{callflowConclusion}}</p>
+</section>
+
+<!-- MIGRATION PLAN -->
+<section id="plan">
+  <div class="section-eyebrow">&sect; 06 &mdash; Plan de migration</div>
+  <h2>{{planTitle}}</h2>
+
+  <div class="timeline">
+    {{#each phases}}
+    <div class="phase">
+      <div class="phase-marker">
+        <div class="phase-num">&#x25B8; Phase {{romanNum}}</div>
+        <div class="phase-duration">{{duration}}<small>sem.</small></div>
+      </div>
+      <div class="phase-content">
+        <h3>{{title}}</h3>
+        <p class="lede">{{description}}</p>
+        <div class="phase-items">
+          {{#each items}}
+          <div class="phase-item">{{this}}</div>
+          {{/each}}
+        </div>
+        <p class="phase-rationale">{{rationale}}</p>
+      </div>
+    </div>
+    {{/each}}
+  </div>
+</section>
+
+<!-- PROJECTS -->
+<section id="projects">
+  <div class="section-eyebrow">&sect; 07 &mdash; Inventaire des services m&eacute;tier</div>
+  <h2>Les <span class="accent">{{projectCount}} services</span> du portefeuille.</h2>
+  <p class="lede">Chaque service correspond &agrave; une fonction m&eacute;tier identifi&eacute;e. Le classement par taille croissante donne une vue naturelle de l'effort de migration.</p>
+
+  <div class="projects-grid">
+    <div class="projects-header">
+      <div>#</div><div>Service</div><div>Domaine</div><div>LOC</div><div>Fichiers</div><div>Taille</div>
+    </div>
+    {{#each projects}}
+    <div class="project-row">
+      <div class="project-num">{{num}}</div>
+      <div><div class="project-name">{{name}}</div><div class="project-desc">{{description}}</div></div>
+      <div class="project-domain">{{domain}}</div>
+      <div class="project-metric">{{locFormatted}}<small>LOC</small></div>
+      <div class="project-metric">{{fileCount}}<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill {{sizeClass}}">{{sizeLabel}}</span></div>
+    </div>
+    {{/each}}
+  </div>
+</section>
+
+<!-- RISKS -->
+<section id="risks">
+  <div class="section-eyebrow">&sect; 08 &mdash; Points de vigilance</div>
+  <h2>{{riskCount}} risques, <span class="accent">{{riskCount}} mitigations.</span></h2>
+
+  <div class="risks-list">
+    {{#each risks}}
+    <div class="risk">
+      <div class="risk-level {{levelClass}}">R{{num}}</div>
+      <div class="risk-content">
+        <h3>{{title}}</h3>
+        <p>{{description}}</p>
+        <div class="risk-mitigation"><strong>Mitigation</strong> &mdash; {{mitigation}}</div>
+      </div>
+      <div class="risk-meta">
+        <div class="label">Impact</div>
+        <div class="value">{{impact}}</div>
+      </div>
+    </div>
+    {{/each}}
+  </div>
+</section>
+
+<!-- GLOSSARY -->
+<section id="glossary">
+  <div class="section-eyebrow">&sect; 09 &mdash; Glossaire</div>
+  <h2>Vocabulaire <span class="accent">technique partag&eacute;.</span></h2>
+
+  <div class="glossary">
+    {{#each glossary}}
+    <div class="glossary-item">
+      <div class="glossary-term">{{term}}</div>
+      <div class="glossary-def">{{definition}}</div>
+    </div>
+    {{/each}}
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div>
+    <div style="margin-bottom: 4px;"><span class="brand-mark">&gt;_</span> COMPLEO &middot; Java Legacy Modernizer</div>
+    <div style="color: var(--text-faint); margin-top: 4px;">Programme de modernisation syst&egrave;me &mdash; {{reportMonth}}</div>
+  </div>
+  <div style="text-align: right;">
+    <div style="margin-bottom: 4px;">workspace-audit.v13.2</div>
+    <div style="color: var(--red);">&#x25CF; Confidentiel</div>
+  </div>
+</footer>
+
+{{#if noLlmWarning}}
+<div style="text-align: center; font-family: 'Geist Mono', monospace; font-size: 10px; color: var(--text-faint); padding: 16px 0;">(prose generated without LLM enrichment)</div>
+{{/if}}
+
+</body>
+</html>

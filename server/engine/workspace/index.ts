@@ -27,3 +27,7 @@ export type { Tier, TierItem, FrameworkGroup, MigrationPlan } from "./MigrationP
 
 export { SharedStubLibrary } from "./SharedStubLibrary";
 export type { ClassUsageData, MethodSignature, SharedStubBundle } from "./SharedStubLibrary";
+
+// v13.2 — Workspace Report Generator
+export { WorkspaceReportGenerator } from "./WorkspaceReportGenerator";
+export type { ReportInput, ReportOutput, EnrichmentData, Finding, FrameworkRole, Risk } from "./WorkspaceReportGenerator";

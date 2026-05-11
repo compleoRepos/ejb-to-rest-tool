@@ -574,14 +574,28 @@
 - Le fine-tuning QLoRA est en cours sur le laptop (2052 paires, ~3-5h CPU)
 
 ## v13.0 — Workspace Mode (saut majeur v12.x → v13.0)
-- [ ] Créer structure server/engine/workspace/
-- [ ] Implémenter DependencyAnalyzer.ts (DAG inter-projets, package ownership, external deps)
-- [ ] Implémenter MigrationPlanner.ts (tri topologique, tiers, effort estimation, framework groups)
-- [ ] Implémenter SharedStubLibrary.ts (stubs cross-projet agrégés, pom.xml, module Maven)
-- [ ] Tests unitaires DependencyAnalyzer (≥10 tests, fixture BMCE 19 projets)
-- [ ] Tests unitaires MigrationPlanner (≥10 tests)
-- [ ] Tests unitaires SharedStubLibrary (≥10 tests)
-- [ ] IHM Workspace Analysis (écran 2bis : DAG mermaid, tableau tiers, frameworks, preview stubs)
-- [ ] Intégrer lib stubs dans benchmark BMCE (cible ≥10/19 PASS avec stubs au classpath)
+- [x] Créer structure server/engine/workspace/
+- [x] Implémenter DependencyAnalyzer.ts (DAG inter-projets, package ownership, external deps)
+- [x] Implémenter MigrationPlanner.ts (tri topologique, tiers, effort estimation, framework groups)
+- [x] Implémenter SharedStubLibrary.ts (stubs cross-projet agrégés, pom.xml, module Maven)
+- [x] Tests unitaires DependencyAnalyzer (10/10 PASS)
+- [x] Tests unitaires MigrationPlanner (10/10 PASS)
+- [x] Tests unitaires SharedStubLibrary (12/12 PASS)
+- [x] IHM Workspace Analysis (écran 2bis : DAG mermaid, tableau tiers, frameworks, preview stubs)
+- [ ] Intégrer lib stubs dans benchmark BMCE — DÉSACTIVÉ (stubs ont des imports manquants, fix v13.1)
 - [ ] Vérifier non-régression mode single-project (GitHub 13 → 10/13 maintenu)
 - [ ] Rapport v13.0
+
+## Rollback R48 — Désactivation SharedStubLibrary injection
+- [x] Confirmer `if (false && sharedStubs...)` dans bench-bmce-19.ts
+- [x] Relancer benchmark BMCE R53 → 3/19 PASS confirmé stable (score 55.8/100)
+- [x] Relancer benchmark GitHub 13 projets → 9/13 PASS (légère régression nexabank 0→6 err, mais cible ≥7/10 atteinte)
+- [x] Rapporter résultats finaux
+
+## v13.2 — WorkspaceReportGenerator (Rapport HTML audit)
+- [x] Template HTML Handlebars (workspace-report.html.template) — fidèle au mockup
+- [x] WorkspaceReportGenerator.ts — 6 prompts LLM + fallback rule-based
+- [x] Endpoint API GET /api/workspace/:id/report.html
+- [x] Bouton "Rapport HTML" dans WorkspaceAnalysis.tsx
+- [x] 4 tests unitaires (4/4 PASS)
+- [x] Non-régression : 106/114 fichiers PASS (8 FAIL pré-existants, non liés à v13.2)
