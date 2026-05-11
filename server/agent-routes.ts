@@ -467,10 +467,11 @@ export function registerAgentRoutes(app: Express) {
         userChoices: session.userChoices?.map(c => ({ ambiguityId: c.ambiguityId, chosenOption: c.choiceId })),
       };
       const report = await ProjectReportGenerator.generate(reportInput);
-      zipEntries.set("DELIVERY_REPORT.html", report.html);
+      zipEntries.set("MIGRATION-REPORT.html", report.html);
       zipEntries.set(".compleo/transformations.json", report.artifacts.transformationsJson);
-      zipEntries.set(".compleo/todos.json", report.artifacts.todosJson);
+      zipEntries.set(".compleo/todo-markers.json", report.artifacts.todoMarkersJson);
       zipEntries.set(".compleo/files-manifest.json", report.artifacts.filesManifestJson);
+      zipEntries.set(".compleo/decisions.json", report.artifacts.decisionsJson);
       if (report.artifacts.schemaMappingJson) {
         zipEntries.set(".compleo/schema-mapping.json", report.artifacts.schemaMappingJson);
       }

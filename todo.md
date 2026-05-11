@@ -607,3 +607,12 @@
 - [x] 5 tests unitaires (5/5 PASS, 41ms)
 - [x] Pipeline resilience : try/catch global, non-blocking, 5 statuts (Ready/Near-complete/Partial/Needs-review/Pipeline-error)
 - [x] Artifacts JSON : transformations.json, todos.json, files-manifest.json, schema-mapping.json
+
+## v13.3b — ProjectReportGenerator mise à jour (fidélité mockup + resilience)
+- [x] Renommer DELIVERY_REPORT.html → MIGRATION-REPORT.html dans le zip
+- [x] Renommer .compleo/todos.json → .compleo/todo-markers.json
+- [x] Ajouter .compleo/decisions.json dans les artifacts
+- [x] Ajouter severityClass dynamique sur todo-card (high/low)
+- [x] Mettre à jour CSS template (todo-summary grid, todo-card border-left, code-block)
+- [x] Ajouter safeGet dans _generateMinimalFallback (Resilience 5)
+- [x] 5 tests de resilience ajoutés (10/10 PASS total)

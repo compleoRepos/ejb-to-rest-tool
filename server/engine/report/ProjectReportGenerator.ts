@@ -60,9 +60,10 @@ export interface ReportOutput {
   /** JSON artifacts for .compleo/ directory */
   artifacts: {
     transformationsJson: string;
-    todosJson: string;
+    todoMarkersJson: string;
     filesManifestJson: string;
     schemaMappingJson?: string;
+    decisionsJson: string;
   };
 }
 
@@ -172,6 +173,7 @@ interface TodoCard {
   column: number;
   title: string;
   severity: string;
+  severityClass: string;
   effortEstimate: string;
   category: string;
   diagnostic: string;
@@ -262,19 +264,23 @@ function extractTransformCards(input: ReportInput): TransformCard[] {
 
 function extractTodoCards(input: ReportInput): TodoCard[] {
   const errors = input.compilationResult?.finalErrors ?? [];
-  return errors.map((err, idx) => ({
-    file: path.basename(err.file),
-    line: err.line,
-    column: err.column,
-    title: summarizeError(err),
-    severity: err.autoFixable ? "low" : "medium",
-    effortEstimate: err.autoFixable ? "5 min" : "15 min",
-    category: categorizeError(err),
-    diagnostic: buildDiagnostic(err),
-    currentCode: `// Erreur à la ligne ${err.line}: ${err.message}`,
-    suggestedFix: buildSuggestedFix(err),
-    whyNotAutoFixed: buildWhyNotFixed(err),
-  }));
+  return errors.map((err, idx) => {
+    const severity = err.autoFixable ? "low" : "medium";
+    return {
+      file: path.basename(err.file),
+      line: err.line,
+      column: err.column,
+      title: summarizeError(err),
+      severity,
+      severityClass: severity === "high" ? "high" : severity === "low" ? "low" : "",
+      effortEstimate: err.autoFixable ? "5 min" : "15 min",
+      category: categorizeError(err),
+      diagnostic: buildDiagnostic(err),
+      currentCode: `// Erreur à la ligne ${err.line}: ${err.message}`,
+      suggestedFix: buildSuggestedFix(err),
+      whyNotAutoFixed: buildWhyNotFixed(err),
+    };
+  });
 }
 
 function summarizeError(err: CompilationError): string {
@@ -648,7 +654,7 @@ function toPascalCase(name: string): string {
 // ARTIFACTS GENERATION
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function generateArtifacts(input: ReportInput, transforms: TransformCard[], todos: TodoCard[]): ReportOutput["artifacts"] {
+function generateArtifacts(input: ReportInput, transforms: TransformCard[], todos: TodoCard[], decisions: Array<{question: string; answer: string}> = []): ReportOutput["artifacts"] {
   const transformationsJson = JSON.stringify({
     version: "1.0",
     project: input.projectName,
@@ -661,7 +667,7 @@ function generateArtifacts(input: ReportInput, transforms: TransformCard[], todo
     })),
   }, null, 2);
 
-  const todosJson = JSON.stringify({
+  const todoMarkersJson = JSON.stringify({
     version: "1.0",
     project: input.projectName,
     generatedAt: new Date().toISOString(),
@@ -708,7 +714,14 @@ function generateArtifacts(input: ReportInput, transforms: TransformCard[], todo
     }, null, 2);
   }
 
-  return { transformationsJson, todosJson, filesManifestJson, schemaMappingJson };
+  const decisionsJson = JSON.stringify({
+    version: "1.0",
+    project: input.projectName,
+    generatedAt: new Date().toISOString(),
+    decisions: decisions.map(d => ({ question: d.question, answer: d.answer })),
+  }, null, 2);
+
+  return { transformationsJson, todoMarkersJson, filesManifestJson, schemaMappingJson, decisionsJson };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -869,8 +882,7 @@ export class ProjectReportGenerator {
 
     const template = getTemplate();
     const html = template(templateData);
-    const artifacts = generateArtifacts(input, transforms, todos);
-
+    const artifacts = generateArtifacts(input, transforms, todos, decisions);
     return { html, status, artifacts };
   }
 
@@ -878,6 +890,9 @@ export class ProjectReportGenerator {
    * Minimal fallback if the generator itself crashes (Resilience 5)
    */
   private static _generateMinimalFallback(input: ReportInput, error: unknown): ReportOutput {
+    function safeGet<T>(fn: () => T, fallback: T): T {
+      try { return fn() ?? fallback; } catch { return fallback; }
+    }
     const errMsg = error instanceof Error ? error.message : String(error);
     const html = `<!DOCTYPE html>
 <html lang="fr"><head><meta charset="UTF-8"><title>${input.projectName} · Migration Report — COMPLEO</title>
@@ -891,9 +906,9 @@ h1{color:#3FDEA1;}code{background:#1E2521;padding:2px 6px;border-radius:4px;}.er
 <p style="margin-top:16px;">Les fichiers générés sont disponibles dans le ZIP. Relancer la migration ou contacter le support.</p></div>
 <h3>KPIs disponibles</h3>
 <ul>
-<li>Fichiers générés : ${input.generatedProject?.files.length ?? "N/A"}</li>
-<li>Erreurs compilation : ${input.compilationResult?.finalErrors?.length ?? "N/A"}</li>
-<li>Use cases : ${input.ir?.useCases.length ?? "N/A"}</li>
+<li>Fichiers générés : ${safeGet(() => input.generatedProject?.files.length, "N/A")}</li>
+<li>Erreurs compilation : ${safeGet(() => input.compilationResult?.finalErrors?.length, "N/A")}</li>
+<li>Use cases : ${safeGet(() => input.ir?.useCases?.length, "N/A")}</li>
 </ul>
 </body></html>`;
 
@@ -902,8 +917,9 @@ h1{color:#3FDEA1;}code{background:#1E2521;padding:2px 6px;border-radius:4px;}.er
       status: "Pipeline-error",
       artifacts: {
         transformationsJson: JSON.stringify({ error: errMsg }),
-        todosJson: JSON.stringify({ error: errMsg }),
+        todoMarkersJson: JSON.stringify({ error: errMsg }),
         filesManifestJson: JSON.stringify({ error: errMsg }),
+        decisionsJson: JSON.stringify({ error: errMsg }),
       },
     };
   }

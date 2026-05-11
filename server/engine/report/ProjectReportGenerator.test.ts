@@ -220,16 +220,118 @@ describe("ProjectReportGenerator v13.3", () => {
     expect(transforms.project).toBe("avis-opere");
     expect(transforms.transformations.length).toBeGreaterThan(0);
 
-    // TODOs JSON
-    const todos = JSON.parse(result.artifacts.todosJson);
+     // TODO markers JSON
+    const todos = JSON.parse(result.artifacts.todoMarkersJson);
     expect(todos.version).toBe("1.0");
     expect(todos.todos.length).toBe(1);
     expect(todos.todos[0].file).toBe("AvisOpereService.java");
-
     // Files manifest JSON
     const manifest = JSON.parse(result.artifacts.filesManifestJson);
     expect(manifest.version).toBe("1.0");
     expect(manifest.totalFiles).toBe(3);
     expect(manifest.files.length).toBe(3);
+    // Decisions JSON
+    const decisions = JSON.parse(result.artifacts.decisionsJson);
+    expect(decisions.version).toBe("1.0");
+    expect(decisions.decisions.length).toBeGreaterThan(0);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // RESILIENCE TESTS (spec v13.3b)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  it("Resilience 1: LLM down → Pipeline-error status, report still produced with error tab", async () => {
+    const input = makeMinimalInput({
+      pipelineError: { stage: "generation", message: "LLM service unavailable: connection refused" },
+      generatedProject: null,
+      compilationResult: null,
+    });
+    const result = await ProjectReportGenerator.generate(input);
+    expect(result.status).toBe("Pipeline-error");
+    expect(result.html).toContain("pipeline-error");
+    expect(result.html).toContain("generation");
+    expect(result.html).toContain("LLM service unavailable");
+    // Artifacts still produced
+    expect(result.artifacts.transformationsJson).toBeTruthy();
+    expect(result.artifacts.todoMarkersJson).toBeTruthy();
+    expect(result.artifacts.filesManifestJson).toBeTruthy();
+    expect(result.artifacts.decisionsJson).toBeTruthy();
+  });
+
+  it("Resilience 2: >100 errors after 7 iterations → Needs-review with 100+ TODOs", async () => {
+    const manyErrors = Array.from({ length: 120 }, (_, i) => ({
+      file: `Service${i % 10}.java`,
+      line: 10 + i,
+      column: 5,
+      message: `cannot find symbol: Type${i}`,
+      code: "UNRESOLVED_TYPE",
+      autoFixable: false,
+    }));
+    const input = makeMinimalInput({
+      compilationResult: {
+        status: "PARTIAL",
+        finalErrors: manyErrors,
+        totalAttempts: 7,
+        llmStats: { successfulFixes: 30, failedFixes: 120 },
+      } as any,
+    });
+    const result = await ProjectReportGenerator.generate(input);
+    expect(result.status).toBe("Needs-review");
+    // Should have todo cards for each error
+    const todosArtifact = JSON.parse(result.artifacts.todoMarkersJson);
+    expect(todosArtifact.todos.length).toBe(120);
+    // HTML should contain todo section
+    expect(result.html).toContain("todo-card");
+  });
+
+  it("Resilience 3: Timeout on 1 project in workspace → other projects unaffected", async () => {
+    // Simulate project with network timeout
+    const timeoutInput = makeMinimalInput({
+      projectName: "projet-timeout",
+      pipelineError: { stage: "compile", message: "ETIMEDOUT: network timeout after 60s" },
+      compilationResult: null,
+    });
+    const timeoutResult = await ProjectReportGenerator.generate(timeoutInput);
+    expect(timeoutResult.status).toBe("Pipeline-error");
+    expect(timeoutResult.html).toContain("ETIMEDOUT");
+
+    // Simulate another project that works fine
+    const okInput = makeMinimalInput({ projectName: "projet-ok" });
+    const okResult = await ProjectReportGenerator.generate(okInput);
+    expect(okResult.status).toBe("Ready");
+    // Both produce valid reports independently
+    expect(timeoutResult.html).toContain("projet-timeout");
+    expect(okResult.html).toContain("projet-ok");
+  });
+
+  it("Resilience 4: Schema decoder OOM → schema skipped, project continues", async () => {
+    const input = makeMinimalInput({
+      schemaResult: null, // Schema decoder failed/skipped
+    });
+    const result = await ProjectReportGenerator.generate(input);
+    // Should still produce a valid report
+    expect(result.status).toBe("Ready");
+    expect(result.html).toContain("avis-opere");
+    // Schema section should indicate no schema
+    expect(result.artifacts.transformationsJson).toBeTruthy();
+    // No schema mapping artifact
+    expect(result.artifacts.schemaMappingJson).toBeUndefined();
+  });
+
+  it("Resilience 5: Report generator itself crashes → minimal fallback HTML", async () => {
+    // Force an internal crash by passing completely invalid data
+    const brokenInput = {
+      projectName: "broken-project",
+      ir: { get useCases() { throw new Error("Simulated OOM in IR access"); } },
+    } as any as ReportInput;
+    const result = await ProjectReportGenerator.generate(brokenInput);
+    // Should use the minimal fallback
+    expect(result.status).toBe("Pipeline-error");
+    expect(result.html).toContain("broken-project");
+    expect(result.html).toContain("Erreur de g\u00e9n\u00e9ration du rapport");
+    // Artifacts should still exist (with error content)
+    expect(result.artifacts.transformationsJson).toContain("error");
+    expect(result.artifacts.todoMarkersJson).toContain("error");
+    expect(result.artifacts.decisionsJson).toContain("error");
   });
 });

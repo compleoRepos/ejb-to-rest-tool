@@ -269,25 +269,40 @@ p { color: var(--text-soft); margin-bottom: 12px; }
 .diff-line.diff-ctx { color: var(--text-muted); }
 
 /* === TODO === */
-.todo-summary { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; margin-bottom: 32px; }
-.todo-summary-stats { display: flex; gap: 32px; margin-top: 16px; }
-.todo-stat .label { font-family: 'Geist Mono', monospace; font-size: 10px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px; }
-.todo-stat .value { font-size: 18px; font-weight: 600; color: var(--text); }
-.todo-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; margin-bottom: 16px; }
-.todo-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
-.todo-location { font-family: 'Geist Mono', monospace; font-size: 13px; }
+.todo-summary {
+  background: linear-gradient(180deg, rgba(244, 208, 63, 0.04) 0%, var(--surface) 100%);
+  border: 1px solid rgba(244, 208, 63, 0.25);
+  border-radius: 12px;
+  padding: 28px 32px;
+  margin-bottom: 32px;
+}
+.todo-summary-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(244, 208, 63, 0.15); }
+.todo-stat .label { font-family: 'Geist Mono', monospace; font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+.todo-stat .value { font-size: 24px; font-weight: 700; color: var(--yellow); letter-spacing: -0.02em; }
+.todo-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px;
+  margin-bottom: 16px;
+  border-left: 3px solid var(--yellow);
+}
+.todo-card.high { border-left-color: var(--red); }
+.todo-card.low { border-left-color: var(--mint); }
+.todo-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; }
+.todo-location { font-family: 'Geist Mono', monospace; font-size: 13px; color: var(--text); font-weight: 500; margin-bottom: 6px; }
 .todo-location .file { color: var(--mint); }
 .todo-location .lineno { color: var(--text-muted); }
-.todo-title { font-size: 16px; font-weight: 600; color: var(--text); margin-top: 6px; }
-.todo-meta { display: flex; gap: 8px; flex-wrap: wrap; }
-.todo-tag { font-family: 'Geist Mono', monospace; font-size: 10px; padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-muted); }
+.todo-title { font-size: 17px; font-weight: 600; color: var(--text); }
+.todo-meta { display: flex; gap: 12px; font-family: 'Geist Mono', monospace; font-size: 11px; flex-wrap: wrap; }
+.todo-tag { padding: 4px 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--text-muted); }
 .todo-tag.severity-high { color: var(--red); border-color: rgba(229, 115, 115, 0.3); background: rgba(229, 115, 115, 0.06); }
-.todo-tag.severity-medium { color: var(--yellow); border-color: rgba(244, 208, 63, 0.3); background: rgba(244, 208, 63, 0.06); }
-.todo-tag.severity-low { color: var(--mint); border-color: rgba(63, 222, 161, 0.3); background: rgba(63, 222, 161, 0.06); }
-.todo-tag.effort { color: var(--blue); border-color: rgba(93, 173, 226, 0.3); background: rgba(93, 173, 226, 0.06); }
-.todo-diagnostic { font-size: 13px; color: var(--text-soft); line-height: 1.6; margin-bottom: 20px; padding: 16px; background: var(--bg-elevated); border-radius: 8px; border: 1px solid var(--border-soft); }
-.todo-section { margin-bottom: 16px; }
-.todo-section h4 { margin-bottom: 8px; }
+.todo-tag.severity-medium { background: rgba(244, 208, 63, 0.08); color: var(--yellow); border-color: rgba(244, 208, 63, 0.2); }
+.todo-tag.severity-low { background: var(--mint-glow); color: var(--mint); border-color: rgba(63, 222, 161, 0.2); }
+.todo-tag.effort { color: var(--text); }
+.todo-diagnostic { font-size: 13px; color: var(--text-soft); line-height: 1.6; margin-bottom: 16px; }
+.todo-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.todo-section h4 { color: var(--mint); margin-bottom: 8px; }
 
 /* === MAPPINGS === */
 .mapping-section { margin-bottom: 40px; }
@@ -300,8 +315,18 @@ p { color: var(--text-soft); margin-bottom: 12px; }
 .mapping-table .count { font-family: 'Geist Mono', monospace; text-align: right; color: var(--text-muted); }
 
 /* === CODE BLOCK === */
-.code-block { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; font-family: 'Geist Mono', monospace; font-size: 12px; line-height: 1.7; overflow-x: auto; white-space: pre; color: var(--text-soft); margin-bottom: 24px; }
-.code-block.fix { border-color: rgba(63, 222, 161, 0.25); }
+.code-block {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 18px;
+  font-family: 'Geist Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text);
+  overflow-x: auto;
+}
+.code-block.fix { border-color: rgba(63, 222, 161, 0.25); background: linear-gradient(180deg, rgba(63, 222, 161, 0.04) 0%, var(--bg-elevated) 100%); }
 
 /* === FILE TREE === */
 .file-tree { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
@@ -568,7 +593,7 @@ p { color: var(--text-soft); margin-bottom: 12px; }
   </div>
 
   {{#each todoCards}}
-  <div class="todo-card">
+  <div class="todo-card {{severityClass}}">
     <div class="todo-header">
       <div>
         <div class="todo-location"><span class="file">{{file}}</span> <span class="lineno">:{{line}}:{{column}}</span></div>
