@@ -157,7 +157,7 @@ function FileTreeNode({
         isSelected ? "bg-emerald-500/15 text-emerald-300" : "hover:bg-white/5 text-white/60"
       }`}
       style={{ paddingLeft: `${depth * 14 + 4}px` }}
-      onClick={() => node.file && onSelect(node.file)}
+      onClick={() => node.file && onSelect(node.file)} data-test={`file-${node.name}`}
     >
       <FileCode2 className="w-3.5 h-3.5 shrink-0 text-white/30" />
       <span className="truncate">{node.name}</span>

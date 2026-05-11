@@ -34,7 +34,7 @@ export function PipelineStepper({ currentStep }: PipelineStepperProps) {
           const Icon = step.icon;
 
           return (
-            <div key={step.id} className="flex items-center flex-1 last:flex-none">
+            <div key={step.id} className="flex items-center flex-1 last:flex-none" data-test={`pipeline-step-${step.id}`} data-active={String(isActive)} data-completed={String(isCompleted)}>
               {/* Step circle */}
               <div className="flex flex-col items-center gap-1">
                 <div

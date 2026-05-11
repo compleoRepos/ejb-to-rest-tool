@@ -81,6 +81,7 @@ export default function Home() {
               size="lg"
               className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
               onClick={() => setLocation("/projects")}
+              data-test="my-projects"
             >
               <FolderGit2 className="w-4 h-4" />
               Mes Projets
@@ -91,6 +92,7 @@ export default function Home() {
               size="lg"
               className="gap-2"
               onClick={() => setLocation("/projects")}
+              data-test="new-project"
             >
               <Plus className="w-4 h-4" />
               Nouveau Projet
@@ -105,10 +107,10 @@ export default function Home() {
           transition={{ delay: 0.1 }}
           className="grid grid-cols-2 md:grid-cols-4 gap-4"
         >
-          <StatCard icon={FolderGit2} label="Projets" value={projects?.length ?? 0} color="text-primary" />
-          <StatCard icon={FileCode2} label="Fichiers" value={totalFiles} color="text-emerald-400" />
-          <StatCard icon={Code2} label="Lignes de code" value={totalLines} color="text-amber-400" />
-          <StatCard icon={Layers} label="Technologies" value={allTechs.size} color="text-cyan-400" />
+          <StatCard icon={FolderGit2} label="Projets" value={projects?.length ?? 0} color="text-primary" testId="project-count" />
+          <StatCard icon={FileCode2} label="Fichiers" value={totalFiles} color="text-emerald-400" testId="file-count" />
+          <StatCard icon={Code2} label="Lignes de code" value={totalLines} color="text-amber-400" testId="lines-count" />
+          <StatCard icon={Layers} label="Technologies" value={allTechs.size} color="text-cyan-400" testId="tech-count" />
         </motion.div>
 
         {/* Recent Projects */}
@@ -213,11 +215,11 @@ export default function Home() {
   );
 }
 
-function StatCard({ icon: Icon, label, value, color }: { icon: typeof Terminal; label: string; value: number; color: string }) {
+function StatCard({ icon: Icon, label, value, color, testId }: { icon: typeof Terminal; label: string; value: number; color: string; testId?: string }) {
   return (
-    <div className="rounded-lg border border-border bg-card/50 p-4 text-center">
+    <div className="rounded-lg border border-border bg-card/50 p-4 text-center" data-test={testId}>
       <Icon className={`w-5 h-5 ${color} mx-auto mb-2`} />
-      <div className="text-2xl font-bold font-mono">{value.toLocaleString()}</div>
+      <div className="text-2xl font-bold font-mono" data-test={testId ? `${testId}-value` : undefined}>{value.toLocaleString()}</div>
       <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</div>
     </div>
   );

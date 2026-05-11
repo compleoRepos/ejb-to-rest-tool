@@ -154,7 +154,7 @@ export default function AnalysisReviewScreen({
             </h2>
           </div>
           <Button
-            onClick={onContinueToGeneration}
+            onClick={onContinueToGeneration} data-test="continue-generation"
             className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white px-5"
           >
             <ArrowRight className="w-4 h-4 mr-2" />
@@ -407,7 +407,7 @@ export default function AnalysisReviewScreen({
           )}
         </div>
         <Button
-          onClick={onContinueToGeneration}
+          onClick={onContinueToGeneration} data-test="continue-generation"
           className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white px-6"
         >
           <ArrowRight className="w-4 h-4 mr-2" />

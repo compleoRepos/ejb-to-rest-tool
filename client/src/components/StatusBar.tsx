@@ -53,7 +53,7 @@ export function StatusBar({ className }: StatusBarProps) {
       <div className={cn(
         "flex items-center gap-4 px-4 py-1.5 text-xs text-muted-foreground bg-muted/30 border-b border-border/50",
         className
-      )}>
+      )} data-test="status-bar" data-state="unavailable">
         <span className="flex items-center gap-1">
           <Server className="h-3 w-3" />
           {error ? "Serveur indisponible" : "Chargement..."}
@@ -66,15 +66,15 @@ export function StatusBar({ className }: StatusBarProps) {
     <div className={cn(
       "flex items-center gap-4 px-4 py-1.5 text-xs text-muted-foreground bg-muted/30 border-b border-border/50",
       className
-    )}>
+    )} data-test="status-bar" data-state="ready">
       {/* Version */}
-      <span className="flex items-center gap-1 font-mono">
+      <span className="flex items-center gap-1 font-mono" data-test="app-version">
         <Server className="h-3 w-3" />
         v{status.version}
       </span>
 
       {/* LLM Status */}
-      <span className="flex items-center gap-1.5">
+      <span className="flex items-center gap-1.5" data-test="llm-status" data-available={String(status.llm.available)}>
         <span className={cn(
           "h-2 w-2 rounded-full",
           status.llm.available ? "bg-emerald-500" : "bg-red-500"
@@ -88,7 +88,7 @@ export function StatusBar({ className }: StatusBarProps) {
 
       {/* Sessions actives */}
       {status.activeSessions !== undefined && (
-        <span className="flex items-center gap-1">
+        <span className="flex items-center gap-1" data-test="active-sessions">
           <Activity className="h-3 w-3" />
           {status.activeSessions} session{status.activeSessions !== 1 ? "s" : ""}
         </span>
@@ -96,14 +96,14 @@ export function StatusBar({ className }: StatusBarProps) {
 
       {/* Règles */}
       {status.rulesCount !== undefined && (
-        <span className="flex items-center gap-1">
+        <span className="flex items-center gap-1" data-test="rules-count">
           <BookOpen className="h-3 w-3" />
           {status.rulesCount} règle{status.rulesCount !== 1 ? "s" : ""}
         </span>
       )}
 
       {/* Mémoire */}
-      <span className="ml-auto font-mono opacity-60">
+      <span className="ml-auto font-mono opacity-60" data-test="memory-usage">
         {status.memory.heapUsed}MB / {status.memory.heapTotal}MB
       </span>
     </div>

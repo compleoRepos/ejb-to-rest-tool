@@ -62,7 +62,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
       {/* Top Navigation Bar */}
-      <header className="h-12 border-b border-border flex items-center justify-between px-4 shrink-0 bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60 z-50">
+      <header className="h-12 border-b border-border" data-test="app-header flex items-center justify-between px-4 shrink-0 bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60 z-50">
         <div className="flex items-center gap-4">
           <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <Terminal className="w-5 h-5 text-primary" />
@@ -77,7 +77,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {NAV_ITEMS.map((item) => {
               const isActive = isNavActive(item.path);
               return (
-                <Link key={item.path} href={item.path}>
+                <Link key={item.path} href={item.path} data-test={`nav-${item.label.toLowerCase()}`}>
                   <button className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                     isActive
                       ? "bg-primary/15 text-primary"
@@ -110,7 +110,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {NAV_ITEMS.map((item) => {
             const isActive = isNavActive(item.path);
             return (
-              <Link key={item.path} href={item.path}>
+              <Link key={item.path} href={item.path} data-test={`nav-${item.label.toLowerCase()}`}>
                 <button
                   onClick={() => setMobileMenuOpen(false)}
                   className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${
@@ -130,7 +130,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               {COMPLEO_TABS.map((tab) => {
                 const isActive = isCompleoTabActive(tab);
                 return (
-                  <Link key={tab.path} href={tab.path}>
+                  <Link key={tab.path} href={tab.path} data-test={`tab-${tab.label.toLowerCase()}`}>
                     <button
                       onClick={() => setMobileMenuOpen(false)}
                       className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${
@@ -157,7 +157,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {COMPLEO_TABS.map((tab) => {
             const isActive = isCompleoTabActive(tab);
             return (
-              <Link key={tab.path} href={tab.path}>
+              <Link key={tab.path} href={tab.path} data-test={`tab-${tab.label.toLowerCase()}`}>
                 <button className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap ${
                   isActive
                     ? "bg-primary/15 text-primary"
@@ -185,7 +185,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {PROJECT_TABS.map((tab) => {
             const isActive = location === tab.path;
             return (
-              <Link key={tab.path} href={tab.path}>
+              <Link key={tab.path} href={tab.path} data-test={`tab-${tab.label.toLowerCase()}`}>
                 <button className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
                   isActive
                     ? "bg-primary/15 text-primary"

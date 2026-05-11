@@ -287,7 +287,7 @@ export default function LearningRulesPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={exportRules}
+                onClick={exportRules} data-test="export-rules"
                 className="border-[oklch(0.3_0.01_250)] bg-transparent text-[oklch(0.7_0.01_250)] hover:bg-[oklch(0.2_0.01_250)]"
               >
                 <Download className="w-4 h-4 mr-2" />

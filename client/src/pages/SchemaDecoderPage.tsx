@@ -177,7 +177,7 @@ export default function SchemaDecoderPage() {
           <p className="text-zinc-400 mb-6">
             Aucun JDBC détecté dans ce projet. Le Schema Decoder est automatiquement ignoré.
           </p>
-          <Button onClick={skipToConfig} className="bg-teal-600 hover:bg-teal-500">
+          <Button onClick={skipToConfig} data-test="schema-skip" className="bg-teal-600 hover:bg-teal-500">
             Continuer vers Configuration <ArrowRight className="w-4 h-4 ml-2" />
           </Button>
         </Card>

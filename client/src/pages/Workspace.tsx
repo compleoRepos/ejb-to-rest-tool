@@ -279,7 +279,7 @@ export default function WorkspacePage() {
                 className="w-full px-3 py-2 rounded-md bg-[oklch(0.12_0.01_250)] border border-[oklch(0.25_0.01_250)] text-white text-sm mb-3 focus:outline-none focus:border-emerald-500"
               />
               <Button
-                onClick={handleCreate}
+                onClick={handleCreate} data-test="ws-create-btn"
                 disabled={creating || !newWsName.trim()}
                 className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
                 size="sm"
@@ -370,7 +370,7 @@ export default function WorkspacePage() {
                         ) : (
                           <Download className="w-4 h-4 mr-1" />
                         )}
-                        Générer ZIP Multi-Module
+                        Générer ZIP Multi-Module" data-test="ws-generate-zip
                       </Button>
                     </div>
 

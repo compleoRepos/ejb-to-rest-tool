@@ -133,12 +133,15 @@ export default function DropZone({ onUpload, onDemoLoad }: DropZoneProps) {
         onDragLeave={handleDragLeave}
         onClick={() => status !== "loading" && fileInputRef.current?.click()}
         whileHover={status === "idle" ? { scale: 1.01 } : {}}
+        data-test="drop-zone"
+        data-status={status}
       >
         <input
           ref={fileInputRef}
           type="file"
           accept=".zip"
           className="hidden"
+          data-test="file-input"
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) handleFile(file);
@@ -224,6 +227,7 @@ export default function DropZone({ onUpload, onDemoLoad }: DropZoneProps) {
           onChange={(e) => setGitUrl(e.target.value)}
           className="bg-white/5 border-white/10 text-sm"
           onKeyDown={(e) => e.key === "Enter" && handleGitClone()}
+          data-test="git-url-input"
         />
         <Button
           variant="outline"
@@ -231,6 +235,7 @@ export default function DropZone({ onUpload, onDemoLoad }: DropZoneProps) {
           onClick={handleGitClone}
           disabled={!gitUrl.trim() || status === "loading"}
           className="shrink-0"
+          data-test="git-clone-btn"
         >
           Clone
         </Button>

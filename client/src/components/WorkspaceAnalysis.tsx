@@ -127,7 +127,7 @@ export default function WorkspaceAnalysis({ workspaceId, workspaceName }: Props)
           </div>
         )}
         <Button
-          onClick={runAnalysis}
+          onClick={runAnalysis} data-test="ws-analyze"
           disabled={loading}
           className="bg-blue-600 hover:bg-blue-700 text-white"
         >
@@ -177,7 +177,7 @@ export default function WorkspaceAnalysis({ workspaceId, workspaceName }: Props)
           <Button
             variant="outline"
             size="sm"
-            onClick={runAnalysis}
+            onClick={runAnalysis} data-test="ws-analyze"
             disabled={loading}
             className="text-[oklch(0.6_0.01_250)] border-[oklch(0.25_0.01_250)]"
           >

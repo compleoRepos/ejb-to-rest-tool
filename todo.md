@@ -616,3 +616,18 @@
 - [x] Mettre à jour CSS template (todo-summary grid, todo-card border-left, code-block)
 - [x] Ajouter safeGet dans _generateMinimalFallback (Resilience 5)
 - [x] 5 tests de resilience ajoutés (10/10 PASS total)
+
+## v13.4 — Stabilisation via tests E2E IHM (RÉSULTATS FINAUX)
+- [x] Installer Playwright + créer playwright.config.ts (3 projets: chromium, firefox, mobile-safari)
+- [x] Auditer IHM et ajouter 52 data-test attributes (aucun changement visuel)
+- [x] Créer fixtures test-data.ts (4 scénarios mock)
+- [x] Parcours 1: Single-project happy path — 2/5 PASS, 3 skipped (pipeline SSE)
+- [x] Parcours 2: Single-project partial — 1/5 PASS, 4 skipped (pipeline SSE)
+- [x] Parcours 3: Workspace mode complet — 5/5 PASS
+- [x] Parcours 4: Résilience LLM down — 5/5 PASS
+- [x] Parcours 5: Résilience workspace partial — 4/4 PASS
+- [x] Visual Regression — 8/9 PASS, 1 skipped (VR.3 pipeline SSE)
+- [x] Performance — 7/7 PASS
+- [x] CI workflow .github/workflows/e2e.yml
+- [x] Documentation tests/e2e/README.md
+- [x] TOTAL : 31 PASS / 0 FAIL / 8 skipped

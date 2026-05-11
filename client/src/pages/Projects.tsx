@@ -122,7 +122,7 @@ export default function ProjectsPage() {
               Gérez vos projets Java legacy et suivez leur modernisation
             </p>
           </div>
-          <Button size="sm" className="gap-1.5" onClick={() => setShowCreate(true)}>
+          <Button size="sm" className="gap-1.5" onClick={() => setShowCreate(true)} data-test="create-project-btn">
             <Plus className="w-3.5 h-3.5" />
             Nouveau Projet
           </Button>
@@ -132,14 +132,14 @@ export default function ProjectsPage() {
         <div className="flex items-center gap-3">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input
+            <Input data-test="search-input"
               placeholder="Rechercher un projet..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 h-8 text-xs bg-secondary/30"
             />
           </div>
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <Select value={filterStatus} onValueChange={setFilterStatus} data-test="filter-status">
             <SelectTrigger className="w-32 h-8 text-xs bg-secondary/30">
               <SelectValue />
             </SelectTrigger>
@@ -286,7 +286,7 @@ export default function ProjectsPage() {
           <div className="space-y-4 py-2">
             <div>
               <Label className="text-xs">Nom du projet *</Label>
-              <Input
+              <Input data-test="search-input"
                 placeholder="ex: payment-service-legacy"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
@@ -295,7 +295,7 @@ export default function ProjectsPage() {
             </div>
             <div>
               <Label className="text-xs">Description</Label>
-              <Input
+              <Input data-test="search-input"
                 placeholder="Description du projet..."
                 value={newDesc}
                 onChange={(e) => setNewDesc(e.target.value)}
@@ -304,7 +304,7 @@ export default function ProjectsPage() {
             </div>
             <div>
               <Label className="text-xs">URL du repository Git (optionnel)</Label>
-              <Input
+              <Input data-test="search-input"
                 placeholder="https://github.com/org/repo"
                 value={newGitUrl}
                 onChange={(e) => setNewGitUrl(e.target.value)}

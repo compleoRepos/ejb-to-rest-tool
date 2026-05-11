@@ -947,7 +947,7 @@ export default function CompleoAgentPage() {
                 <Button
                   variant={sourceMode === "zip" ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setSourceMode("zip")}
+                  onClick={() => setSourceMode("zip")} data-test="source-zip"
                   className="gap-1.5"
                 >
                   <Upload className="w-4 h-4" />
@@ -956,7 +956,7 @@ export default function CompleoAgentPage() {
                 <Button
                   variant={sourceMode === "git" ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setSourceMode("git")}
+                  onClick={() => setSourceMode("git")} data-test="source-git"
                   className="gap-1.5"
                 >
                   <GitBranch className="w-4 h-4" />
@@ -1071,7 +1071,7 @@ export default function CompleoAgentPage() {
             <Button
               size="lg"
               className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700"
-              onClick={handleStart}
+              onClick={handleStart} data-test="agent-start"
               disabled={!canStart || isStarting}
             >
               {isStarting ? (
@@ -1475,7 +1475,7 @@ export default function CompleoAgentPage() {
                     <Button
                       size="sm"
                       className="w-full gap-1.5 bg-emerald-600 hover:bg-emerald-700"
-                      onClick={handleDownload}
+                      onClick={handleDownload} data-test="agent-download"
                     >
                       <Download className="w-4 h-4" />
                       Télécharger le projet
@@ -1497,7 +1497,7 @@ export default function CompleoAgentPage() {
                     variant="outline"
                     size="sm"
                     className="w-full gap-1.5"
-                    onClick={handleReset}
+                    onClick={handleReset} data-test="agent-reset"
                   >
                     <RefreshCw className="w-4 h-4" />
                     Nouvelle migration

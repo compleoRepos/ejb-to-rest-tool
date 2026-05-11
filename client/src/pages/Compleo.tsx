@@ -612,7 +612,7 @@ export default function CompleoPage() {
               {pipelineStep !== "idle" && (
                 <div className="hidden md:block">
                   <StepProgress
-                    current={pipelineStep}
+                    current={pipelineStep} data-test="pipeline-stepper"
                     onNavigate={handleStepNavigate}
                     completed={completedSteps}
                   />
@@ -671,7 +671,7 @@ export default function CompleoPage() {
               className="max-w-2xl mx-auto px-4 sm:px-6 py-8"
             >
               <div className="text-center mb-8">
-                <h2 className="text-2xl font-bold text-white mb-2">Importez votre projet Java Legacy</h2>
+                <h2 className="text-2xl font-bold text-white mb-2" data-test="upload-title">Importez votre projet Java Legacy</h2>
                 <p className="text-[oklch(0.55_0.01_250)] text-sm">
                   EJB, Servlet, Struts, SOAP, JDBC, Hibernate, JMS, Batch...
                 </p>
@@ -702,7 +702,7 @@ export default function CompleoPage() {
                     <div className="flex items-center gap-3">
                       <Network className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" />
                       <div>
-                        <p className="text-sm font-medium text-white">Workspace Multi-Modules</p>
+                        <p className="text-sm font-medium text-white" data-test="workspace-link">Workspace Multi-Modules</p>
                         <p className="text-xs text-[oklch(0.5_0.01_250)]">
                           Regroupez plusieurs EJB interconnectés et résolvez les dépendances JNDI
                         </p>
@@ -1146,7 +1146,7 @@ export default function CompleoPage() {
                 </div>
 
                 <Button
-                  onClick={handleGenerateWithChoices}
+                  onClick={handleGenerateWithChoices} data-test="generate-btn"
                   disabled={generating || !canGenerate}
                   className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white px-6"
                 >
@@ -1190,7 +1190,7 @@ export default function CompleoPage() {
               <div className="border-b border-[oklch(0.25_0.01_250)] bg-[oklch(0.14_0.01_250)] px-4 py-2 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-4 text-xs text-[oklch(0.5_0.01_250)]">
-                    <span className="text-emerald-400 font-medium">{generationResult.stats.totalFiles} fichiers</span>
+                    <span className="text-emerald-400 font-medium" data-test="result-files-count">{generationResult.stats.totalFiles} fichiers</span>
                     <span>{generationResult.stats.totalLinesGenerated.toLocaleString()} lignes</span>
                     {generationResult.choicesApplied != null && generationResult.choicesApplied > 0 && (
                       <span>{generationResult.choicesApplied} choix appliqués</span>
@@ -1200,15 +1200,15 @@ export default function CompleoPage() {
                 <div className="flex items-center gap-2">
                   <Tabs value={resultTab} onValueChange={(v) => setResultTab(v as any)}>
                     <TabsList className="h-7 bg-[oklch(0.18_0.01_250)] border border-[oklch(0.25_0.01_250)]">
-                      <TabsTrigger value="code" className="text-xs h-5 data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400">
+                      <TabsTrigger value="code" data-test="tab-code" className="text-xs h-5 data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400">
                         <Code2 className="w-3 h-3 mr-1" />
                         Code
                       </TabsTrigger>
-                      <TabsTrigger value="diff" className="text-xs h-5 data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400">
+                      <TabsTrigger value="diff" data-test="tab-diff" className="text-xs h-5 data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400">
                         <GitCompare className="w-3 h-3 mr-1" />
                         Diff
                       </TabsTrigger>
-                      <TabsTrigger value="architecture" className="text-xs h-5 data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-400">
+                      <TabsTrigger value="architecture" data-test="tab-archi" className="text-xs h-5 data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-400">
                         <Network className="w-3 h-3 mr-1" />
                         Archi
                       </TabsTrigger>
@@ -1216,7 +1216,7 @@ export default function CompleoPage() {
                   </Tabs>
                   <Button
                     size="sm"
-                    onClick={handleDownload}
+                    onClick={handleDownload} data-test="download-zip"
                     className="bg-emerald-600 hover:bg-emerald-700 text-white h-7 text-xs"
                   >
                     <Download className="w-3 h-3 mr-1" />

@@ -20,7 +20,12 @@
     "test:init-fixtures": "npx tsx scripts/init-fixtures.ts",
     "test:dashboard": "npx tsx scripts/generate-dashboard.ts",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test:e2e": "playwright test",
+    "test:e2e:fast": "playwright test --grep-invert \"@slow\"",
+    "test:e2e:slow": "playwright test --grep \"@slow\"",
+    "test:e2e:visual": "playwright test --grep \"@visual\"",
+    "test:e2e:update-snapshots": "playwright test --update-snapshots"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.693.0",
@@ -112,6 +117,7 @@
   },
   "devDependencies": {
     "@builder.io/vite-plugin-jsx-loc": "^0.1.1",
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/typography": "^0.5.15",
     "@tailwindcss/vite": "^4.1.3",
     "@types/adm-zip": "^0.5.8",
