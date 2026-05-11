@@ -25,7 +25,8 @@
     "test:e2e:fast": "playwright test --grep-invert \"@slow\"",
     "test:e2e:slow": "playwright test --grep \"@slow\"",
     "test:e2e:visual": "playwright test --grep \"@visual\"",
-    "test:e2e:update-snapshots": "playwright test --update-snapshots"
+    "test:e2e:update-snapshots": "playwright test --update-snapshots",
+    "test:e2e:demo": "playwright test --config=playwright.demo.config.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.693.0",

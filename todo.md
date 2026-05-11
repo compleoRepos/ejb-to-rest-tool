@@ -631,3 +631,12 @@
 - [x] CI workflow .github/workflows/e2e.yml
 - [x] Documentation tests/e2e/README.md
 - [x] TOTAL : 31 PASS / 0 FAIL / 8 skipped
+
+## v13.5 — Démo Dry-Run (test E2E bout-en-bout métier) — COMPLÉTÉ
+- [x] Créer playwright.demo.config.ts (30min timeout, 1 worker, screenshots on, video retain-on-failure)
+- [x] Créer DemoValidationReporter.ts (custom reporter → validation-report.html self-contained)
+- [x] Préparer fixtures BMCE (interface-credit-jocker.zip 13MB, avis-opere.zip 750KB)
+- [x] Implémenter demo-dry-run.spec.ts — 16 étapes séquentielles (test.describe.serial)
+- [x] Ajouter script pnpm test:e2e:demo dans package.json
+- [x] Vérifier compilation TS : 0 erreurs
+- [x] Structure : 14 fichiers E2E + 8 golden files VR + 2 fixtures BMCE
