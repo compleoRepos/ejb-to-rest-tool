@@ -13,6 +13,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 import * as crypto from "crypto";
 import Handlebars from "handlebars";
 import { llmGenerateJSON, llmGenerate, isLLMAvailable } from "../ml/llm-adapter";
@@ -142,11 +143,14 @@ function statusPillText(status: ProjectStatus): string {
 // TEMPLATE LOADING
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// v13.5b: ESM-compatible __dirname polyfill
+const __dirnameCompat = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
+
 let compiledTemplate: Handlebars.TemplateDelegate | null = null;
 
 function getTemplate(): Handlebars.TemplateDelegate {
   if (compiledTemplate) return compiledTemplate;
-  const templatePath = path.join(__dirname, "templates", "project-report.html.template");
+  const templatePath = path.join(__dirnameCompat, "templates", "project-report.html.template");
   const templateSrc = fs.readFileSync(templatePath, "utf-8");
   compiledTemplate = Handlebars.compile(templateSrc, { noEscape: true });
   return compiledTemplate;
@@ -407,7 +411,7 @@ function formatCompileLog(input: ReportInput): string {
   lines.push('<span class="lineno">[04]</span><span class="info"> [INFO] --------------------------------[ jar ]---------------------------------</span>');
   lines.push('<span class="lineno">[05]</span><span class="info"> [INFO] --- maven-compiler-plugin:3.11.0:compile (default-compile) ---</span>');
 
-  const fileCount = input.generatedProject?.files.length ?? 0;
+  const fileCount = (input.generatedProject?.files.length ?? 0) + (input.generatedProject?.multiTechFiles?.length ?? 0);
   lines.push(`<span class="lineno">[06]</span><span class="info"> [INFO] Compiling ${fileCount} source files to target/classes</span>`);
 
   const errors = result.finalErrors ?? [];
@@ -560,7 +564,7 @@ Réponds en JSON strict:
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function fallbackSynthesis(input: ReportInput, status: ProjectStatus): LLMSynthesis {
-  const fileCount = input.generatedProject?.files.length ?? 0;
+  const fileCount = (input.generatedProject?.files.length ?? 0) + (input.generatedProject?.multiTechFiles?.length ?? 0);
   const errorCount = input.compilationResult?.finalErrors?.length ?? 0;
   const ucCount = input.ir?.useCases.length ?? 0;
 
@@ -786,8 +790,8 @@ export class ProjectReportGenerator {
 
     // Compute template variables
     const totalTransformations = transforms.reduce((sum, t) => sum + t.occurrences, 0);
-    const fileCount = input.generatedProject?.files.length ?? 0;
-    const linesGenerated = input.generatedProject?.files.reduce((sum, f) => sum + f.content.split("\n").length, 0) ?? 0;
+    const fileCount = (input.generatedProject?.files.length ?? 0) + (input.generatedProject?.multiTechFiles?.length ?? 0);
+    const linesGenerated = [...(input.generatedProject?.files ?? []), ...(input.generatedProject?.multiTechFiles ?? [])].reduce((sum, f) => sum + f.content.split("\n").length, 0);
     const errorCount = input.compilationResult?.finalErrors?.length ?? 0;
     const iterations = input.compilationResult?.totalAttempts ?? 0;
     const duration = input.durationMs ? formatDuration(input.durationMs) : "N/A";
@@ -878,6 +882,12 @@ export class ProjectReportGenerator {
 
       // LLM fallback banner
       llmFallbackUsed,
+      // v13.5b: Score Glossary variables
+      hasScoreGlossary: true,
+      compileReadinessValue: errorCount === 0 ? "PASS" : (errorCount <= 4 ? "PARTIAL" : "FAIL"),
+      compileReadinessClass: errorCount === 0 ? "mint" : (errorCount <= 4 ? "warn" : "red"),
+      codeQualityValue: (() => { const qf = input.generatedProject?.files?.find(f => f.path === "QUALITY_SCORE.md"); if (!qf) return "N/A"; const m = qf.content.match(/(\d+)\/(\d+)\s+\(([A-F][+]?)\)/); return m ? `${m[1]}/${m[2]} (${m[3]})` : "N/A"; })(),
+      maturityScoreValue: (input.analysisResult as any)?.multiTech?.maturityScore?.global != null ? `${(input.analysisResult as any).multiTech.maturityScore.global}/100 — ${(input.analysisResult as any).multiTech.maturityScore.label}` : "N/A",
     };
 
     const template = getTemplate();

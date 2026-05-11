@@ -476,6 +476,35 @@ p { color: var(--text-soft); margin-bottom: 12px; }
       <div class="sub">{{kpiCoverageSub}}</div>
     </div>
   </div>
+  <!-- v13.5b: Score Glossary — Reconciliation des scores -->
+  {{#if hasScoreGlossary}}
+  <div class="score-glossary" style="margin-bottom: 32px; padding: 20px 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px;">
+    <div class="section-eyebrow">Score Glossary</div>
+    <p style="font-size: 13px; color: var(--text-soft); margin-bottom: 16px;">
+      Ce rapport utilise trois métriques distinctes. Chacune mesure un aspect différent de la migration.
+    </p>
+    <table class="mapping-table">
+      <thead><tr><th>Métrique</th><th>Valeur</th><th>Sémantique</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="from">Compile Readiness</td>
+          <td><span class="badge {{compileReadinessClass}}">{{compileReadinessValue}}</span></td>
+          <td style="font-size: 12px; color: var(--text-soft);">Le code généré compile-t-il avec Maven ? PASS = 0 erreur, PARTIAL = erreurs résiduelles, FAIL = ne compile pas.</td>
+        </tr>
+        <tr>
+          <td class="from">Code Quality</td>
+          <td><span class="badge mint">{{codeQualityValue}}</span></td>
+          <td style="font-size: 12px; color: var(--text-soft);">Score statique /100 sur le code généré : pas de Object générique, SQL constants, propagation des paramètres, couverture UseCase, etc.</td>
+        </tr>
+        <tr>
+          <td class="from">Maturity Score</td>
+          <td><span class="badge mint">{{maturityScoreValue}}</span></td>
+          <td style="font-size: 12px; color: var(--text-soft);">Évaluation /100 de la faisabilité de migration : complexité technique (25%), couverture code (25%), risque de rupture (25%), valeur ajoutée (15%), confiance moteur (10%).</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {{/if}}
 
   <!-- Pipeline -->
   <div class="pipeline">

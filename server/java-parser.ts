@@ -381,9 +381,11 @@ export function parseEjbProject(files: { path: string; content: string }[], pomX
       return uc;
     }),
     ...directEjbUseCases,
-    // FIX v11.2: SOAP UseCases are NOT included in EJB parser result.
-    // They are handled by the multi-tech pipeline separately.
-    // soapUseCases are still detected here for stats/warnings but excluded from useCases[]
+    // FIX v11.2 → v13.5b: SOAP UseCases are now included as fallback when no EJB/EAI UseCases exist.
+    // This ensures SOAP-only projects (like interface-credit-jocker) get controllers/services in the main output.
+    // The multi-tech pipeline still generates its own controllers, but the IR-based ones ensure
+    // the spring-generator produces a complete project with Application class, DTOs, etc.
+    ...soapUseCases,
     ...handlerUseCases,
   ].filter(uc => {
     // v8.3: Exclure la façade Strategy des useCases

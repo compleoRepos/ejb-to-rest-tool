@@ -640,3 +640,12 @@
 - [x] Ajouter script pnpm test:e2e:demo dans package.json
 - [x] Vérifier compilation TS : 0 erreurs
 - [x] Structure : 14 fichiers E2E + 8 golden files VR + 2 fixtures BMCE
+
+## v13.5b — Corrections ZIP + Re-run migrations
+- [ ] Anomalie A : Filtrer les classes de librairies tierces (Gson, Hystrix, jcraft) → dépendances Maven
+- [ ] Anomalie B : interface-credit-jocker doit avoir ≥1 controller, ≥1 service, application class
+- [ ] Anomalie C : Cohérence des scores (compile readiness vs code quality vs confiance)
+- [ ] Re-run interface-credit-jocker avec MIGRATION-REPORT.html + .compleo/
+- [ ] Re-run avis-opere avec MIGRATION-REPORT.html + .compleo/
+- [ ] Vérifier 5 critères de succès
+- [ ] Livrer les 2 ZIP conformes

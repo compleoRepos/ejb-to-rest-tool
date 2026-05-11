@@ -12,6 +12,7 @@ import { generateSmartStub } from "./server/engine/validation/SmartStubGenerator
 import { ParenBalancer } from "./server/engine/validation/ParenBalancer";
 import { DependencyAnalyzer, Workspace, WorkspaceGraph } from "./server/engine/workspace/DependencyAnalyzer";
 import { SharedStubLibrary, SharedStubBundle } from "./server/engine/workspace/SharedStubLibrary";
+import { ProjectReportGenerator, type ReportInput } from "./server/engine/report/ProjectReportGenerator";
 
 const PROJECTS_DIR = "/tmp/bmce-flat";
 const OUTPUT_DIR = "/tmp/bmce-output";
@@ -102,6 +103,18 @@ async function benchmarkProject(projDir: string, sharedStubs: SharedStubBundle |
   // In production, postProcessJdbc() is called to migrate JDBC blocks via LLM.
 
   let generatedFiles = genResult.files || [];
+  // v13.5b: Include multiTechFiles (SOAP controllers, etc.) in the output
+  const multiTechFiles = (genResult as any)?.multiTechFiles || [];
+  if (multiTechFiles.length > 0) {
+    // Deduplicate by path — main files take priority over multiTech
+    const existingPaths = new Set(generatedFiles.map((f: any) => f.path));
+    for (const mtf of multiTechFiles) {
+      if (!existingPaths.has(mtf.path)) {
+        generatedFiles.push(mtf);
+        existingPaths.add(mtf.path);
+      }
+    }
+  }
 
   // v12.12: Apply ParenBalancer to all generated files BEFORE post-fix and compile
   const parenBalancer = new ParenBalancer();
@@ -571,7 +584,24 @@ async function benchmarkProject(projDir: string, sharedStubs: SharedStubBundle |
 
   // Save generated files as ZIP-like structure
   // Use finalFiles (with stubs and fixes) if available, otherwise use original generatedFiles
-  const outputFiles = autoFixResult.finalFiles || generatedFiles;
+  let outputFiles = autoFixResult.finalFiles || generatedFiles;
+  // v13.5b: Filter out third-party library stubs from output (Anomaly A fix)
+  const ALLOWED_JAVA_PACKAGES = ['com/example/ejbproject/', 'com/nexa/bmce/', 'com/app/'];
+  const THIRD_PARTY_PREFIXES = [
+    'com/google/', 'com/netflix/', 'com/jcraft/', 'com/fasterxml/', 'com/amazonaws/',
+    'org/apache/', 'org/hibernate/', 'org/jboss/', 'org/springframework/',
+    'io/github/', 'io/netty/', 'net/sf/', 'javax/', 'jakarta/',
+  ];
+  outputFiles = outputFiles.filter(f => {
+    if (!f.path.endsWith('.java')) return true; // Keep non-Java files
+    if (!f.path.includes('src/main/java/')) return true; // Keep test/config files
+    const javaPath = f.path.replace(/^src\/main\/java\//, '');
+    // Allow project packages
+    if (ALLOWED_JAVA_PACKAGES.some(pkg => javaPath.startsWith(pkg))) return true;
+    // Block known third-party packages
+    if (THIRD_PARTY_PREFIXES.some(pkg => javaPath.startsWith(pkg))) return false;
+    return true; // Allow unknown packages by default
+  });
   const projOutputDir = join(OUTPUT_DIR, projName);
   mkdirSync(projOutputDir, { recursive: true });
   for (const f of outputFiles) {
@@ -590,6 +620,44 @@ async function benchmarkProject(projDir: string, sharedStubs: SharedStubBundle |
   }
   // Auto-fixed files are in the temp Maven directory (cleaned up after compile).
   // To debug, we rely on the topErrors field in the results.
+
+  // v13.5b: Generate MIGRATION-REPORT.html and .compleo/ artifacts
+  try {
+    const reportInput: ReportInput = {
+      projectName: projName,
+      sourcePackage: undefined,
+      targetPackage: `com.example.ejbproject`,
+      projectDomain: undefined,
+      analysisResult: analysisResult,
+      ir: analysisResult.ir,
+      generatedProject: {
+        files: outputFiles,
+        stats: (genResult as any)?.stats,
+        warnings: (genResult as any)?.warnings || [],
+        migrationReport: "",
+        multiTechFiles: (genResult as any)?.multiTechFiles || [],
+      } as any,
+      compilationResult: {
+        finalErrors: autoFixResult.finalResult.errors,
+        totalAttempts: autoFixResult.iterations,
+      } as any,
+      schemaResult: undefined,
+      pipelineError: null,
+      durationMs: totalTimeMs,
+    };
+    const report = await ProjectReportGenerator.generate(reportInput);
+    writeFileSync(join(projOutputDir, "MIGRATION-REPORT.html"), report.html);
+    // Write .compleo/ artifacts
+    const compleoDir = join(projOutputDir, ".compleo");
+    mkdirSync(compleoDir, { recursive: true });
+    if (report.artifacts.transformationsJson) writeFileSync(join(compleoDir, "transformations.json"), report.artifacts.transformationsJson);
+    if (report.artifacts.todoMarkersJson) writeFileSync(join(compleoDir, "todo-markers.json"), report.artifacts.todoMarkersJson);
+    if (report.artifacts.filesManifestJson) writeFileSync(join(compleoDir, "files-manifest.json"), report.artifacts.filesManifestJson);
+    if (report.artifacts.decisionsJson) writeFileSync(join(compleoDir, "decisions.json"), report.artifacts.decisionsJson);
+    if (report.artifacts.schemaMappingJson) writeFileSync(join(compleoDir, "schema-mapping.json"), report.artifacts.schemaMappingJson);
+  } catch (reportErr) {
+    console.warn(`  [WARN] Report generation failed for ${projName}:`, (reportErr as Error).message);
+  }
 
   return {
     projectName: projName,

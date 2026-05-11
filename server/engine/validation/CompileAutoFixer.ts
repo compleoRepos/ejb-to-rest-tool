@@ -706,7 +706,12 @@ function fixMissingPackages(
   // Filter out known framework packages (should be resolved via dependencies, not stubs)
   const FRAMEWORK_PACKAGES = [
     "org.springframework", "jakarta.", "javax.", "org.hibernate",
-    "org.apache.", "com.fasterxml", "io.micrometer", "org.slf4j"
+    "org.apache.", "com.fasterxml", "io.micrometer", "org.slf4j",
+    // v13.5b: Third-party libraries — add Maven deps instead of stubs
+    "com.google.", "com.netflix.", "com.jcraft.", "org.mockito.",
+    "org.junit.", "junit.", "oracle.", "org.w3c.", "org.xml.",
+    "ma.eai.", "com.sun.", "io.swagger.", "lombok.",
+    "org.projectlombok", "net.sf.", "commons-", "org.bouncycastle",
   ];
 
   // For each missing package, find what classes are imported from it
@@ -940,6 +945,91 @@ function fixMissingSymbols(
       }
       continue;
     }
+
+    // v13.5b: Don't generate stubs for known third-party libraries — add Maven deps instead
+    const THIRD_PARTY_PACKAGES: Record<string, { groupId: string; artifactId: string; version?: string; scope?: string }> = {
+      // Google Gson
+      'Gson': { groupId: 'com.google.code.gson', artifactId: 'gson', version: '2.10.1' },
+      'JsonObject': { groupId: 'com.google.code.gson', artifactId: 'gson', version: '2.10.1' },
+      'JsonElement': { groupId: 'com.google.code.gson', artifactId: 'gson', version: '2.10.1' },
+      'JsonParser': { groupId: 'com.google.code.gson', artifactId: 'gson', version: '2.10.1' },
+      'JsonArray': { groupId: 'com.google.code.gson', artifactId: 'gson', version: '2.10.1' },
+      'TypeToken': { groupId: 'com.google.code.gson', artifactId: 'gson', version: '2.10.1' },
+      // Netflix Hystrix
+      'HystrixCommand': { groupId: 'com.netflix.hystrix', artifactId: 'hystrix-core', version: '1.5.18' },
+      'HystrixCommandGroupKey': { groupId: 'com.netflix.hystrix', artifactId: 'hystrix-core', version: '1.5.18' },
+      // JSch/jcraft
+      'JSch': { groupId: 'com.jcraft', artifactId: 'jsch', version: '0.1.55' },
+      'Session': { groupId: 'com.jcraft', artifactId: 'jsch', version: '0.1.55' },
+      'Channel': { groupId: 'com.jcraft', artifactId: 'jsch', version: '0.1.55' },
+      'ChannelSftp': { groupId: 'com.jcraft', artifactId: 'jsch', version: '0.1.55' },
+      // Mockito (test scope)
+      'Mockito': { groupId: 'org.mockito', artifactId: 'mockito-core', version: '5.11.0', scope: 'test' },
+      'MockitoAnnotations': { groupId: 'org.mockito', artifactId: 'mockito-core', version: '5.11.0', scope: 'test' },
+      'Mock': { groupId: 'org.mockito', artifactId: 'mockito-core', version: '5.11.0', scope: 'test' },
+      'InjectMocks': { groupId: 'org.mockito', artifactId: 'mockito-core', version: '5.11.0', scope: 'test' },
+      // JUnit (test scope)
+      'Test': { groupId: 'org.junit.jupiter', artifactId: 'junit-jupiter', version: '5.10.2', scope: 'test' },
+      'Assert': { groupId: 'org.junit.jupiter', artifactId: 'junit-jupiter', version: '5.10.2', scope: 'test' },
+      'Before': { groupId: 'org.junit.jupiter', artifactId: 'junit-jupiter', version: '5.10.2', scope: 'test' },
+      'After': { groupId: 'org.junit.jupiter', artifactId: 'junit-jupiter', version: '5.10.2', scope: 'test' },
+      // Oracle JDBC
+      'OracleDataSource': { groupId: 'com.oracle.database.jdbc', artifactId: 'ojdbc11', version: '23.3.0.23.09' },
+      'OracleConnection': { groupId: 'com.oracle.database.jdbc', artifactId: 'ojdbc11', version: '23.3.0.23.09' },
+      // Apache Commons
+      'StringUtils': { groupId: 'org.apache.commons', artifactId: 'commons-lang3', version: '3.14.0' },
+      'IOUtils': { groupId: 'commons-io', artifactId: 'commons-io', version: '2.15.1' },
+      'FileUtils': { groupId: 'commons-io', artifactId: 'commons-io', version: '2.15.1' },
+      'Base64': { groupId: 'commons-codec', artifactId: 'commons-codec', version: '1.16.1' },
+      'DigestUtils': { groupId: 'commons-codec', artifactId: 'commons-codec', version: '1.16.1' },
+      // Hibernate (if not via spring-boot-starter-data-jpa)
+      'Criteria': { groupId: 'org.hibernate.orm', artifactId: 'hibernate-core', version: '6.4.4.Final' },
+      'SessionFactory': { groupId: 'org.hibernate.orm', artifactId: 'hibernate-core', version: '6.4.4.Final' },
+      // Lombok (compile-only)
+      'Getter': { groupId: 'org.projectlombok', artifactId: 'lombok', version: '1.18.30' },
+      'Setter': { groupId: 'org.projectlombok', artifactId: 'lombok', version: '1.18.30' },
+      'Data': { groupId: 'org.projectlombok', artifactId: 'lombok', version: '1.18.30' },
+      'Builder': { groupId: 'org.projectlombok', artifactId: 'lombok', version: '1.18.30' },
+      'AllArgsConstructor': { groupId: 'org.projectlombok', artifactId: 'lombok', version: '1.18.30' },
+      'NoArgsConstructor': { groupId: 'org.projectlombok', artifactId: 'lombok', version: '1.18.30' },
+      'RequiredArgsConstructor': { groupId: 'org.projectlombok', artifactId: 'lombok', version: '1.18.30' },
+      'Slf4j': { groupId: 'org.projectlombok', artifactId: 'lombok', version: '1.18.30' },
+      // SLF4J
+      'LoggerFactory': { groupId: 'org.slf4j', artifactId: 'slf4j-api', version: '2.0.12' },
+    };
+    // Also filter by package prefix for known third-party patterns
+    const THIRD_PARTY_PREFIXES = [
+      'com.google.', 'com.netflix.', 'com.jcraft.', 'org.mockito.', 'org.junit.',
+      'junit.', 'oracle.', 'org.w3c.', 'org.xml.', 'ma.eai.', 'com.sun.',
+      'io.swagger.', 'org.projectlombok.', 'net.sf.', 'org.bouncycastle.',
+    ];
+    // Check if this class is from a third-party package by examining imports in the error file
+    let isThirdPartyByImport = false;
+    {
+      let errFileIdx = result.findIndex(f => f.path.endsWith('/' + err.file));
+      if (errFileIdx === -1) errFileIdx = result.findIndex(f => f.path.includes(err.file));
+      if (errFileIdx !== -1) {
+        const errContent = result[errFileIdx].content;
+        isThirdPartyByImport = THIRD_PARTY_PREFIXES.some(prefix =>
+          errContent.includes(`import ${prefix}`) && errContent.includes(missingClass)
+        );
+      }
+    }
+    const thirdPartyDep = THIRD_PARTY_PACKAGES[missingClass];
+    if (thirdPartyDep || isThirdPartyByImport) {
+      // Add Maven dependency to pom.xml instead of generating a stub
+      if (thirdPartyDep) {
+        const pomIdx = result.findIndex(f => f.path.endsWith('pom.xml'));
+        if (pomIdx !== -1 && !result[pomIdx].content.includes(thirdPartyDep.artifactId)) {
+          const scopeXml = thirdPartyDep.scope ? `\n            <scope>${thirdPartyDep.scope}</scope>` : '';
+          const depXml = `        <dependency>\n            <groupId>${thirdPartyDep.groupId}</groupId>\n            <artifactId>${thirdPartyDep.artifactId}</artifactId>${thirdPartyDep.version ? `\n            <version>${thirdPartyDep.version}</version>` : ''}${scopeXml}\n        </dependency>`;
+          result[pomIdx] = { ...result[pomIdx], content: result[pomIdx].content.replace('    </dependencies>', `${depXml}\n    </dependencies>`) };
+          actions.push({ iteration, type: 'ADD_DEPENDENCY', file: 'pom.xml', description: `Added Maven dependency ${thirdPartyDep.groupId}:${thirdPartyDep.artifactId} for third-party class: ${missingClass}` });
+        }
+      }
+      continue;
+    }
+
     // Determine what kind of stub to generate
     let stubContent: string;
     let subDir: string;
