@@ -9,6 +9,7 @@ import { compileWithMaven, MavenCompileResult } from "./server/engine/validation
 import { autoFixAndCompile, AutoFixResult } from "./server/engine/validation/CompileAutoFixer";
 import { CompleoEngine, SourceFile } from "./server/engine/CompleoEngine";
 import { generateSmartStub } from "./server/engine/validation/SmartStubGenerator";
+import { ParenBalancer } from "./server/engine/validation/ParenBalancer";
 
 const PROJECTS_DIR = "/tmp/bmce-flat";
 const OUTPUT_DIR = "/tmp/bmce-output";
@@ -99,6 +100,15 @@ async function benchmarkProject(projDir: string): Promise<BmceResult> {
   // In production, postProcessJdbc() is called to migrate JDBC blocks via LLM.
 
   let generatedFiles = genResult.files || [];
+
+  // v12.12: Apply ParenBalancer to all generated files BEFORE post-fix and compile
+  const parenBalancer = new ParenBalancer();
+  generatedFiles = generatedFiles.map(f => {
+    if (!f.path.endsWith('.java')) return f;
+    const { fixed, fixCount } = parenBalancer.balance(f.content);
+    if (fixCount > 0) return { ...f, content: fixed };
+    return f;
+  });
 
   // Post-fix: remove orphan JDBC placeholders and fix common patterns
   generatedFiles = generatedFiles.map(f => {
@@ -311,6 +321,11 @@ async function benchmarkProject(projDir: string): Promise<BmceResult> {
   if (autoFixResult.finalResult.status === 'FAIL' && autoFixResult.finalFiles) {
     let secondPassFiles = autoFixResult.finalFiles.map(f => {
       let content = f.content;
+      // v12.12: Re-apply ParenBalancer on second pass files (autofix may have introduced new imbalances)
+      if (f.path.endsWith('.java')) {
+        const { fixed, fixCount } = parenBalancer.balance(content);
+        if (fixCount > 0) content = fixed;
+      }
       // Uncomment AUTOFIX lines that contain catch/finally (they were wrongly commented by method-level commenting)
       content = content.replace(/^\/\/ \[AUTOFIX\]\s*(.*}\s*catch\s*\(.*)/gm, '$1');
       content = content.replace(/^\/\/ \[AUTOFIX\]\s*(.*\bfinally\s*\{.*)/gm, '$1');
@@ -522,7 +537,7 @@ async function main() {
     .map(d => join(PROJECTS_DIR, d));
 
   console.log(`\n${"=".repeat(80)}`);
-  console.log(`  COMPLEO v12.10 — BMCE Bank Benchmark (${dirs.length} projets réels)`);
+  console.log(`  COMPLEO v12.12 — BMCE Bank Benchmark (${dirs.length} projets réels)`);
   console.log(`${"=".repeat(80)}\n`);
 
   const results: BmceResult[] = [];

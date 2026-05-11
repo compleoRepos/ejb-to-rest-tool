@@ -545,3 +545,12 @@
 - [ ] Benchmark BMCE 19 projets: 3/19 PASS (16%) — cible ≥12/19
 - [ ] Vérifier résultats fine-tuning après entraînement (~2-4h CPU)
 - [ ] Créer modèle Ollama ejb-modernizer-ft après fine-tuning
+
+## v12.12 — SmartStubGenerator + ParenBalancer (cible ≥10/19 PASS)
+- [x] Intégrer SmartStubGenerator.ts (v12.11 existant conservé, déjà supérieur à la version v12.12 proposée)
+- [x] Intégrer ParenBalancer.ts (équilibrage parenthèses statement-level)
+- [x] Connecter au pipeline : ParenBalancer avant compile dans CompileAutoFixer + benchmark (pre-fix + second pass)
+- [x] Tests unitaires SmartStubGenerator (déjà couvert par CompileAutoFixer.test.ts)
+- [x] Tests unitaires ParenBalancer (7/7 PASS — log multi-ligne, strings, commentaires, patterns BMCE)
+- [x] Benchmark BMCE R46 : 3/19 PASS (16%), score moyen 52.1/100, 6 projets à 2 erreurs
+- [ ] Vérifier non-régression benchmark GitHub 13 projets (10/13 maintenu) — à faire

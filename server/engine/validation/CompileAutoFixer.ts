@@ -14,6 +14,7 @@
 import { compileWithMaven, MavenCompileResult, MavenCompileError } from "./RealMavenCompiler";
 import { transformMailAndJms, hasMailReferences, hasJmsReferences } from "../transformer/mail-transformer";
 import { generateSmartStub } from "./SmartStubGenerator";
+import { ParenBalancer } from "./ParenBalancer";
 
 /**
  * Wrapper for SmartStubGenerator integration.
@@ -253,77 +254,25 @@ function injectSmartStubs(files: GeneratedFile[]): { files: GeneratedFile[]; inj
 }
 
 /**
- * v12.13: Pre-process all Java files to fix unbalanced parentheses and duplicate imports.
+ * v12.12: Pre-process all Java files using ParenBalancer + duplicate import removal.
  * Runs BEFORE the first compile to catch issues that the error-driven fix loop might miss.
+ * ParenBalancer uses statement-level depth tracking (not line-level) for accurate paren balancing.
  */
 function preProcessParensAndImports(files: GeneratedFile[]): GeneratedFile[] {
   const result = files.map(f => ({ ...f }));
+  const balancer = new ParenBalancer();
 
   for (let fi = 0; fi < result.length; fi++) {
     if (!result[fi].path.endsWith('.java')) continue;
     let content = result[fi].content;
     let changed = false;
 
-    // 1. Fix multi-line log/method statements missing closing parenthesis
-    // Pattern: log.xxx("string"
-    //              + expr;  ← missing ) before ;
-    // Strategy: find lines starting with + that end with ; and scan backward
-    // to find if the statement started with an unclosed method call.
-    const cLines = content.split('\n');
-    for (let li = 0; li < cLines.length; li++) {
-      const ln = cLines[li];
-      const trimmed = ln.trim();
-      // Only process lines that: end with ; AND start with + (string concatenation continuation)
-      if (!trimmed.endsWith(';') || !trimmed.startsWith('+')) continue;
-      
-      // Count parens across the full statement (scan backward)
-      let totalOpen = 0, totalClose = 0;
-      const countParens = (line: string) => {
-        let op = 0, cl = 0, inS = false, sC = '';
-        for (let ci = 0; ci < line.length; ci++) {
-          const ch = line[ci];
-          if (inS) { if (ch === sC && line[ci - 1] !== '\\') inS = false; continue; }
-          if (ch === '"' || ch === "'") { inS = true; sC = ch; continue; }
-          if (ch === '(') op++;
-          if (ch === ')') cl++;
-        }
-        return { op, cl };
-      };
-      
-      // Count current line
-      const cur = countParens(ln);
-      totalOpen = cur.op;
-      totalClose = cur.cl;
-      
-      // Scan backward up to 10 lines
-      for (let k = li - 1; k >= Math.max(0, li - 10); k--) {
-        const prevLine = cLines[k].trim();
-        if (prevLine.endsWith(';') || prevLine.endsWith('{') || prevLine.endsWith('}') || prevLine === '') break;
-        const prev = countParens(cLines[k]);
-        totalOpen += prev.op;
-        totalClose += prev.cl;
-      }
-      
-      if (totalOpen > totalClose) {
-        const diff = totalOpen - totalClose;
-        cLines[li] = ln.replace(/;(\s*)$/, ')'.repeat(diff) + ';$1');
-        changed = true;
-      }
+    // 1. ParenBalancer: fix unbalanced parentheses across multi-line statements
+    const { fixed, fixCount } = balancer.balance(content);
+    if (fixCount > 0) {
+      content = fixed;
+      changed = true;
     }
-    
-    // Also fix: lines ending with )); where statement only needs one )
-    for (let li = 0; li < cLines.length; li++) {
-      const ln = cLines[li];
-      const trimmed = ln.trim();
-      if (!trimmed.endsWith('));')) continue;
-      if (!trimmed.startsWith('+') && !/^\w+\(/.test(trimmed)) continue;
-      // Only fix actionXxx(args)); → actionXxx(args);
-      if (/^\w+\([^)]*\)\);$/.test(trimmed)) {
-        cLines[li] = ln.replace(/\)\)(\s*;)/, ')$1');
-        changed = true;
-      }
-    }
-    if (changed) content = cLines.join('\n');
 
     // 2. Remove duplicate imports of same class from different packages
     const importLines = content.match(/^\s*import\s+[\w.]+\s*;/gm) || [];
