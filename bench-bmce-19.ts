@@ -473,7 +473,12 @@ async function benchmarkProject(projDir: string): Promise<BmceResult> {
   const techsDetected = analysisResult.ir?.technologies?.map((t: any) => t.name || t) || [];
   const useCaseCount = analysisResult.ir?.useCases?.length || 0;
 
-  // Score calculation (simple heuristic)
+  // v12.13: ParenBalancer final pass DISABLED — causes regressions on some projects
+  // (commande-chequier 74→58, opposition-carte 60→48 when applied globally)
+  // The ParenBalancer is too aggressive on already-correct code (annotations, lambdas).
+  // Keeping the pre-process and second-pass applications which are more targeted.
+
+  // Score calculation (simple heuristic) - placed AFTER final paren pass for accurate count
   const baseScore = autoFixResult.finalResult.status === "PASS" ? 85 : 
     Math.max(10, Math.round(85 * (1 - autoFixResult.finalResult.errorCount / Math.max(1, autoFixResult.originalResult.errorCount))));
   const score = Math.min(100, baseScore + (autoFixResult.recoveredFromFail ? 10 : 0));

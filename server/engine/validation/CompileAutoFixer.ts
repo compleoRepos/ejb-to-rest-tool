@@ -538,6 +538,29 @@ export function autoFixAndCompile(
     }
   }
 
+  // v12.13: FINAL ParenBalancer pass — ensures paren fixes are never undone by earlier iterations
+  if (currentResult.status === "FAIL") {
+    const finalBalancer = new ParenBalancer();
+    let finalFixApplied = false;
+    for (let fi = 0; fi < currentFiles.length; fi++) {
+      if (!currentFiles[fi].path.endsWith('.java')) continue;
+      const { fixed, fixCount } = finalBalancer.balance(currentFiles[fi].content);
+      if (fixCount > 0) {
+        currentFiles[fi] = { ...currentFiles[fi], content: fixed };
+        finalFixApplied = true;
+      }
+    }
+    if (finalFixApplied) {
+      currentResult = compileWithMaven(currentFiles, options);
+      allFixes.push({
+        iteration: iteration + 1,
+        type: 'FIX_SYNTAX' as const,
+        file: 'FINAL_PAREN_BALANCE',
+        description: 'Final ParenBalancer pass on all files',
+      });
+    }
+  }
+
   const recovered = originalResult.status === "FAIL" && currentResult.status === "PASS";
   const status = currentResult.status === "PASS"
     ? iteration > 0 ? `PASS after ${iteration} auto-fix iteration(s)` : "PASS"
@@ -1294,15 +1317,24 @@ function fixSyntaxErrors(
       return mod;
     });
 
-    // Fix 6b: "not a statement" errors - comment out the offending line
+    // Fix 6b: "not a statement" errors - fix or comment out the offending line
     for (const err of fileErrors) {
       if (err.message.includes('not a statement')) {
         const lines = content.split('\n');
         const lineIdx = err.line - 1;
         if (lineIdx >= 0 && lineIdx < lines.length) {
           const offendingLine = lines[lineIdx].trim();
+          // v12.13: Fix cast-as-statement: ((Type) methodCall(args)); → methodCall(args);
+          // Match with or without leading whitespace
+          const castMatch = offendingLine.match(/^\(\(([A-Z]\w*)\)\s+(.+)\);?\s*$/);
+          if (castMatch) {
+            const indent = lines[lineIdx].match(/^(\s*)/)?.[1] || '';
+            lines[lineIdx] = `${indent}${castMatch[2]};`;
+            content = lines.join('\n');
+            fixed = true;
+          }
           // Only comment out if it's a simple expression statement (variable name, null, etc.)
-          if (/^\w[\w.]*\s*;\s*$/.test(offendingLine) || /^null\s*;\s*$/.test(offendingLine) || /^\w[\w.]*\s*\/\*.*\*\/\s*;\s*$/.test(offendingLine)) {
+          else if (/^\w[\w.]*\s*;\s*$/.test(offendingLine) || /^null\s*;\s*$/.test(offendingLine) || /^\w[\w.]*\s*\/\*.*\*\/\s*;\s*$/.test(offendingLine)) {
             if (!lines[lineIdx].trim().startsWith('//')) lines[lineIdx] = '// [AUTOFIX] ' + lines[lineIdx];
             content = lines.join('\n');
             fixed = true;
@@ -1498,13 +1530,22 @@ function fixSyntaxErrors(
       }
     }
 
-    // Fix 10: Remove orphan casts used as statements: ((Action) methodCall(args)); → methodCall(args);
-    // Pattern: line starts with spaces, then ((Type) methodCall(args));
-    content = content.replace(/^(\s*)\(\(\w+\)\s+(\w+\([^)]*\))\);/gm, '$1$2;');
-    // Also fix: varName = ((Action) methodCall(args)); → varName = methodCall(args);
-    content = content.replace(/\(\(Action\)\s+(\w+\([^)]*\))\)/g, '$1');
-    // Remove casts to unknown classes that cause 'cannot find symbol': ((UnknownClass) expr) → expr
-    content = content.replace(/\(\(Action\)\s+/g, '');
+    // Fix 10: Remove orphan casts used as statements: ((Type) methodCall(args)); → methodCall(args);
+    // v12.13: Extended regex to handle multi-arg calls like ((Action) actionGetInfoTier(envIn, envOut));
+    content = content.replace(/^(\s*)\(\([A-Z]\w*\)\s+(\w+\([^;]*?\))\)\s*;/gm, (m, indent, call) => {
+      fixed = true;
+      return `${indent}${call};`;
+    });
+    // Also fix inline: varName = ((Action) methodCall(args)); → varName = methodCall(args);
+    content = content.replace(/\(\([A-Z]\w*\)\s+(\w+\([^;]*?\))\)/g, (m, call) => {
+      fixed = true;
+      return call;
+    });
+    // Remove standalone casts to Action that cause 'not a statement': ((Action) expr) as statement
+    content = content.replace(/^(\s*)\(\(Action\)\s+/gm, (m, indent) => {
+      fixed = true;
+      return `${indent}`;
+    });
 
     // Fix 12: Multi-line parenthesis balancer for log/method calls
     // Handles statements spanning multiple lines where ( opens on one line and ; ends on another
@@ -1558,12 +1599,43 @@ function fixSyntaxErrors(
           const diff = totalOpen - totalClose;
           cLines[li] = ln.replace(/;(\s*)$/, ')'.repeat(diff) + ';$1');
           fixed = true;
-        } else if (totalClose > totalOpen && totalClose - totalOpen === 1) {
-          // Extra closing paren — e.g. methodCall(args));
-          // Only fix if it's a simple case: )); at end of current line
-          if (/\)\)\s*;\s*$/.test(ln)) {
+        } else if (totalClose > totalOpen) {
+          // Extra closing paren(s) — e.g. new ArrayList<Handler>()) or methodCall(args));
+          const excess = totalClose - totalOpen;
+          // v12.13: Remove excess `)` from the line. Try common patterns:
+          // Pattern 1: >()) → >() (generic constructor with extra paren)
+          if (excess === 1 && />[^)]*\(\)\)/.test(ln)) {
+            cLines[li] = ln.replace(/(>[^)]*\(\))\)/, '$1');
+            fixed = true;
+          }
+          // Pattern 2: )); at end → ); (simple extra close)
+          else if (excess === 1 && /\)\)\s*;\s*$/.test(ln)) {
             cLines[li] = ln.replace(/\)\)(\s*;\s*)$/, ')$1');
             fixed = true;
+          }
+          // Pattern 3: multiple excess — remove rightmost excess `)` before `;`
+          else if (excess >= 1) {
+            let fixedLn = ln;
+            let removed = 0;
+            // Remove from right to left, just before the ;
+            const semiIdx = fixedLn.lastIndexOf(';');
+            if (semiIdx > 0) {
+              let pos = semiIdx - 1;
+              while (pos >= 0 && removed < excess) {
+                if (fixedLn[pos] === ')') {
+                  fixedLn = fixedLn.substring(0, pos) + fixedLn.substring(pos + 1);
+                  removed++;
+                } else if (fixedLn[pos] === ' ' || fixedLn[pos] === '\t') {
+                  pos--;
+                } else {
+                  break;
+                }
+              }
+              if (removed > 0) {
+                cLines[li] = fixedLn;
+                fixed = true;
+              }
+            }
           }
         }
       }

@@ -42,6 +42,23 @@ interface SmartStubResult {
 /**
  * Generate a smart stub for a missing class by inferring its API from usage.
  */
+/**
+ * v12.13: Build a map of className -> actual package from all files.
+ * Used by renderStub to resolve correct imports for types used in stub signatures.
+ */
+function buildClassPackageMap(allFiles: GeneratedFile[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const f of allFiles) {
+    if (!f.path.endsWith('.java')) continue;
+    const pkgMatch = f.content.match(/^package\s+([\w.]+)\s*;/m);
+    const classMatch = f.content.match(/(?:public\s+)?(?:class|interface|enum|record)\s+(\w+)/);
+    if (pkgMatch && classMatch) {
+      map.set(classMatch[1], pkgMatch[1]);
+    }
+  }
+  return map;
+}
+
 export function generateSmartStub(
   missingClass: string,
   pkg: string,
@@ -196,8 +213,9 @@ export function generateSmartStub(
     }
   }
 
-  // 4. Render the stub
-  const stubContent = renderStub(pkg, missingClass, methods, fields, hasConstructorWithArgs, constructorArgTypes);
+  // 4. Render the stub (v12.13: pass classPackageMap for correct import resolution)
+  const classPackageMap = buildClassPackageMap(allFiles);
+  const stubContent = renderStub(pkg, missingClass, methods, fields, hasConstructorWithArgs, constructorArgTypes, classPackageMap);
 
   return { className: missingClass, pkg, stubContent, transitiveStubs };
 }
@@ -442,7 +460,8 @@ function renderStub(
   methods: Map<string, MethodSignature>,
   fields: Map<string, FieldSignature>,
   hasCtorWithArgs: boolean,
-  ctorArgTypes: string[]
+  ctorArgTypes: string[],
+  classPackageMap?: Map<string, string>
 ): string {
   const imports = new Set<string>();
   const methodBodies: string[] = [];
@@ -461,9 +480,27 @@ function renderStub(
     if (type.includes("Reader")) imports.add("java.io.Reader");
     if (type.includes("InputStream")) imports.add("java.io.InputStream");
     if (type.includes("OutputStream")) imports.add("java.io.OutputStream");
-    // Import project classes used as types (not standard Java)
+    // v12.13: Import project classes using correct package from classPackageMap
     if (/^[A-Z]/.test(rawType) && !rawType.startsWith('java.') && !['String','Object','Integer','Long','Boolean','Double','Float','Byte','Short','Character','Void','List','Map','Set','Date','BigDecimal','LocalDate','Reader','InputStream','OutputStream','Collections'].includes(rawType)) {
-      imports.add(`${pkg}.${rawType}`);
+      const actualPkg = classPackageMap?.get(rawType);
+      if (actualPkg) {
+        imports.add(`${actualPkg}.${rawType}`);
+      } else {
+        imports.add(`${pkg}.${rawType}`);
+      }
+    }
+    // v12.13: Also resolve generic type parameters (e.g., List<Dotation> → import Dotation)
+    const genericMatch = type.match(/<([A-Z]\w+)>/);
+    if (genericMatch) {
+      const innerType = genericMatch[1];
+      if (!['String','Object','Integer','Long','Boolean','Double','Float','Byte','Short','Character','Void'].includes(innerType)) {
+        const innerPkg = classPackageMap?.get(innerType);
+        if (innerPkg) {
+          imports.add(`${innerPkg}.${innerType}`);
+        } else {
+          imports.add(`${pkg}.${innerType}`);
+        }
+      }
     }
   };
 

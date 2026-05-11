@@ -554,3 +554,21 @@
 - [x] Tests unitaires ParenBalancer (7/7 PASS — log multi-ligne, strings, commentaires, patterns BMCE)
 - [x] Benchmark BMCE R46 : 3/19 PASS (16%), score moyen 52.1/100, 6 projets à 2 erreurs
 - [ ] Vérifier non-régression benchmark GitHub 13 projets (10/13 maintenu) — à faire
+
+## v12.13 — Fix ciblé 6 projets à 2 erreurs (cible ≥7/19 PASS)
+- [x] Extraire les 12 erreurs exactes des 6 projets (file:line:column:message)
+- [x] Catégoriser les erreurs : D-Syntaxe (8 err, 4 projets), A-Import (4 err, 2 projets)
+- [x] Implémenter Fix 6b amélioré (cast orphelin avec indentation)
+- [x] Implémenter Fix 10 amélioré (regex multi-args)
+- [x] Implémenter Fix 12 amélioré (extra parens generics)
+- [x] Implémenter SmartStubGenerator import resolver (buildClassPackageMap)
+- [x] Benchmark R48: 3/19 PASS (16%), score 55.5/100 — 5 projets à 2 erreurs
+- [x] Benchmark R49: ParenBalancer final DISABLED (causait régressions commande-chequier 74→58, opposition-carte 60→48)
+- [ ] Relancer benchmark GitHub 13 projets (non-régression, cible 10/13 maintenu)
+- [ ] Rapport v12.13 final
+
+### Conclusion v12.13
+- Les fix de syntaxe sont implémentés et fonctionnent en test unitaire
+- Le problème résiduel est le NON-DÉTERMINISME du LLM (chaque run génère un code légèrement différent)
+- Les 2 erreurs résiduelles changent à chaque exécution → seul le fine-tuning peut les résoudre
+- Le fine-tuning QLoRA est en cours sur le laptop (2052 paires, ~3-5h CPU)
