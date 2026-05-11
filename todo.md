@@ -533,3 +533,15 @@
 - [x] Scale-up: Apache Fineract (527K LOC, 5087 fichiers, 92 erreurs, 32.6s)
 - [x] Profiling CPU+mémoire sur Fineract (76MB heap, 32s total, hot path: AI 49.5%)
 - [x] Rapport final v12.10
+
+## v12.11 — Fine-tuning QLoRA + Benchmark BMCE 19 projets
+- [x] Préparer 511 paires d'entraînement BMCE (EJB source → REST output)
+- [x] Merger avec dataset existant (1541 + 511 = 2052 paires, 12 Mo)
+- [x] Lancer fine-tuning QLoRA en background (Qwen2.5-Coder-1.5B, 2 epochs, CPU)
+- [x] Améliorer CompileAutoFixer: preProcess global parenthèses multi-ligne
+- [x] Améliorer CompileAutoFixer: fix imports dupliqués pré-compilation
+- [x] Améliorer CompileAutoFixer: fix Fix 12 multi-ligne (continuation lines)
+- [x] Test unitaire preProcess: PASS (fix vérifié en isolation)
+- [ ] Benchmark BMCE 19 projets: 3/19 PASS (16%) — cible ≥12/19
+- [ ] Vérifier résultats fine-tuning après entraînement (~2-4h CPU)
+- [ ] Créer modèle Ollama ejb-modernizer-ft après fine-tuning

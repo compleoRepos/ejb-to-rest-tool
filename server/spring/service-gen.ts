@@ -170,11 +170,11 @@ export function generateDomainService(
       : `\n        log.info("Audit trail: transaction ${methodName} completed");\n${returnType !== "void" ? `        return ${returnType === "String" ? "\"\"" : returnType === "int" || returnType === "long" || returnType === "double" || returnType === "float" ? "0" : returnType === "boolean" ? "false" : "null"};` : ""}`;
 
     methods.push(`
-${scheduledAnnotation}${txAnnotation}    /**
+    /**
      * ${sanitizeClassName(uc.className)} — ${uc.bianDomain || domain} / ${uc.bianAction || methodName}.${javadocLine}
      * Migrated from legacy UseCase: ${sanitizeClassName(uc.className)}
      */
-    public ${returnType} ${methodName}(${paramType}) {
+${scheduledAnnotation}${txAnnotation}    public ${returnType} ${methodName}(${paramType}) {
         log.info("Audit trail: transaction ${methodName} initiated");
 ${methodBody}${endingLines}
     }`);
@@ -203,9 +203,17 @@ ${methodBody}${endingLines}
     "QueueConnectionFactory": "QueueConnectionFactoryAdapter",
     "TopicConnectionFactory": "TopicConnectionFactoryAdapter",
   };
+  // v12.10: EJB infrastructure types to SKIP entirely (not services)
+  const EJB_SKIP_TYPES = new Set([
+    "SessionContext", "static SessionContext", "EJBContext",
+    "UserTransaction", "TimerService", "InitialContext",
+    "Context", "DataSource",
+  ]);
   const localFields: string[] = [];
   const crossModuleFields: string[] = [];
   for (const [, svc] of allInjected) {
+    // Skip EJB infrastructure types that have no Spring equivalent as injected services
+    if (EJB_SKIP_TYPES.has(svc.type)) continue;
     const resolvedType = EJB_TO_ADAPTER[svc.type] ?? svc.type;
     // v12.10: Preserve original field name from source to avoid mismatches in body code
     const fieldName = svc.originalName || (resolvedType.charAt(0).toLowerCase() + resolvedType.slice(1));
