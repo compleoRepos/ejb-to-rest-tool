@@ -572,3 +572,16 @@
 - Le problème résiduel est le NON-DÉTERMINISME du LLM (chaque run génère un code légèrement différent)
 - Les 2 erreurs résiduelles changent à chaque exécution → seul le fine-tuning peut les résoudre
 - Le fine-tuning QLoRA est en cours sur le laptop (2052 paires, ~3-5h CPU)
+
+## v13.0 — Workspace Mode (saut majeur v12.x → v13.0)
+- [ ] Créer structure server/engine/workspace/
+- [ ] Implémenter DependencyAnalyzer.ts (DAG inter-projets, package ownership, external deps)
+- [ ] Implémenter MigrationPlanner.ts (tri topologique, tiers, effort estimation, framework groups)
+- [ ] Implémenter SharedStubLibrary.ts (stubs cross-projet agrégés, pom.xml, module Maven)
+- [ ] Tests unitaires DependencyAnalyzer (≥10 tests, fixture BMCE 19 projets)
+- [ ] Tests unitaires MigrationPlanner (≥10 tests)
+- [ ] Tests unitaires SharedStubLibrary (≥10 tests)
+- [ ] IHM Workspace Analysis (écran 2bis : DAG mermaid, tableau tiers, frameworks, preview stubs)
+- [ ] Intégrer lib stubs dans benchmark BMCE (cible ≥10/19 PASS avec stubs au classpath)
+- [ ] Vérifier non-régression mode single-project (GitHub 13 → 10/13 maintenu)
+- [ ] Rapport v13.0

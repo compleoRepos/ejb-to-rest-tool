@@ -567,7 +567,88 @@ ${modules}
 `;
 }
 
-// ─── Export ─────────────────────────────────────────────────────────────────
+// ─── POST /api/workspace/:id/analyze — v13.0 Workspace Analysis ──────────
+
+router.post("/:id/analyze", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database unavailable" });
+
+    // Récupérer les sessions du workspace
+    const sessions = await db.select().from(workspaceSessions).where(eq(workspaceSessions.workspaceId, id));
+    if (sessions.length === 0) {
+      return res.status(400).json({ error: "Workspace has no projects" });
+    }
+
+    // Construire le Workspace (Map<projectName, Map<filePath, content>>)
+    const { DependencyAnalyzer } = await import("./engine/workspace/DependencyAnalyzer");
+    const { MigrationPlanner } = await import("./engine/workspace/MigrationPlanner");
+    const { SharedStubLibrary } = await import("./engine/workspace/SharedStubLibrary");
+    type Workspace = import("./engine/workspace/DependencyAnalyzer").Workspace;
+
+    const workspace: Workspace = new Map();
+    for (const session of sessions) {
+      const store = sessionStore.get(session.sessionId);
+      if (!store?.files) continue;
+      const fileMap = new Map<string, string>();
+      for (const [path, content] of Object.entries(store.files)) {
+        if (typeof content === 'string') fileMap.set(path, content);
+      }
+      workspace.set(session.projectName || session.sessionId, fileMap);
+    }
+
+    if (workspace.size === 0) {
+      return res.status(400).json({ error: "No project files found in session store" });
+    }
+
+    // 1. DependencyAnalyzer
+    const analyzer = new DependencyAnalyzer();
+    const graph = analyzer.analyze(workspace);
+    const mermaidDiagram = analyzer.toMermaidDiagram(graph);
+    const topFrameworks = analyzer.getTopExternalFrameworks(graph, 3);
+
+    // 2. MigrationPlanner
+    const planner = new MigrationPlanner();
+    const plan = planner.plan(graph);
+    const planSummary = planner.summarize(plan);
+
+    // 3. SharedStubLibrary (générer pour les top frameworks)
+    const stubLib = new SharedStubLibrary();
+    const packagesToStub = topFrameworks.map(f => f.rootPackage);
+    const stubBundle = stubLib.generate(graph, workspace, packagesToStub, `${sessions[0].projectName || 'workspace'}-stubs`);
+
+    // Formater la réponse
+    const response = {
+      graph: {
+        projects: graph.projects,
+        edges: graph.dependencyEdges,
+        mermaidDiagram,
+      },
+      plan: {
+        tiers: plan.tiers,
+        totalProjects: plan.totalProjects,
+        totalEstimatedEffortDays: plan.totalEstimatedEffortDays,
+        externalFrameworks: plan.externalFrameworks,
+        summary: planSummary,
+      },
+      stubs: {
+        moduleName: stubBundle.moduleName,
+        version: stubBundle.version,
+        classCount: stubBundle.classCount,
+        files: Object.fromEntries(stubBundle.stubFiles),
+      },
+      topFrameworks,
+    };
+
+    return res.json(response);
+  } catch (err: any) {
+    console.error("[Workspace] Analyze error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Export ───────────────────────────────────────────────────────────────────────────
 
 export function registerWorkspaceRoutes(app: import("express").Express) {
   app.use("/api/workspace", router);

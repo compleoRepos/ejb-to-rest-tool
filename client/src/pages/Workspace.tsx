@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Link as RouterLink } from "wouter";
 import WorkspaceInsights from "@/components/WorkspaceInsights";
+import WorkspaceAnalysis from "@/components/WorkspaceAnalysis";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ export default function WorkspacePage() {
   const [availableSessions, setAvailableSessions] = useState<AvailableSession[]>([]);
   const [addingProject, setAddingProject] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [activeTab, setActiveTab] = useState<"modules" | "intelligence">("modules");
+  const [activeTab, setActiveTab] = useState<"modules" | "intelligence" | "analysis">("modules");
 
   // ─── Load workspaces ────────────────────────────────────────────────────
 
@@ -417,9 +418,24 @@ export default function WorkspacePage() {
                     >
                       <Brain className="w-3.5 h-3.5 mr-1" /> Intelligence
                     </Button>
+                    <Button
+                      variant={activeTab === "analysis" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setActiveTab("analysis")}
+                      className={activeTab === "analysis"
+                        ? "bg-blue-600 hover:bg-blue-700 text-white"
+                        : "text-[oklch(0.6_0.01_250)] border-[oklch(0.25_0.01_250)] hover:bg-[oklch(0.2_0.01_250)]"
+                      }
+                    >
+                      <Network className="w-3.5 h-3.5 mr-1" /> Analysis v13
+                    </Button>
                   </div>
-
-                  {activeTab === "intelligence" ? (
+                  {activeTab === "analysis" ? (
+                    <WorkspaceAnalysis
+                      workspaceId={selectedWs.id}
+                      workspaceName={selectedWs.name}
+                    />
+                  ) : activeTab === "intelligence" ? (
                     <WorkspaceInsights
                       workspaceId={selectedWs.id}
                       workspaceName={selectedWs.name}

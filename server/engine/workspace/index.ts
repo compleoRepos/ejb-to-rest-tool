@@ -17,3 +17,13 @@ export type { MutualizationRecommendation, MutualizationReport } from "./Mutuali
 
 export { WorkspaceIntelligenceEngine } from "./WorkspaceIntelligenceEngine";
 export type { WorkspaceInsight } from "./WorkspaceIntelligenceEngine";
+
+// v13.0 — Workspace Mode
+export { DependencyAnalyzer } from "./DependencyAnalyzer";
+export type { Workspace, ProjectNode, ExternalDep, DependencyEdge, WorkspaceGraph } from "./DependencyAnalyzer";
+
+export { MigrationPlanner } from "./MigrationPlanner";
+export type { Tier, TierItem, FrameworkGroup, MigrationPlan } from "./MigrationPlanner";
+
+export { SharedStubLibrary } from "./SharedStubLibrary";
+export type { ClassUsageData, MethodSignature, SharedStubBundle } from "./SharedStubLibrary";
