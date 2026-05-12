@@ -113,6 +113,13 @@ function injectSmartStubs(files: GeneratedFile[]): { files: GeneratedFile[]; inj
     'IndexOutOfBoundsException', 'NumberFormatException', 'ArithmeticException',
     'Exception', 'Throwable', 'Error', 'StackTraceElement', 'Thread', 'System',
     'Math', 'StringBuilder', 'StringBuffer', 'Comparable', 'Iterable', 'Cloneable',
+    // v13.10: Spring Boot / Jakarta classes that MUST NOT be stubbed
+    'ResponseEntity', 'HttpStatus', 'RequestMapping', 'RestController',
+    'GetMapping', 'PostMapping', 'PutMapping', 'DeleteMapping', 'PathVariable',
+    'RequestBody', 'RequestParam', 'Autowired', 'Service', 'Component',
+    'Repository', 'Configuration', 'Bean', 'Value', 'Transactional',
+    'ModelAndView', 'Model', 'RedirectAttributes', 'BindingResult',
+    'Valid', 'NotNull', 'NotBlank', 'Size', 'Pattern',
   ]);
 
   for (let fi = 0; fi < result.length; fi++) {
@@ -154,6 +161,9 @@ function injectSmartStubs(files: GeneratedFile[]): { files: GeneratedFile[]; inj
       if (JAVA_BUILTINS.has(className)) continue;
       if (definedClasses.has(className)) continue;
       if (importedButMissing.has(className)) continue;
+      // v13.10: Skip short names (likely acronyms/false positives) and all-uppercase names
+      if (className.length <= 4) continue;
+      if (/^[A-Z]+$/.test(className)) continue;
       // Check if it's actually used as a type (not just a string)
       if (f.content.includes(`class ${className}`) || f.content.includes(`interface ${className}`)) continue;
       // Only add if the class is used meaningfully (field, variable, cast, new)
@@ -305,11 +315,455 @@ function preProcessParensAndImports(files: GeneratedFile[]): GeneratedFile[] {
       }
     }
 
+    // 3. v13.10: Remove invalid imports containing @WebParam, partName, "...", or varargs
+    //    e.g. "import com.example.dto.(name =);" or "import ...partName = \"x\") String;"
+    //    or "import com.example.dto.WebServiceFeature...;"
+    const invalidImportRegex = /^\s*import\s+.*(?:partName|@WebParam|\(name\s*=|\.\.\.).*$/gm;
+    const beforeInvalidImport = content;
+    content = content.replace(invalidImportRegex, '');
+    if (content !== beforeInvalidImport) changed = true;
+
+    // 4. v13.10: Clean @WebParam/partName pollution in method parameters
+    //    Pattern: @RequestParam (name = "xxx", @RequestParam partName = "xxx") Type var
+    //    Fix:     @RequestParam Type var
+    const soapParamPollutionRegex = /@RequestParam\s*\(name\s*=\s*"[^"]*",\s*@RequestParam\s+partName\s*=\s*"[^"]*"\)\s*(\w[\w<>,\s]*?)\s+(\w+)/g;
+    const beforeSoapClean = content;
+    content = content.replace(soapParamPollutionRegex, '@RequestParam $1 $2');
+    if (content !== beforeSoapClean) changed = true;
+
+    // 5. v13.10: Clean bare (name = "...", partName = "...") in method signatures (no @RequestParam prefix)
+    //    Pattern: (name = "xxx", partName = "xxx") Type var
+    //    Fix:     Type var
+    const bareSoapParamRegex = /\(name\s*=\s*"[^"]*",\s*partName\s*=\s*"[^"]*"\)\s*/g;
+    const beforeBareSoap = content;
+    content = content.replace(bareSoapParamRegex, '');
+    if (content !== beforeBareSoap) changed = true;
+
+    // 6. v13.10: Clean standalone (name = "...") without preceding annotation in params
+    //    Pattern: @RequestParam (name = "xxx",  → @RequestParam
+    const partialSoapRegex = /@RequestParam\s+\(name\s*=\s*"[^"]*",/g;
+    const beforePartialSoap = content;
+    content = content.replace(partialSoapRegex, '@RequestParam');
+    if (content !== beforePartialSoap) changed = true;
+
     if (changed) {
       result[fi] = { ...result[fi], content };
     }
   }
-  
+
+  // 7. v13.10: Fix Spring class imports — replace stub imports with real Spring imports
+  //    and remove stub files for classes that Spring Boot already provides
+  const SPRING_IMPORT_MAP: Record<string, string> = {
+    'ResponseEntity': 'org.springframework.http.ResponseEntity',
+    'HttpStatus': 'org.springframework.http.HttpStatus',
+    'ModelAndView': 'org.springframework.web.servlet.ModelAndView',
+    'Model': 'org.springframework.ui.Model',
+    'RedirectAttributes': 'org.springframework.web.servlet.mvc.support.RedirectAttributes',
+    'BindingResult': 'org.springframework.validation.BindingResult',
+  };
+  for (let fi = 0; fi < result.length; fi++) {
+    if (!result[fi].path.endsWith('.java')) continue;
+    let content = result[fi].content;
+    let changed2 = false;
+    for (const [className, correctImport] of Object.entries(SPRING_IMPORT_MAP)) {
+      // Replace any wrong import of this class with the correct Spring import
+      const wrongImportRegex = new RegExp(`^import\\s+(?!${correctImport.replace(/\./g, '\\\\.')})([\\w.]+\\.${className})\\s*;`, 'gm');
+      const before = content;
+      content = content.replace(wrongImportRegex, `import ${correctImport};`);
+      if (content !== before) changed2 = true;
+    }
+    if (changed2) result[fi] = { ...result[fi], content };
+  }
+  // Remove stub files for Spring classes
+  const springStubNames = Object.keys(SPRING_IMPORT_MAP).map(c => `${c}.java`);
+  for (let fi = result.length - 1; fi >= 0; fi--) {
+    const path = result[fi].path;
+    if (path.includes('/common/') && springStubNames.some(s => path.endsWith(s))) {
+      result.splice(fi, 1);
+    }
+  }
+
+  // 8. v13.10: Fix excess parentheses — detect lines where paren depth goes negative
+  //    Pattern: new ArrayList<Handler>()) → new ArrayList<Handler>()
+  for (let fi = 0; fi < result.length; fi++) {
+    if (!result[fi].path.endsWith('.java')) continue;
+    let content = result[fi].content;
+    const lines = content.split('\n');
+    let fixedExcess = false;
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li];
+      // Skip comments
+      const trimmed = line.trim();
+      if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+      // Count parens on this line (simplified — ignores strings)
+      let depth = 0;
+      let minDepth = 0;
+      for (const ch of line) {
+        if (ch === '(') depth++;
+        else if (ch === ')') { depth--; if (depth < minDepth) minDepth = depth; }
+      }
+      // If depth goes negative, there are excess closing parens
+      if (minDepth < 0 && depth < 0) {
+        // v13.10.2: Only remove excess ) if the line has at least one (
+        // Lines without ( are continuation lines of multi-line calls — their ) belongs to a ( on a previous line
+        const hasOpenParen = line.includes('(');
+        if (!hasOpenParen) continue; // Skip continuation lines
+        // Remove |depth| excess closing parens from the end of the line
+        let fixed = line;
+        let toRemove = Math.abs(depth);
+        for (let ri = fixed.length - 1; ri >= 0 && toRemove > 0; ri--) {
+          if (fixed[ri] === ')') {
+            fixed = fixed.substring(0, ri) + fixed.substring(ri + 1);
+            toRemove--;
+          }
+        }
+        if (fixed !== line) {
+          lines[li] = fixed;
+          fixedExcess = true;
+        }
+      }
+    }
+    // Also fix lambda closing pattern: '};' → '});' when preceded by return/} line
+    for (let li = 1; li < lines.length; li++) {
+      const trimmed = lines[li].trim();
+      if (trimmed === '};') {
+        const prevTrimmed = lines[li - 1].trim();
+        if (prevTrimmed.startsWith('return ') || prevTrimmed === '}' || prevTrimmed.endsWith(';')) {
+          lines[li] = lines[li].replace('};', '});');
+          fixedExcess = true;
+        }
+      }
+    }
+    if (fixedExcess) {
+      result[fi] = { ...result[fi], content: lines.join('\n') };
+    }
+  }
+
+  // 8b. v13.10.1: Detect multi-line method calls missing closing paren before ;
+  //     Covers two patterns:
+  //     A) Line ends with ; (not ); or };) and lookback finds unbalanced (
+  //     B) Line ends with ); but combined depth with lookback is still > 0 (nested calls)
+  for (let fi = 0; fi < result.length; fi++) {
+    if (!result[fi].path.endsWith('.java')) continue;
+    let content = result[fi].content;
+    const lines8b = content.split('\n');
+    let fixedMultiLine = false;
+    for (let i = 0; i < lines8b.length; i++) {
+      const trimmed = lines8b[i].trim().replace(/\r$/, '');
+      // Must end with ;
+      if (!trimmed.endsWith(';')) continue;
+      if (trimmed.endsWith('};')) continue;
+      if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+      if (trimmed.startsWith('package ') || trimmed.startsWith('import ')) continue;
+      
+      // For lines NOT ending with );  — skip assignments, returns, etc.
+      const endsWithCloseParen = trimmed.endsWith(');');
+      if (!endsWithCloseParen) {
+        if (trimmed.includes('=') && !trimmed.includes('==')) continue;
+        if (trimmed.startsWith('return ') || trimmed.startsWith('throw ') || trimmed.startsWith('break;') || trimmed.startsWith('continue;')) continue;
+      }
+      
+      // Count parens on this line (exclude the trailing ;)
+      let lineDepth = 0;
+      for (const ch of trimmed.slice(0, -1)) {
+        if (ch === '(') lineDepth++;
+        else if (ch === ')') lineDepth--;
+      }
+      
+      // For lines ending with ); that are already balanced on their own, check lookback
+      // For lines NOT ending with ); lineDepth is typically 0 (no parens on continuation line)
+      
+      // Look back up to 10 lines to find unbalanced opening paren
+      let totalDepth = lineDepth;
+      let foundCallStart = false;
+      for (let j = i - 1; j >= 0 && j >= i - 10; j--) {
+        const prevTrimmed = lines8b[j].trim();
+        if (prevTrimmed.startsWith('//') || prevTrimmed.startsWith('*')) continue;
+        for (const ch of prevTrimmed) {
+          if (ch === '(') totalDepth++;
+          else if (ch === ')') totalDepth--;
+        }
+        if (totalDepth > 0 && /\w+\s*\(/.test(prevTrimmed)) {
+          foundCallStart = true;
+          break;
+        }
+        // Stop at statement boundaries
+        if (prevTrimmed.endsWith(';') || prevTrimmed.endsWith('{') || prevTrimmed.endsWith('}')) break;
+      }
+      
+      if (foundCallStart && totalDepth > 0) {
+        // Insert totalDepth closing parens before the ;
+        const semiIdx = lines8b[i].lastIndexOf(';');
+        if (semiIdx >= 0) {
+          lines8b[i] = lines8b[i].substring(0, semiIdx) + ')'.repeat(totalDepth) + ';';
+          fixedMultiLine = true;
+        }
+      }
+    }
+    if (fixedMultiLine) {
+      result[fi] = { ...result[fi], content: lines8b.join('\n') };
+    }
+  }
+
+  // 8c. v13.10.1: Fix missing closing paren in multi-line method signatures ending with {
+  //     Pattern: public void method(Type arg1,\n        Type arg2 {  → Type arg2) {
+  //     The LLM sometimes forgets the ) before { in method/constructor signatures
+  for (let fi = 0; fi < result.length; fi++) {
+    if (!result[fi].path.endsWith('.java')) continue;
+    let content = result[fi].content;
+    const lines8c = content.split('\n');
+    let fixed8c = false;
+    for (let i = 0; i < lines8c.length; i++) {
+      const trimmed = lines8c[i].trim().replace(/\r$/, '');
+      // Must end with { (method/constructor body start)
+      if (!trimmed.endsWith('{')) continue;
+      if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+      // Skip class/interface/enum declarations and control flow
+      if (/^(public |private |protected )?(static )?(abstract )?(class |interface |enum )/.test(trimmed)) continue;
+      if (/^(if|else|for|while|switch|try|catch|finally|do)\b/.test(trimmed)) continue;
+      if (trimmed === '{') continue;
+      // Skip lambdas: line contains -> before { (lambda body, not method signature)
+      if (trimmed.includes('->')) continue;
+      
+      // Count parens on this line (exclude the trailing {)
+      let lineDepth = 0;
+      for (const ch of trimmed.slice(0, -1)) {
+        if (ch === '(') lineDepth++;
+        else if (ch === ')') lineDepth--;
+      }
+      
+      // Look back for unbalanced opening paren (multi-line signature)
+      let totalDepth = lineDepth;
+      let foundSigStart = false;
+      let hasLambdaInLookback = false;
+      for (let j = i - 1; j >= 0 && j >= i - 10; j--) {
+        const prevTrimmed = lines8c[j].trim();
+        if (prevTrimmed.startsWith('//') || prevTrimmed.startsWith('*')) continue;
+        if (prevTrimmed.includes('->')) { hasLambdaInLookback = true; break; }
+        for (const ch of prevTrimmed) {
+          if (ch === '(') totalDepth++;
+          else if (ch === ')') totalDepth--;
+        }
+        // Method/constructor signature starts with access modifier or annotation
+        if (totalDepth > 0 && (/\w+\s*\(/.test(prevTrimmed) || prevTrimmed.startsWith('@'))) {
+          foundSigStart = true;
+          break;
+        }
+        if (prevTrimmed.endsWith(';') || prevTrimmed.endsWith('{') || prevTrimmed.endsWith('}')) break;
+      }
+      if (hasLambdaInLookback) continue;
+      
+      if (foundSigStart && totalDepth > 0) {
+        // Insert closing parens before the {
+        const braceIdx = lines8c[i].lastIndexOf('{');
+        if (braceIdx >= 0) {
+          const before = lines8c[i].substring(0, braceIdx).trimEnd();
+          lines8c[i] = before + ')'.repeat(totalDepth) + ' {';
+          fixed8c = true;
+        }
+      }
+    }
+    if (fixed8c) {
+      result[fi] = { ...result[fi], content: lines8c.join('\n') };
+    }
+  }
+
+  // 8d. v13.10.1: Fix lambda/anonymous class closing: }; → });
+  //     Pattern: Handler chain or anonymous class ends with }; instead of });
+  for (let fi = 0; fi < result.length; fi++) {
+    if (!result[fi].path.endsWith('.java')) continue;
+    let content = result[fi].content;
+    // Simple regex: find }; where the matching { is preceded by a method call with (
+    // Look for pattern: ...method(... {\n ... \n };
+    // Replace }; with }); only when the block was opened inside a method call argument
+    const lines8d = content.split('\n');
+    let fixed8d = false;
+    for (let i = 0; i < lines8d.length; i++) {
+      const trimmed = lines8d[i].trim().replace(/\r$/, '');
+      if (trimmed !== '};') continue;
+      
+      // Look back to find the matching { and check if it's inside a method call
+      let braceDepth = 1; // we're at }
+      let foundOpenBrace = false;
+      for (let j = i - 1; j >= 0 && j >= i - 50; j--) {
+        const prevLine = lines8d[j].trim();
+        for (let ci = prevLine.length - 1; ci >= 0; ci--) {
+          if (prevLine[ci] === '}') braceDepth++;
+          else if (prevLine[ci] === '{') {
+            braceDepth--;
+            if (braceDepth === 0) {
+              // Found the matching {. Check if this line or the previous has an unbalanced (
+              let parenDepth = 0;
+              for (const ch of prevLine) {
+                if (ch === '(') parenDepth++;
+                else if (ch === ')') parenDepth--;
+              }
+              if (parenDepth > 0) {
+                // The { is inside a method call — fix }; to });
+                lines8d[i] = lines8d[i].replace('};', '});');
+                fixed8d = true;
+              }
+              foundOpenBrace = true;
+              break;
+            }
+          }
+        }
+        if (foundOpenBrace) break;
+      }
+    }
+    if (fixed8d) {
+      result[fi] = { ...result[fi], content: lines8d.join('\n') };
+    }
+  }
+
+  // 9. v13.10: Fix qualified inner class references when the inner class exists as a separate file
+  //    Only applies to type usages in generics (e.g., List<Outer.Inner> → List<Inner>)
+  //    Does NOT touch imports or method calls (Outer.method()) to avoid corruption
+  const allFileNames9 = new Set(result.map(f => {
+    const parts = f.path.split('/');
+    return parts[parts.length - 1].replace('.java', '');
+  }));
+  for (let fi = 0; fi < result.length; fi++) {
+    if (!result[fi].path.endsWith('.java')) continue;
+    let content = result[fi].content;
+    // Only match inside generic type parameters: <Outer.Inner>
+    const genericInnerRegex = /<([A-Z]\w+)\.([A-Z]\w+)>/g;
+    const before = content;
+    content = content.replace(genericInnerRegex, (match, outer, inner) => {
+      if (allFileNames9.has(inner) && allFileNames9.has(outer)) {
+        return `<${inner}>`;
+      }
+      return match;
+    });
+    if (content !== before) {
+      result[fi] = { ...result[fi], content };
+    }
+  }
+
+  // 10. v13.10: Post-process brace balancing — ensure every .java file has balanced {}
+  //    This fixes DTOs truncated by AUTOFIX that comment out the closing brace
+  for (let fi = 0; fi < result.length; fi++) {
+    if (!result[fi].path.endsWith('.java')) continue;
+    let content = result[fi].content;
+    // Count braces (ignoring those in comments and strings)
+    let openBraces = 0;
+    const lines = content.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      // Skip commented lines
+      if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+      for (const ch of trimmed) {
+        if (ch === '{') openBraces++;
+        if (ch === '}') openBraces--;
+      }
+    }
+    if (openBraces > 0) {
+      // Add missing closing braces
+      content = content.trimEnd() + '\n' + '}'.repeat(openBraces) + '\n';
+      result[fi] = { ...result[fi], content };
+    }
+  }
+
+  // 11. v13.10: Cross-package import resolver — add missing imports for types that exist in other packages
+  //    Build index: className → full package path
+  const classIndex = new Map<string, string>();
+  for (const f of result) {
+    if (!f.path.endsWith('.java')) continue;
+    const pkgMatch = f.content.match(/^package\s+([\w.]+)\s*;/m);
+    const classMatch = f.path.match(/\/([A-Z]\w+)\.java$/);
+    if (pkgMatch && classMatch) {
+      classIndex.set(classMatch[1], pkgMatch[1] + '.' + classMatch[1]);
+    }
+  }
+  // For each file, find types used but not imported and add imports
+  for (let fi = 0; fi < result.length; fi++) {
+    if (!result[fi].path.endsWith('.java')) continue;
+    let content = result[fi].content;
+    const existingImports = new Set((content.match(/^import\s+[\w.*]+\s*;/gm) || []).map(i => {
+      const m = i.match(/import\s+[\w.]+\.(\w+)\s*;/);
+      return m ? m[1] : '';
+    }));
+    // Also check wildcard imports
+    const wildcardPkgs = (content.match(/^import\s+([\w.]+)\.\*\s*;/gm) || []).map(i => {
+      const m = i.match(/import\s+([\w.]+)\.\*\s*;/);
+      return m ? m[1] : '';
+    });
+    const pkgMatch = content.match(/^package\s+([\w.]+)\s*;/m);
+    const ownPkg = pkgMatch ? pkgMatch[1] : '';
+    // Find type references in code
+    const typeRefRegex11 = /(?:^|[\s(,<])([A-Z][a-zA-Z0-9]{4,})(?:\s+\w|\s*[(<>])/gm;
+    const missingImports: string[] = [];
+    let m11;
+    while ((m11 = typeRefRegex11.exec(content)) !== null) {
+      const typeName = m11[1];
+      if (existingImports.has(typeName)) continue;
+      if (typeName === 'Override' || typeName === 'SuppressWarnings' || typeName === 'Deprecated') continue;
+      const fqcn = classIndex.get(typeName);
+      if (!fqcn) continue;
+      // Skip if same package (no import needed)
+      if (fqcn.startsWith(ownPkg + '.') && fqcn.split('.').length === ownPkg.split('.').length + 1) continue;
+      // Skip if covered by a wildcard import
+      const typePkg = fqcn.substring(0, fqcn.lastIndexOf('.'));
+      if (wildcardPkgs.includes(typePkg)) continue;
+      if (!missingImports.includes(`import ${fqcn};`)) {
+        missingImports.push(`import ${fqcn};`);
+        existingImports.add(typeName);
+      }
+    }
+    if (missingImports.length > 0) {
+      // Insert after the last existing import line
+      const lastImportIdx = content.lastIndexOf('import ');
+      if (lastImportIdx > -1) {
+        const lineEnd = content.indexOf('\n', lastImportIdx);
+        content = content.substring(0, lineEnd + 1) + missingImports.join('\n') + '\n' + content.substring(lineEnd + 1);
+      } else {
+        // No imports — insert after package
+        const pkgEnd = content.indexOf(';');
+        content = content.substring(0, pkgEnd + 1) + '\n' + missingImports.join('\n') + '\n' + content.substring(pkgEnd + 1);
+      }
+      result[fi] = { ...result[fi], content };
+    }
+  }
+
+  // 12. v13.10.2: Fix orphan casts in method parameter declarations
+  //     Pattern: String ((String) mntTirage) → String mntTirage
+  for (let fi = 0; fi < result.length; fi++) {
+    if (!result[fi].path.endsWith('.java')) continue;
+    let content = result[fi].content;
+    const before = content;
+    content = content.replace(/\b(\w+)\s+\(\(\w+\)\s+(\w+)\)/g, (_m, type, varName) => {
+      return `${type} ${varName}`;
+    });
+    if (content !== before) {
+      result[fi] = { ...result[fi], content };
+    }
+  }
+
+  // 13. v13.10.2: Fix varargs not at last position
+  //     Pattern: method(Type... varName, Type other) → method(Type other, Type... varName)
+  for (let fi = 0; fi < result.length; fi++) {
+    if (!result[fi].path.endsWith('.java')) continue;
+    let content = result[fi].content;
+    const before = content;
+    // Match method signatures with varargs not at the end
+    content = content.replace(/\(([^)]*\w+\.\.\.\s+\w+)\s*,\s*([^)]+)\)/g, (match, beforeVarargs, afterVarargs) => {
+      // Only fix if the varargs is clearly not the last param
+      // Split params, find the varargs one, move it to end
+      const allParams = match.slice(1, -1); // remove ( and )
+      const params = allParams.split(/\s*,\s*/);
+      const varargsIdx = params.findIndex((p: string) => p.includes('...'));
+      if (varargsIdx >= 0 && varargsIdx < params.length - 1) {
+        const varargsParam = params.splice(varargsIdx, 1)[0];
+        params.push(varargsParam);
+        return '(' + params.join(', ') + ')';
+      }
+      return match;
+    });
+    if (content !== before) {
+      result[fi] = { ...result[fi], content };
+    }
+  }
+
   return result;
 }
 
@@ -326,6 +780,7 @@ export function autoFixAndCompile(
   
   // v12.13: Pre-process ALL Java files for paren balancing and duplicate imports
   const filesToCompile = preProcessParensAndImports(enrichedFiles);
+
 
   const originalResult = compileWithMaven(filesToCompile, options);
 
@@ -353,11 +808,15 @@ export function autoFixAndCompile(
 
   while (currentResult.status === "FAIL" && iteration < MAX_ITERATIONS) {
     iteration++;
+    console.log(`[AUTOFIX-DBG] Iter ${iteration}: ${currentResult.errors.length} errors, files: ${currentFiles.length}`);
+
     const fixes = applyFixes(currentFiles, currentResult.errors, iteration);
 
-    if (fixes.actions.length === 0) break; // No more fixes possible
+    if (fixes.actions.length === 0) { console.log(`[AUTOFIX-DBG] No fixes, break`); break; }
 
     const candidateFiles = fixes.files;
+    console.log(`[AUTOFIX-DBG] Applied ${fixes.actions.length} fixes: ${fixes.actions.map(a => a.type).join(',')}`);
+    console.log(`[AUTOFIX-DBG] Files: ${currentFiles.length} -> ${candidateFiles.length}`);
     allFixes.push(...fixes.actions);
 
     // Recompile
@@ -365,6 +824,7 @@ export function autoFixAndCompile(
 
     // Safety guard (Bloc 4B v12.8): if this iteration INCREASED errors significantly, rollback
     const newErrorCount = candidateResult.errors.length;
+    console.log(`[AUTOFIX-DBG] After recompile: ${newErrorCount} errors (was ${previousErrorCount})`);
     // Allow error increase in early iterations (stubs create temporary errors)
     // Only trigger rollback if: iteration >= 3 AND errors increased by >50%
     const errorIncreaseRatio = newErrorCount / Math.max(previousErrorCount, 1);
@@ -401,6 +861,7 @@ export function autoFixAndCompile(
   // v12.10: Merge stubs from current state into best state, then recompile.
   // v12.12: After the loop, merge stubs + imports into best state, then run extra fix iterations.
   // v12.10: After the loop, merge stubs from current state into best state
+  console.log(`[AUTOFIX-DBG] Post-loop: bestErrorCount=${bestErrorCount}, currentErrors=${currentResult.errors.length}, currentFiles=${currentFiles.length}`);
   if (bestErrorCount <= currentResult.errors.length && currentFiles.length > 0) {
     const bestPaths = new Set(bestFiles.map(f => f.path));
     const newStubs = currentFiles.filter(f => !bestPaths.has(f.path));
@@ -468,10 +929,12 @@ export function autoFixAndCompile(
   }
 
   // v12.10: Post-loop global fix for persistent "Object cannot be converted" errors
+  console.log(`[AUTOFIX-DBG] Pre-postloop: ${currentResult.errors.length} errors`);
   if (currentResult.status === "FAIL") {
     const objErrors = currentResult.errors.filter(e =>
       e.message.includes('java.lang.Object') && e.message.includes('cannot be converted to')
     );
+    console.log(`[AUTOFIX-DBG] Object cast errors: ${objErrors.length}`);
     if (objErrors.length > 0) {
       let postFixApplied = false;
       for (const err of objErrors) {
@@ -534,6 +997,7 @@ export function autoFixAndCompile(
       if (postFixApplied) {
         // Recompile after post-loop fix
         currentResult = compileWithMaven(currentFiles, options);
+        console.log(`[AUTOFIX-DBG] After Object cast fix: ${currentResult.errors.length} errors`);
         allFixes.push({
           iteration: iteration + 1,
           type: 'FIX_SYNTAX' as const,
@@ -544,29 +1008,170 @@ export function autoFixAndCompile(
     }
   }
 
+  console.log(`[AUTOFIX-DBG] Before ParenBalancer: ${currentResult.errors.length} errors`);
   // v12.13: FINAL ParenBalancer pass — ensures paren fixes are never undone by earlier iterations
-  if (currentResult.status === "FAIL") {
-    const finalBalancer = new ParenBalancer();
+  // v13.10: Only apply if there are actual paren-related syntax errors (prevents regression)
+  const hasParenErrors = currentResult.errors.some(e =>
+    e.message.includes("')' expected") || e.message.includes("';' expected") ||
+    e.message.includes('illegal start of expression') || e.message.includes('reached end of file while parsing')
+  );
+  if (currentResult.status === "FAIL" && hasParenErrors) {
+    const preParenFiles = currentFiles.map(f => ({ ...f }));
+    const preParenResult = currentResult;
+    // v13.10: Only apply ParenBalancer to files that have paren-related errors
+    const filesWithParenErrors = new Set(
+      currentResult.errors
+        .filter(e => e.message.includes("')' expected") || e.message.includes("';' expected") ||
+          e.message.includes('illegal start of expression') || e.message.includes('reached end of file while parsing'))
+        .map(e => e.file)
+    );
     let finalFixApplied = false;
     for (let fi = 0; fi < currentFiles.length; fi++) {
       if (!currentFiles[fi].path.endsWith('.java')) continue;
-      const { fixed, fixCount } = finalBalancer.balance(currentFiles[fi].content);
+      // Only balance files that have paren errors
+      const fileName = currentFiles[fi].path.split('/').pop() || '';
+      const fullPath = currentFiles[fi].path;
+      if (!filesWithParenErrors.has(fileName) && !filesWithParenErrors.has(fullPath)) continue;
+      const fileBalancer = new ParenBalancer();
+      const { fixed, fixCount } = fileBalancer.balance(currentFiles[fi].content);
       if (fixCount > 0) {
         currentFiles[fi] = { ...currentFiles[fi], content: fixed };
         finalFixApplied = true;
       }
     }
     if (finalFixApplied) {
-      currentResult = compileWithMaven(currentFiles, options);
-      allFixes.push({
-        iteration: iteration + 1,
-        type: 'FIX_SYNTAX' as const,
-        file: 'FINAL_PAREN_BALANCE',
-        description: 'Final ParenBalancer pass on all files',
-      });
+      const parenResult = compileWithMaven(currentFiles, options);
+      console.log(`[AUTOFIX-DBG] After ParenBalancer: ${parenResult.errors.length} errors (was ${preParenResult.errors.length})`);
+      // v13.10: Check if paren errors are resolved
+      const parenErrorsAfter = parenResult.errors.filter(e =>
+        e.message.includes("')' expected") || e.message.includes("';' expected") ||
+        e.message.includes('illegal start of expression') || e.message.includes('reached end of file while parsing')
+      ).length;
+      if (parenResult.errors.length <= preParenResult.errors.length) {
+        // Strictly better — accept
+        currentResult = parenResult;
+        allFixes.push({ iteration: iteration + 1, type: 'FIX_SYNTAX' as const, file: 'FINAL_PAREN_BALANCE', description: 'Final ParenBalancer pass on all files' });
+      } else if (parenErrorsAfter === 0) {
+        // Paren errors resolved but total increased (hidden errors exposed) — accept and re-run autofix loop
+        console.log(`[AUTOFIX-DBG] ParenBalancer exposed hidden errors, re-running autofix loop`);
+        currentResult = parenResult;
+        allFixes.push({ iteration: iteration + 1, type: 'FIX_SYNTAX' as const, file: 'FINAL_PAREN_BALANCE', description: 'Final ParenBalancer pass (exposed hidden errors)' });
+        // Re-run autofix loop to handle newly exposed errors
+        for (let extraIter = 0; extraIter < 5 && currentResult.status === 'FAIL'; extraIter++) {
+          const fixes = applyFixes(currentFiles, currentResult.errors, iteration + extraIter + 2);
+          if (fixes.actions.length === 0) break;
+          currentFiles = fixes.files;
+          allFixes.push(...fixes.actions);
+          currentResult = compileWithMaven(currentFiles, options);
+          console.log(`[AUTOFIX-DBG] Post-paren iter ${extraIter+1}: ${currentResult.errors.length} errors`);
+        }
+        // If still worse than pre-paren, rollback
+        if (currentResult.errors.length > preParenResult.errors.length && currentResult.status !== 'PASS') {
+          console.log(`[AUTOFIX-DBG] Post-paren still worse (${currentResult.errors.length} > ${preParenResult.errors.length}), keeping paren fixes anyway`);
+          // Keep paren fixes — the exposed errors are real and should be reported
+        }
+      } else {
+        // ParenBalancer made things worse AND didn't resolve all paren errors — rollback
+        console.log(`[AUTOFIX-DBG] ParenBalancer rollback: ${parenResult.errors.length} > ${preParenResult.errors.length}`);
+        currentFiles = preParenFiles;
+        currentResult = preParenResult;
+      }
     }
   }
 
+  // v13.10.3: Final pass — fix patterns that may have been introduced during autofix loop
+  for (let fi = 0; fi < currentFiles.length; fi++) {
+    if (!currentFiles[fi].path.endsWith('.java')) continue;
+    let content = currentFiles[fi].content;
+    const before = content;
+    // Fix orphan casts in method parameters: String ((String) varName) → String varName
+    content = content.replace(/\b(\w+)\s+\(\(\w+\)\s+(\w+)\)/g, (_m: string, type: string, varName: string) => `${type} ${varName}`);
+    // Fix varargs not at last position
+    content = content.replace(/\(([^)]*\w+\.\.\.\s+\w+)\s*,\s*([^)]+)\)/g, (match: string) => {
+      const allParams = match.slice(1, -1);
+      const params = allParams.split(/\s*,\s*/);
+      const varargsIdx = params.findIndex((p: string) => p.includes('...'));
+      if (varargsIdx >= 0 && varargsIdx < params.length - 1) {
+        const varargsParam = params.splice(varargsIdx, 1)[0];
+        params.push(varargsParam);
+        return '(' + params.join(', ') + ')';
+      }
+      return match;
+    });
+    // Fix duplicate field declarations (same variable name declared twice)
+    const fieldLines = content.split('\n');
+    const declaredFields = new Map<string, number>();
+    for (let li = 0; li < fieldLines.length; li++) {
+      const fldMatch = fieldLines[li].match(/^\s*(?:private|protected|public)\s+(?:final\s+)?(?:static\s+)?[\w<>\[\],\s]+\s+(\w+)\s*[;=]/);
+      if (fldMatch && !fieldLines[li].trim().startsWith('//')) {
+        const fldName = fldMatch[1];
+        if (declaredFields.has(fldName)) {
+          // Comment out the duplicate
+          fieldLines[li] = '// [AUTOFIX-DEDUP] ' + fieldLines[li];
+        } else {
+          declaredFields.set(fldName, li);
+        }
+      }
+    }
+    content = fieldLines.join('\n');
+    // Fix Lombok duplicate constructor: @NoArgsConstructor + @AllArgsConstructor on empty class
+    if (content.includes('@NoArgsConstructor') && content.includes('@AllArgsConstructor')) {
+      // Check if class body has no fields (only methods or empty)
+      const classBodyMatch = content.match(/class\s+\w+[^{]*\{([\s\S]*)\}\s*$/);
+      if (classBodyMatch) {
+        const body = classBodyMatch[1].trim();
+        // If body is empty or has no field declarations, remove @AllArgsConstructor
+        const hasFields = /^\s*(?:private|protected|public)\s+(?!.*\().*[;=]/m.test(body);
+        if (!hasFields) {
+          content = content.replace(/^\s*@AllArgsConstructor\s*\n/m, '');
+        }
+      }
+    }
+    if (content !== before) {
+      currentFiles[fi] = { ...currentFiles[fi], content };
+    }
+  }
+  // v13.10.4: Fix inner class references - when code uses Outer.Inner and Inner doesn't exist,
+  // add Inner as a public static inner class in Outer
+  if (currentResult.status === 'FAIL') {
+    for (const err of currentResult.errors) {
+      if (err.message.includes('cannot find symbol') && err.message.includes('class')) {
+        const classMatch = err.message.match(/symbol:\s*class\s+(\w+)/);
+        const locationMatch = err.message.match(/location:\s*class\s+([\w.]+)/);
+        if (classMatch && locationMatch) {
+          const innerClass = classMatch[1];
+          const outerFqn = locationMatch[1];
+          const outerSimple = outerFqn.split('.').pop() || '';
+          // Find the outer class file
+          const outerIdx = currentFiles.findIndex(f => 
+            f.path.endsWith(`/${outerSimple}.java`) && 
+            !f.content.includes(`class ${innerClass}`)
+          );
+          if (outerIdx >= 0) {
+            // Add inner class before the last closing brace
+            const outerContent = currentFiles[outerIdx].content;
+            const lastBrace = outerContent.lastIndexOf('}');
+            if (lastBrace > 0) {
+              const innerClassCode = `\n    public static class ${innerClass} {\n        // Auto-generated inner class stub\n    }\n`;
+              currentFiles[outerIdx] = {
+                ...currentFiles[outerIdx],
+                content: outerContent.slice(0, lastBrace) + innerClassCode + outerContent.slice(lastBrace)
+              };
+            }
+          }
+        }
+      }
+    }
+  }
+  // Recompile if fixes were applied
+  if (currentResult.status === 'FAIL') {
+    const recheck = compileWithMaven(currentFiles, options);
+    if (recheck.errors.length < currentResult.errors.length) {
+      currentResult = recheck;
+    }
+  }
+
+  console.log(`[AUTOFIX-DBG] FINAL: ${currentResult.errors.length} errors`);
   const recovered = originalResult.status === "FAIL" && currentResult.status === "PASS";
   const status = currentResult.status === "PASS"
     ? iteration > 0 ? `PASS after ${iteration} auto-fix iteration(s)` : "PASS"
@@ -782,9 +1387,12 @@ function fixMissingSymbols(
     if (!e.message.includes("cannot find symbol")) return false;
     if (e.message.includes("method")) return false;
     if (e.message.includes("variable")) {
-      // Include utility classes referenced as variables (e.g., DateTimeUtils.method())
+      // v13.10: Include ALL variables starting with uppercase (static utility classes)
+      // e.g., GenerateFlux.method(), Services.find(), Constants.VALUE, Parser.parse()
       const varMatch = e.message.match(/variable\s+(\w+)/);
-      if (varMatch && /^[A-Z]/.test(varMatch[1]) && /(?:Utils|Util|Helper|Helpers|Constants)$/.test(varMatch[1])) {
+      if (varMatch && /^[A-Z]/.test(varMatch[1]) && varMatch[1].length > 2) {
+        // Skip ALL_UPPER_WITH_UNDERSCORE constants — these are fields, not classes
+        if (/^[A-Z_]+$/.test(varMatch[1]) && varMatch[1].includes('_')) return false;
         return true;
       }
       return false;
@@ -815,10 +1423,13 @@ function fixMissingSymbols(
     // Format: "cannot find symbol - class Xxx" or "cannot find symbol" with "symbol: class Xxx"
     let symbolMatch = err.message.match(/(?:symbol:\s*class|cannot find symbol\s*-\s*class)\s+(\w+)/);
     if (!symbolMatch) {
-      // Also match utility classes referenced as variables
+      // v13.10: Also match ALL uppercase-starting variables (static utility classes)
       const varMatch = err.message.match(/(?:symbol:\s*variable|cannot find symbol\s*-\s*variable)\s+(\w+)/);
-      if (varMatch && /^[A-Z]/.test(varMatch[1]) && /(?:Utils|Util|Helper|Helpers|Constants)$/.test(varMatch[1])) {
-        symbolMatch = varMatch;
+      if (varMatch && /^[A-Z]/.test(varMatch[1]) && varMatch[1].length > 2) {
+        // Skip ALL_UPPER_WITH_UNDERSCORE constants
+        if (!(/^[A-Z_]+$/.test(varMatch[1]) && varMatch[1].includes('_'))) {
+          symbolMatch = varMatch;
+        }
       }
     }
     if (!symbolMatch) continue;
@@ -856,9 +1467,12 @@ function fixMissingSymbols(
     // Match both "class X" and "variable X" when X looks like a utility class name
     let symbolMatch = err.message.match(/(?:symbol:\s*class|cannot find symbol\s*-\s*class)\s+(\w+)/);
     if (!symbolMatch) {
-      // Also detect utility classes referenced as variables (e.g., DateTimeUtils.method())
+      // Also detect utility classes referenced as variables (e.g., GenerateFlux.method(), Services.find())
+      // In Java, a variable starting with uppercase is almost always a class used statically
       const varMatch = err.message.match(/(?:symbol:\s*variable|cannot find symbol\s*-\s*variable)\s+(\w+)/);
-      if (varMatch && /^[A-Z]/.test(varMatch[1]) && /(?:Utils|Util|Helper|Helpers|Constants)$/.test(varMatch[1])) {
+      if (varMatch && /^[A-Z]/.test(varMatch[1]) && varMatch[1].length > 2) {
+        // Skip ALL_UPPER_WITH_UNDERSCORE constants (e.g., NUM_DOSSIER_LOGS) — these are fields, not classes
+        if (/^[A-Z_]+$/.test(varMatch[1]) && varMatch[1].includes('_')) continue;
         symbolMatch = varMatch;
       }
     }
@@ -1325,7 +1939,7 @@ function fixSyntaxErrors(
   // Group syntax errors by file
   const syntaxByFile = new Map<string, MavenCompileError[]>();
   for (const err of errors) {
-    if (err.message.includes("expected") || err.message.includes("illegal") || err.message.includes("not a statement") || err.message.includes("unexpected type")) {
+    if (err.message.includes("expected") || err.message.includes("illegal") || err.message.includes("not a statement") || err.message.includes("unexpected type") || err.message.includes("already defined") || err.message.includes("not allowed here")) {
       const existing = syntaxByFile.get(err.file) || [];
       existing.push(err);
       syntaxByFile.set(err.file, existing);
@@ -1445,6 +2059,42 @@ function fixSyntaxErrors(
       }
     }
 
+    // Fix 6c: "variable X is already defined" - comment out the duplicate declaration
+    for (const err of fileErrors) {
+      if (err.message.includes('already defined')) {
+        const varMatch = err.message.match(/variable (\w+) is already defined/);
+        if (varMatch) {
+          const varName = varMatch[1];
+          const lines = content.split('\n');
+          const lineIdx = (err.line || 1) - 1;
+          if (lineIdx >= 0 && lineIdx < lines.length) {
+            const line = lines[lineIdx];
+            if (line.includes(varName) && !line.trim().startsWith('//')) {
+              lines[lineIdx] = '// [AUTOFIX-DEDUP] ' + line;
+              content = lines.join('\n');
+              fixed = true;
+            }
+          }
+        }
+      }
+    }
+    // Fix 6d: "'void' type not allowed here" - wrap void method call in statement
+    for (const err of fileErrors) {
+      if (err.message.includes('not allowed here') && err.message.includes('void')) {
+        const lines = content.split('\n');
+        const lineIdx = (err.line || 1) - 1;
+        if (lineIdx >= 0 && lineIdx < lines.length) {
+          const line = lines[lineIdx];
+          // Pattern: Type varName = voidMethod(...); → voidMethod(...);
+          const assignMatch = line.match(/^(\s*)\w[\w<>\[\],\s]*\s+\w+\s*=\s*(.+;)\s*$/);
+          if (assignMatch) {
+            lines[lineIdx] = assignMatch[1] + assignMatch[2];
+            content = lines.join('\n');
+            fixed = true;
+          }
+        }
+      }
+    }
     // Fix 7: Remove invalid imports (import ...static void, import ...void)
     content = content.replace(/^\s*import\s+[\w.]+\.(?:static\s+)?void\s*;\s*$/gm, () => {
       fixed = true;
@@ -1649,6 +2299,14 @@ function fixSyntaxErrors(
       return `${indent}`;
     });
 
+    // Fix 10b: v13.10.2: Remove orphan casts in method parameter declarations
+    // Pattern: String ((String) mntTirage) → String mntTirage
+    // This happens when the LLM includes a cast inside a parameter declaration
+    content = content.replace(/\b(\w+)\s+\(\(\w+\)\s+(\w+)\)/g, (m, type, varName) => {
+      fixed = true;
+      return `${type} ${varName}`;
+    });
+
     // Fix 12: Multi-line parenthesis balancer for log/method calls
     // Handles statements spanning multiple lines where ( opens on one line and ; ends on another
     {
@@ -1656,6 +2314,9 @@ function fixSyntaxErrors(
       for (let li = 0; li < cLines.length; li++) {
         const ln = cLines[li];
         if (!ln.trim().endsWith(';')) continue;
+        // v13.10.2: Skip lambda/anonymous class closing lines: }); or });\r
+        const trimmedLnCheck = ln.trim().replace(/\r$/, '');
+        if (trimmedLnCheck === '});') continue;
         
         // Find the start of this statement (scan backward for the line that starts it)
         let stmtStart = li;
@@ -2373,6 +3034,33 @@ function fixMissingVariables(
       if (varName.endsWith('Utils') || varName.endsWith('Util') || varName.endsWith('Helper') || varName.endsWith('Helpers')) {
         // These are static utility classes, not variables. They need an import, not a field.
         // fixMissingSymbols will generate the stub class and fixImportErrors will add the import.
+        continue;
+      }
+      // Case 0b: v13.10 — Static utility class (starts with uppercase, used as ClassName.method())
+      // Let fixMissingSymbols handle these by generating stubs
+      if (/^[A-Z]/.test(varName) && !/^[A-Z_]+$/.test(varName) && content.includes(`${varName}.`)) {
+        continue;
+      }
+      // Case 0c: v13.10 — ALL_UPPER_WITH_UNDERSCORE constants (e.g., NUM_DOSSIER_LOGS, FLUX_CODE)
+      // Declare as private static final String in the class
+      if (/^[A-Z][A-Z_0-9]+$/.test(varName) && varName.includes('_')) {
+        const constDecl = `private static final String ${varName} = "";`;
+        if (!content.includes(constDecl) && !content.includes(`${varName} =`)) {
+          const classMatch2 = content.match(/(public\s+class\s+\w+[^{]*\{)/);
+          if (classMatch2) {
+            content = content.replace(
+              classMatch2[1],
+              `${classMatch2[1]}\n    ${constDecl}\n`
+            );
+            modified = true;
+            actions.push({
+              iteration,
+              type: 'FIX_SYNTAX' as const,
+              file: result[fileIdx].path,
+              description: `Added missing constant: ${varName}`,
+            });
+          }
+        }
         continue;
       }
       // Case 1: Missing service/DAO/Manager field

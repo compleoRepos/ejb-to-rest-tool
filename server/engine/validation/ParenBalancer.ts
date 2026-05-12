@@ -25,6 +25,17 @@ export class ParenBalancer {
       depth += lineEffect.parenDelta;
       inBlockComment = lineEffect.endsInComment;
 
+      // v13.10.1: Lambda/anonymous class blocks: when we see '-> {' or similar,
+      // save the current paren depth and reset to 0 for the lambda body.
+      // The depth will be restored when we encounter the closing '};'
+      const trimmedLine = line.trim().replace(/\r$/, '');
+      if (depth > 0 && (trimmedLine.includes('-> {') || trimmedLine.includes('-> {'))) {
+        // Don't accumulate paren depth inside lambda bodies
+        // The lambda opener has ( from the method call, but the ; inside the lambda
+        // should not trigger paren insertion
+        depth = 0;
+      }
+
       // Si la ligne contient un `;` (en dehors string/comment) et qu'on est en déséquilibre positif
       const semiPos = this.findStatementTerminator(line);
       if (semiPos !== -1 && depth > 0) {
@@ -36,6 +47,19 @@ export class ParenBalancer {
       } else if (semiPos !== -1) {
         // Statement terminé proprement
         depth = 0;
+      }
+
+      // v13.10: Also treat '{' as a method signature terminator
+      // Pattern: method(@Param Type a,\n  @Param Type b { → insert ')' before '{'
+      // But NOT for lambdas (lines containing '->')
+      if (depth > 0 && semiPos === -1 && !line.includes('->')) {
+        const bracePos = this.findOpenBrace(line);
+        if (bracePos !== -1) {
+          const closing = ')'.repeat(depth);
+          line = line.substring(0, bracePos) + closing + ' ' + line.substring(bracePos);
+          fixCount += depth;
+          depth = 0;
+        }
       }
 
       result.push(line);
@@ -83,6 +107,38 @@ export class ParenBalancer {
     }
 
     return { parenDelta: delta, endsInComment: inComment };
+  }
+
+  /** Trouve la position du `{` qui ouvre un bloc, hors strings/comments */
+  private findOpenBrace(line: string): number {
+    let inString = false;
+    let inChar = false;
+    let escape = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      const next = line[i + 1];
+
+      if (escape) { escape = false; continue; }
+
+      if (inString) {
+        if (c === '\\') { escape = true; continue; }
+        if (c === '"') inString = false;
+        continue;
+      }
+      if (inChar) {
+        if (c === '\\') { escape = true; continue; }
+        if (c === "'") inChar = false;
+        continue;
+      }
+
+      if (c === '/' && next === '/') return -1;
+      if (c === '"') { inString = true; continue; }
+      if (c === "'") { inChar = true; continue; }
+      if (c === '{') return i;
+    }
+
+    return -1;
   }
 
   /** Trouve la position du `;` qui termine le statement, hors strings/comments */

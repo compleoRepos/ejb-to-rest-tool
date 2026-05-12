@@ -45,7 +45,9 @@ export class SoapDetector implements TechnologyDetector {
 
     // Extraire les operations @WebMethod
     const operations: DetectedMethod[] = [];
-    const methodRegex = /(?:@WebMethod\s*(?:\([^)]*\))?\s*)?public\s+(\w[\w<>,\s]*?)\s+(\w+)\s*\(([^)]*)\)/g;
+    // v13.10: Use a regex that handles nested parens in @WebParam(name="...") annotations
+    // The simple [^)]* fails because @WebParam(name="x") contains nested parens
+    const methodRegex = /(?:@WebMethod\s*(?:\([^)]*\))?\s*)?public\s+(\w[\w<>,\s]*?)\s+(\w+)\s*\(([\s\S]*?)\)\s*(?:throws[\s\S]*?)?[{;]/g;
     let m;
     while ((m = methodRegex.exec(content)) !== null) {
       const name = m[2];
@@ -94,12 +96,31 @@ export class SoapDetector implements TechnologyDetector {
     return component.confidence;
   }
 
+  // v13.10: Split params by comma but respect nested parentheses (e.g. @WebParam(name="x", partName="y"))
+  private smartSplitParams(raw: string): string[] {
+    const parts: string[] = [];
+    let depth = 0;
+    let current = '';
+    for (const ch of raw) {
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+      else if (ch === ',' && depth === 0) {
+        parts.push(current);
+        current = '';
+        continue;
+      }
+      current += ch;
+    }
+    if (current.trim()) parts.push(current);
+    return parts;
+  }
+
   private parseParams(raw: string): { name: string; type: string; annotations?: string[] }[] {
     if (!raw.trim()) return [];
-    return raw.split(",").map((p) => {
+    return this.smartSplitParams(raw).map((p) => {
       const trimmed = p.trim();
       const annotations: string[] = [];
-      const annMatch = trimmed.match(/@WebParam\s*\(\s*name\s*=\s*"([^"]+)"\s*\)/);
+      const annMatch = trimmed.match(/@WebParam\s*\(\s*name\s*=\s*"([^"]+)"/);
       if (annMatch) annotations.push(`@WebParam("${annMatch[1]}")`);
       const parts = trimmed.replace(/@\w+\s*\([^)]*\)\s*/g, "").trim().split(/\s+/);
       return {

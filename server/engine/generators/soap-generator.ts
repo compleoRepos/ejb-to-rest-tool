@@ -29,7 +29,7 @@ export class SoapGenerator implements CodeGenerator {
 
   validate(generated: GeneratedFile[]): ValidationResult { return { valid: true, errors: [], warnings: [] }; }
 
-  private genCtrl(c: SoapComponent, ctrlName: string, svcName: string, pkg: string): string {
+   private genCtrl(c: SoapComponent, ctrlName: string, svcName: string, pkg: string): string {
     const sf = svcName.charAt(0).toLowerCase() + svcName.slice(1);
     const basePath = "/api/" + c.className.replace(/Service$|Impl$|WS$/i, "").toLowerCase();
     const methods = c.metadata.operations.map(op => {
@@ -39,16 +39,23 @@ export class SoapGenerator implements CodeGenerator {
       const params = op.params.length > 0 ? `@RequestBody ${this.capitalize(op.name)}RequestDTO request` : "";
       return `    @Operation(summary = "${op.name} - migre depuis SOAP")\n    ${mapping}("${path}")\n    public ResponseEntity<${op.returnType}> ${op.name}(${params}) {\n        return ResponseEntity.ok(${sf}.${op.name}(${op.params.length > 0 ? "request" : ""}));\n    }`;
     }).join("\n\n");
-
-    return `package ${pkg}.controller;\n\nimport ${pkg}.service.${svcName};\nimport lombok.RequiredArgsConstructor;\nimport org.springframework.http.ResponseEntity;\nimport org.springframework.web.bind.annotation.*;\nimport io.swagger.v3.oas.annotations.Operation;\nimport io.swagger.v3.oas.annotations.tags.Tag;\n\n/** REST Controller migre depuis SOAP WebService: ${c.className}\n * Namespace: ${c.metadata.targetNamespace || "N/A"}\n * ${c.metadata.wsdlPresent ? "WSDL etait present" : "Pas de WSDL"}\n */\n@RestController\n@RequestMapping("${basePath}")\n@RequiredArgsConstructor\n@Tag(name = "${ctrlName}", description = "Migre depuis SOAP ${c.metadata.serviceName}")\npublic class ${ctrlName} {\n\n    private final ${svcName} ${sf};\n\n${methods}\n}\n`;
+    // v13.10: Generate proper imports for request DTOs (same package as controller)
+    const dtoImports = c.metadata.operations
+      .filter((op: any) => op.params.length > 0)
+      .map((op: any) => `import ${pkg}.dto.${this.capitalize(op.name)}RequestDTO;`)
+      .join("\n");
+    const extraImports = dtoImports;
+    // v13.10: Also import the main project's dto package (wildcard) for return types like ModelFlux
+    const mainDtoImport = `import com.example.ejbproject.dto.*;`;
+    return `package ${pkg}.controller;\n\nimport ${pkg}.service.${svcName};\n${extraImports}\n${mainDtoImport}\nimport lombok.RequiredArgsConstructor;\nimport org.springframework.http.ResponseEntity;\nimport org.springframework.web.bind.annotation.*;\nimport io.swagger.v3.oas.annotations.Operation;\nimport io.swagger.v3.oas.annotations.tags.Tag;\n\n/** REST Controller migre depuis SOAP WebService: ${c.className}\n * Namespace: ${c.metadata.targetNamespace || "N/A"}\n * ${c.metadata.wsdlPresent ? "WSDL etait present" : "Pas de WSDL"}\n */\n@RestController\n@RequestMapping("${basePath}")\n@RequiredArgsConstructor\n@Tag(name = "${ctrlName}", description = "Migre depuis SOAP ${c.metadata.serviceName}")\npublic class ${ctrlName} {\n\n    private final ${svcName} ${sf};\n\n${methods}\n}\n`;
   }
 
   private genSvc(c: SoapComponent, svcName: string, pkg: string): string {
     const methods = c.metadata.operations.map(op => {
       return `    @Transactional\n    public ${op.returnType} ${op.name}(${op.params.length > 0 ? "Object request" : ""}) {\n        // TODO: Migrer la logique SOAP de ${c.className}.${op.name}\n        throw new UnsupportedOperationException("Migration en cours");\n    }`;
     }).join("\n\n");
-
-    return `package ${pkg}.service;\n\nimport lombok.RequiredArgsConstructor;\nimport lombok.extern.slf4j.Slf4j;\nimport org.springframework.stereotype.Service;\nimport org.springframework.transaction.annotation.Transactional;\n\n/** Service migre depuis SOAP: ${c.className} */\n@Service\n@RequiredArgsConstructor\n@Slf4j\npublic class ${svcName} {\n\n${methods}\n}\n`;
+    // v13.10: Add wildcard import for dto package to resolve return types
+    return `package ${pkg}.service;\n\nimport com.example.ejbproject.dto.*;\nimport lombok.RequiredArgsConstructor;\nimport lombok.extern.slf4j.Slf4j;\nimport org.springframework.stereotype.Service;\nimport org.springframework.transaction.annotation.Transactional;\n\n/** Service migre depuis SOAP: ${c.className} */\n@Service\n@RequiredArgsConstructor\n@Slf4j\npublic class ${svcName} {\n\n${methods}\n}\n`;
   }
 
   private genDto(op: any, dtoName: string, pkg: string): string {

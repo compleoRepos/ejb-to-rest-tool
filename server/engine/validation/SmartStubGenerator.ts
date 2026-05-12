@@ -83,6 +83,8 @@ export function generateSmartStub(
 
   // 2. Collect method calls and field accesses
   const methods = new Map<string, MethodSignature>();
+  // v13.10: Track all observed param counts per method to pick the most frequent (mode)
+  const methodParamCounts = new Map<string, number[]>();
   const fields = new Map<string, FieldSignature>();
   let hasConstructorWithArgs = false;
   let constructorArgTypes: string[] = [];
@@ -108,6 +110,9 @@ export function generateSmartStub(
         allFiles,
         true
       );
+      // Track param count for mode calculation
+      if (!methodParamCounts.has(methodName)) methodParamCounts.set(methodName, []);
+      methodParamCounts.get(methodName)!.push(sig.params.length);
       if (!methods.has(methodName) || methods.get(methodName)!.params.length < sig.params.length) {
         methods.set(methodName, sig);
       }
@@ -131,6 +136,9 @@ export function generateSmartStub(
           allFiles,
           false
         );
+        // Track param count for mode calculation
+        if (!methodParamCounts.has(methodName)) methodParamCounts.set(methodName, []);
+        methodParamCounts.get(methodName)!.push(sig.params.length);
         if (!methods.has(methodName) || methods.get(methodName)!.params.length < sig.params.length) {
           methods.set(methodName, sig);
         }
@@ -146,6 +154,13 @@ export function generateSmartStub(
         if (fieldName === 'class' || fieldName === 'this') continue;
         // Skip if it's actually a method call we missed
         if (methods.has(fieldName)) continue;
+        // v13.10: Skip truncated method names caused by lookahead backtracking
+        // e.g., "getNodeAsStrin" is a prefix of method "getNodeAsString"
+        const isTruncatedMethod = [...methods.keys()].some(mName => mName.startsWith(fieldName) && mName.length > fieldName.length);
+        if (isTruncatedMethod) continue;
+        // Also skip if the next char in source is a word char (indicates truncation)
+        const matchEnd = m.index + m[0].length;
+        if (matchEnd < file.content.length && /\w/.test(file.content[matchEnd])) continue;
         if (!fields.has(fieldName)) {
           fields.set(fieldName, { name: fieldName, type: inferFieldType(fieldName) });
         }
@@ -168,38 +183,48 @@ export function generateSmartStub(
     }
   }
 
-  // 3. Check for transitive missing classes in return types
+  // v13.10: Correct method signatures using mode (most frequent param count)
+  // This fixes false positives from regex [^)]* not handling nested parentheses
+  for (const [methodName, counts] of methodParamCounts) {
+    if (counts.length <= 1) continue;
+    // Find mode (most frequent param count)
+    const freq = new Map<number, number>();
+    for (const c of counts) freq.set(c, (freq.get(c) || 0) + 1);
+    let modeCount = counts[0];
+    let modeFreq = 0;
+    for (const [count, f] of freq) {
+      if (f > modeFreq || (f === modeFreq && count < modeCount)) {
+        modeCount = count;
+        modeFreq = f;
+      }
+    }
+    const currentSig = methods.get(methodName);
+    if (currentSig && currentSig.params.length > modeCount) {
+      // Truncate params to mode count
+      currentSig.params = currentSig.params.slice(0, modeCount);
+      methods.set(methodName, currentSig);
+    }
+  }
+
+  // 3. Check for transitive missing classes in return types AND generic type params
+  const SKIP_TYPES = new Set(['void','Object','String','int','long','boolean','double','float','Integer','Long','Boolean','Double','Float','Short','Byte','Character','Number','List','Map','Set','Date','BigDecimal','LocalDate','Exception','RuntimeException','Throwable','Error']);
+  const collectTransitiveTypes = (type: string): string[] => {
+    const types: string[] = [];
+    const genericIdx = type.indexOf('<');
+    const rawType = genericIdx > 0 ? type.substring(0, genericIdx) : type;
+    if (!SKIP_TYPES.has(rawType) && /^[A-Z]/.test(rawType) && !rawType.startsWith('java.')) types.push(rawType);
+    // v13.10: Also check generic type parameters (e.g., List<DeclicTirageDTO>)
+    const genericMatch = type.match(/<([A-Z]\w+)>/);
+    if (genericMatch && !SKIP_TYPES.has(genericMatch[1])) types.push(genericMatch[1]);
+    return types;
+  };
   for (const [name, sig] of methods) {
-    // Strip generic parameters from return type to get the raw class name
-    let rt = sig.returnType;
-    const genericIdx = rt.indexOf('<');
-    const rawRt = genericIdx > 0 ? rt.substring(0, genericIdx) : rt;
-    
-    // Skip invalid class names (containing special chars)
-    if (/[<>\[\]\s,()]/.test(rawRt)) continue;
-    
-    if (
-      rawRt !== "void" &&
-      rawRt !== "Object" &&
-      rawRt !== "String" &&
-      rawRt !== "int" &&
-      rawRt !== "long" &&
-      rawRt !== "boolean" &&
-      rawRt !== "double" &&
-      rawRt !== "float" &&
-      rawRt !== "Integer" &&
-      rawRt !== "Long" &&
-      rawRt !== "Boolean" &&
-      rawRt !== "Double" &&
-      !rawRt.startsWith("java.") &&
-      rawRt !== "List" &&
-      rawRt !== "Map" &&
-      rawRt !== "Set" &&
-      !existingClasses.has(rawRt) &&
-      rawRt !== missingClass &&
-      depth < maxDepth
-    ) {
-      // This return type is also missing — recurse
+    const typesToCheck = [...collectTransitiveTypes(sig.returnType)];
+    for (const p of sig.params) typesToCheck.push(...collectTransitiveTypes(p.type));
+    for (const rawRt of typesToCheck) {
+      if (/[<>\[\]\s,()]/.test(rawRt)) continue;
+      if (existingClasses.has(rawRt) || rawRt === missingClass || depth >= maxDepth) continue;
+      // This type is also missing — recurse
       const transitive = generateSmartStub(
         rawRt,
         pkg,
@@ -208,6 +233,16 @@ export function generateSmartStub(
         depth + 1,
         maxDepth
       );
+      transitiveStubs.set(rawRt, transitive.stubContent);
+      transitive.transitiveStubs.forEach((v, k) => transitiveStubs.set(k, v));
+    }
+  }
+  // v13.10: Also check constructor arg types for transitive stubs
+  for (const ctorType of constructorArgTypes) {
+    for (const rawRt of collectTransitiveTypes(ctorType)) {
+      if (/[<>\[\]\s,()]/.test(rawRt)) continue;
+      if (existingClasses.has(rawRt) || rawRt === missingClass || depth >= maxDepth) continue;
+      const transitive = generateSmartStub(rawRt, pkg, allFiles, existingClasses, depth + 1, maxDepth);
       transitiveStubs.set(rawRt, transitive.stubContent);
       transitive.transitiveStubs.forEach((v, k) => transitiveStubs.set(k, v));
     }
@@ -350,6 +385,25 @@ function inferReturnType(methodName: string, content: string, callIndex: number)
     if (methodName.toLowerCase().includes("list") || methodName.toLowerCase().includes("all")) {
       return "java.util.List<Object>";
     }
+    // v13.10: Detect type hints in method name (getNodeAsString → String, getAsInt → int)
+    if (methodName.endsWith("String") || methodName.endsWith("AsString") || methodName.includes("AsString")) {
+      return "String";
+    }
+    if (methodName.endsWith("Int") || methodName.endsWith("AsInt") || methodName.endsWith("Integer")) {
+      return "int";
+    }
+    if (methodName.endsWith("Long") || methodName.endsWith("AsLong")) {
+      return "long";
+    }
+    if (methodName.endsWith("Boolean") || methodName.endsWith("AsBool") || methodName.endsWith("AsBoolean")) {
+      return "boolean";
+    }
+    if (methodName.endsWith("Double") || methodName.endsWith("AsDouble")) {
+      return "double";
+    }
+    if (methodName.endsWith("Date")) {
+      return "java.util.Date";
+    }
     return "Object";
   }
   if (methodName.startsWith("set") || methodName.startsWith("add") || methodName.startsWith("remove") ||
@@ -480,26 +534,27 @@ function renderStub(
     if (type.includes("Reader")) imports.add("java.io.Reader");
     if (type.includes("InputStream")) imports.add("java.io.InputStream");
     if (type.includes("OutputStream")) imports.add("java.io.OutputStream");
-    // v12.13: Import project classes using correct package from classPackageMap
-    if (/^[A-Z]/.test(rawType) && !rawType.startsWith('java.') && !['String','Object','Integer','Long','Boolean','Double','Float','Byte','Short','Character','Void','List','Map','Set','Date','BigDecimal','LocalDate','Reader','InputStream','OutputStream','Collections'].includes(rawType)) {
+    // v13.10: Extended exclusion list — java.lang types that don't need imports
+    const JAVA_LANG_TYPES = new Set(['String','Object','Integer','Long','Boolean','Double','Float','Byte','Short','Character','Void','Number','Throwable','Exception','RuntimeException','Error','Class','Comparable','Iterable','AutoCloseable','Cloneable','Runnable','Thread','List','Map','Set','Date','BigDecimal','LocalDate','Reader','InputStream','OutputStream','Collections']);
+    if (/^[A-Z]/.test(rawType) && !rawType.startsWith('java.') && !JAVA_LANG_TYPES.has(rawType)) {
       const actualPkg = classPackageMap?.get(rawType);
-      if (actualPkg) {
+      if (actualPkg && actualPkg !== pkg) {
+        // v13.10: Only import if from a different package (same-package classes don't need imports in Java)
         imports.add(`${actualPkg}.${rawType}`);
-      } else {
-        imports.add(`${pkg}.${rawType}`);
       }
+      // v13.10: If class not found in classPackageMap, don't add import from same pkg
+      // (it either exists in same package and doesn't need import, or doesn't exist at all)
     }
     // v12.13: Also resolve generic type parameters (e.g., List<Dotation> → import Dotation)
     const genericMatch = type.match(/<([A-Z]\w+)>/);
     if (genericMatch) {
       const innerType = genericMatch[1];
-      if (!['String','Object','Integer','Long','Boolean','Double','Float','Byte','Short','Character','Void'].includes(innerType)) {
+      if (!JAVA_LANG_TYPES.has(innerType)) {
         const innerPkg = classPackageMap?.get(innerType);
-        if (innerPkg) {
+        if (innerPkg && innerPkg !== pkg) {
           imports.add(`${innerPkg}.${innerType}`);
-        } else {
-          imports.add(`${pkg}.${innerType}`);
         }
+        // v13.10: Don't import from same package
       }
     }
   };
@@ -603,6 +658,11 @@ function simplifyType(type: string): string {
   if (type.startsWith("java.math.BigDecimal")) return "BigDecimal";
   if (type.startsWith("java.util.Date")) return "Date";
   if (type.startsWith("java.time.LocalDate")) return "LocalDate";
+  // v13.10: Replace invalid types (lowercase, Java/SQL keywords) with Object
+  const INVALID_TYPES = new Set(['from','select','where','into','class','new','return','this','super','null','true','false','void','if','else','for','while','do','switch','case','break','continue','try','catch','finally','throw','throws','import','package','public','private','protected','static','final','abstract','interface','extends','implements','instanceof','var','val']);
+  if (INVALID_TYPES.has(type) || (type.length > 0 && /^[a-z]/.test(type) && !['int','long','float','double','boolean','byte','short','char'].includes(type))) {
+    return 'Object';
+  }
   return type;
 }
 
