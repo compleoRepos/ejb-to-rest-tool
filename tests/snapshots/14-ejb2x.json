@@ -1,11 +1,11 @@
 {
   "fixtureId": "14-ejb2x",
-  "timestamp": "2026-05-11T19:42:09.547Z",
+  "timestamp": "2026-05-12T07:43:44.860Z",
   "useCaseCount": 0,
   "dtoCount": 0,
   "enumCount": 0,
   "exceptionCount": 0,
-  "generatedFileCount": 16,
+  "generatedFileCount": 18,
   "generatedFilePaths": [
     "src/main/java/com/example/ejbproject/EjbProjectApplication.java",
     "src/main/java/com/example/ejbproject/exception/GlobalExceptionHandler.java",
@@ -22,7 +22,9 @@
     "QUALITY_SCORE.md",
     "BIAN_MAPPING.md",
     "ARCHITECTURE.md",
-    "MIGRATION_SUMMARY.md"
+    "MIGRATION_SUMMARY.md",
+    "src/main/java/com/example/ejbproject/common/CompleoUnvalidated.java",
+    "src/main/java/com/example/ejbproject/common/CompleoUnvalidatedMethodException.java"
   ],
   "score": 75,
   "status": "WARN"

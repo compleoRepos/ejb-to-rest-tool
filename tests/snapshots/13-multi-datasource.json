@@ -1,11 +1,11 @@
 {
   "fixtureId": "13-multi-datasource",
-  "timestamp": "2026-05-11T19:42:09.505Z",
+  "timestamp": "2026-05-12T07:43:44.844Z",
   "useCaseCount": 1,
   "dtoCount": 2,
   "enumCount": 0,
   "exceptionCount": 0,
-  "generatedFileCount": 21,
+  "generatedFileCount": 23,
   "generatedFilePaths": [
     "src/main/java/com/bank/ejbmultids/EjbMultiDsApplication.java",
     "src/main/java/com/bank/ejbmultids/dto/CompteRequestDTO.java",
@@ -27,7 +27,9 @@
     "QUALITY_SCORE.md",
     "BIAN_MAPPING.md",
     "ARCHITECTURE.md",
-    "MIGRATION_SUMMARY.md"
+    "MIGRATION_SUMMARY.md",
+    "src/main/java/com/bank/ejbmultids/common/CompleoUnvalidated.java",
+    "src/main/java/com/bank/ejbmultids/common/CompleoUnvalidatedMethodException.java"
   ],
   "score": 82,
   "status": "PASS"

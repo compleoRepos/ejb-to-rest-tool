@@ -1,11 +1,11 @@
 {
   "fixtureId": "02-ejb-direct",
-  "timestamp": "2026-05-11T19:42:08.898Z",
+  "timestamp": "2026-05-12T07:43:44.472Z",
   "useCaseCount": 2,
   "dtoCount": 0,
   "enumCount": 0,
   "exceptionCount": 0,
-  "generatedFileCount": 19,
+  "generatedFileCount": 21,
   "generatedFilePaths": [
     "src/main/java/com/bank/ejbproject/EjbProjectApplication.java",
     "src/main/java/com/bank/ejbproject/exception/GlobalExceptionHandler.java",
@@ -25,7 +25,9 @@
     "QUALITY_SCORE.md",
     "BIAN_MAPPING.md",
     "ARCHITECTURE.md",
-    "MIGRATION_SUMMARY.md"
+    "MIGRATION_SUMMARY.md",
+    "src/main/java/com/bank/ejbproject/common/CompleoUnvalidated.java",
+    "src/main/java/com/bank/ejbproject/common/CompleoUnvalidatedMethodException.java"
   ],
   "score": 79,
   "status": "WARN"

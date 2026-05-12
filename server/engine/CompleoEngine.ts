@@ -361,26 +361,34 @@ export class CompleoEngine {
     );
     const migrationReport = reportFile?.content || "";
 
-    // v13.7: Inject @CompleoUnvalidated on multiTechFiles stub methods
+    // v13.8: Inject @CompleoUnvalidated + CompleoUnvalidatedMethodException on multiTechFiles
     const mtFiles = multiTechFiles || [];
     if (mtFiles.length > 0) {
-      // Detect basePackage from result files
       const sampleFile = result.files.find(f => f.path.endsWith('Application.java'));
       const pkgMatch = sampleFile?.content.match(/^package ([\w.]+);/m);
       const basePkg = pkgMatch ? pkgMatch[1] : 'com.example.ejbproject';
       const cuImportMt = `import ${basePkg}.common.CompleoUnvalidated;`;
+      const cuExImportMt = `import ${basePkg}.common.CompleoUnvalidatedMethodException;`;
+      const migDateMt = new Date().toISOString().split('T')[0];
       for (const file of mtFiles) {
         if (!file.path.endsWith('.java')) continue;
+        if (file.path.includes('CompleoUnvalidated')) continue;
         if (!file.content.includes('throw new UnsupportedOperationException')) continue;
+        const classNameMatchMt = file.path.match(/([A-Z]\w+)\.java$/);
+        const classNameMt = classNameMatchMt ? classNameMatchMt[1] : 'Unknown';
         if (!file.content.includes('CompleoUnvalidated')) {
           file.content = file.content.replace(
             /(package [\w.]+;\n)/,
-            `$1${cuImportMt}\n`
+            `$1${cuImportMt}\n${cuExImportMt}\n`
           );
         }
         file.content = file.content.replace(
-          /([ \t]+)((?:@Transactional\s+)?(?:public|protected)\s+\S+\s+\w+\s*\([^)]*\)\s*\{[^}]*throw new UnsupportedOperationException)/g,
-          '$1@CompleoUnvalidated\n$1$2'
+          /([\t ]+)((?:@Transactional\s+)?(?:public|protected)\s+\S+\s+(\w+)\s*\([^)]*\)\s*\{[^}]*?)throw new UnsupportedOperationException\("([^"]*)"\)/g,
+          (match: string, indent: string, methodHead: string, methodName: string, msg: string) => {
+            const legacyRefMt = `${classNameMt}.${methodName}`;
+            return `${indent}@CompleoUnvalidated(severity = "STUB", legacyRef = "${legacyRefMt}", migrationDate = "${migDateMt}")
+${indent}${methodHead}throw new CompleoUnvalidatedMethodException("${methodName}", "${legacyRefMt}", "STUB")`;
+          }
         );
       }
     }

@@ -1,11 +1,11 @@
 {
   "fixtureId": "17-bmce-banking",
-  "timestamp": "2026-05-11T19:42:09.758Z",
+  "timestamp": "2026-05-12T07:43:44.969Z",
   "useCaseCount": 6,
   "dtoCount": 4,
   "enumCount": 0,
   "exceptionCount": 0,
-  "generatedFileCount": 32,
+  "generatedFileCount": 34,
   "generatedFilePaths": [
     "src/main/java/com/bank/ejbproject/EjbProjectApplication.java",
     "src/main/java/com/bank/ejbproject/dto/ConsulterSoldeRequestDTO.java",
@@ -38,7 +38,9 @@
     "QUALITY_SCORE.md",
     "BIAN_MAPPING.md",
     "ARCHITECTURE.md",
-    "MIGRATION_SUMMARY.md"
+    "MIGRATION_SUMMARY.md",
+    "src/main/java/com/bank/ejbproject/common/CompleoUnvalidated.java",
+    "src/main/java/com/bank/ejbproject/common/CompleoUnvalidatedMethodException.java"
   ],
   "score": 87,
   "status": "PASS"

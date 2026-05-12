@@ -1,15 +1,18 @@
 {
   "fixtureId": "09-soap",
-  "timestamp": "2026-05-11T19:42:09.367Z",
-  "useCaseCount": 0,
+  "timestamp": "2026-05-12T07:43:44.746Z",
+  "useCaseCount": 2,
   "dtoCount": 0,
   "enumCount": 0,
   "exceptionCount": 0,
-  "generatedFileCount": 16,
+  "generatedFileCount": 21,
   "generatedFilePaths": [
     "src/main/java/com/bank/ejbproject/EjbProjectApplication.java",
     "src/main/java/com/bank/ejbproject/exception/GlobalExceptionHandler.java",
     "src/main/java/com/bank/ejbproject/exception/BusinessRuleException.java",
+    "src/main/java/com/bank/ejbproject/service/CompteService.java",
+    "src/main/java/com/bank/ejbproject/controller/CompteController.java",
+    "src/test/java/com/bank/ejbproject/controller/CompteControllerTest.java",
     "src/main/resources/application.yml",
     "src/main/resources/application.properties",
     "DATASOURCE_MIGRATION.md",
@@ -22,8 +25,10 @@
     "QUALITY_SCORE.md",
     "BIAN_MAPPING.md",
     "ARCHITECTURE.md",
-    "MIGRATION_SUMMARY.md"
+    "MIGRATION_SUMMARY.md",
+    "src/main/java/com/bank/ejbproject/common/CompleoUnvalidated.java",
+    "src/main/java/com/bank/ejbproject/common/CompleoUnvalidatedMethodException.java"
   ],
-  "score": 75,
+  "score": 79,
   "status": "WARN"
 }

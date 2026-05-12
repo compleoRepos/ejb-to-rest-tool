@@ -637,13 +637,12 @@ import java.lang.annotation.Target;
 /**
  * Marks a method that was structurally migrated by COMPLEO but whose
  * business logic has NOT been validated. The method compiles and wires
- * correctly into Spring Boot, but its body contains a placeholder
- * (UnsupportedOperationException or stub).
+ * correctly into Spring Boot, but its body contains a placeholder.
  *
  * <p>Usage: review each annotated method, port the legacy logic,
  * then remove the annotation and the placeholder throw.</p>
  *
- * @since COMPLEO v13.7
+ * @since COMPLEO v13.8
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
@@ -652,29 +651,85 @@ public @interface CompleoUnvalidated {
     String reason() default "Business logic requires manual validation";
     /** Reference to the legacy class/method for traceability. */
     String legacyRef() default "";
+    /** Severity: STUB (empty body), PARTIAL (some logic migrated), REVIEW (logic migrated but unvalidated). */
+    String severity() default "STUB";
+    /** Original legacy method signature for traceability. */
+    String legacySignature() default "";
+    /** ISO date when the migration was performed. */
+    String migrationDate() default "";
 }
 `,
+  };
+  // Also generate CompleoUnvalidatedMethodException
+  const compleoException: GeneratedFile = {
+    path: `src/main/java/${basePackage.replace(/\./g, '/')}/common/CompleoUnvalidatedMethodException.java`,
+    content: `package ${basePackage}.common;
+
+/**
+ * Runtime exception thrown by methods annotated with @CompleoUnvalidated.
+ * Provides structured context about the unvalidated migration for
+ * logging, monitoring, and debugging.
+ *
+ * @since COMPLEO v13.8
+ */
+public class CompleoUnvalidatedMethodException extends RuntimeException {
+
+    private final String legacyRef;
+    private final String severity;
+    private final String methodName;
+
+    public CompleoUnvalidatedMethodException(String methodName, String legacyRef, String severity) {
+        super(String.format("[COMPLEO-UNVALIDATED] Method '%s' was migrated from '%s' (severity=%s) "
+            + "but its business logic has not been validated. "
+            + "Please review and implement the legacy logic.", methodName, legacyRef, severity));
+        this.methodName = methodName;
+        this.legacyRef = legacyRef;
+        this.severity = severity;
+    }
+
+    public String getLegacyRef() { return legacyRef; }
+    public String getSeverity() { return severity; }
+    public String getMethodName() { return methodName; }
+}
+`,
+    category: 'common',
   };
   if (!files.some(f => f.path.includes('CompleoUnvalidated.java'))) {
     files.push(compleoUnvalidatedAnnotation);
   }
-  // Post-process: add @CompleoUnvalidated to methods with UnsupportedOperationException
+  if (!files.some(f => f.path.includes('CompleoUnvalidatedMethodException.java'))) {
+    files.push(compleoException);
+  }
+  // Post-process v13.8: add @CompleoUnvalidated + CompleoUnvalidatedMethodException wrapping
   const cuImport = `import ${basePackage}.common.CompleoUnvalidated;`;
+  const cuExImport = `import ${basePackage}.common.CompleoUnvalidatedMethodException;`;
+  const migrationDate = new Date().toISOString().split('T')[0];
   for (const file of files) {
     if (!file.path.endsWith('.java')) continue;
-    if (file.path.includes('CompleoUnvalidated.java')) continue;
+    if (file.path.includes('CompleoUnvalidated')) continue;
     if (!file.content.includes('throw new UnsupportedOperationException')) continue;
-    // Add import if not present
+
+    // Extract class name from file for legacyRef
+    const classNameMatch = file.path.match(/([A-Z]\w+)\.java$/);
+    const className = classNameMatch ? classNameMatch[1] : 'Unknown';
+
+    // Add imports if not present
     if (!file.content.includes('CompleoUnvalidated')) {
       file.content = file.content.replace(
         /(package [\w.]+;\n)/,
-        `$1${cuImport}\n`
+        `$1${cuImport}\n${cuExImport}\n`
       );
     }
-    // Add @CompleoUnvalidated before each method that throws UnsupportedOperationException
+
+    // Replace UnsupportedOperationException with CompleoUnvalidatedMethodException
+    // and add enriched @CompleoUnvalidated annotation
     file.content = file.content.replace(
-      /([ \t]+)((?:@Transactional\s+)?(?:public|protected)\s+\S+\s+\w+\s*\([^)]*\)\s*\{[^}]*throw new UnsupportedOperationException)/g,
-      '$1@CompleoUnvalidated\n$1$2'
+      /([\t ]+)((?:@Transactional\s+)?(?:public|protected)\s+\S+\s+(\w+)\s*\([^)]*\)\s*\{[^}]*?)throw new UnsupportedOperationException\("([^"]*)"\)/g,
+      (match, indent, methodHead, methodName, msg) => {
+        const legacyRef = `${className}.${methodName}`;
+        return `${indent}@CompleoUnvalidated(severity = "STUB", legacyRef = "${legacyRef}", migrationDate = "${migrationDate}")
+${indent}${methodHead}throw new CompleoUnvalidatedMethodException("${methodName}", "${legacyRef}", "STUB")`;
+      }
     );
   }
 

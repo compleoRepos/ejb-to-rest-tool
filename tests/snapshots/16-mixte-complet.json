@@ -1,11 +1,11 @@
 {
   "fixtureId": "16-mixte-complet",
-  "timestamp": "2026-05-11T19:42:09.674Z",
+  "timestamp": "2026-05-12T07:43:44.908Z",
   "useCaseCount": 3,
   "dtoCount": 2,
   "enumCount": 1,
   "exceptionCount": 1,
-  "generatedFileCount": 26,
+  "generatedFileCount": 28,
   "generatedFilePaths": [
     "src/main/java/com/bank/ejbproject/EjbProjectApplication.java",
     "src/main/java/com/bank/ejbproject/dto/ConsulterSoldeRequestDTO.java",
@@ -32,7 +32,9 @@
     "QUALITY_SCORE.md",
     "BIAN_MAPPING.md",
     "ARCHITECTURE.md",
-    "MIGRATION_SUMMARY.md"
+    "MIGRATION_SUMMARY.md",
+    "src/main/java/com/bank/ejbproject/common/CompleoUnvalidated.java",
+    "src/main/java/com/bank/ejbproject/common/CompleoUnvalidatedMethodException.java"
   ],
   "score": 81,
   "status": "PASS"

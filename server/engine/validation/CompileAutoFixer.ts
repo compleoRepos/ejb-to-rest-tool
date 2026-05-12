@@ -107,6 +107,12 @@ function injectSmartStubs(files: GeneratedFile[]): { files: GeneratedFile[]; inj
     'EJBException', 'AsyncResult', 'Future', 'Callable', 'Runnable',
     'Logger', 'Level', 'LogManager', 'HttpServletRequest', 'HttpServletResponse',
     'HttpSession', 'ServletContext',
+    // java.lang exceptions & core (must NOT be stubbed)
+    'UnsupportedOperationException', 'IllegalStateException', 'RuntimeException',
+    'IllegalArgumentException', 'NullPointerException', 'ClassCastException',
+    'IndexOutOfBoundsException', 'NumberFormatException', 'ArithmeticException',
+    'Exception', 'Throwable', 'Error', 'StackTraceElement', 'Thread', 'System',
+    'Math', 'StringBuilder', 'StringBuffer', 'Comparable', 'Iterable', 'Cloneable',
   ]);
 
   for (let fi = 0; fi < result.length; fi++) {
@@ -890,6 +896,12 @@ function fixMissingSymbols(
       'Logger', 'Level', 'LogManager',
       // Servlet
       'HttpServletRequest', 'HttpServletResponse', 'HttpSession', 'ServletContext',
+      // java.lang exceptions & core (must NOT be stubbed)
+      'UnsupportedOperationException', 'IllegalStateException', 'RuntimeException',
+      'IllegalArgumentException', 'NullPointerException', 'ClassCastException',
+      'IndexOutOfBoundsException', 'NumberFormatException', 'ArithmeticException',
+      'Exception', 'Throwable', 'Error', 'StackTraceElement', 'Thread', 'System',
+      'Math', 'StringBuilder', 'StringBuffer', 'Comparable', 'Iterable', 'Cloneable',
     ]);
     if (JAVA_BUILTINS.has(missingClass)) {
       // v12.8: Don't generate a stub, but DO add the missing import for known standard classes

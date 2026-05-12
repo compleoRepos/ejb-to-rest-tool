@@ -296,6 +296,123 @@ describe("SchemaDecoder v12.6", () => {
     });
   });
 
+  describe("Source 6: JPA @Column annotation (v13.8)", () => {
+    const JPA_ENTITY = `
+package com.bank.entity;
+
+import javax.persistence.*;
+
+@Entity
+@Table(name = "CUST_TBL")
+public class Customer {
+    @Column(name = "FIELD1")
+    private String customerId;
+
+    @Column(name = "FIELD2")
+    private String fullName;
+
+    @Column(name = "FIELD3")
+    private String emailAddress;
+
+    @Column(name = "FIELD4", length = 20)
+    private String phoneNumber;
+}
+`;
+
+    it("decodes @Column annotations as HIGH confidence", () => {
+      const result = decodeSchema([
+        { path: "Customer.java", content: JPA_ENTITY },
+      ]);
+      const custTable = result.tables.find(t => t.name === "CUST_TBL");
+      expect(custTable).toBeDefined();
+
+      const field1 = custTable!.columns.find(c => c.db === "FIELD1");
+      expect(field1).toBeDefined();
+      expect(field1!.inferred).toBe("customerId");
+      expect(field1!.confidence).toBe("high");
+
+      const field2 = custTable!.columns.find(c => c.db === "FIELD2");
+      expect(field2).toBeDefined();
+      expect(field2!.inferred).toBe("fullName");
+      expect(field2!.confidence).toBe("high");
+    });
+  });
+
+  describe("Source 7: RS getXxx by numeric index (v13.8)", () => {
+    const INDEX_DAO = `
+package com.bank.dao;
+
+import java.sql.*;
+
+public class IndexDAO {
+    private static final String SELECT_ALL = "SELECT FIELD1, FIELD2, FIELD3 FROM CUST_TBL";
+
+    public Customer findAll() throws SQLException {
+        ResultSet rs = stmt.executeQuery(SELECT_ALL);
+        if (rs.next()) {
+            Customer c = new Customer();
+            c.setClientId(rs.getString(1));
+            c.setClientName(rs.getString(2));
+            BigDecimal solde = rs.getBigDecimal(3);
+            return c;
+        }
+        return null;
+    }
+}
+`;
+
+    it("maps numeric RS index to column via SELECT order", () => {
+      const result = decodeSchema([
+        { path: "IndexDAO.java", content: INDEX_DAO },
+      ]);
+      const custTable = result.tables.find(t => t.name === "CUST_TBL");
+      expect(custTable).toBeDefined();
+
+      // FIELD1 (index 1) → clientId from c.setClientId
+      const field1 = custTable!.columns.find(c => c.db === "FIELD1");
+      expect(field1).toBeDefined();
+      expect(field1!.inferred).toBe("clientId");
+
+      // FIELD2 (index 2) → clientName from c.setClientName
+      const field2 = custTable!.columns.find(c => c.db === "FIELD2");
+      expect(field2).toBeDefined();
+      expect(field2!.inferred).toBe("clientName");
+
+      // FIELD3 (index 3) → solde from variable name
+      const field3 = custTable!.columns.find(c => c.db === "FIELD3");
+      expect(field3).toBeDefined();
+      expect(field3!.inferred).toBe("solde");
+    });
+  });
+
+  describe("Enriched abbreviation map (v13.8)", () => {
+    it("decodes banking abbreviations like RIB, IBAN, VIR", () => {
+      const bankDAO = `
+package com.bank.dao;
+import java.sql.*;
+public class BankDAO {
+    private static final String SELECT = "SELECT RIB, IBAN, VIR, BNF FROM BANK_TBL";
+    public void process() throws SQLException {
+        ResultSet rs = stmt.executeQuery(SELECT);
+    }
+}
+`;
+      const result = decodeSchema([
+        { path: "BankDAO.java", content: bankDAO },
+      ]);
+      const bankTable = result.tables.find(t => t.name === "BANK_TBL");
+      expect(bankTable).toBeDefined();
+
+      const rib = bankTable!.columns.find(c => c.db === "RIB");
+      expect(rib).toBeDefined();
+      expect(rib!.inferred).toBe("rib");
+
+      const iban = bankTable!.columns.find(c => c.db === "IBAN");
+      expect(iban).toBeDefined();
+      expect(iban!.inferred).toBe("iban");
+    });
+  });
+
   describe("nexabank-core CoreBankingDAO", () => {
     it("decodes ≥80% of columns from real nexabank DAO", () => {
       // Simulate nexabank CoreBankingDAO pattern

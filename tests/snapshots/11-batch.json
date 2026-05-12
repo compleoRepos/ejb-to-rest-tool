@@ -1,11 +1,11 @@
 {
   "fixtureId": "11-batch",
-  "timestamp": "2026-05-11T19:42:09.402Z",
+  "timestamp": "2026-05-12T07:43:44.788Z",
   "useCaseCount": 1,
   "dtoCount": 0,
   "enumCount": 0,
   "exceptionCount": 0,
-  "generatedFileCount": 20,
+  "generatedFileCount": 22,
   "generatedFilePaths": [
     "src/main/java/com/bank/ejbproject/dto/PurgerComptesInactifsResponseDTO.java",
     "src/main/java/com/bank/ejbproject/EjbProjectApplication.java",
@@ -26,7 +26,9 @@
     "QUALITY_SCORE.md",
     "BIAN_MAPPING.md",
     "ARCHITECTURE.md",
-    "MIGRATION_SUMMARY.md"
+    "MIGRATION_SUMMARY.md",
+    "src/main/java/com/bank/ejbproject/common/CompleoUnvalidated.java",
+    "src/main/java/com/bank/ejbproject/common/CompleoUnvalidatedMethodException.java"
   ],
   "score": 77,
   "status": "WARN"

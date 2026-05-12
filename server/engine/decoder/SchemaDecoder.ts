@@ -1,5 +1,5 @@
 /**
- * SchemaDecoder v12.6 — Decode cryptic database column names using Java source code semantics.
+ * SchemaDecoder v13.8 — Decode cryptic database column names using Java source code semantics.
  *
  * On legacy banking systems, DB columns are often cryptic (FIELD1..FIELDn, ZONE_A, COL_001).
  * This module infers the real semantic meaning by analyzing how columns are used in Java code.
@@ -9,7 +9,9 @@
  * Sources of semantics (by confidence level):
  *   - HIGH: Setter on DTO/Entity (customer.setName(rs.getString("FIELD1")))
  *   - HIGH: Named local variable (String nom = rs.getString("FIELD1"))
+ *   - HIGH: JPA @Column(name="FIELD1") annotation (v13.8)
  *   - MEDIUM: Typed method parameter (save(String nom){ ps.setString(1, nom) })
+ *   - MEDIUM: ResultSet getXxx by numeric index (v13.8)
  *   - LOW: Concat/formatting context (FIELD1 || FIELD2 → composite)
  *   - LOW: SQL type heuristic only (varchar(255) without clear usage)
  *
@@ -147,6 +149,12 @@ export function decodeSchema(
 
     // Source 5: Concat/formatting context (LOW confidence)
     extractConcatUsages(file.content, className, tableColumns, usages);
+
+    // Source 6: JPA @Column annotation (HIGH confidence) — v13.8
+    extractJpaColumnUsages(file.content, className, tableColumns, usages);
+
+    // Source 7: ResultSet getXxx by index (MEDIUM confidence) — v13.8
+    extractRsIndexUsages(file.content, className, tableColumns, usages);
   }
 
   // Phase 2: Build decoded tables
@@ -528,7 +536,121 @@ function extractConcatUsages(
   }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Source 6: JPA @Column annotation (HIGH) — v13.8 ───────────────────────
+
+function extractJpaColumnUsages(
+  content: string,
+  className: string,
+  tableColumns: Map<string, Set<string>>,
+  usages: ColumnUsage[]
+): void {
+  // Detect @Table(name="...") on the class
+  const tableAnnotation = content.match(/@Table\s*\(\s*name\s*=\s*"(\w+)"\s*\)/i);
+  const jpaTableName = tableAnnotation ? tableAnnotation[1] : null;
+
+  // Pattern: @Column(name="CRYPTIC_COL") followed by field declaration
+  const columnRegex = /@Column\s*\([^)]*name\s*=\s*"(\w+)"[^)]*\)\s*(?:private|protected|public)?\s*(\w+)\s+(\w+)\s*[;=]/g;
+  let match;
+  while ((match = columnRegex.exec(content)) !== null) {
+    const [, columnName, javaType, fieldName] = match;
+    if (isGenericVarName(fieldName)) continue;
+
+    // Use JPA table or try to find from SQL context
+    let tableName = jpaTableName;
+    if (!tableName) {
+      tableName = findTableForColumn(columnName, tableColumns);
+    }
+    if (!tableName) continue;
+
+    // Ensure the table and column are registered
+    if (!tableColumns.has(tableName)) {
+      tableColumns.set(tableName, new Set());
+    }
+    tableColumns.get(tableName)!.add(columnName);
+
+    usages.push({
+      columnName,
+      tableName,
+      inferredName: fieldName,
+      confidence: "high",
+      source: `@Column in ${className}`,
+      javaType,
+    });
+  }
+}
+
+// ─── Source 7: ResultSet getXxx by numeric index (MEDIUM) — v13.8 ────────
+
+function extractRsIndexUsages(
+  content: string,
+  className: string,
+  tableColumns: Map<string, Set<string>>,
+  usages: ColumnUsage[]
+): void {
+  // Pattern: obj.setXxx(rs.getYyy(N)) where N is a numeric index
+  const setterIndexRegex = /(\w+)\.(set(\w+))\s*\(\s*(?:rs|resultSet|rset|result)\s*\.\s*(get\w+)\s*\(\s*(\d+)\s*\)\s*\)/g;
+  let match;
+  while ((match = setterIndexRegex.exec(content)) !== null) {
+    const [, objVar, , propertyName, getterMethod, indexStr] = match;
+    const colIndex = parseInt(indexStr) - 1; // JDBC is 1-based
+    const javaType = RS_TYPE_MAP[getterMethod] || "String";
+    const inferredName = camelToReadable(propertyName);
+
+    // Find the SELECT statement to map index to column name
+    const sqlStrings = extractSQLStrings(content);
+    for (const sql of sqlStrings) {
+      const selectMatch = sql.match(/SELECT\s+(.+?)\s+FROM\s+(\w+)/i);
+      if (selectMatch && selectMatch[1].trim() !== "*") {
+        const tableName = selectMatch[2];
+        const cols = selectMatch[1].split(",").map(c =>
+          c.trim().replace(/.*\.\s*/, "").replace(/\s+AS\s+\w+/i, "").trim()
+        ).filter(c => /^\w+$/.test(c));
+        if (colIndex >= 0 && colIndex < cols.length) {
+          usages.push({
+            columnName: cols[colIndex],
+            tableName,
+            inferredName,
+            confidence: "medium",
+            source: `${className}.${objVar}.set${propertyName}(rs.${getterMethod}(${indexStr}))`,
+            javaType,
+          });
+        }
+      }
+    }
+  }
+
+  // Pattern: Type varName = rs.getXxx(N)
+  const varIndexRegex = /(?:String|Long|Integer|BigDecimal|LocalDate|LocalDateTime|Boolean|Double|Float|int|long|double|boolean)\s+(\w+)\s*=\s*(?:rs|resultSet|rset|result)\s*\.\s*(get\w+)\s*\(\s*(\d+)\s*\)/g;
+  while ((match = varIndexRegex.exec(content)) !== null) {
+    const [, varName, getterMethod, indexStr] = match;
+    if (isGenericVarName(varName)) continue;
+    const colIndex = parseInt(indexStr) - 1;
+    const javaType = RS_TYPE_MAP[getterMethod] || "String";
+
+    const sqlStrings = extractSQLStrings(content);
+    for (const sql of sqlStrings) {
+      const selectMatch = sql.match(/SELECT\s+(.+?)\s+FROM\s+(\w+)/i);
+      if (selectMatch && selectMatch[1].trim() !== "*") {
+        const tableName = selectMatch[2];
+        const cols = selectMatch[1].split(",").map(c =>
+          c.trim().replace(/.*\.\s*/, "").replace(/\s+AS\s+\w+/i, "").trim()
+        ).filter(c => /^\w+$/.test(c));
+        if (colIndex >= 0 && colIndex < cols.length) {
+          usages.push({
+            columnName: cols[colIndex],
+            tableName,
+            inferredName: varName,
+            confidence: "medium",
+            source: `var ${varName} = rs.${getterMethod}(${indexStr}) in ${className}`,
+            javaType,
+          });
+        }
+      }
+    }
+  }
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────────
 
 function extractSQLStrings(content: string): string[] {
   const results: string[] = [];
@@ -610,7 +732,7 @@ function pickBestInference(
 }
 
 function decodeFromColumnName(colName: string): string | null {
-  // Try common abbreviation patterns
+  // Try common abbreviation patterns (banking/legacy French systems)
   const abbrevMap: Record<string, string> = {
     NOM: "nom", PRENOM: "prenom", ADR: "adresse", ADDR: "address",
     TEL: "telephone", NUM: "numero", DT: "date", MTT: "montant",
@@ -619,6 +741,18 @@ function decodeFromColumnName(colName: string): string | null {
     CPT: "compte", AGE: "agence", CLI: "client", CTR: "contrat",
     DEV: "devise", SOL: "solde", TAU: "taux", DUR: "duree",
     ECH: "echeance", CAP: "capital", INT: "interet", PEN: "penalite",
+    // v13.8 — Banking-specific abbreviations
+    RIB: "rib", IBAN: "iban", BIC: "bic", SWIFT: "swift",
+    BNF: "beneficiaire", DON: "donneur", OPE: "operation", MVT: "mouvement",
+    VIR: "virement", CHQ: "cheque", PRE: "prelevement", REM: "remise",
+    ENC: "encaissement", DEC: "decaissement", GAR: "garantie", HYP: "hypotheque",
+    ASS: "assurance", PRM: "prime", COM: "commission", FRA: "frais",
+    AGI: "agios", RBT: "rabattement", ESC: "escompte",
+    AVO: "avoir", DEB: "debit", CRD: "credit", BEN: "benefice",
+    PRT: "perte", BIL: "bilan", CMP: "comptabilite",
+    JNL: "journal", GRL: "grand_livre", BAL: "balance", EXE: "exercice",
+    TRS: "transaction", SIG: "signature", AUT: "autorisation", VAL: "valeur",
+    NAT: "nature", MOT: "motif", DSG: "designation", IDT: "identifiant",
   };
 
   const upper = colName.toUpperCase();

@@ -364,8 +364,8 @@ function extractTodoCards(input: ReportInput): TodoCard[] {
     const fileName = path.basename(f.path);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      // Detect UnsupportedOperationException (stub pattern from generators)
-      if (line.includes("throw new UnsupportedOperationException") || line.includes("STUB à implémenter")) {
+      // Detect UnsupportedOperationException or CompleoUnvalidatedMethodException (stub pattern from generators)
+      if (line.includes("throw new UnsupportedOperationException") || line.includes("throw new CompleoUnvalidatedMethodException") || line.includes("STUB à implémenter")) {
         // Find the enclosing method name
         let methodName = "unknown";
         for (let j = i - 1; j >= Math.max(0, i - 10); j--) {
