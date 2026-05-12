@@ -1,0 +1,30 @@
+# Méthode actuellement stub (v13.8 output)
+@CompleoUnvalidated(severity = "STUB", legacyRef = "SearchServiceImpl.getReqTypeAvis", migrationDate = "2026-05-12")
+@Transactional
+public String getReqTypeAvis() {
+    // TODO: Migrer la logique EJB de SearchServiceImpl.getReqTypeAvis
+    throw new CompleoUnvalidatedMethodException("getReqTypeAvis", "SearchServiceImpl.getReqTypeAvis", "STUB");
+}
+
+# Source legacy correspondante
+# Fichier : avis-opere/service/avisopere/SearchServiceImpl.java
+# Méthode : getReqTypeAvis
+@Override
+public String getReqTypeAvis() {
+    List<TypeAO> list = getListTypes();
+    String reqType = "";
+    for (TypeAO type : list) {
+        reqType += type.getCode() + ",";
+    }
+    reqType = reqType.substring(0, reqType.length() - 1);
+    EaiLog.info("==============les types getReqTypeAvis()=========" + reqType);
+    return reqType;
+}
+
+# Contexte projet
+- Type : EJB @Service legacy (Spring-like annotation)
+- Domaine : Banking - Document Management (Avis Opéré) - Type filtering
+- Framework : Spring + custom EAI framework (@ContinueOrStartTransaction)
+- Classes utilisées : TypeAO (entity), SearchRepo (repository), EaiLog
+- Pattern : Repository call → List iteration → String concatenation → Trim trailing comma
+- Catégorie échantillon : A (logique réelle avec boucle for-each, string manipulation)

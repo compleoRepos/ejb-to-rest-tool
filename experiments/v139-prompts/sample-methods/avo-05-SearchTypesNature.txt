@@ -1,0 +1,34 @@
+# Méthode actuellement stub (v13.8 output)
+@CompleoUnvalidated(severity = "STUB", legacyRef = "SearchTypesRepDemat.SearchTypes", migrationDate = "2026-05-12")
+@Transactional
+public List<TypeAoRd> SearchTypes(String nature) {
+    // TODO: Migrer la logique Hibernate de SearchTypesRepDemat.SearchTypes
+    throw new CompleoUnvalidatedMethodException("SearchTypes", "SearchTypesRepDemat.SearchTypes", "STUB");
+}
+
+# Source legacy correspondante
+# Fichier : avis-opere/repository/SearchTypesRepDemat.java
+# Méthode : SearchTypes(String nature)
+public List<TypeAoRd> SearchTypes(String nature) {
+    EaiLog.info("Repository nature => " + nature);
+    List<TypeAoRd> list;
+    Map<String, Object> params = new HashMap<String, Object>();
+    if (nature == null || nature.isEmpty()) {
+        Query query = this.createQuery("From TypeAoRd");
+        list = query.list();
+    } else {
+        params.put("nature", nature);
+        Query query = this.createQuery("from TypeAoRd where nature = :nature", params);
+        query.setParameter("nature", nature);
+        list = query.list();
+    }
+    return list != null && !list.isEmpty() ? list : Collections.emptyList();
+}
+
+# Contexte projet
+- Type : Hibernate DAO (extends GeneriqueDAO<TypeAoRd, String>)
+- Domaine : Banking - Document Management (RepDemat) - Type filtering by nature
+- Framework : Hibernate + custom GeneriqueDAO + @Manager + @ContinueOrStartTransaction
+- Classes utilisées : TypeAoRd (entity), Query (Hibernate), HashMap, Collections, EaiLog
+- Pattern : Conditional HQL (null check on param) → Query with/without parameter → Null-safe return
+- Catégorie échantillon : B (repository Hibernate avec condition — if/else sur paramètre, 2 HQL paths)

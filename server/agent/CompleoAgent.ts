@@ -1347,6 +1347,50 @@ export class CompleoAgent {
       });
     }
 
+    // ─── v13.9: Re-prompt LLM forcé — enrichir les stubs avec MIGRATED LOGIC ───
+    try {
+      const { StubRePromptEngine } = await import("../engine/migration/StubRePromptEngine");
+      const rePromptEngine = new StubRePromptEngine({ maxMethodsPerRun: 20, maxBodyLOC: 100 });
+
+      // Collecter les fichiers source legacy depuis la session
+      const sourceFiles = ((session as any)._sourceFiles || []).map((f: any) => ({
+        path: f.path || f.name || "",
+        content: f.content || "",
+      }));
+
+      // Traiter les multiTechFiles (SOAP/Servlet stubs)
+      const mtFilesForRePrompt = project.multiTechFiles.map(f => ({ path: f.path, content: f.content }));
+      const rePromptResult = await rePromptEngine.process(mtFilesForRePrompt, sourceFiles);
+
+      // Appliquer les modifications
+      if (rePromptResult.enrichedCount > 0) {
+        const mtMap = new Map(mtFilesForRePrompt.map(f => [f.path, f.content]));
+        for (const file of project.multiTechFiles) {
+          const updated = mtMap.get(file.path);
+          if (updated) file.content = updated;
+        }
+        this.sessionStore.update(session.id, { generatedProject: project });
+      }
+
+      yield this.event("LOG", {
+        level: rePromptResult.enrichedCount > 0 ? "success" : "info",
+        message: `v13.9: ${rePromptResult.enrichedCount}/${rePromptResult.totalStubs} stubs enrichis avec MIGRATED LOGIC (${rePromptResult.skippedCount} skippés)`,
+        phase: "MIGRATING_BUSINESS_LOGIC",
+        data: {
+          totalStubs: rePromptResult.totalStubs,
+          enrichedCount: rePromptResult.enrichedCount,
+          skippedCount: rePromptResult.skippedCount,
+          details: rePromptResult.details.slice(0, 10),
+        } as unknown as Record<string, unknown>,
+      });
+    } catch (rePromptErr: any) {
+      yield this.event("LOG", {
+        level: "warn",
+        message: `v13.9 re-prompt partiel : ${rePromptErr.message}`,
+        phase: "MIGRATING_BUSINESS_LOGIC",
+      });
+    }
+
     yield this.event("PHASE_END", {
       phase: "MIGRATING_BUSINESS_LOGIC",
       message: `Migration logique métier terminée (${Date.now() - startTime}ms)`,

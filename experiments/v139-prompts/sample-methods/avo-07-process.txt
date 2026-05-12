@@ -1,0 +1,33 @@
+# Méthode actuellement stub (v13.8 output)
+@CompleoUnvalidated(severity = "STUB", legacyRef = "avisopereBean.process", migrationDate = "2026-05-12")
+@Transactional
+public Object process(Object request) {
+    // TODO: Migrer la logique EJB de avisopereBean.process
+    throw new CompleoUnvalidatedMethodException("process", "avisopereBean.process", "STUB");
+}
+
+# Source legacy correspondante
+# Fichier : avis-opere/avisopereBean.java
+# Méthode : process
+@Override
+public Envelope process(Envelope envelopeIn) throws Exception {
+    Envelope envOut = null;
+    try {
+        EaiLog.initLogTraceInfos(envelopeIn);
+        EaiLog.info("======>FLUX ENTRE EN XML: " + envelopeIn);
+        envOut = super.process(envelopeIn);
+    } catch (Exception e) {
+        EaiLog.error("Erreur Service : ", e);
+        return CommonFunction.constructEnvWhenGlobalError(envelopeIn);
+    }
+    EaiLog.info("=========>FLUX SORTIE EN XML:  " + envOut);
+    return envOut;
+}
+
+# Contexte projet
+- Type : EJB @Stateless (extends UCStrategie)
+- Domaine : Banking - Document Management (Avis Opéré) - Main EJB entry point
+- Framework : EJB 3.x + custom UCStrategie framework + SynchroneService
+- Classes utilisées : Envelope, CommonFunction, EaiLog, UCStrategie (parent class)
+- Pattern : Init logging → Delegate to super.process() → Error handling → Return
+- Catégorie échantillon : C (quasi-vide — wrapper EJB qui délègue à super.process())

@@ -146,6 +146,28 @@ async function benchmarkProject(
     return { ...f, content };
   });
 
+  // v13.9: Re-prompt LLM — enrichir les stubs avec MIGRATED LOGIC
+  try {
+    const { StubRePromptEngine } = await import("./server/engine/migration/StubRePromptEngine");
+    const rePromptEngine = new StubRePromptEngine({ maxMethodsPerRun: 20, maxBodyLOC: 100 });
+    const mtFilesForRePrompt = generatedFiles
+      .filter(f => f.content.includes('CompleoUnvalidatedMethodException'))
+      .map(f => ({ path: f.path, content: f.content }));
+    if (mtFilesForRePrompt.length > 0) {
+      const rePromptResult = await rePromptEngine.process(mtFilesForRePrompt, javaFiles.map(f => ({ path: f.path, content: f.content })));
+      if (rePromptResult.enrichedCount > 0) {
+        const mtMap = new Map(mtFilesForRePrompt.map(f => [f.path, f.content]));
+        generatedFiles = generatedFiles.map(f => {
+          const updated = mtMap.get(f.path);
+          return updated ? { ...f, content: updated } : f;
+        });
+      }
+      console.log(`    v13.9 Re-prompt: ${rePromptResult.enrichedCount}/${rePromptResult.totalStubs} stubs enrichis`);
+    }
+  } catch (rePromptErr: any) {
+    console.warn(`    v13.9 Re-prompt skipped: ${rePromptErr.message}`);
+  }
+
   // Compile
   const t2 = Date.now();
   const autoFixResult = await autoFixAndCompile(generatedFiles, { maxIterations: 5 });

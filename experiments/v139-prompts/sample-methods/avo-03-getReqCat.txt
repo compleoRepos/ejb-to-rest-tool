@@ -1,0 +1,28 @@
+# Méthode actuellement stub (v13.8 output)
+@CompleoUnvalidated(severity = "STUB", legacyRef = "RepdematService.getReqCat", migrationDate = "2026-05-12")
+@Transactional
+public String getReqCat() {
+    // TODO: Migrer la logique de RepdematService.getReqCat
+    throw new CompleoUnvalidatedMethodException("getReqCat", "RepdematService.getReqCat", "STUB");
+}
+
+# Source legacy correspondante
+# Fichier : avis-opere/service/repdemat/RepdematService.java
+# Méthode : getReqCat
+public String getReqCat() throws PersistenceException {
+    List<TypeAoRd> list = searchService.getTypesNotNull();
+    String reqType = "";
+    for (TypeAoRd type : list) {
+        reqType += "'" + type.getCode() + "',";
+    }
+    reqType = reqType.substring(0, reqType.length() - 1);
+    return reqType;
+}
+
+# Contexte projet
+- Type : Spring @Service legacy
+- Domaine : Banking - Document Management (RepDemat categories)
+- Framework : Spring + custom EAI framework (@ContinueOrStartTransaction)
+- Classes utilisées : TypeAoRd (entity), IServiceRepDemat (interface), PersistenceException
+- Pattern : Service call → List iteration → String concatenation with quotes → Trim trailing comma
+- Catégorie échantillon : A (logique réelle — boucle, string building, service delegation)

@@ -1,0 +1,69 @@
+# Méthode actuellement stub (v13.8 output)
+@CompleoUnvalidated(severity = "STUB", legacyRef = "CreditJockerWebService.simulationTirageGAB", migrationDate = "2026-05-12")
+@Transactional
+public ModelFlux simulationTirageGAB(Object request) {
+    // TODO: Migrer la logique SOAP de CreditJockerWebService.simulationTirageGAB
+    throw new CompleoUnvalidatedMethodException("simulationTirageGAB", "CreditJockerWebService.simulationTirageGAB", "STUB");
+}
+
+# Source legacy correspondante
+# Fichier : interface-credit-jocker/ws/salafin/CreditJockerWebService.java
+# Méthode : simulationTirageGAB
+@WebMethod(operationName = "simulationTirageGAB")
+public ModelFlux simulationTirageGAB(@WebParam(name = "mntTirage") String mntTirage,
+        @WebParam(name = "durTirage") String durTirage, @WebParam(name = "compte") String compte)
+        throws Exception {
+    String fluxTirageDeclic = GenerateFlux.simulationTirageGAB(mntTirage, durTirage, compte);
+    SynchroneService posteAgenceSolde = null;
+    Log.setNewThreadId();
+    Log.setServiceName("simulationTirageGAB");
+    Log.info("Debut simulation web service joker: ");
+    try {
+        Log.info("mntTirage: " + mntTirage);
+        Log.info(DUR_TIRAGE_LOGS + durTirage);
+        Log.info("compte: " + compte);
+        posteAgenceSolde = Services.find(Constants.UDDI_DECLIC_SERVICES, SynchroneService.class);
+    } catch (Exception e) {
+        Log.error(EXCEPTION_ERROR_LOGS, e);
+    }
+    ModelFlux fluxRetour = new ModelFlux();
+    Flux flux = new Flux();
+    if (posteAgenceSolde == null) {
+        flux.setCodeRefusTirageGAB("009");
+        flux.setMessagedeRefus("Probleme technique");
+        fluxRetour.setFlux(flux);
+        return fluxRetour;
+    }
+    Envelope reponseEJB = posteAgenceSolde.process(Parser.unmarshall(fluxTirageDeclic));
+    reponseEJB = Parser.update(reponseEJB);
+    Tirage tirage = new Tirage();
+    String codeGab = reponseEJB.getNodeAsString(FLUX_TIRAGE_CODE_RETOUR_GAB);
+    Log.info("codeGab: " + codeGab);
+    if (codeGab.equals("000")) {
+        tirage.setMntTirage(reponseEJB.getNodeAsString("flux/tirage/mntTirage"));
+        tirage.setMontant1Echeance(reponseEJB.getNodeAsString("flux/tirage/montant1Echeance"));
+        tirage.setDurTirage(reponseEJB.getNodeAsString("flux/tirage/durTirage"));
+        tirage.setDtDebTirage(reponseEJB.getNodeAsString("flux/tirage/dtDebTirage"));
+        tirage.setDt1Echeance(reponseEJB.getNodeAsString("flux/tirage/dt1Echeance"));
+        tirage.setCodeRetourGab(reponseEJB.getNodeAsString(FLUX_TIRAGE_CODE_RETOUR_GAB));
+    } else if (codeGab.equals("444")) {
+        tirage.setCodeRetourGab(reponseEJB.getNodeAsString(FLUX_TIRAGE_CODE_RETOUR_GAB));
+    } else if (codeGab.equals("333")) {
+        tirage.setCodeRetourGab(reponseEJB.getNodeAsString(FLUX_TIRAGE_CODE_RETOUR_GAB));
+    } else {
+        flux.setCodeRefusTirageGAB("009");
+        flux.setMessagedeRefus("Probleme technique");
+    }
+    flux.setTirage(tirage);
+    fluxRetour.setFlux(flux);
+    Log.info("Fin simulation web service joker: ");
+    return fluxRetour;
+}
+
+# Contexte projet
+- Type : SOAP @WebService legacy
+- Domaine : Banking - Credit Simulation (DECLIC GAB)
+- Framework : EJB stateless, SOAP document/literal
+- Classes utilisées : ModelFlux, Flux, Tirage, GenerateFlux, SynchroneService, Envelope, Parser, Constants
+- Pattern : Flux generation → EJB call → Envelope parsing → Multi-branch code handling (000/444/333/else) → DTO mapping
+- Catégorie échantillon : A (logique réelle avec if/else if/else, parsing XML, mapping DTO complexe)

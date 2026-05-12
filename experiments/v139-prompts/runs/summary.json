@@ -1,0 +1,53 @@
+{
+  "methods": [
+    "icj-01-getLigneDeclicGAB",
+    "icj-06-Traitement",
+    "icj-03-BlocageJoker",
+    "avo-01-getReqTypeAvis",
+    "avo-06-getListTypes"
+  ],
+  "variants": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E"
+  ],
+  "results": {
+    "A": {
+      "total_quality": 2.9000000000000004,
+      "non_stub": 3,
+      "valid": 1,
+      "logic": 4,
+      "count": 5
+    },
+    "B": {
+      "total_quality": 3.6,
+      "non_stub": 5,
+      "valid": 3,
+      "logic": 5,
+      "count": 5
+    },
+    "C": {
+      "total_quality": 3.2,
+      "non_stub": 3,
+      "valid": 1,
+      "logic": 5,
+      "count": 5
+    },
+    "D": {
+      "total_quality": 4.6,
+      "non_stub": 4,
+      "valid": 4,
+      "logic": 5,
+      "count": 5
+    },
+    "E": {
+      "total_quality": 5,
+      "non_stub": 5,
+      "valid": 5,
+      "logic": 5,
+      "count": 5
+    }
+  }
+}

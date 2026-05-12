@@ -1,0 +1,33 @@
+# Méthode actuellement stub (v13.8 output)
+@CompleoUnvalidated(severity = "STUB", legacyRef = "SearchRepo.SearchTypes", migrationDate = "2026-05-12")
+@Transactional
+public List<TypeAO> SearchTypes() {
+    // TODO: Migrer la logique Hibernate de SearchRepo.SearchTypes
+    throw new CompleoUnvalidatedMethodException("SearchTypes", "SearchRepo.SearchTypes", "STUB");
+}
+
+# Source legacy correspondante
+# Fichier : avis-opere/repository/SearchRepo.java
+# Méthode : SearchTypes
+public List<TypeAO> SearchTypes() {
+    long start = System.currentTimeMillis();
+    List<TypeAO> list = null;
+    try {
+        Query query = this.createQuery("From TypeAO");
+        list = query.list();
+        EaiLog.info("============> SearchRepository listtype  size...." + list.size());
+    } catch (Exception e) {
+        EaiLog.error(e);
+    }
+    long end = System.currentTimeMillis();
+    EaiLog.info("temps Total d'execution requette BDD:  " + (end - start) + " ms");
+    return list != null && !list.isEmpty() ? list : null;
+}
+
+# Contexte projet
+- Type : Hibernate DAO (extends GeneriqueDAO<TypeAO, String>)
+- Domaine : Banking - Document Management (Avis Opéré) - Type lookup
+- Framework : Hibernate + custom GeneriqueDAO + @Manager annotation
+- Classes utilisées : TypeAO (entity), Query (Hibernate), EaiLog
+- Pattern : HQL query → Execute → Null-safe return → Performance logging
+- Catégorie échantillon : B (repository Hibernate simple — un seul HQL, pas de logique métier complexe)
