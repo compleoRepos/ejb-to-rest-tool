@@ -623,6 +623,61 @@ public interface ${repoName} extends JpaRepository<${entityName}, Long> {
     methodName: b.methodName,
   }));
 
+  // v13.7: Inject @CompleoUnvalidated annotation on stub methods
+  const compleoUnvalidatedAnnotation: GeneratedFile = {
+    path: `${basePath}/common/CompleoUnvalidated.java`,
+    category: 'other' as const,
+    content: `package ${basePackage}.common;
+
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+
+/**
+ * Marks a method that was structurally migrated by COMPLEO but whose
+ * business logic has NOT been validated. The method compiles and wires
+ * correctly into Spring Boot, but its body contains a placeholder
+ * (UnsupportedOperationException or stub).
+ *
+ * <p>Usage: review each annotated method, port the legacy logic,
+ * then remove the annotation and the placeholder throw.</p>
+ *
+ * @since COMPLEO v13.7
+ */
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface CompleoUnvalidated {
+    /** Free-text reason why the method was not auto-migrated. */
+    String reason() default "Business logic requires manual validation";
+    /** Reference to the legacy class/method for traceability. */
+    String legacyRef() default "";
+}
+`,
+  };
+  if (!files.some(f => f.path.includes('CompleoUnvalidated.java'))) {
+    files.push(compleoUnvalidatedAnnotation);
+  }
+  // Post-process: add @CompleoUnvalidated to methods with UnsupportedOperationException
+  const cuImport = `import ${basePackage}.common.CompleoUnvalidated;`;
+  for (const file of files) {
+    if (!file.path.endsWith('.java')) continue;
+    if (file.path.includes('CompleoUnvalidated.java')) continue;
+    if (!file.content.includes('throw new UnsupportedOperationException')) continue;
+    // Add import if not present
+    if (!file.content.includes('CompleoUnvalidated')) {
+      file.content = file.content.replace(
+        /(package [\w.]+;\n)/,
+        `$1${cuImport}\n`
+      );
+    }
+    // Add @CompleoUnvalidated before each method that throws UnsupportedOperationException
+    file.content = file.content.replace(
+      /([ \t]+)((?:@Transactional\s+)?(?:public|protected)\s+\S+\s+\w+\s*\([^)]*\)\s*\{[^}]*throw new UnsupportedOperationException)/g,
+      '$1@CompleoUnvalidated\n$1$2'
+    );
+  }
+
   return { files, stats, warnings, compilationResult, dsInfo, jdbcBlocks };
 }
 

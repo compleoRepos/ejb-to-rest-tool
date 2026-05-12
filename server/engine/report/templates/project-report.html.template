@@ -304,6 +304,34 @@ p { color: var(--text-soft); margin-bottom: 12px; }
 .todo-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
 .todo-section h4 { color: var(--mint); margin-bottom: 8px; }
 
+
+/* === v13.6: TODO CATEGORY FILTER CHIPS === */
+.todo-filters { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+.todo-filter-chip {
+  padding: 6px 16px; border-radius: 20px; font-family: 'Geist Mono', monospace; font-size: 11px;
+  cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
+  transition: all 0.2s; user-select: none;
+}
+.todo-filter-chip:hover { border-color: var(--mint); color: var(--text); }
+.todo-filter-chip.active { background: var(--mint); color: var(--bg); border-color: var(--mint); font-weight: 600; }
+.todo-filter-chip .chip-count { margin-left: 6px; opacity: 0.7; }
+.todo-filter-chip.bug-compleo.active { background: var(--red); border-color: var(--red); }
+.todo-filter-chip.framework-dependency.active { background: #6C63FF; border-color: #6C63FF; }
+.todo-filter-chip.business-logic.active { background: var(--yellow); border-color: var(--yellow); color: var(--bg); }
+.todo-filter-chip.migrated-unvalidated.active { background: #FF8C42; border-color: #FF8C42; color: var(--bg); }
+.todo-card.framework { border-left-color: #6C63FF; }
+.todo-card.business { border-left-color: var(--yellow); }
+.todo-card.migrated { border-left-color: #FF8C42; }
+.todo-tag.severity-info { background: rgba(108, 99, 255, 0.08); color: #6C63FF; border-color: rgba(108, 99, 255, 0.2); }
+.todo-tag.cat-bug-compleo { color: var(--red); border-color: rgba(229, 115, 115, 0.3); background: rgba(229, 115, 115, 0.06); }
+.todo-tag.cat-framework-dependency { color: #6C63FF; border-color: rgba(108, 99, 255, 0.3); background: rgba(108, 99, 255, 0.06); }
+.todo-tag.cat-business-logic { color: var(--yellow); border-color: rgba(244, 208, 63, 0.3); background: rgba(244, 208, 63, 0.06); }
+.todo-tag.cat-migrated-unvalidated { color: #FF8C42; border-color: rgba(255, 140, 66, 0.3); background: rgba(255, 140, 66, 0.06); }
+.framework-info { margin-top: 12px; padding: 12px 16px; background: rgba(108, 99, 255, 0.06); border: 1px solid rgba(108, 99, 255, 0.2); border-radius: 8px; font-size: 12px; }
+.framework-info .pkg { color: #6C63FF; font-family: 'Geist Mono', monospace; font-weight: 600; }
+.framework-info .action { color: var(--text-soft); margin-top: 4px; }
+.framework-info .effort-zero { color: var(--mint); font-weight: 600; }
+
 /* === MAPPINGS === */
 .mapping-section { margin-bottom: 40px; }
 .mapping-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -454,7 +482,7 @@ p { color: var(--text-soft); margin-bottom: 12px; }
   <h2>{{synthesisTitle}}</h2>
   <p class="lede">{{synthesisLede}}</p>
 
-  <div class="kpis">
+  <div class="kpis" style="grid-template-columns: repeat(3, 1fr);">
     <div class="kpi">
       <div class="label">Fichiers traités</div>
       <div class="value">{{kpiFilesProcessed}}</div>
@@ -474,6 +502,16 @@ p { color: var(--text-soft); margin-bottom: 12px; }
       <div class="label">Couverture estimée</div>
       <div class="value mint">{{kpiCoverageValue}}</div>
       <div class="sub">{{kpiCoverageSub}}</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Effort dev réel</div>
+      <div class="value mint">{{effortDevReel}}</div>
+      <div class="sub">hors framework deps</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Hand-off Readiness</div>
+      <div class="value {{handOffReadinessClass}}">{{handOffReadiness}}</div>
+      <div class="sub">% non bloqué par bugs COMPLEO</div>
     </div>
   </div>
   <!-- v13.5b: Score Glossary — Reconciliation des scores -->
@@ -600,41 +638,68 @@ p { color: var(--text-soft); margin-bottom: 12px; }
   <div class="section-eyebrow">items à finaliser</div>
   {{#if hasTodos}}
   <h2>{{todoCountText}}, <span class="accent">{{todoCountPatch}} patches prêts.</span></h2>
-  <p class="lede">Ces items n'ont pas été résolus automatiquement par COMPLEO. Chacun inclut diagnostic complet et patch suggéré. Application : {{todoEffortTotal}} au total.</p>
-
+  <p class="lede">Ces items n'ont pas été résolus automatiquement par COMPLEO. Chacun inclut diagnostic complet et patch suggéré.</p>
+  <!-- v13.6: Filter Chips -->
+  <div class="todo-filters">
+    <span class="todo-filter-chip active" data-filter="all" onclick="filterTodos('all')">Tous<span class="chip-count">{{todoCount}}</span></span>
+    <span class="todo-filter-chip bug-compleo" data-filter="bug-compleo" onclick="filterTodos('bug-compleo')">Bug COMPLEO<span class="chip-count">{{todoBugCount}}</span></span>
+    <span class="todo-filter-chip framework-dependency" data-filter="framework-dependency" onclick="filterTodos('framework-dependency')">Framework Dep.<span class="chip-count">{{todoFrameworkCount}}</span></span>
+    <span class="todo-filter-chip business-logic" data-filter="business-logic" onclick="filterTodos('business-logic')">Business Logic<span class="chip-count">{{todoBusinessCount}}</span></span>
+    <span class="todo-filter-chip migrated-unvalidated" data-filter="migrated-unvalidated" onclick="filterTodos('migrated-unvalidated')">Migrated ✗<span class="chip-count">{{todoMigratedCount}}</span></span>
+  </div>
   <div class="todo-summary">
     <h3 style="margin-bottom: 4px;">Récapitulatif</h3>
-    <p style="font-size: 14px; color: var(--text-soft); margin: 0;">{{todoCount}} items, dont {{todoCriticalCount}} critique(s), {{todoMinorCount}} mineur(s).</p>
-    <div class="todo-summary-stats">
+    <p style="font-size: 14px; color: var(--text-soft); margin: 0;">{{todoCount}} items : {{todoBugCount}} bug(s) COMPLEO, {{todoFrameworkCount}} framework dep., {{todoBusinessCount}} business logic, {{todoMigratedCount}} migrated-unvalidated.</p>
+    <div class="todo-summary-stats" style="grid-template-columns: repeat(3, 1fr);">
       <div class="todo-stat">
-        <div class="label">Effort estimé</div>
-        <div class="value">{{todoEffortTotal}}</div>
+        <div class="label">Effort dev réel</div>
+        <div class="value" style="color: var(--mint);">{{effortDevReel}}</div>
       </div>
       <div class="todo-stat">
-        <div class="label">Sévérité max</div>
-        <div class="value">{{todoMaxSeverity}}</div>
+        <div class="label">Hand-off Readiness</div>
+        <div class="value {{handOffReadinessClass}}">{{handOffReadiness}}</div>
       </div>
       <div class="todo-stat">
-        <div class="label">Fichiers concernés</div>
-        <div class="value">{{todoFileCount}}</div>
+        <div class="label">Bug COMPLEO</div>
+        <div class="value" style="color: var(--red);">{{todoBugCount}}</div>
+      </div>
+    </div>
+    <div class="todo-summary-stats" style="grid-template-columns: repeat(3, 1fr); margin-top: 8px;">
+      <div class="todo-stat">
+        <div class="label">Framework Dep.</div>
+        <div class="value" style="color: #6C63FF;">{{todoFrameworkCount}}</div>
+      </div>
+      <div class="todo-stat">
+        <div class="label">Business Logic</div>
+        <div class="value" style="color: var(--yellow);">{{todoBusinessCount}}</div>
+      </div>
+      <div class="todo-stat">
+        <div class="label">Migrated ✗</div>
+        <div class="value" style="color: #FF8C42;">{{todoMigratedCount}}</div>
       </div>
     </div>
   </div>
-
   {{#each todoCards}}
-  <div class="todo-card {{severityClass}}">
+  <div class="todo-card {{severityClass}}" data-todo-category="{{todoCategory}}">
     <div class="todo-header">
       <div>
         <div class="todo-location"><span class="file">{{file}}</span> <span class="lineno">:{{line}}:{{column}}</span></div>
         <div class="todo-title">{{title}}</div>
       </div>
       <div class="todo-meta">
+        <span class="todo-tag cat-{{todoCategory}}">{{todoCategory}}</span>
         <span class="todo-tag severity-{{severity}}">severity · {{severity}}</span>
         <span class="todo-tag effort">effort · {{effortEstimate}}</span>
-        <span class="todo-tag">category · {{category}}</span>
       </div>
     </div>
     <div class="todo-diagnostic">{{diagnostic}}</div>
+    {{#if frameworkPackage}}
+    <div class="framework-info">
+      <div><span class="pkg">{{frameworkPackage}}</span></div>
+      <div class="action">{{actionRequired}}</div>
+      <div class="effort-zero">Effort résiduel COMPLEO = 0h</div>
+    </div>
+    {{/if}}
     <div class="todo-section">
       <h4>Code actuel (généré)</h4>
       <div class="code-block">{{currentCode}}</div>
@@ -658,7 +723,6 @@ p { color: var(--text-soft); margin-bottom: 12px; }
   </div>
   {{/if}}
 </div>
-
 <!-- TAB 4: MAPPINGS -->
 <div class="tab-panel" id="tab-mappings">
   <div class="section-eyebrow">registre de mappings</div>
@@ -852,6 +916,21 @@ document.querySelectorAll('.filter-chip').forEach(chip => {
     chip.classList.add('active');
   });
 });
+</script>
+
+
+<script>
+function filterTodos(category) {
+  document.querySelectorAll('.todo-filter-chip').forEach(function(c) { c.classList.remove('active'); });
+  document.querySelector('.todo-filter-chip[data-filter="' + category + '"]').classList.add('active');
+  document.querySelectorAll('.todo-card[data-todo-category]').forEach(function(card) {
+    if (category === 'all' || card.dataset.todoCategory === category) {
+      card.style.display = '';
+    } else {
+      card.style.display = 'none';
+    }
+  });
+}
 </script>
 
 </body>

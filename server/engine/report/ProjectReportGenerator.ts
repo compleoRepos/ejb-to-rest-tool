@@ -172,6 +172,9 @@ interface TransformCard {
 }
 
 interface TodoCard {
+  todoCategory: "bug-compleo" | "framework-dependency" | "business-logic" | "migrated-unvalidated";
+  frameworkPackage?: string;
+  actionRequired?: string;
   file: string;
   line: number;
   column: number;
@@ -266,25 +269,237 @@ function extractTransformCards(input: ReportInput): TransformCard[] {
   return cards;
 }
 
+// v13.6: Standard packages that are NOT framework-dependency
+const STANDARD_PACKAGES = [
+  'java.', 'javax.', 'jakarta.', 'org.springframework.', 'org.apache.',
+  'com.example.', 'com.app.', 'com.fasterxml.', 'org.hibernate.',
+  'lombok', 'org.slf4j.', 'org.junit.', 'org.mockito.', 'com.nexa.',
+  'io.swagger.', 'org.mapstruct.', 'org.projectlombok.', 'com.zaxxer.',
+  'org.flywaydb.', 'io.micrometer.', 'net.sf.', 'org.json.',
+  'net.java.', 'legacy.',
+];
+
+/** Check if a package is standard (matches prefix OR exact name) */
+function isStandardPackage(pkg: string): boolean {
+  return STANDARD_PACKAGES.some(sp => pkg === sp.replace(/\.$/, '') || pkg.startsWith(sp));
+}
+
+function classifyTodoCategory(err: CompilationError): { todoCategory: "bug-compleo" | "framework-dependency" | "business-logic" | "migrated-unvalidated"; frameworkPackage?: string; actionRequired?: string } {
+  const msg = err.message;
+  if (msg.includes("cannot find symbol") || err.code === "UNRESOLVED_TYPE" || err.code === "MISSING_PACKAGE" || msg.includes("does not exist")) {
+    const pkgMatch = msg.match(/package\s+([\w.]+)\s+does not exist/) || msg.match(/location:\s+package\s+([\w.]+)/);
+    if (pkgMatch) {
+      const pkg = pkgMatch[1];
+      const isStandard = isStandardPackage(pkg);
+      if (!isStandard) {
+        return { todoCategory: "framework-dependency", frameworkPackage: pkg, actionRequired: "Provide JAR or migrate as Tier 0 dependency" };
+      }
+    }
+    const classMatch = msg.match(/symbol:\s+class\s+(\w+)/);
+    if (classMatch) {
+      return { todoCategory: "framework-dependency", frameworkPackage: classMatch[1], actionRequired: "Provide JAR or add Maven dependency" };
+    }
+  }
+  return { todoCategory: "bug-compleo" };
+}
+
 function extractTodoCards(input: ReportInput): TodoCard[] {
+  const todos: TodoCard[] = [];
+  // 1. Compilation errors → bug-compleo or framework-dependency
   const errors = input.compilationResult?.finalErrors ?? [];
-  return errors.map((err, idx) => {
-    const severity = err.autoFixable ? "low" : "medium";
-    return {
+  for (const err of errors) {
+    const classification = classifyTodoCategory(err);
+    const severity = classification.todoCategory === "framework-dependency" ? "info" : (err.autoFixable ? "low" : "medium");
+    todos.push({
+      ...classification,
       file: path.basename(err.file),
       line: err.line,
       column: err.column,
       title: summarizeError(err),
       severity,
-      severityClass: severity === "high" ? "high" : severity === "low" ? "low" : "",
-      effortEstimate: err.autoFixable ? "5 min" : "15 min",
+      severityClass: classification.todoCategory === "framework-dependency" ? "framework" : (severity === "high" ? "high" : severity === "low" ? "low" : ""),
+      effortEstimate: classification.todoCategory === "framework-dependency" ? "0h (COMPLEO)" : (err.autoFixable ? "5 min" : "15 min"),
       category: categorizeError(err),
       diagnostic: buildDiagnostic(err),
       currentCode: `// Erreur à la ligne ${err.line}: ${err.message}`,
       suggestedFix: buildSuggestedFix(err),
       whyNotAutoFixed: buildWhyNotFixed(err),
-    };
-  });
+    });
+  }
+  // 2. // TODO markers in generated files → business-logic
+  const allFiles = [...(input.generatedProject?.files ?? []), ...(input.generatedProject?.multiTechFiles ?? [])];
+  for (const f of allFiles) {
+    if (!f.path.endsWith(".java")) continue;
+    const lines = f.content.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const todoMatch = line.match(/\/\/\s*(TODO|FIXME)\s*:?\s*(.*)/i);
+      if (todoMatch) {
+        const todoText = todoMatch[2].trim();
+        if (!todoText) continue;
+        todos.push({
+          todoCategory: "business-logic",
+          file: path.basename(f.path),
+          line: i + 1,
+          column: 0,
+          title: todoText.length > 80 ? todoText.slice(0, 77) + "..." : todoText,
+          severity: "info",
+          severityClass: "business",
+          effortEstimate: "30 min",
+          category: "business-logic",
+          diagnostic: `Logique métier à implémenter. Ce TODO a été généré par COMPLEO pour signaler une zone nécessitant une implémentation manuelle.`,
+          currentCode: `// ${line.trim()}`,
+          suggestedFix: `// Implémenter la logique métier correspondante au use case legacy`,
+          whyNotAutoFixed: "COMPLEO ne génère pas de logique métier spéculative. L'implémentation doit être validée par l'équipe fonctionnelle.",
+        });
+      }
+    }
+  }
+  // 3. Migrated-but-unvalidated: methods with UnsupportedOperationException or STUB markers
+  // These are structurally migrated (compilable) but contain placeholder logic that needs validation
+  const seenMigratedMethods = new Set<string>();
+  for (const f of allFiles) {
+    if (!f.path.endsWith(".java")) continue;
+    const lines = f.content.split("\n");
+    const fileName = path.basename(f.path);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // Detect UnsupportedOperationException (stub pattern from generators)
+      if (line.includes("throw new UnsupportedOperationException") || line.includes("STUB à implémenter")) {
+        // Find the enclosing method name
+        let methodName = "unknown";
+        for (let j = i - 1; j >= Math.max(0, i - 10); j--) {
+          const methodMatch = lines[j].match(/(?:public|protected|private)\s+\S+\s+(\w+)\s*\(/);
+          if (methodMatch) { methodName = methodMatch[1]; break; }
+        }
+        const key = `${fileName}:${methodName}`;
+        if (!seenMigratedMethods.has(key)) {
+          seenMigratedMethods.add(key);
+          todos.push({
+            todoCategory: "migrated-unvalidated",
+            file: fileName,
+            line: i + 1,
+            column: 0,
+            title: `Méthode migrée non validée: ${methodName}()`,
+            severity: "medium",
+            severityClass: "migrated",
+            effortEstimate: "1h",
+            category: "migrated-unvalidated",
+            diagnostic: `La méthode ${methodName}() a été structurellement migrée (compilable) mais contient un placeholder (UnsupportedOperationException ou STUB). La logique métier legacy doit être portée et validée par l'équipe fonctionnelle.`,
+            currentCode: `// ${line.trim()}`,
+            suggestedFix: `// Remplacer le placeholder par la logique métier du use case legacy correspondant.\n// Utiliser le code source legacy comme référence pour l'implémentation.`,
+            whyNotAutoFixed: "COMPLEO a migré la structure (signature, annotations, wiring Spring) mais n'a pas pu transformer la logique métier avec un niveau de confiance suffisant. L'annotation @CompleoUnvalidated marque cette méthode pour review.",
+          });
+        }
+      }
+      // Detect "Migration en cours" pattern
+      if (line.includes('"Migration en cours"') && !line.trim().startsWith("//")) {
+        let methodName = "unknown";
+        for (let j = i - 1; j >= Math.max(0, i - 10); j--) {
+          const methodMatch = lines[j].match(/(?:public|protected|private)\s+\S+\s+(\w+)\s*\(/);
+          if (methodMatch) { methodName = methodMatch[1]; break; }
+        }
+        const key = `${fileName}:${methodName}`;
+        if (!seenMigratedMethods.has(key)) {
+          seenMigratedMethods.add(key);
+          todos.push({
+            todoCategory: "migrated-unvalidated",
+            file: fileName,
+            line: i + 1,
+            column: 0,
+            title: `Méthode migrée non validée: ${methodName}()`,
+            severity: "medium",
+            severityClass: "migrated",
+            effortEstimate: "1h",
+            category: "migrated-unvalidated",
+            diagnostic: `La méthode ${methodName}() a été structurellement migrée mais contient un marqueur "Migration en cours". La logique métier doit être implémentée.`,
+            currentCode: `// ${line.trim()}`,
+            suggestedFix: `// Implémenter la logique métier depuis le code source legacy.`,
+            whyNotAutoFixed: "COMPLEO a créé le squelette Spring Boot mais la logique métier n'a pas été portée automatiquement.",
+          });
+        }
+      }
+    }
+  }
+  // 4. Non-standard imports in SOURCE files → framework-dependency
+  // These represent legacy framework dependencies that need to be provided as JARs or migrated
+  const seenPackages = new Set<string>();
+  const sourceFiles = input.ir?._rawFiles ?? [];
+  // Build a set of ALL packages declared in the project source files (exact match only)
+  const projectOwnPackages = new Set<string>();
+  for (const f of sourceFiles) {
+    if (!f.path.endsWith(".java")) continue;
+    const pkgMatch = f.content.match(/^package\s+([\w.]+)\s*;/m);
+    if (pkgMatch) {
+      projectOwnPackages.add(pkgMatch[1]);
+    }
+  }
+  for (const f of sourceFiles) {
+    if (!f.path.endsWith(".java")) continue;
+    const lines = f.content.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const importMatch = lines[i].match(/^import\s+([\w.]+)\.\w+;/);
+      if (importMatch) {
+        const pkg = importMatch[1];
+        const isStandard = isStandardPackage(pkg);
+        // Skip the project's own packages (any package declared in source files)
+        const isProjectOwn = projectOwnPackages.has(pkg) || [...projectOwnPackages].some(pp => pkg.startsWith(pp + '.'));
+        if (!isStandard && !isProjectOwn && !seenPackages.has(pkg)) {
+          seenPackages.add(pkg);
+          todos.push({
+            todoCategory: "framework-dependency",
+            frameworkPackage: pkg,
+            actionRequired: "Provide JAR or migrate as Tier 0 dependency",
+            file: path.basename(f.path),
+            line: i + 1,
+            column: 0,
+            title: `Dépendance framework legacy: ${pkg}`,
+            severity: "info",
+            severityClass: "framework",
+            effortEstimate: "0h (COMPLEO)",
+            category: "framework-dependency",
+            diagnostic: `Ce package (${pkg}) est une dépendance du framework EAI/interne utilisée dans le code source legacy. Pour que le projet migré compile, cette dépendance doit être fournie comme JAR Maven ou migrée en Tier 0.`,
+            currentCode: `import ${pkg}.*;`,
+            suggestedFix: `<!-- Ajouter dans pom.xml -->\n<dependency>\n  <groupId>${pkg.split('.').slice(0, 2).join('.')}</groupId>\n  <artifactId>${pkg.split('.').pop()}</artifactId>\n  <version>LATEST</version>\n</dependency>`,
+            whyNotAutoFixed: "COMPLEO n'a pas accès au repository Maven interne BMCE. La dépendance doit être fournie par l'équipe infrastructure.",
+          });
+        }
+      }
+    }
+  }
+  // Also scan generated files for any remaining non-standard imports
+  for (const f of allFiles) {
+    if (!f.path.endsWith(".java")) continue;
+    const lines = f.content.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const importMatch = lines[i].match(/^import\s+([\w.]+)\.\w+;/);
+      if (importMatch) {
+        const pkg = importMatch[1];
+        const isStandard = isStandardPackage(pkg);
+        if (!isStandard && !seenPackages.has(pkg)) {
+          seenPackages.add(pkg);
+          todos.push({
+            todoCategory: "framework-dependency",
+            frameworkPackage: pkg,
+            actionRequired: "Provide JAR or migrate as Tier 0 dependency",
+            file: path.basename(f.path),
+            line: i + 1,
+            column: 0,
+            title: `Import framework non-standard: ${pkg}`,
+            severity: "info",
+            severityClass: "framework",
+            effortEstimate: "0h (COMPLEO)",
+            category: "framework-dependency",
+            diagnostic: `Ce package (${pkg}) est une dépendance non-standard dans le code généré. Il doit être fourni comme dépendance Maven.`,
+            currentCode: `import ${pkg}.*;`,
+            suggestedFix: `<!-- Ajouter dans pom.xml -->\n<dependency>\n  <groupId>${pkg.split('.').slice(0, 2).join('.')}</groupId>\n  <artifactId>${pkg.split('.').pop()}</artifactId>\n  <version>LATEST</version>\n</dependency>`,
+            whyNotAutoFixed: "COMPLEO n'a pas accès au repository Maven interne. La dépendance doit être fournie par l'équipe infrastructure.",
+          });
+        }
+      }
+    }
+  }
+  return todos;
 }
 
 function summarizeError(err: CompilationError): string {
@@ -682,6 +897,10 @@ function generateArtifacts(input: ReportInput, transforms: TransformCard[], todo
       title: t.title,
       severity: t.severity,
       category: t.category,
+      todoCategory: t.todoCategory,
+      frameworkPackage: t.frameworkPackage || null,
+      actionRequired: t.actionRequired || null,
+      effortEstimate: t.effortEstimate,
       diagnostic: t.diagnostic,
     })),
   }, null, 2);
@@ -832,7 +1051,7 @@ export class ProjectReportGenerator {
       doneHighlights: synthesis.doneHighlights,
       leftHighlights: synthesis.leftHighlights,
       transformationCount: totalTransformations,
-      todoCount: errorCount,
+      todoCount: todos.length,
       testsTotal: Math.max(input.ir?.useCases.length ?? 0, 1) * 3,
 
       // Transforms tab
@@ -842,16 +1061,55 @@ export class ProjectReportGenerator {
       remainingTransformCount: Math.max(0, totalTransformations - transforms.slice(0, 5).reduce((s, t) => s + t.occurrences, 0)),
 
       // TODO tab
-      hasTodos: errorCount > 0,
-      todoCountText: `${errorCount} résiduel${errorCount > 1 ? "s" : ""}`,
-      todoCountPatch: `${errorCount} patch${errorCount > 1 ? "es" : ""}`,
-      todoEffortTotal: `${errorCount * 15} min`,
+      hasTodos: todos.length > 0,
+      // v13.6: Categorized TODO counts
+      todoCountText: `${todos.length} résiduel${todos.length > 1 ? "s" : ""}`,
+      todoCountPatch: `${todos.filter(t => t.todoCategory === "bug-compleo").length} patch${todos.filter(t => t.todoCategory === "bug-compleo").length > 1 ? "es" : ""}`,
+      todoEffortTotal: (() => {
+        const bugMinutes = todos.filter(t => t.todoCategory === "bug-compleo").length * 15;
+        const bizMinutes = todos.filter(t => t.todoCategory === "business-logic").length * 30;
+        const migratedMinutes = todos.filter(t => t.todoCategory === "migrated-unvalidated").length * 60;
+        const totalMin = bugMinutes + bizMinutes + migratedMinutes;
+        return totalMin >= 60 ? `${Math.round(totalMin / 60)}h ${totalMin % 60}min` : `${totalMin} min`;
+      })(),
       todoCriticalCount: todos.filter(t => t.severity === "high").length,
       todoMinorCount: todos.filter(t => t.severity !== "high").length,
       todoMaxSeverity: todos.some(t => t.severity === "high") ? "High" : (todos.some(t => t.severity === "medium") ? "Medium" : "Low"),
       todoFileCount: new Set(todos.map(t => t.file)).size,
-      todoBadgeClass: errorCount === 0 ? "count-mint" : "count-warn",
+      todoBadgeClass: todos.length === 0 ? "count-mint" : "count-warn",
       todoCards: todos,
+      // v13.7: Category counts for filter chips (4 buckets)
+      todoBugCount: todos.filter(t => t.todoCategory === "bug-compleo").length,
+      todoFrameworkCount: todos.filter(t => t.todoCategory === "framework-dependency").length,
+      todoBusinessCount: todos.filter(t => t.todoCategory === "business-logic").length,
+      todoMigratedCount: todos.filter(t => t.todoCategory === "migrated-unvalidated").length,
+      // v13.7: Effort dev réel (excludes framework-dependency, includes migrated-unvalidated)
+      effortDevReel: (() => {
+        const bugMinutes = todos.filter(t => t.todoCategory === "bug-compleo").length * 15;
+        const bizMinutes = todos.filter(t => t.todoCategory === "business-logic").length * 30;
+        const migratedMinutes = todos.filter(t => t.todoCategory === "migrated-unvalidated").length * 60;
+        const totalMin = bugMinutes + bizMinutes + migratedMinutes;
+        return totalMin >= 60 ? `${Math.round(totalMin / 60)}h ${totalMin % 60}min` : `${totalMin} min`;
+      })(),
+      // v13.7: Hand-off readiness KPI
+      handOffReadiness: (() => {
+        const total = todos.length;
+        if (total === 0) return "100%";
+        const actionable = todos.filter(t => t.todoCategory !== "framework-dependency").length;
+        const migratedUnvalidated = todos.filter(t => t.todoCategory === "migrated-unvalidated").length;
+        const bugCompleo = todos.filter(t => t.todoCategory === "bug-compleo").length;
+        // Hand-off = % of work NOT blocked by COMPLEO bugs
+        // Framework deps are external, business-logic is expected, migrated-unvalidated needs review
+        // Only bug-compleo blocks hand-off
+        const readiness = total > 0 ? Math.round(((total - bugCompleo) / total) * 100) : 100;
+        return `${readiness}%`;
+      })(),
+      handOffReadinessClass: (() => {
+        const bugCount = todos.filter(t => t.todoCategory === "bug-compleo").length;
+        if (bugCount === 0) return "mint";
+        if (bugCount <= 5) return "yellow";
+        return "red";
+      })(),
 
       // Mappings tab
       mappingCount: mappings.imports.length + mappings.annotations.length + mappings.exceptions.length,

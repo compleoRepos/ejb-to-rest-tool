@@ -16,6 +16,25 @@ const PROJECTS_DIR = "/tmp/bmce-flat";
 const OUTPUT_DIR = "/tmp/bmce-output-v135b";
 const TARGET_PROJECTS = ["interface-credit-jocker", "avis-opere"];
 
+/** Detect the source package from the IR's raw files */
+function detectSourcePackage(ir: any): string | undefined {
+  if (!ir?._rawFiles?.length) return undefined;
+  const pkgCounts = new Map<string, number>();
+  for (const f of ir._rawFiles) {
+    const m = f.content.match(/^package\s+([\w.]+)\s*;/m);
+    if (m) pkgCounts.set(m[1], (pkgCounts.get(m[1]) || 0) + 1);
+  }
+  if (pkgCounts.size === 0) return undefined;
+  // Find the most common root package (2-3 segments)
+  const roots = new Map<string, number>();
+  for (const [pkg, count] of pkgCounts) {
+    const parts = pkg.split('.');
+    const root = parts.slice(0, Math.min(3, parts.length)).join('.');
+    roots.set(root, (roots.get(root) || 0) + count);
+  }
+  return [...roots.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+
 async function benchmarkProject(
   dir: string,
   sharedStubs: SharedStubBundle
@@ -174,7 +193,7 @@ async function benchmarkProject(
   try {
     const reportInput: ReportInput = {
       projectName: projName,
-      sourcePackage: undefined,
+      sourcePackage: detectSourcePackage(analysisResult.ir),
       targetPackage: `com.example.ejbproject`,
       projectDomain: undefined,
       analysisResult: analysisResult,

@@ -361,12 +361,36 @@ export class CompleoEngine {
     );
     const migrationReport = reportFile?.content || "";
 
+    // v13.7: Inject @CompleoUnvalidated on multiTechFiles stub methods
+    const mtFiles = multiTechFiles || [];
+    if (mtFiles.length > 0) {
+      // Detect basePackage from result files
+      const sampleFile = result.files.find(f => f.path.endsWith('Application.java'));
+      const pkgMatch = sampleFile?.content.match(/^package ([\w.]+);/m);
+      const basePkg = pkgMatch ? pkgMatch[1] : 'com.example.ejbproject';
+      const cuImportMt = `import ${basePkg}.common.CompleoUnvalidated;`;
+      for (const file of mtFiles) {
+        if (!file.path.endsWith('.java')) continue;
+        if (!file.content.includes('throw new UnsupportedOperationException')) continue;
+        if (!file.content.includes('CompleoUnvalidated')) {
+          file.content = file.content.replace(
+            /(package [\w.]+;\n)/,
+            `$1${cuImportMt}\n`
+          );
+        }
+        file.content = file.content.replace(
+          /([ \t]+)((?:@Transactional\s+)?(?:public|protected)\s+\S+\s+\w+\s*\([^)]*\)\s*\{[^}]*throw new UnsupportedOperationException)/g,
+          '$1@CompleoUnvalidated\n$1$2'
+        );
+      }
+    }
+
     return {
       files: result.files,
       stats: result.stats,
       warnings: result.warnings,
       migrationReport,
-      multiTechFiles: multiTechFiles || [],
+      multiTechFiles: mtFiles,
       // v10.11: Pass JDBC blocks for LLM post-processing
       jdbcBlocks: result.jdbcBlocks,
     } as GeneratedProject;
