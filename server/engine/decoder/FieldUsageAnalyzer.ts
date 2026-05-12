@@ -67,18 +67,34 @@ function getContext(content: string, index: number, radius: number = 2): string 
 
 function extractSQLStrings(content: string): string[] {
   const results: string[] = [];
-  const singleLineRegex = /"([^"]*(?:SELECT|INSERT|UPDATE|DELETE|CREATE|FROM|INTO|SET|WHERE)[^"]*)"/gi;
-  let match;
-  while ((match = singleLineRegex.exec(content)) !== null) {
-    results.push(match[1]);
-  }
+  const coveredRanges: Array<[number, number]> = [];
+
+  // 1. Multi-line concatenated strings FIRST (higher priority)
   const multiLineRegex = /(?:"([^"]*)"(?:\s*\+\s*"([^"]*)")+)/g;
+  let match;
   while ((match = multiLineRegex.exec(content)) !== null) {
     const fullStr = match[0].replace(/"\s*\+\s*"/g, " ").replace(/^"|"$/g, "");
     if (/SELECT|INSERT|UPDATE|DELETE|CREATE|FROM/i.test(fullStr)) {
       results.push(fullStr);
+      coveredRanges.push([match.index, match.index + match[0].length]);
     }
   }
+
+  // 2. Single-line strings, but skip those already covered by multi-line
+  const singleLineRegex = /"([^"]*(?:SELECT|INSERT|UPDATE|DELETE|CREATE|FROM|INTO|SET|WHERE)[^"]*)"/gi;
+  while ((match = singleLineRegex.exec(content)) !== null) {
+    const pos = match.index;
+    const isCovered = coveredRanges.some(([start, end]) => pos >= start && pos < end);
+    if (isCovered) continue;
+    // Skip fragments that are clearly not complete SQL (e.g., just "FROM table ")
+    const str = match[1].trim();
+    if (!str || str.length < 10) continue;
+    // Must start with a SQL keyword or contain a complete SQL statement
+    if (/^(?:SELECT|INSERT|UPDATE|DELETE|CREATE)\s/i.test(str)) {
+      results.push(str);
+    }
+  }
+
   return results;
 }
 
@@ -192,22 +208,91 @@ export class FieldUsageAnalyzer {
 
   // ─── 1. SQL-based extraction ────────────────────────────────────────────
 
+  /**
+   * Build a map of SQL table aliases → real table names from a SQL string.
+   * Handles: FROM table alias, JOIN table alias, FROM table AS alias
+   */
+  private buildAliasMap(sql: string): Map<string, string> {
+    const aliases = new Map<string, string>();
+    // FROM table [AS] alias, JOIN table [AS] alias
+    const fromRegex = /(?:FROM|JOIN)\s+(\w+)(?:\s+(?:AS\s+)?(\w+))?/gi;
+    let m;
+    while ((m = fromRegex.exec(sql)) !== null) {
+      const realTable = m[1].toUpperCase();
+      const alias = m[2] ? m[2].toUpperCase() : null;
+      // Skip SQL keywords that look like aliases
+      if (["WHERE", "SET", "ON", "AND", "OR", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "NATURAL", "GROUP", "ORDER", "HAVING", "LIMIT", "UNION"].includes(realTable)) continue;
+      if (alias && !["WHERE", "SET", "ON", "AND", "OR", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "NATURAL", "GROUP", "ORDER", "HAVING", "LIMIT", "UNION"].includes(alias)) {
+        aliases.set(alias, realTable);
+      }
+      // Also map the table name to itself
+      aliases.set(realTable, realTable);
+    }
+    return aliases;
+  }
+
+  /**
+   * Resolve a column reference like "t.FIELD1" or "FIELD1" to { column, table }.
+   * Uses the alias map to resolve table aliases.
+   */
+  private resolveColumn(colRef: string, aliasMap: Map<string, string>, defaultTable: string): { column: string; table: string } | null {
+    const stripped = colRef.trim();
+    // Skip SQL functions like SUM(...), COUNT(...), etc.
+    if (/^\w+\s*\(/.test(stripped)) {
+      // Extract the inner column: SUM(FIELD3) → FIELD3, SUM(t.FIELD3) → t.FIELD3
+      const innerMatch = stripped.match(/\w+\s*\(\s*(?:(\w+)\s*\.\s*)?(\w+)\s*\)/);
+      if (innerMatch) {
+        const alias = innerMatch[1]?.toUpperCase();
+        const col = innerMatch[2].toUpperCase();
+        if (col === "*" || /^\d+$/.test(col)) return null;
+        const table = alias ? (aliasMap.get(alias) || alias) : defaultTable;
+        return { column: col, table };
+      }
+      return null;
+    }
+    // Handle alias.column
+    const dotMatch = stripped.match(/^(\w+)\s*\.\s*(\w+)$/);
+    if (dotMatch) {
+      const alias = dotMatch[1].toUpperCase();
+      const col = dotMatch[2].toUpperCase();
+      const table = aliasMap.get(alias) || alias;
+      return { column: col, table };
+    }
+    // Plain column name
+    if (/^\w+$/.test(stripped)) {
+      return { column: stripped.toUpperCase(), table: defaultTable };
+    }
+    return null;
+  }
+
+  /**
+   * Check if a column name is actually a SQL alias (from AS clause).
+   */
+  private isSelectAlias(colExpr: string): boolean {
+    return /\s+AS\s+/i.test(colExpr);
+  }
+
   private extractSqlUsages(content: string, fileName: string): void {
     const sqlStrings = extractSQLStrings(content);
 
     for (const sql of sqlStrings) {
+      const aliasMap = this.buildAliasMap(sql);
+
       // SELECT cols FROM table
       const selectMatch = sql.match(/SELECT\s+(.+?)\s+FROM\s+(\w+)/i);
       if (selectMatch) {
-        const tableName = selectMatch[2];
+        const rawTableName = selectMatch[2].toUpperCase();
+        const tableName = aliasMap.get(rawTableName) || rawTableName;
         this.ensureTable(tableName, "SQL SELECT");
         const selectClause = selectMatch[1].trim();
         if (selectClause !== "*") {
           const cols = selectClause.split(",").map(c => c.trim());
           for (const col of cols) {
-            const colName = col.replace(/.*\.\s*/, "").replace(/\s+AS\s+\w+/i, "").trim();
-            if (colName && /^\w+$/.test(colName)) {
-              const field = this.getOrCreateField(colName, tableName);
+            // Skip AS aliases — the alias itself is not a real column
+            const colExprNoAlias = col.replace(/\s+AS\s+\w+/i, "").trim();
+            const resolved = this.resolveColumn(colExprNoAlias, aliasMap, tableName);
+            if (resolved && /^FIELD\d+$|^[A-Z_]{2,}$/.test(resolved.column)) {
+              const field = this.getOrCreateField(resolved.column, resolved.table);
               const idx = content.indexOf(sql);
               this.addUsage(field, {
                 file: fileName,
@@ -223,7 +308,7 @@ export class FieldUsageAnalyzer {
       // INSERT INTO table (cols)
       const insertMatch = sql.match(/INSERT\s+INTO\s+(\w+)\s*\(([^)]+)\)/i);
       if (insertMatch) {
-        const tableName = insertMatch[1];
+        const tableName = aliasMap.get(insertMatch[1].toUpperCase()) || insertMatch[1];
         this.ensureTable(tableName, "SQL INSERT");
         const cols = insertMatch[2].split(",").map(c => c.trim());
         for (const col of cols) {
@@ -243,7 +328,7 @@ export class FieldUsageAnalyzer {
       // UPDATE table SET col = ?
       const updateMatch = sql.match(/UPDATE\s+(\w+)\s+SET\s+(.+?)(?:\s+WHERE|$)/i);
       if (updateMatch) {
-        const tableName = updateMatch[1];
+        const tableName = aliasMap.get(updateMatch[1].toUpperCase()) || updateMatch[1];
         this.ensureTable(tableName, "SQL UPDATE");
         const setCols = updateMatch[2].split(",");
         for (const setCol of setCols) {
@@ -270,10 +355,15 @@ export class FieldUsageAnalyzer {
         while ((condMatch = condRegex.exec(whereClause)) !== null) {
           const colName = condMatch[1];
           if (/^(AND|OR|NOT|NULL)$/i.test(colName)) continue;
-          // Find the table from the FROM clause
+          // Find the table from the FROM clause, resolve alias
           const fromMatch = sql.match(/FROM\s+(\w+)/i);
           if (fromMatch) {
-            const field = this.getOrCreateField(colName, fromMatch[1]);
+            const resolvedTable = aliasMap.get(fromMatch[1].toUpperCase()) || fromMatch[1];
+            // Handle alias.column in WHERE (e.g., t.FIELD1 = ?)
+            const dotWhere = colName.match(/^(\w+)\.(\w+)$/);
+            const actualCol = dotWhere ? dotWhere[2] : colName;
+            const actualTable = dotWhere ? (aliasMap.get(dotWhere[1].toUpperCase()) || dotWhere[1]) : resolvedTable;
+            const field = this.getOrCreateField(actualCol, actualTable);
             const idx = content.indexOf(sql);
             this.addUsage(field, {
               file: fileName,
@@ -309,20 +399,27 @@ export class FieldUsageAnalyzer {
     let match;
     while ((match = rsRegex.exec(content)) !== null) {
       const [, , columnName] = match;
-      // Try to find the table from SQL context
+      // Try to find the table from SQL context, resolving aliases
       const sqlStrings = extractSQLStrings(content);
       let tableName = "UNKNOWN";
       for (const sql of sqlStrings) {
+        const aliasMap = this.buildAliasMap(sql);
         const fromMatch = sql.match(/FROM\s+(\w+)/i);
         if (fromMatch && sql.toUpperCase().includes(columnName.toUpperCase())) {
-          tableName = fromMatch[1];
+          const raw = fromMatch[1].toUpperCase();
+          tableName = aliasMap.get(raw) || fromMatch[1];
           break;
         }
       }
       if (tableName === "UNKNOWN") {
         for (const sql of sqlStrings) {
+          const aliasMap = this.buildAliasMap(sql);
           const fromMatch = sql.match(/FROM\s+(\w+)/i);
-          if (fromMatch) { tableName = fromMatch[1]; break; }
+          if (fromMatch) {
+            const raw = fromMatch[1].toUpperCase();
+            tableName = aliasMap.get(raw) || fromMatch[1];
+            break;
+          }
         }
       }
       this.ensureTable(tableName, "ResultSet");
@@ -525,14 +622,18 @@ export class FieldUsageAnalyzer {
   private extractJoinRelationships(content: string, fileName: string): void {
     const sqlStrings = extractSQLStrings(content);
     for (const sql of sqlStrings) {
+      const aliasMap = this.buildAliasMap(sql);
       // Pattern: T1.col1 = T2.col2 (in JOIN or WHERE)
       const joinRegex = /(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)/g;
       let match;
       while ((match = joinRegex.exec(sql)) !== null) {
-        const [, table1, col1, table2, col2] = match;
+        const [, rawTable1, col1, rawTable2, col2] = match;
         // Skip SQL keywords
-        if (/^(AND|OR|NOT|WHERE|SET|FROM|JOIN)$/i.test(table1)) continue;
-        if (/^(AND|OR|NOT|WHERE|SET|FROM|JOIN)$/i.test(table2)) continue;
+        if (/^(AND|OR|NOT|WHERE|SET|FROM|JOIN)$/i.test(rawTable1)) continue;
+        if (/^(AND|OR|NOT|WHERE|SET|FROM|JOIN)$/i.test(rawTable2)) continue;
+        // Resolve aliases to real table names
+        const table1 = aliasMap.get(rawTable1.toUpperCase()) || rawTable1;
+        const table2 = aliasMap.get(rawTable2.toUpperCase()) || rawTable2;
 
         this.ensureTable(table1, "SQL JOIN");
         this.ensureTable(table2, "SQL JOIN");

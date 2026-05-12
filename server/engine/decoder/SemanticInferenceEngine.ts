@@ -237,8 +237,13 @@ function computeConfidence(
 
   // Variable names (strong signal)
   if (field.variableNames.length > 0) {
-    score += 30;
+    score += 35;
     sources.push(`variable names: ${field.variableNames.join(", ")}`);
+    // Extra bonus for multiple distinct variable names (stronger cross-validation)
+    if (field.variableNames.length >= 2) {
+      score += 10;
+      sources.push(`${field.variableNames.length} distinct variable names`);
+    }
   }
 
   // Multiple files referencing (cross-validation)
@@ -255,8 +260,14 @@ function computeConfidence(
 
   // Setter mapping (strong)
   if (field.reads.some(r => r.type === 'resultset-get') && field.variableNames.length > 0) {
-    score += 20;
+    score += 25;
     sources.push("ResultSet → setter mapping");
+  }
+
+  // PreparedStatement write (medium-strong signal)
+  if (field.writes.some(w => w.type === 'sql-insert' || w.type === 'sql-update')) {
+    score += 10;
+    sources.push("SQL write operations");
   }
 
   // Log context (medium)
@@ -279,7 +290,7 @@ function computeConfidence(
 
   // Static abbreviation match
   if (hasStaticInference) {
-    score += 15;
+    score += 20;
     sources.push("banking abbreviation dictionary");
   }
 
@@ -297,8 +308,8 @@ function computeConfidence(
   score = Math.min(100, score);
 
   let level: SemanticConfidence;
-  if (score >= 70) level = "high";
-  else if (score >= 40) level = "medium";
+  if (score >= 65) level = "high";
+  else if (score >= 35) level = "medium";
   else if (score >= 15) level = "low";
   else level = "unresolved";
 

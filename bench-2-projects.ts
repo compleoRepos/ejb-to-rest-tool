@@ -11,6 +11,7 @@ import { ParenBalancer } from "./server/engine/validation/ParenBalancer";
 import { DependencyAnalyzer, Workspace, WorkspaceGraph } from "./server/engine/workspace/DependencyAnalyzer";
 import { SharedStubLibrary, SharedStubBundle } from "./server/engine/workspace/SharedStubLibrary";
 import { ProjectReportGenerator, type ReportInput } from "./server/engine/report/ProjectReportGenerator";
+import { SchemaReverseEngineer } from "./server/engine/decoder/SchemaReverseEngineer";
 
 const PROJECTS_DIR = "/tmp/bmce-flat";
 const OUTPUT_DIR = "/tmp/bmce-output-v135b";
@@ -265,6 +266,19 @@ async function benchmarkProject(
     }
   }
 
+  // v13.13: Schema Reverse-Engineering
+  let schemaReverseResult: any = null;
+  try {
+    const schemaEngine = new SchemaReverseEngineer({ useLlm: false, projectName: projName });
+    schemaReverseResult = await schemaEngine.analyze(javaFiles.map(f => ({ path: f.path, content: f.content })));
+    console.log(`    Schema Reverse: ${schemaReverseResult.fieldUsageAnalysis.stats.totalFields} fields, ` +
+      `${schemaReverseResult.semanticInference.stats.high} high-conf, ` +
+      `${schemaReverseResult.orphanDetection.orphans.length} orphans, ` +
+      `glossary: ${schemaReverseResult.glossary.stats.totalEntries} entries`);
+  } catch (schemaErr: any) {
+    console.warn(`    Schema Reverse failed: ${schemaErr.message}`);
+  }
+
   // Generate report
   try {
     const reportInput: ReportInput = {
@@ -286,6 +300,7 @@ async function benchmarkProject(
         totalAttempts: autoFixResult.iterations,
       } as any,
       schemaResult: undefined,
+      schemaReverseResult: schemaReverseResult,
       pipelineError: null,
       durationMs: totalTimeMs,
     };
@@ -298,7 +313,11 @@ async function benchmarkProject(
     if (report.artifacts.filesManifestJson) writeFileSync(join(compleoDir, "files-manifest.json"), report.artifacts.filesManifestJson);
     if (report.artifacts.decisionsJson) writeFileSync(join(compleoDir, "decisions.json"), report.artifacts.decisionsJson);
     if (report.artifacts.schemaMappingJson) writeFileSync(join(compleoDir, "schema-mapping.json"), report.artifacts.schemaMappingJson);
-    console.log(`    Report: MIGRATION-REPORT.html + .compleo/ generated`);
+    if (report.artifacts.glossaryHtml) writeFileSync(join(compleoDir, "glossary.html"), report.artifacts.glossaryHtml);
+    if (report.artifacts.glossaryCsv) writeFileSync(join(compleoDir, "glossary.csv"), report.artifacts.glossaryCsv);
+    if (report.artifacts.glossaryJson) writeFileSync(join(compleoDir, "glossary.json"), report.artifacts.glossaryJson);
+    if (report.artifacts.orphanFieldsJson) writeFileSync(join(compleoDir, "orphan-fields.json"), report.artifacts.orphanFieldsJson);
+    console.log(`    Report: MIGRATION-REPORT.html + .compleo/ + glossary generated`);
   } catch (reportErr) {
     console.warn(`    Report generation failed:`, (reportErr as Error).message);
   }
