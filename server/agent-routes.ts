@@ -461,7 +461,8 @@ export function registerAgentRoutes(app: Express) {
         ir: session.ir || undefined,
         generatedProject: session.generatedProject || undefined,
         compilationResult: session.compilationResult || undefined,
-        schemaResult: undefined,
+        schemaResult: (session as any).schemaResult || undefined,
+        schemaReverseResult: (session as any).schemaReverseResult || undefined,
         pipelineError: session.errorMessage ? { stage: session.currentPhase || "unknown", message: session.errorMessage } : null,
         durationMs: session.updatedAt - session.createdAt,
         userChoices: session.userChoices?.map(c => ({ ambiguityId: c.ambiguityId, chosenOption: c.choiceId })),
@@ -474,6 +475,19 @@ export function registerAgentRoutes(app: Express) {
       zipEntries.set(".compleo/decisions.json", report.artifacts.decisionsJson);
       if (report.artifacts.schemaMappingJson) {
         zipEntries.set(".compleo/schema-mapping.json", report.artifacts.schemaMappingJson);
+      }
+      // v13.13: Glossary and orphan artifacts
+      if (report.artifacts.glossaryHtml) {
+        zipEntries.set("GLOSSAIRE-METIER.html", report.artifacts.glossaryHtml);
+      }
+      if (report.artifacts.glossaryCsv) {
+        zipEntries.set(".compleo/glossaire-metier.csv", report.artifacts.glossaryCsv);
+      }
+      if (report.artifacts.glossaryJson) {
+        zipEntries.set(".compleo/glossaire-metier.json", report.artifacts.glossaryJson);
+      }
+      if (report.artifacts.orphanFieldsJson) {
+        zipEntries.set(".compleo/orphan-fields.json", report.artifacts.orphanFieldsJson);
       }
       console.log(`[Agent] Delivery report generated: status=${report.status}`);
     } catch (reportErr) {

@@ -21,6 +21,9 @@ import type { CompilationError, LoopResult, GeneratedFile, LoopIteration } from 
 import type { AnalysisResult, GeneratedProject } from "../CompleoEngine";
 import type { ProjectIR } from "../../java-parser";
 import type { SchemaDecoderResult, DecodedTable } from "../decoder/SchemaDecoder";
+import type { SchemaReverseEngineerResult } from "../decoder/SchemaReverseEngineer";
+import type { GlossaryOutput } from "../decoder/GlossaryGenerator";
+import type { OrphanDetectionResult } from "../decoder/OrphanFieldDetector";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -47,6 +50,8 @@ export interface ReportInput {
   compilationResult?: LoopResult | null;
   /** Schema decoder result (may be null) */
   schemaResult?: SchemaDecoderResult | null;
+  /** v13.13: Schema reverse-engineering result (enriched) */
+  schemaReverseResult?: SchemaReverseEngineerResult | null;
   /** Pipeline error info (if pipeline crashed) */
   pipelineError?: { stage: string; message: string; stack?: string } | null;
   /** Pipeline execution duration in ms */
@@ -64,6 +69,14 @@ export interface ReportOutput {
     todoMarkersJson: string;
     filesManifestJson: string;
     schemaMappingJson?: string;
+    /** v13.13: Glossary HTML */
+    glossaryHtml?: string;
+    /** v13.13: Glossary CSV */
+    glossaryCsv?: string;
+    /** v13.13: Glossary JSON */
+    glossaryJson?: string;
+    /** v13.13: Orphan fields JSON */
+    orphanFieldsJson?: string;
     decisionsJson: string;
   };
 }
@@ -846,16 +859,48 @@ function extractSchemaData(input: ReportInput) {
     fieldCount: t.columns.length,
   }));
 
+  // v13.13: Enrich with SchemaReverseEngineer data if available
+  const sr = input.schemaReverseResult;
+  const glossaryEntries = sr?.glossary?.entries ?? [];
+  const orphanCount = sr?.orphanDetection?.orphans?.length ?? 0;
+  const healthScore = sr?.orphanDetection?.stats?.healthScore ?? 100;
+  const confidenceStats = sr?.semanticInference?.stats ?? null;
+
   return {
     hasSchema: true,
     schemaTableCount: schema.tables.length,
     schemaEntityCount: schema.tables.length,
     schemaFieldCount: schema.stats.totalColumns,
-    schemaRelationCount: 0, // Will be enriched by LLM
+    schemaRelationCount: 0,
     schemaSource: "Oracle / JDBC",
     schemaTables: tables,
     schemaRelations: [],
     schemaConventions: [],
+    // v13.13: Glossary data
+    hasGlossary: glossaryEntries.length > 0,
+    glossaryEntryCount: glossaryEntries.length,
+    glossaryEntries: glossaryEntries.slice(0, 50).map(e => ({
+      column: e.column,
+      table: e.table,
+      businessNameFr: e.businessNameFr,
+      businessNameEn: e.businessNameEn,
+      javaType: e.javaType,
+      confidence: e.confidence,
+      confidenceScore: e.confidenceScore,
+      domain: e.domain,
+      orphanCategory: e.orphanCategory,
+    })),
+    // v13.13: Orphan data
+    hasOrphans: orphanCount > 0,
+    orphanCount,
+    schemaHealthScore: healthScore,
+    schemaHealthClass: healthScore >= 80 ? "mint" : (healthScore >= 60 ? "yellow" : "red"),
+    // v13.13: Confidence distribution
+    hasConfidenceStats: confidenceStats !== null,
+    confidenceHigh: confidenceStats?.high ?? 0,
+    confidenceMedium: confidenceStats?.medium ?? 0,
+    confidenceLow: confidenceStats?.low ?? 0,
+    confidenceUnresolved: confidenceStats?.unresolved ?? 0,
   };
 }
 
@@ -944,7 +989,38 @@ function generateArtifacts(input: ReportInput, transforms: TransformCard[], todo
     decisions: decisions.map(d => ({ question: d.question, answer: d.answer })),
   }, null, 2);
 
-  return { transformationsJson, todoMarkersJson, filesManifestJson, schemaMappingJson, decisionsJson };
+  // v13.13: Glossary and orphan artifacts from SchemaReverseEngineer
+  let glossaryHtml: string | undefined;
+  let glossaryCsv: string | undefined;
+  let glossaryJson: string | undefined;
+  let orphanFieldsJson: string | undefined;
+
+  if (input.schemaReverseResult) {
+    const sr = input.schemaReverseResult;
+    if (sr.glossary) {
+      glossaryHtml = sr.glossary.html;
+      glossaryCsv = sr.glossary.csv;
+      glossaryJson = sr.glossary.json;
+    }
+    if (sr.orphanDetection && sr.orphanDetection.orphans.length > 0) {
+      orphanFieldsJson = JSON.stringify({
+        version: "13.13",
+        project: input.projectName,
+        generatedAt: new Date().toISOString(),
+        healthScore: sr.orphanDetection.stats.healthScore,
+        orphans: sr.orphanDetection.orphans.map(o => ({
+          column: o.dbColumn,
+          table: o.tableName,
+          category: o.category,
+          severity: o.severity,
+          reason: o.reason,
+          recommendation: o.recommendation,
+        })),
+      }, null, 2);
+    }
+  }
+
+  return { transformationsJson, todoMarkersJson, filesManifestJson, schemaMappingJson, glossaryHtml, glossaryCsv, glossaryJson, orphanFieldsJson, decisionsJson };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
