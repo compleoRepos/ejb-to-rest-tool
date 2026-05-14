@@ -280,9 +280,9 @@ export class BusinessLogicMigrator {
   async migrateMultipleBlocks(
     blocks: JdbcMigrationContext[],
   ): Promise<JdbcMigrationResult[]> {
-    // Limiter la concurrence à 3 pour ne pas surcharger le LLM
+    // v13.18: Augmenter la concurrence à 5 (Manus invokeLLM supporte la concurrence)
     const results: JdbcMigrationResult[] = [];
-    const batchSize = 3;
+    const batchSize = 5;
 
     for (let i = 0; i < blocks.length; i += batchSize) {
       const batch = blocks.slice(i, i + batchSize);

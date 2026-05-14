@@ -751,37 +751,43 @@ Contexte: ${projectContext}
 Réponds en JSON strict (array):
 [{"category": "ejb → spring", "rationale": "justification technique"}]`;
 
-  // Prompt 4: TODO diagnostics
+  // v13.18: Paralléliser TOUS les prompts LLM ensemble (gain ~3-5x)
   const errors = input.compilationResult?.finalErrors ?? [];
-  let todoDiagnostics: LLMTodoDiagnostic[] | null = null;
+
+  // Construire les prompts conditionnels
+  let todoPrompt: string | null = null;
+  let todoInput: unknown = null;
   if (errors.length > 0 && errors.length <= 10) {
     const errorsContext = errors.slice(0, 5).map(e => `${e.file}:${e.line} - ${e.message}`).join("\n");
-    const todoPrompt = `Tu es un développeur Java senior. Pour chaque erreur de compilation, donne un diagnostic précis et un fix.
+    todoPrompt = `Tu es un développeur Java senior. Pour chaque erreur de compilation, donne un diagnostic précis et un fix.
 Erreurs:
 ${errorsContext}
 
 Réponds en JSON strict (array):
 [{"file": "nom.java", "diagnostic": "explication cause racine", "suggestedFix": "code fix", "whyNotAutoFixed": "raison"}]`;
-    todoDiagnostics = await cachedLlmJSON<LLMTodoDiagnostic[]>("todo", todoPrompt, errors);
+    todoInput = errors;
   }
 
-  // Prompt 5: Schema insight
-  let schemaInsight: LLMSchemaInsight | null = null;
+  let schemaPrompt: string | null = null;
+  let schemaInput: unknown = null;
   if (input.schemaResult && input.schemaResult.tables.length > 0) {
     const tables = input.schemaResult.tables.map(t => t.name).join(", ");
-    const schemaPrompt = `Tu es un DBA Oracle/Java. Analyse les conventions de nommage des tables suivantes et déduis les patterns.
+    schemaPrompt = `Tu es un DBA Oracle/Java. Analyse les conventions de nommage des tables suivantes et déduis les patterns.
 Tables: ${tables}
 Colonnes exemple: ${input.schemaResult.tables[0]?.columns.slice(0, 5).map(c => c.db).join(", ")}
 
 Réponds en JSON strict:
 {"lede": "description 1-2 phrases", "conventions": [{"prefix": "FLG_", "meaning": "flag booléen", "target": "Boolean + @Converter", "count": 3}]}`;
-    schemaInsight = await cachedLlmJSON<LLMSchemaInsight>("schema", schemaPrompt, input.schemaResult.tables.map(t => t.name));
+    schemaInput = input.schemaResult.tables.map(t => t.name);
   }
 
-  const [synthesis, decisions, transformRationales] = await Promise.all([
+  // Lancer TOUS les appels LLM en parallèle
+  const [synthesis, decisions, transformRationales, todoDiagnostics, schemaInsight] = await Promise.all([
     cachedLlmJSON<LLMSynthesis>("synthesis", synthesisPrompt, projectContext),
     cachedLlmJSON<LLMDecision[]>("decisions", decisionsPrompt, projectContext),
     cachedLlmJSON<LLMTransformRationale[]>("transforms", transformPrompt, projectContext),
+    todoPrompt ? cachedLlmJSON<LLMTodoDiagnostic[]>("todo", todoPrompt, todoInput) : Promise.resolve(null),
+    schemaPrompt ? cachedLlmJSON<LLMSchemaInsight>("schema", schemaPrompt, schemaInput) : Promise.resolve(null),
   ]);
 
   return { synthesis, decisions, transformRationales, todoDiagnostics, schemaInsight };
@@ -880,8 +886,8 @@ function extractSchemaData(input: ReportInput) {
     hasGlossary: glossaryEntries.length > 0,
     glossaryEntryCount: glossaryEntries.length,
     glossaryEntries: glossaryEntries.slice(0, 50).map(e => ({
-      column: e.column,
-      table: e.table,
+      column: e.dbColumn,
+      table: e.tableName,
       businessNameFr: e.businessNameFr,
       businessNameEn: e.businessNameEn,
       javaType: e.javaType,

@@ -154,7 +154,7 @@ export class ReportEnhancer {
     // v7.6: Enrichir le contexte avec les noms réels si pas déjà fournis
     this.enrichContextWithRealNames(context);
 
-    // Exécution séquentielle — Ollama ne peut traiter qu'un prompt à la fois
+    // v13.18: Exécution PARALLÈLE — Manus invokeLLM supporte la concurrence
     const reports: Record<string, string | null> = {
       MIGRATION_REPORT:     null,
       MICROSERVICES_REPORT: null,
@@ -171,12 +171,15 @@ export class ReportEnhancer {
       { key: "EXECUTIVE_SUMMARY",    fn: () => this.generateExecutiveSummary(context) },
     ];
 
-    for (const task of tasks) {
-      try {
-        reports[task.key] = await task.fn();
-      } catch (err) {
-        console.warn(`[ReportEnhancer] ${task.key} échoué: ${err instanceof Error ? err.message : String(err)}`);
-        reports[task.key] = null;
+    // Paralléliser tous les appels LLM (gain ~4x vs séquentiel)
+    const results = await Promise.allSettled(tasks.map(t => t.fn()));
+    for (let i = 0; i < tasks.length; i++) {
+      const result = results[i];
+      if (result.status === "fulfilled") {
+        reports[tasks[i].key] = result.value;
+      } else {
+        console.warn(`[ReportEnhancer] ${tasks[i].key} échoué: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+        reports[tasks[i].key] = null;
       }
     }
 

@@ -1,5 +1,5 @@
 /**
- * StubRePromptEngine v13.9 — Re-prompt LLM forcé pour les méthodes stub.
+ * StubRePromptEngine v13.18 — Re-prompt LLM forcé pour les méthodes stub.
  *
  * Prend les méthodes annotées @CompleoUnvalidated(severity="STUB") et injecte
  * un bloc commenté MIGRATED LOGIC contenant une traduction best-effort
@@ -9,6 +9,7 @@
  * dispose d'un guide de migration directement dans le code.
  *
  * Utilise le prompt variant E (domain keywords) — gagnant de l'expérimentation v13.9.
+ * v13.18: Traitement parallèle par batch de 5 pour réduire la durée.
  *
  * @author Compleo
  * @since v13.9
@@ -178,7 +179,7 @@ function findLegacyBody(legacyRef: string, sourceFiles: Array<{ path: string; co
     if (!candidates.some(c => file.path.includes(c))) continue;
 
     // Extraire la méthode du fichier source
-    // Note: [\\s\\S]*? dans les params pour supporter @WebParam(name="...") avec parenthèses
+    // Note: [\s\S]*? dans les params pour supporter @WebParam(name="...") avec parenthèses
     const methodPattern = new RegExp(
       `(?:public|protected|private)\\s+\\S+\\s+${methodName}\\s*\\([\\s\\S]*?\\)\\s*(?:throws\\s+[^{]+)?\\{`,
       "g"
@@ -213,7 +214,16 @@ function findLegacyBody(legacyRef: string, sourceFiles: Array<{ path: string; co
   return undefined;
 }
 
+// ─── Batch LLM Result Type ────────────────────────────────────────────────────
+
+type StubLLMResult =
+  | { enriched: false; stub: StubMethod; reason: string }
+  | { enriched: true; stub: StubMethod; file: { path: string; content: string }; commentBlock: string };
+
 // ─── Main Engine ───────────────────────────────────────────────────────────────
+
+/** v13.18: Concurrency batch size for parallel LLM calls */
+const LLM_BATCH_SIZE = 5;
 
 export class StubRePromptEngine {
   private maxMethodsPerRun: number;
@@ -226,6 +236,7 @@ export class StubRePromptEngine {
 
   /**
    * Traite les fichiers générés pour enrichir les stubs avec MIGRATED LOGIC.
+   * v13.18: Traitement parallèle par batch de LLM_BATCH_SIZE.
    */
   async process(
     generatedFiles: Array<{ path: string; content: string }>,
@@ -274,92 +285,67 @@ export class StubRePromptEngine {
     // 3. Limiter le nombre de méthodes par run
     const toProcess = allStubs.slice(0, this.maxMethodsPerRun);
 
-    // 4. Traiter chaque stub
-    for (const { file, stub } of toProcess) {
-      // Chercher le code legacy source
-      const legacyBody = stub.legacyBody || findLegacyBody(stub.legacyRef, sourceFiles);
+    // 4. v13.18: Traiter par batch parallèle de LLM_BATCH_SIZE
+    for (let i = 0; i < toProcess.length; i += LLM_BATCH_SIZE) {
+      const batch = toProcess.slice(i, i + LLM_BATCH_SIZE);
 
-      if (!legacyBody) {
-        result.skippedCount++;
-        result.details.push({
-          methodName: stub.methodName,
-          className: stub.className,
-          enriched: false,
-          reason: "Legacy source not found",
-        });
-        continue;
-      }
+      // Phase A: Appels LLM en parallèle (I/O-bound, safe to parallelize)
+      const batchResults = await Promise.allSettled(
+        batch.map(({ file, stub }) => this.processOneStub(file, stub, sourceFiles)),
+      );
 
-      // Vérifier la taille
-      const bodyLOC = legacyBody.split("\n").filter(l => l.trim()).length;
-      if (bodyLOC > this.maxBodyLOC) {
-        result.skippedCount++;
-        result.details.push({
-          methodName: stub.methodName,
-          className: stub.className,
-          enriched: false,
-          reason: `Body too large (${bodyLOC} LOC > ${this.maxBodyLOC})`,
-        });
-        continue;
-      }
-
-      // Appeler le LLM
-      try {
-        const prompt = buildRePrompt(legacyBody, stub.stubSignature, stub.legacyRef);
-        const generated = await llmGenerateCode(prompt, {
-          temperature: 0.2,
-          maxTokens: 3000,
-        });
-
-        if (!generated || generated.trim().length < 20) {
+      // Phase B: Appliquer les mutations de fichier séquentiellement
+      // (les insertions dans file.content doivent être ordonnées pour éviter les décalages)
+      for (const settled of batchResults) {
+        if (settled.status === "rejected") {
           result.skippedCount++;
           result.details.push({
-            methodName: stub.methodName,
-            className: stub.className,
+            methodName: "unknown",
+            className: "unknown",
             enriched: false,
-            reason: "LLM returned empty/short response",
+            reason: `LLM error: ${settled.reason instanceof Error ? settled.reason.message : String(settled.reason)}`,
           });
           continue;
         }
 
-        // Nettoyer et envelopper comme commentaire
-        const cleaned = cleanLLMOutput(generated);
-        const commentBlock = wrapAsComment(cleaned, stub.legacyRef);
+        const r = settled.value;
+        if (!r.enriched) {
+          result.skippedCount++;
+          result.details.push({
+            methodName: r.stub.methodName,
+            className: r.stub.className,
+            enriched: false,
+            reason: r.reason,
+          });
+          continue;
+        }
 
         // Injecter le commentaire AVANT le @CompleoUnvalidated
         const annotationPattern = new RegExp(
-          `([ \\t]*)@CompleoUnvalidated\\(severity\\s*=\\s*"STUB",\\s*legacyRef\\s*=\\s*"${stub.legacyRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`,
+          `([ \\t]*)@CompleoUnvalidated\\(severity\\s*=\\s*"STUB",\\s*legacyRef\\s*=\\s*"${r.stub.legacyRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`,
         );
-        const annotMatch = annotationPattern.exec(file.content);
+        const annotMatch = annotationPattern.exec(r.file.content);
         if (annotMatch) {
           const insertPos = annotMatch.index;
-          file.content = file.content.substring(0, insertPos) +
-            commentBlock + "\n" +
-            file.content.substring(insertPos);
+          r.file.content = r.file.content.substring(0, insertPos) +
+            r.commentBlock + "\n" +
+            r.file.content.substring(insertPos);
 
           result.enrichedCount++;
           result.details.push({
-            methodName: stub.methodName,
-            className: stub.className,
+            methodName: r.stub.methodName,
+            className: r.stub.className,
             enriched: true,
           });
         } else {
           result.skippedCount++;
           result.details.push({
-            methodName: stub.methodName,
-            className: stub.className,
+            methodName: r.stub.methodName,
+            className: r.stub.className,
             enriched: false,
             reason: "Could not locate annotation insertion point",
           });
         }
-      } catch (err: any) {
-        result.skippedCount++;
-        result.details.push({
-          methodName: stub.methodName,
-          className: stub.className,
-          enriched: false,
-          reason: `LLM error: ${err.message}`,
-        });
       }
     }
 
@@ -370,5 +356,44 @@ export class StubRePromptEngine {
     }
 
     return result;
+  }
+
+  /**
+   * Traite un seul stub : validation + appel LLM.
+   * Retourne un résultat typé sans muter le fichier (mutation faite dans la boucle appelante).
+   */
+  private async processOneStub(
+    file: { path: string; content: string },
+    stub: StubMethod,
+    sourceFiles: Array<{ path: string; content: string }>,
+  ): Promise<StubLLMResult> {
+    // Chercher le code legacy source
+    const legacyBody = stub.legacyBody || findLegacyBody(stub.legacyRef, sourceFiles);
+    if (!legacyBody) {
+      return { enriched: false, stub, reason: "Legacy source not found" };
+    }
+
+    // Vérifier la taille
+    const bodyLOC = legacyBody.split("\n").filter(l => l.trim()).length;
+    if (bodyLOC > this.maxBodyLOC) {
+      return { enriched: false, stub, reason: `Body too large (${bodyLOC} LOC > ${this.maxBodyLOC})` };
+    }
+
+    // Appeler le LLM
+    const prompt = buildRePrompt(legacyBody, stub.stubSignature, stub.legacyRef);
+    const generated = await llmGenerateCode(prompt, {
+      temperature: 0.2,
+      maxTokens: 3000,
+    });
+
+    if (!generated || generated.trim().length < 20) {
+      return { enriched: false, stub, reason: "LLM returned empty/short response" };
+    }
+
+    // Nettoyer et envelopper comme commentaire
+    const cleaned = cleanLLMOutput(generated);
+    const commentBlock = wrapAsComment(cleaned, stub.legacyRef);
+
+    return { enriched: true, stub, file, commentBlock };
   }
 }

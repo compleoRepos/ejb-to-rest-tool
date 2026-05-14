@@ -46,8 +46,8 @@ router.post("/analyze", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "sessionId requis" });
     }
 
-    // Retrieve the session's IR from the session store
-    const session = sessionStore.get(sessionId);
+    // Retrieve the session's IR from the session store (async to load from DB if not in cache)
+    const session = await sessionStore.getAsync(sessionId);
     if (!session) {
       return res.status(404).json({ error: "Session non trouvée" });
     }

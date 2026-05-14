@@ -649,3 +649,7 @@
 - [ ] Re-run avis-opere avec MIGRATION-REPORT.html + .compleo/
 - [ ] Vérifier 5 critères de succès
 - [ ] Livrer les 2 ZIP conformes
+
+## v13.18 — Bugs critiques démo
+- [x] BUG: Architecture "session non trouvée" — fix: getAsync() au lieu de get() dans architecture-routes.ts
+- [x] BUG: Session Agent IA trop longue — parallélisation LLM: report-enhancer (5 en //), ProjectReportGenerator (5 en //), StubRePromptEngine (batch 5), BusinessLogicMigrator (batch 5)
