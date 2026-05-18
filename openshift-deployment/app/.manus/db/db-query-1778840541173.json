@@ -1,0 +1,16 @@
+{
+  "query": "SELECT COUNT(*) as total, COUNT(DISTINCT name) as unique_names, SUM(fileCount) as total_files, SUM(totalLines) as total_lines FROM projects;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 7MtqdpAHC3Gogvx.19563b0ba7fa --database ZuBzGQ3A9ameWxvz3cohMD --execute SELECT COUNT(*) as total, COUNT(DISTINCT name) as unique_names, SUM(fileCount) as total_files, SUM(totalLines) as total_lines FROM projects;",
+  "rows": [
+    {
+      "total": "100000",
+      "unique_names": "56952",
+      "total_files": "10565351",
+      "total_lines": "1365289819"
+    }
+  ],
+  "messages": [],
+  "stdout": "total\tunique_names\ttotal_files\ttotal_lines\n100000\t56952\t10565351\t1365289819\n",
+  "stderr": "",
+  "execution_time_ms": 482
+}

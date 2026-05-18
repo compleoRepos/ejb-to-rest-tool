@@ -1,0 +1,85 @@
+---
+# PVC — MySQL data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-data
+  namespace: ejb-modernizer
+  labels:
+    app.kubernetes.io/name: ejb-modernizer
+    app.kubernetes.io/component: database
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: standard
+---
+# PVC — File uploads
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uploads-data
+  namespace: ejb-modernizer
+  labels:
+    app.kubernetes.io/name: ejb-modernizer
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+---
+# PVC — Ollama models
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-data
+  namespace: ejb-modernizer
+  labels:
+    app.kubernetes.io/name: ejb-modernizer
+    app.kubernetes.io/component: inference
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: standard
+---
+# PVC — Model GGUF files
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: models-data
+  namespace: ejb-modernizer
+  labels:
+    app.kubernetes.io/name: ejb-modernizer
+    app.kubernetes.io/component: inference
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 30Gi
+  storageClassName: standard
+---
+# PVC — Pipeline workspace
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: workspace-data
+  namespace: ejb-modernizer
+  labels:
+    app.kubernetes.io/name: ejb-modernizer
+    app.kubernetes.io/component: pipeline
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: standard

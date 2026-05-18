@@ -1,0 +1,16 @@
+{
+  "query": "SELECT SUM(fileCount) as totalFiles, SUM(totalLines) as totalLines, AVG(fileCount) as avgFiles, AVG(totalLines) as avgLines FROM projects;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 7MtqdpAHC3Gogvx.19563b0ba7fa --database ZuBzGQ3A9ameWxvz3cohMD --execute SELECT SUM(fileCount) as totalFiles, SUM(totalLines) as totalLines, AVG(fileCount) as avgFiles, AVG(totalLines) as avgLines FROM projects;",
+  "rows": [
+    {
+      "totalFiles": "1778955",
+      "totalLines": "230076277",
+      "avgFiles": "177.8955",
+      "avgLines": "23007.6277"
+    }
+  ],
+  "messages": [],
+  "stdout": "totalFiles\ttotalLines\tavgFiles\tavgLines\n1778955\t230076277\t177.8955\t23007.6277\n",
+  "stderr": "",
+  "execution_time_ms": 270
+}

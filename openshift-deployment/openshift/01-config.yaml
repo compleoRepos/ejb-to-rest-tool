@@ -1,0 +1,35 @@
+---
+# ConfigMap — Application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ejb-modernizer-config
+  namespace: ejb-modernizer
+  labels:
+    app.kubernetes.io/name: ejb-modernizer
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  OLLAMA_URL: "http://inference:11434"
+  OLLAMA_MODEL: "ejb-modernizer"
+  STORAGE_PATH: "/data/uploads"
+  PIPELINE_URL: "http://pipeline:8080"
+  OWNER_OPEN_ID: "local-admin"
+---
+# Secret — Sensitive credentials (base64 encoded)
+# IMPORTANT: Replace values before deploying!
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ejb-modernizer-secrets
+  namespace: ejb-modernizer
+  labels:
+    app.kubernetes.io/name: ejb-modernizer
+type: Opaque
+stringData:
+  MYSQL_ROOT_PASSWORD: "ejb-modernizer-2025"
+  MYSQL_PASSWORD: "ejb-app-password"
+  MYSQL_USER: "ejb_app"
+  MYSQL_DATABASE: "ejb_modernizer"
+  DATABASE_URL: "mysql://ejb_app:ejb-app-password@mysql:3306/ejb_modernizer"
+  JWT_SECRET: "change-this-to-a-random-secret-in-production"

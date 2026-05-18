@@ -1,0 +1,181 @@
+import "dotenv/config";
+import express from "express";
+import { createServer } from "http";
+import net from "net";
+import { createExpressMiddleware } from "@trpc/server/adapters/express";
+// OAuth removed — no auth in autonomous mode
+import { registerCompleoRoutes } from "../compleo-routes";
+import { registerAgentRoutes } from "../agent-routes";
+import learningRoutes from "../learning-routes";
+import { intelligenceRoutes } from "../intelligence-routes";
+import { authRoutes } from "../auth-routes";
+import { registerArchitectureRoutes } from "../architecture-routes";
+import { registerWorkspaceRoutes } from "../workspace-routes";
+import { authMiddleware } from "../middleware/auth-middleware";
+import { globalErrorHandler } from "../middleware/error-handler";
+import { getDb } from "../db";
+import { appRouter } from "../routers";
+import { createContext } from "./context";
+import { serveStatic, setupVite } from "./vite";
+import { bootstrap } from "../bootstrap";
+
+function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise(resolve => {
+    const server = net.createServer();
+    server.listen(port, () => {
+      server.close(() => resolve(true));
+    });
+    server.on("error", () => resolve(false));
+  });
+}
+
+async function findAvailablePort(startPort: number = 3000): Promise<number> {
+  for (let port = startPort; port < startPort + 20; port++) {
+    if (await isPortAvailable(port)) {
+      return port;
+    }
+  }
+  throw new Error(`No available port found starting from ${startPort}`);
+}
+
+async function startServer() {
+  // ── Bootstrap Code First : migration + seed (AVANT les routes) ──
+  await bootstrap();
+
+  const app = express();
+  const server = createServer(app);
+  // Configure body parser with larger size limit for file uploads
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+  // ── Health endpoint (public, pas d'auth) ────────────────────
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString(), version: "10.4", uptime: process.uptime() });
+  });
+
+  // ── Readiness probe ──────────────────────────────────────
+  app.get("/ready", async (_req, res) => {
+    const checks: Record<string, boolean> = {};
+    try {
+      const database = await getDb();
+      checks.database = !!database;
+    } catch { checks.database = false; }
+    const allReady = Object.values(checks).every(Boolean);
+    res.status(allReady ? 200 : 503).json({ ready: allReady, checks });
+  });
+
+  // ── Status endpoint (monitoring) ─────────────────────────
+  app.get("/api/status", async (_req, res) => {
+    const { checkLLMHealth } = await import("../engine/ml/llm-health");
+    const { getAgentStore } = await import("../agent/CompleoAgent");
+    const llmHealth = await checkLLMHealth();
+    let activeSessions = 0;
+    let rulesCount = 0;
+    try {
+      const store = getAgentStore();
+      activeSessions = store.list().filter(
+        (s: any) => s.state === "ANALYZING" || s.state === "GENERATING"
+      ).length;
+    } catch { /* store not available */ }
+    try {
+      const { RuleEngine } = await import("../intelligence/knowledge/rules/RuleEngine");
+      const engine = new RuleEngine();
+      rulesCount = engine.getRules().length;
+    } catch { /* rules engine not available */ }
+    res.json({
+      version: "11.2",
+      uptime: process.uptime(),
+      llm: {
+        available: llmHealth.manus || llmHealth.finetuned,
+        model: llmHealth.activeBackend !== "none" ? llmHealth.activeBackend : undefined,
+        backend: llmHealth.activeBackend,
+      },
+      activeSessions,
+      rulesCount,
+      memory: {
+        heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+      },
+    });
+  });
+
+  // OAuth removed — autonomous mode, no auth
+  // Serve uploaded files from local storage
+  app.use("/uploads", express.static(process.env.STORAGE_PATH || "/data/uploads"));
+
+  // ── Auth routes (login, me, refresh — publiques) ────────────
+  app.use("/api/auth", authRoutes);
+
+  // ── Routes protégées par auth middleware ─────────────────────
+  // Auth désactivée temporairement pour faciliter les tests
+  // app.use("/api/compleo", authMiddleware);
+  // app.use("/api/intelligence", authMiddleware);
+  // app.use("/api/learning", authMiddleware);
+  // app.use("/api/agent", authMiddleware);
+  // app.use("/api/architecture", authMiddleware);
+
+  // Compleo API routes (upload, analyze, generate, download)
+  registerCompleoRoutes(app);
+  // Agent API routes (SSE, status, choices, cancel, download)
+  registerAgentRoutes(app);
+  // Learning engine routes (rules CRUD, stats, export/import)
+  app.use("/api/learning", learningRoutes);
+  // Intelligence engine routes (analyze, report, stats)
+  app.use("/api/intelligence", intelligenceRoutes);
+  // Architecture discovery routes (analyze, export, result)
+  registerArchitectureRoutes(app);
+  // Workspace multi-module routes (CRUD, add-project, generate)
+  registerWorkspaceRoutes(app);
+
+  // tRPC API
+  app.use(
+    "/api/trpc",
+    createExpressMiddleware({
+      router: appRouter,
+      createContext,
+    })
+  );
+
+  // ── Global error handler (MUST be after all routes) ──
+  app.use(globalErrorHandler);
+
+  // development mode uses Vite, production mode uses static files
+  if (process.env.NODE_ENV === "development") {
+    await setupVite(app, server);
+  } else {
+    serveStatic(app);
+  }
+
+  const preferredPort = parseInt(process.env.PORT || "3000");
+  const port = await findAvailablePort(preferredPort);
+
+  if (port !== preferredPort) {
+    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
+  }
+
+  server.listen(port, () => {
+    console.log(`Server running on http://localhost:${port}/`);
+  });
+
+  // ── Graceful shutdown ──
+  async function gracefulShutdown(signal: string) {
+    console.log(`\n[SERVER] ${signal} reçu — arrêt gracieux...`);
+    server.close();
+    console.log("[SERVER] Arrêt terminé");
+    process.exit(0);
+  }
+
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+  process.on("uncaughtException", (error) => {
+    console.error("[FATAL] Uncaught exception:", error);
+    gracefulShutdown("uncaughtException");
+  });
+
+  process.on("unhandledRejection", (reason) => {
+    console.error("[FATAL] Unhandled rejection:", reason);
+  });
+}
+
+startServer().catch(console.error);

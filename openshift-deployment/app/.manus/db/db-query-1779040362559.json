@@ -1,0 +1,31 @@
+{
+  "query": "SELECT COUNT(*) as total FROM projects; SELECT id, name, description, status, technologies, fileCount, totalLines, legacyScore, gitUrl, gitProvider FROM projects LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 7MtqdpAHC3Gogvx.19563b0ba7fa --database ZuBzGQ3A9ameWxvz3cohMD --execute SELECT COUNT(*) as total FROM projects; SELECT id, name, description, status, technologies, fileCount, totalLines, legacyScore, gitUrl, gitProvider FROM projects LIMIT 5;",
+  "rows": [
+    {
+      "total": "100000"
+    },
+    {
+      "total": "id\tname\tdescription\tstatus\ttechnologies\tfileCount\ttotalLines\tlegacyScore\tgitUrl\tgitProvider"
+    },
+    {
+      "total": "930001\tBankingSystem\tBank Management System using Java Swing\tactive\t[\"JAVA_ENTERPRISE\"]\t79\t8295\t74\thttps://github.com/ssoad/BankingSystem\tgithub"
+    },
+    {
+      "total": "930002\tBankApplication\t🏦 Banking System Management\tactive\t[\"JAVA_ENTERPRISE\"]\t230\t45080\t82\thttps://github.com/thederickff/BankApplication\tgithub"
+    },
+    {
+      "total": "930003\treal-time-payment-architecture-orchestration\tA reference implementation showcasing real-time payment architecture and orchestration. Includes ISO 20022–native models, event-driven microservices, Kafka-based flows, rule-driven routing, fraud checks, and high-availability patterns used in modern digital banking systems.\tactive\t[\"JMS\", \"MICROSERVICES\"]\t500\t49500\t69\thttps://github.com/RahulAutade2288/real-time-payment-architecture-orchestration\tgithub"
+    },
+    {
+      "total": "930004\tbankManagement-JAVA-SQL-\tA multi-step ATM-style banking system with signup, login, deposit, withdrawal, and PIN change. Built using Java Swing for GUI, MySQL for database, and JDBC for connectivity.\tactive\t[\"JDBC\"]\t130\t17940\t45\thttps://github.com/yeswanth-ares/bankManagement-JAVA-SQL-\tgithub"
+    },
+    {
+      "total": "930005\tBankingSystem\tConsole-based Banking System using Core Java\tactive\t[\"JAVA_ENTERPRISE\"]\t5\t545\t86\thttps://github.com/Mahavishnu-06/BankingSystem\tgithub"
+    }
+  ],
+  "messages": [],
+  "stdout": "total\n100000\nid\tname\tdescription\tstatus\ttechnologies\tfileCount\ttotalLines\tlegacyScore\tgitUrl\tgitProvider\n930001\tBankingSystem\tBank Management System using Java Swing\tactive\t[\"JAVA_ENTERPRISE\"]\t79\t8295\t74\thttps://github.com/ssoad/BankingSystem\tgithub\n930002\tBankApplication\t🏦 Banking System Management\tactive\t[\"JAVA_ENTERPRISE\"]\t230\t45080\t82\thttps://github.com/thederickff/BankApplication\tgithub\n930003\treal-time-payment-architecture-orchestration\tA reference implementation showcasing real-time payment architecture and orchestration. Includes ISO 20022–native models, event-driven microservices, Kafka-based flows, rule-driven routing, fraud checks, and high-availability patterns used in modern digital banking systems.\tactive\t[\"JMS\", \"MICROSERVICES\"]\t500\t49500\t69\thttps://github.com/RahulAutade2288/real-time-payment-architecture-orchestration\tgithub\n930004\tbankManagement-JAVA-SQL-\tA multi-step ATM-style banking system with signup, login, deposit, withdrawal, and PIN change. Built using Java Swing for GUI, MySQL for database, and JDBC for connectivity.\tactive\t[\"JDBC\"]\t130\t17940\t45\thttps://github.com/yeswanth-ares/bankManagement-JAVA-SQL-\tgithub\n930005\tBankingSystem\tConsole-based Banking System using Core Java\tactive\t[\"JAVA_ENTERPRISE\"]\t5\t545\t86\thttps://github.com/Mahavishnu-06/BankingSystem\tgithub\n",
+  "stderr": "",
+  "execution_time_ms": 1151
+}

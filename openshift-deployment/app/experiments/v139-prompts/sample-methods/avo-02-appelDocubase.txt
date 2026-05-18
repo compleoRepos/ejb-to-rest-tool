@@ -1,0 +1,46 @@
+# Méthode actuellement stub (v13.8 output)
+@CompleoUnvalidated(severity = "STUB", legacyRef = "CallDocubase.appelDocubase", migrationDate = "2026-05-12")
+@Transactional
+public Object appelDocubase(Object request) {
+    // TODO: Migrer la logique de CallDocubase.appelDocubase
+    throw new CompleoUnvalidatedMethodException("appelDocubase", "CallDocubase.appelDocubase", "STUB");
+}
+
+# Source legacy correspondante
+# Fichier : avis-opere/service/CallDocubase.java
+# Méthode : appelDocubase
+public Pager appelDocubase(StringArray arrCompte, StringArray arrType,
+        String DateDebut, String Datefin, int numPage, int pageSize,
+        double montantmin, double montantmax) {
+    EaiLog.info("Appel web Service DOCUBASE.:");
+    String docubaseServiceDataWsdlUrl = Services.find(Constant.DOCUBASE_SERVICEDATA_URL, String.class);
+    URL wsdlServiceDataFromUDDI = getUrlFromUddi(docubaseServiceDataWsdlUrl);
+    Pager resultat = null;
+    try {
+        long startDOCUBASE = System.currentTimeMillis();
+        ServiceDataService serviceDataService = new ServiceDataService(wsdlServiceDataFromUDDI);
+        ServiceData serviceData = serviceDataService.getServiceDataPort();
+        BindingProvider bp = (BindingProvider) serviceData;
+        List<Handler> handlers = new ArrayList<Handler>();
+        handlers.addAll(bp.getBinding().getHandlerChain());
+        handlers.add(new SoapUiLikeLoggingHandler());
+        bp.getBinding().setHandlerChain(handlers);
+        resultat = serviceData.searchByMontant(arrCompte, arrType, DateDebut, Datefin, numPage,
+                pageSize, montantmin, montantmax);
+        long endDOCUBASE = System.currentTimeMillis();
+        EaiLog.info("TEMPS DE REPONSE WS DOCUBASE Documents :" + (endDOCUBASE - startDOCUBASE) + " ms");
+        EaiLog.info("Nombre TOTAL DES DOCS Depuis WS" + resultat.getNombreTotalDeDocument());
+    } catch (Exception e) {
+        EaiLog.error("Erreur lors de l'appel au WS DOCUBASE : " + e.getMessage() + e);
+        throw new RuntimeException("Erreur lors de l'appel au WS DOCUBASE" + e);
+    }
+    return resultat;
+}
+
+# Contexte projet
+- Type : Spring @Service legacy
+- Domaine : Banking - Document Management (Docubase GED integration)
+- Framework : Spring + JAX-WS client + custom EAI framework
+- Classes utilisées : Pager, ServiceDataService, ServiceData, BindingProvider, Handler, SoapUiLikeLoggingHandler, StringArray, Constant, Services
+- Pattern : UDDI lookup → WSDL URL → JAX-WS client creation → Handler chain setup → WS call → Performance logging
+- Catégorie échantillon : A (logique réelle — WS client setup, handler chain, timing, error handling)

@@ -1,0 +1,70 @@
+{
+  "query": "SELECT name, description, gitUrl, technologies FROM projects ORDER BY RAND() LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 7MtqdpAHC3Gogvx.19563b0ba7fa --database ZuBzGQ3A9ameWxvz3cohMD --execute SELECT name, description, gitUrl, technologies FROM projects ORDER BY RAND() LIMIT 10;",
+  "rows": [
+    {
+      "name": "core-banking-transaction-system",
+      "description": "A Spring Boot–based Core Banking Transaction System implementing JWT security, Kafka event streaming, and ACID-compliant transaction processing with audit logging and EOD batch jobs.",
+      "gitUrl": "https://github.com/Ankitsoni8982/core-banking-transaction-system",
+      "technologies": "[\"JMS\", \"SPRING\", \"BATCH\", \"SECURITY\"]"
+    },
+    {
+      "name": "OnlineBanking",
+      "description": "Java project: OnlineBanking",
+      "gitUrl": "https://github.com/vijayalakshmidega/OnlineBanking",
+      "technologies": "[\"JAVA_ENTERPRISE\"]"
+    },
+    {
+      "name": "Electricity-billing-system",
+      "description": "A robust Electricity Billing System built with Java Swing and MySQL. Features include admin/customer login, meter management, bill calculation, and payment processing simulation.",
+      "gitUrl": "https://github.com/SurajMoreTech/Electricity-billing-system",
+      "technologies": "[\"JDBC\"]"
+    },
+    {
+      "name": "ECommerce-New-PaymentGateway-Integrated-JSP-ORACLE_DB",
+      "description": "Java project: ECommerce-New-PaymentGateway-Integrated-JSP-ORACLE_DB",
+      "gitUrl": "https://github.com/ashutosh61299/ECommerce-New-PaymentGateway-Integrated-JSP-ORACLE_DB",
+      "technologies": "[\"JSP\", \"JDBC\"]"
+    },
+    {
+      "name": "Student-Database-Application",
+      "description": "The Student Database Application is designed for university database administrators to efficiently manage student enrollments and balances. This application streamlines the process of student registration, course enrollments, and payment processing, ensuring an organized and effective management of student data.",
+      "gitUrl": "https://github.com/ChaoGlenXu/Student-Database-Application",
+      "technologies": "[\"JDBC\"]"
+    },
+    {
+      "name": "BankingSystem",
+      "description": "A Java-based OOPS project that simulates real-world banking operations like account creation, deposits, withdrawals, and balance checks with clean, modular design.",
+      "gitUrl": "https://github.com/Rajathacharya24/BankingSystem",
+      "technologies": "[\"JAVA_ENTERPRISE\"]"
+    },
+    {
+      "name": "PaymentService",
+      "description": "Java project: PaymentService",
+      "gitUrl": "https://github.com/CBD-WS22-23/PaymentService",
+      "technologies": "[\"JAVA_ENTERPRISE\"]"
+    },
+    {
+      "name": "Banking-Management",
+      "description": "A little application for banking management in java (Spring boot) and RMI sockets protocols",
+      "gitUrl": "https://github.com/mitandour/Banking-Management",
+      "technologies": "[\"SPRING\"]"
+    },
+    {
+      "name": "OnlineBankingSystem",
+      "description": "Java project: OnlineBankingSystem",
+      "gitUrl": "https://github.com/Sayan85/OnlineBankingSystem",
+      "technologies": "[\"JAVA_ENTERPRISE\"]"
+    },
+    {
+      "name": "Microfinance-Group-Loan-Management",
+      "description": "The Microfinance Group Loan Management System helps microfinance institutions manage group-based loans by tracking disbursements, monitoring group and individual repayments, and ensuring overall compliance with repayment schedules.",
+      "gitUrl": "https://github.com/Nikitha259/Microfinance-Group-Loan-Management",
+      "technologies": "[\"JAVA_ENTERPRISE\"]"
+    }
+  ],
+  "messages": [],
+  "stdout": "name\tdescription\tgitUrl\ttechnologies\ncore-banking-transaction-system\tA Spring Boot–based Core Banking Transaction System implementing JWT security, Kafka event streaming, and ACID-compliant transaction processing with audit logging and EOD batch jobs.\thttps://github.com/Ankitsoni8982/core-banking-transaction-system\t[\"JMS\", \"SPRING\", \"BATCH\", \"SECURITY\"]\nOnlineBanking\tJava project: OnlineBanking\thttps://github.com/vijayalakshmidega/OnlineBanking\t[\"JAVA_ENTERPRISE\"]\nElectricity-billing-system\tA robust Electricity Billing System built with Java Swing and MySQL. Features include admin/customer login, meter management, bill calculation, and payment processing simulation.\thttps://github.com/SurajMoreTech/Electricity-billing-system\t[\"JDBC\"]\nECommerce-New-PaymentGateway-Integrated-JSP-ORACLE_DB\tJava project: ECommerce-New-PaymentGateway-Integrated-JSP-ORACLE_DB\thttps://github.com/ashutosh61299/ECommerce-New-PaymentGateway-Integrated-JSP-ORACLE_DB\t[\"JSP\", \"JDBC\"]\nStudent-Database-Application\tThe Student Database Application is designed for university database administrators to efficiently manage student enrollments and balances. This application streamlines the process of student registration, course enrollments, and payment processing, ensuring an organized and effective management of student data.\thttps://github.com/ChaoGlenXu/Student-Database-Application\t[\"JDBC\"]\nBankingSystem\tA Java-based OOPS project that simulates real-world banking operations like account creation, deposits, withdrawals, and balance checks with clean, modular design.\thttps://github.com/Rajathacharya24/BankingSystem\t[\"JAVA_ENTERPRISE\"]\nPaymentService\tJava project: PaymentService\thttps://github.com/CBD-WS22-23/PaymentService\t[\"JAVA_ENTERPRISE\"]\nBanking-Management\tA little application for banking management in java (Spring boot) and RMI sockets protocols\thttps://github.com/mitandour/Banking-Management\t[\"SPRING\"]\nOnlineBankingSystem\tJava project: OnlineBankingSystem\thttps://github.com/Sayan85/OnlineBankingSystem\t[\"JAVA_ENTERPRISE\"]\nMicrofinance-Group-Loan-Management\tThe Microfinance Group Loan Management System helps microfinance institutions manage group-based loans by tracking disbursements, monitoring group and individual repayments, and ensuring overall compliance with repayment schedules.\thttps://github.com/Nikitha259/Microfinance-Group-Loan-Management\t[\"JAVA_ENTERPRISE\"]\n",
+  "stderr": "",
+  "execution_time_ms": 293
+}

@@ -1,0 +1,2 @@
+ALTER TABLE `compleo_sessions` MODIFY COLUMN `status` enum('uploaded','analyzed','waiting_choices','generated','error','missing_deps') NOT NULL DEFAULT 'uploaded';--> statement-breakpoint
+ALTER TABLE `compleo_sessions` ADD `missing_deps_data` json;

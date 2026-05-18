@@ -1,0 +1,65 @@
+{
+  "query": "SELECT id, name, description, status, technologies, fileCount, totalLines, gitUrl, gitProvider FROM projects ORDER BY id DESC LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 7MtqdpAHC3Gogvx.19563b0ba7fa --database ZuBzGQ3A9ameWxvz3cohMD --execute SELECT id, name, description, status, technologies, fileCount, totalLines, gitUrl, gitProvider FROM projects ORDER BY id DESC LIMIT 5;",
+  "rows": [
+    {
+      "id": "840001",
+      "name": "mise-disposition-bmcedirect",
+      "description": "Projet analysé via Agent IA (13 UC, 9 DTOs)",
+      "status": "active",
+      "technologies": "[\"JPA\", \"JDBC\", \"EJB_3X_STATELESS\", \"HIBERNATE\"]",
+      "fileCount": "110",
+      "totalLines": "12360",
+      "gitUrl": "NULL",
+      "gitProvider": "NULL"
+    },
+    {
+      "id": "810001",
+      "name": "interface-credit-jocker",
+      "description": "Projet analysé via Agent IA (16 UC, 9 DTOs)",
+      "status": "active",
+      "technologies": "[\"SOAP\"]",
+      "fileCount": "18",
+      "totalLines": "2198",
+      "gitUrl": "NULL",
+      "gitProvider": "NULL"
+    },
+    {
+      "id": "780002",
+      "name": "transfert-euro-bmce-direct",
+      "description": "Projet analysé via Agent IA (28 UC, 66 DTOs)",
+      "status": "active",
+      "technologies": "[\"JPA\", \"JDBC\", \"HIBERNATE\", \"JAX_RS\"]",
+      "fileCount": "213",
+      "totalLines": "17270",
+      "gitUrl": "NULL",
+      "gitProvider": "NULL"
+    },
+    {
+      "id": "780001",
+      "name": "commande-chequier",
+      "description": "Projet analysé via Agent IA (9 UC, 15 DTOs)",
+      "status": "active",
+      "technologies": "[\"JDBC\", \"SOAP\", \"HIBERNATE\", \"JPA\", \"EJB_3X_STATELESS\"]",
+      "fileCount": "42",
+      "totalLines": "4159",
+      "gitUrl": "NULL",
+      "gitProvider": "NULL"
+    },
+    {
+      "id": "750010",
+      "name": "student-mgmt",
+      "description": "Projet analysé via Agent IA (5 UC, 0 DTOs)",
+      "status": "active",
+      "technologies": "[\"EJB_3X_STATELESS\", \"HIBERNATE\", \"JPA\", \"SERVLET\"]",
+      "fileCount": "9",
+      "totalLines": "415",
+      "gitUrl": "NULL",
+      "gitProvider": "NULL"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tname\tdescription\tstatus\ttechnologies\tfileCount\ttotalLines\tgitUrl\tgitProvider\n840001\tmise-disposition-bmcedirect\tProjet analysé via Agent IA (13 UC, 9 DTOs)\tactive\t[\"JPA\", \"JDBC\", \"EJB_3X_STATELESS\", \"HIBERNATE\"]\t110\t12360\tNULL\tNULL\n810001\tinterface-credit-jocker\tProjet analysé via Agent IA (16 UC, 9 DTOs)\tactive\t[\"SOAP\"]\t18\t2198\tNULL\tNULL\n780002\ttransfert-euro-bmce-direct\tProjet analysé via Agent IA (28 UC, 66 DTOs)\tactive\t[\"JPA\", \"JDBC\", \"HIBERNATE\", \"JAX_RS\"]\t213\t17270\tNULL\tNULL\n780001\tcommande-chequier\tProjet analysé via Agent IA (9 UC, 15 DTOs)\tactive\t[\"JDBC\", \"SOAP\", \"HIBERNATE\", \"JPA\", \"EJB_3X_STATELESS\"]\t42\t4159\tNULL\tNULL\n750010\tstudent-mgmt\tProjet analysé via Agent IA (5 UC, 0 DTOs)\tactive\t[\"EJB_3X_STATELESS\", \"HIBERNATE\", \"JPA\", \"SERVLET\"]\t9\t415\tNULL\tNULL\n",
+  "stderr": "",
+  "execution_time_ms": 410
+}

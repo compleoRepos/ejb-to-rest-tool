@@ -1,0 +1,70 @@
+{
+  "query": "SELECT technologies, COUNT(*) as cnt FROM projects GROUP BY technologies ORDER BY cnt DESC LIMIT 15;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 7MtqdpAHC3Gogvx.19563b0ba7fa --database ZuBzGQ3A9ameWxvz3cohMD --execute SELECT technologies, COUNT(*) as cnt FROM projects GROUP BY technologies ORDER BY cnt DESC LIMIT 15;",
+  "rows": [
+    {
+      "technologies": "[\"JAVA_ENTERPRISE\"]",
+      "cnt": "52056"
+    },
+    {
+      "technologies": "[\"SPRING\"]",
+      "cnt": "9294"
+    },
+    {
+      "technologies": "[\"HIBERNATE\"]",
+      "cnt": "4884"
+    },
+    {
+      "technologies": "[\"JDBC\"]",
+      "cnt": "4056"
+    },
+    {
+      "technologies": "[\"MICROSERVICES\"]",
+      "cnt": "3194"
+    },
+    {
+      "technologies": "[\"SPRING\", \"MICROSERVICES\"]",
+      "cnt": "2285"
+    },
+    {
+      "technologies": "[\"SERVLET\"]",
+      "cnt": "1813"
+    },
+    {
+      "technologies": "[\"SPRING\", \"SECURITY\"]",
+      "cnt": "1378"
+    },
+    {
+      "technologies": "[\"JSP\"]",
+      "cnt": "1278"
+    },
+    {
+      "technologies": "[\"JPA\"]",
+      "cnt": "1221"
+    },
+    {
+      "technologies": "[\"JPA\", \"SPRING\"]",
+      "cnt": "1189"
+    },
+    {
+      "technologies": "[\"JAX_RS\"]",
+      "cnt": "951"
+    },
+    {
+      "technologies": "[\"JDBC\", \"SPRING\"]",
+      "cnt": "939"
+    },
+    {
+      "technologies": "[\"SPRING\", \"BATCH\"]",
+      "cnt": "896"
+    },
+    {
+      "technologies": "[\"JSF\"]",
+      "cnt": "885"
+    }
+  ],
+  "messages": [],
+  "stdout": "technologies\tcnt\n[\"JAVA_ENTERPRISE\"]\t52056\n[\"SPRING\"]\t9294\n[\"HIBERNATE\"]\t4884\n[\"JDBC\"]\t4056\n[\"MICROSERVICES\"]\t3194\n[\"SPRING\", \"MICROSERVICES\"]\t2285\n[\"SERVLET\"]\t1813\n[\"SPRING\", \"SECURITY\"]\t1378\n[\"JSP\"]\t1278\n[\"JPA\"]\t1221\n[\"JPA\", \"SPRING\"]\t1189\n[\"JAX_RS\"]\t951\n[\"JDBC\", \"SPRING\"]\t939\n[\"SPRING\", \"BATCH\"]\t896\n[\"JSF\"]\t885\n",
+  "stderr": "",
+  "execution_time_ms": 331
+}

@@ -1,0 +1,1914 @@
+<!DOCTYPE html>
+
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BMCEDirect — Workspace Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  /* Brand colors (extracted from app screenshot) */
+  --bg: #0A0E0C;
+  --bg-elevated: #0F1411;
+  --surface: #131814;
+  --surface-2: #181E1A;
+  --surface-3: #1E2521;
+  --border: #1F2622;
+  --border-soft: #161B17;
+  --text: #FAFAFA;
+  --text-soft: #B5BDB7;
+  --text-muted: #7A8278;
+  --text-faint: #4E544F;
+  --mint: #3FDEA1;
+  --mint-glow: rgba(63, 222, 161, 0.12);
+  --mint-soft: #5BE5B0;
+  --mint-deep: #2BA77A;
+  --yellow: #F4D03F;
+  --blue: #5DADE2;
+  --red: #E57373;
+  --amber: #F39C5C;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  scroll-behavior: smooth;
+  background: var(--bg);
+}
+
+body {
+  font-family: 'Geist', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  font-weight: 400;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "cv11", "tnum";
+  background-image:
+    radial-gradient(circle at 20% 0%, rgba(63, 222, 161, 0.04) 0%, transparent 50%),
+    radial-gradient(circle at 80% 60%, rgba(63, 222, 161, 0.02) 0%, transparent 50%);
+  background-attachment: fixed;
+}
+
+.mono {
+  font-family: 'Geist Mono', monospace;
+  font-feature-settings: "tnum";
+}
+
+main {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 32px;
+}
+
+/* === STATUS BAR === */
+.status-bar {
+  position: sticky;
+  top: 0;
+  background: rgba(10, 14, 12, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  z-index: 100;
+  padding: 12px 32px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  font-family: 'Geist Mono', monospace;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.status-bar .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mint);
+  box-shadow: 0 0 8px var(--mint-glow);
+  display: inline-block;
+}
+
+.status-cell { display: flex; gap: 8px; align-items: center; }
+
+.status-cell .label { color: var(--text-faint); }
+.status-cell .value { color: var(--text-soft); }
+
+/* === COVER === */
+.cover {
+  min-height: 95vh;
+  padding: 80px 32px 64px;
+  max-width: 1120px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+}
+
+.cover::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(63, 222, 161, 0.08) 0%, transparent 40%),
+    linear-gradient(180deg, transparent 0%, var(--bg) 90%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.cover-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 0 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  font-family: 'Geist Mono', monospace;
+  color: var(--mint);
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+.brand-name {
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.brand-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+}
+
+.brand-version {
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.confidential {
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--red);
+  text-transform: uppercase;
+}
+
+.cover-body {
+  padding: 80px 0 64px;
+}
+
+.cover-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Geist Mono', monospace;
+  font-size: 12px;
+  color: var(--mint);
+  margin-bottom: 32px;
+  padding: 6px 12px;
+  background: var(--mint-glow);
+  border: 1px solid rgba(63, 222, 161, 0.2);
+  border-radius: 6px;
+  letter-spacing: 0.02em;
+}
+
+.cover-eyebrow::before {
+  content: ">_";
+  color: var(--mint);
+  font-weight: 600;
+}
+
+h1.cover-title {
+  font-size: clamp(48px, 7vw, 88px);
+  font-weight: 700;
+  line-height: 0.96;
+  letter-spacing: -0.04em;
+  color: var(--text);
+  margin-bottom: 24px;
+  max-width: 900px;
+}
+
+h1.cover-title .accent {
+  color: var(--mint);
+  display: block;
+}
+
+.cover-subtitle {
+  font-size: 20px;
+  line-height: 1.5;
+  color: var(--text-soft);
+  max-width: 720px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.cover-meta {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-top: 56px;
+}
+
+.meta-cell {
+  background: var(--surface);
+  padding: 28px 24px;
+  transition: background 0.2s;
+}
+
+.meta-cell:hover { background: var(--surface-2); }
+
+.meta-cell .label {
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  letter-spacing: 0.06em;
+}
+
+.meta-cell .value {
+  font-size: 38px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text);
+  letter-spacing: -0.03em;
+}
+
+.meta-cell .value-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 8px;
+  font-family: 'Geist Mono', monospace;
+}
+
+.cover-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  color: var(--text-faint);
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+
+/* === SECTIONS === */
+section {
+  padding: 96px 0;
+  border-top: 1px solid var(--border);
+  position: relative;
+}
+
+.section-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'Geist Mono', monospace;
+  font-size: 12px;
+  color: var(--mint);
+  margin-bottom: 20px;
+  letter-spacing: 0.02em;
+}
+
+.section-eyebrow::before {
+  content: "";
+  width: 16px;
+  height: 1px;
+  background: var(--mint);
+}
+
+h2 {
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: var(--text);
+  margin-bottom: 20px;
+  max-width: 900px;
+}
+
+h2 .accent { color: var(--mint); }
+
+.lede {
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1.55;
+  color: var(--text-soft);
+  max-width: 720px;
+  margin-bottom: 48px;
+  letter-spacing: -0.01em;
+}
+
+h3 {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+
+h4 {
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+p {
+  margin-bottom: 14px;
+  color: var(--text-soft);
+  max-width: 720px;
+  font-size: 14px;
+}
+
+p.intro {
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+code, .code {
+  font-family: 'Geist Mono', monospace;
+  font-size: 0.9em;
+  color: var(--mint);
+  background: var(--surface);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+/* === FINDINGS === */
+.findings {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-top: 48px;
+}
+
+.finding {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.finding:hover {
+  border-color: var(--mint-deep);
+  background: var(--surface-2);
+}
+
+.finding::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  height: 40px;
+  background: var(--mint);
+  border-radius: 0 2px 2px 0;
+}
+
+.finding.critical::before { background: var(--red); }
+
+.finding-num {
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  color: var(--mint);
+  letter-spacing: 0.08em;
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.finding.critical .finding-num { color: var(--red); }
+
+.finding-tag {
+  font-family: 'Geist Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--mint-glow);
+  color: var(--mint);
+  border: 1px solid rgba(63, 222, 161, 0.2);
+}
+
+.finding.critical .finding-tag {
+  background: rgba(229, 115, 115, 0.1);
+  color: var(--red);
+  border-color: rgba(229, 115, 115, 0.2);
+}
+
+.finding h3 {
+  font-size: 19px;
+  margin-bottom: 12px;
+}
+
+.finding p {
+  font-size: 14px;
+  line-height: 1.6;
+  flex: 1;
+  margin-bottom: 0;
+  color: var(--text-soft);
+}
+
+/* === METRICS BAR === */
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 40px 0;
+}
+
+.metric {
+  background: var(--surface);
+  padding: 28px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: background 0.2s;
+}
+
+.metric:hover { background: var(--surface-2); }
+
+.metric-icon {
+  width: 20px;
+  height: 20px;
+  margin-bottom: 12px;
+  color: var(--mint);
+  opacity: 0.8;
+}
+
+.metric-value {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text);
+  letter-spacing: -0.03em;
+  font-feature-settings: "tnum";
+}
+
+.metric-label {
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* === DAG === */
+.dag-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 40px;
+  margin-top: 32px;
+  position: relative;
+  overflow: hidden;
+}
+
+.dag-container::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 0%, var(--mint-glow) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.dag-tier-label {
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-transform: uppercase;
+  position: relative;
+}
+
+.dag-tier-label .badge {
+  font-size: 10px;
+  padding: 4px 10px;
+  background: var(--mint-glow);
+  color: var(--mint);
+  border: 1px solid rgba(63, 222, 161, 0.2);
+  border-radius: 4px;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.dag-tier {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 32px;
+  position: relative;
+}
+
+.dag-tier-0 { grid-template-columns: repeat(4, 1fr); }
+.dag-tier-1 { 
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.dag-node {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  padding: 16px 14px;
+  border-radius: 8px;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.dag-node:hover {
+  border-color: var(--mint-deep);
+  background: var(--surface-2);
+  transform: translateY(-1px);
+}
+
+.dag-tier-0 .dag-node {
+  background: linear-gradient(180deg, rgba(63, 222, 161, 0.05) 0%, var(--surface) 100%);
+  border-color: rgba(63, 222, 161, 0.15);
+}
+
+.dag-node-name {
+  font-family: 'Geist Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 8px;
+  word-break: break-word;
+}
+
+.dag-tier-0 .dag-node-name {
+  color: var(--mint-soft);
+}
+
+.dag-node-role {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.dag-node-stat {
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  color: var(--mint);
+  letter-spacing: 0.04em;
+}
+
+.dag-tier-1 .dag-node-name { font-size: 11px; }
+.dag-tier-1 .dag-node-stat { font-size: 9px; color: var(--text-muted); }
+
+.dag-arrow {
+  text-align: center;
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: -8px 0 24px;
+  letter-spacing: 0.08em;
+}
+
+.dag-arrow .icon {
+  color: var(--mint);
+  font-size: 18px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* === FRAMEWORKS === */
+.frameworks-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-top: 48px;
+}
+
+.framework {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+  position: relative;
+  transition: all 0.2s;
+  overflow: hidden;
+}
+
+.framework:hover {
+  border-color: var(--mint-deep);
+  background: var(--surface-2);
+}
+
+.framework::before {
+  content: "";
+  position: absolute;
+  top: -50%;
+  right: -20%;
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(circle, var(--mint-glow) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.framework:hover::before { opacity: 1; }
+
+.framework-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+
+.framework-package {
+  font-family: 'Geist Mono', monospace;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--mint);
+  margin-bottom: 6px;
+}
+
+.framework-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.framework-imports {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  text-align: right;
+}
+
+.framework-imports small {
+  display: block;
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+.framework-role {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-soft);
+  margin-bottom: 20px;
+}
+
+.framework-target {
+  font-size: 13px;
+  padding: 14px 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--mint);
+  border-radius: 6px;
+  margin-top: 16px;
+  position: relative;
+}
+
+.framework-target .label {
+  font-family: 'Geist Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mint);
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.framework-target .value {
+  font-family: 'Geist Mono', monospace;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.framework-classes {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.framework-classes h4 {
+  font-size: 10px;
+  margin-bottom: 12px;
+}
+
+.class-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.class-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: 'Geist Mono', monospace;
+  font-size: 12px;
+  color: var(--text-soft);
+  padding: 4px 0;
+}
+
+.class-list .count {
+  color: var(--mint);
+  font-weight: 600;
+  font-feature-settings: "tnum";
+}
+
+/* === CALL FLOW === */
+.callflow {
+  margin-top: 32px;
+  padding: 28px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-family: 'Geist Mono', monospace;
+  font-size: 12.5px;
+  overflow-x: auto;
+  position: relative;
+}
+
+.callflow::before {
+  content: "▸  call-flow.trace";
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  letter-spacing: 0.04em;
+}
+
+.callflow-line {
+  display: flex;
+  align-items: center;
+  padding: 6px 0;
+  gap: 12px;
+  color: var(--text-soft);
+}
+
+.callflow-line .arrow {
+  color: var(--mint);
+  font-weight: 700;
+}
+
+.callflow-line .actor {
+  color: var(--text);
+  font-weight: 500;
+  min-width: 130px;
+}
+
+.callflow-line .target {
+  color: var(--mint);
+  font-weight: 500;
+}
+
+.callflow-comment {
+  color: var(--text-muted);
+  padding: 2px 0 6px 142px;
+  font-size: 11px;
+  font-style: italic;
+}
+
+.callflow-comment::before {
+  content: "// ";
+  color: var(--text-faint);
+}
+
+/* === MIGRATION PLAN === */
+.timeline {
+  margin-top: 48px;
+}
+
+.phase {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 36px;
+  margin-bottom: 20px;
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 36px;
+  position: relative;
+  transition: all 0.2s;
+}
+
+.phase:hover {
+  border-color: var(--mint-deep);
+}
+
+.phase-marker {
+  border-right: 1px solid var(--border);
+  padding-right: 28px;
+}
+
+.phase-num {
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mint);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.phase-duration {
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.phase-duration small {
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-left: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.phase-content h3 {
+  font-size: 22px;
+  margin-bottom: 12px;
+}
+
+.phase-content .lede {
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 24px;
+  max-width: none;
+  color: var(--text-soft);
+}
+
+.phase-items {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.phase-item {
+  font-family: 'Geist Mono', monospace;
+  font-size: 11.5px;
+  padding: 10px 14px;
+  background: var(--bg-elevated);
+  border-left: 2px solid var(--mint-deep);
+  border-radius: 4px;
+  color: var(--text-soft);
+}
+
+.phase-rationale {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  padding: 16px 0 0;
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+  font-style: italic;
+}
+
+/* === PROJECTS TABLE === */
+.projects-grid {
+  margin-top: 40px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.projects-header {
+  display: grid;
+  grid-template-columns: 56px 1fr 140px 110px 90px 100px;
+  padding: 16px 24px;
+  gap: 16px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.projects-header > div:nth-child(4),
+.projects-header > div:nth-child(5),
+.projects-header > div:nth-child(6) { text-align: right; }
+
+.project-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 140px 110px 90px 100px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-soft);
+  align-items: center;
+  gap: 16px;
+  transition: background 0.15s;
+}
+
+.project-row:last-child { border-bottom: none; }
+.project-row:hover { background: var(--surface-2); }
+
+.project-num {
+  font-family: 'Geist Mono', monospace;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+.project-name {
+  font-family: 'Geist Mono', monospace;
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.project-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.project-domain {
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mint);
+  font-weight: 600;
+}
+
+.project-metric {
+  font-size: 16px;
+  color: var(--text);
+  font-weight: 600;
+  text-align: right;
+  font-feature-settings: "tnum";
+  letter-spacing: -0.02em;
+}
+
+.project-metric small {
+  font-family: 'Geist Mono', monospace;
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  display: block;
+  margin-top: 2px;
+}
+
+.project-status { text-align: right; }
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid;
+}
+
+.status-pill::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.status-pill.ok { background: var(--mint-glow); color: var(--mint); border-color: rgba(63, 222, 161, 0.2); }
+.status-pill.ok::before { background: var(--mint); box-shadow: 0 0 6px var(--mint); }
+.status-pill.warn { background: rgba(244, 208, 63, 0.08); color: var(--yellow); border-color: rgba(244, 208, 63, 0.2); }
+.status-pill.warn::before { background: var(--yellow); }
+.status-pill.crit { background: rgba(229, 115, 115, 0.08); color: var(--red); border-color: rgba(229, 115, 115, 0.2); }
+.status-pill.crit::before { background: var(--red); }
+
+/* === RISKS === */
+.risks-list { margin-top: 48px; }
+
+.risk {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px;
+  margin-bottom: 16px;
+  display: grid;
+  grid-template-columns: 80px 1fr 160px;
+  gap: 28px;
+  align-items: start;
+  transition: all 0.2s;
+}
+
+.risk:hover { border-color: var(--mint-deep); }
+
+.risk-level {
+  font-family: 'Geist Mono', monospace;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  padding: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.risk-level.high { color: var(--red); border-color: rgba(229, 115, 115, 0.3); }
+.risk-level.med { color: var(--yellow); border-color: rgba(244, 208, 63, 0.3); }
+.risk-level.low { color: var(--mint); border-color: rgba(63, 222, 161, 0.3); }
+
+.risk-content h3 {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+.risk-content p {
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: none;
+  margin-bottom: 14px;
+  color: var(--text-soft);
+}
+
+.risk-mitigation {
+  font-size: 13px;
+  padding: 12px 14px;
+  background: var(--bg-elevated);
+  border-left: 2px solid var(--mint);
+  border-radius: 4px;
+  color: var(--text-soft);
+  line-height: 1.6;
+}
+
+.risk-mitigation strong { color: var(--mint); font-weight: 600; }
+
+.risk-meta { text-align: right; }
+
+.risk-meta .label {
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.risk-meta .value {
+  font-size: 16px;
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* === GLOSSARY === */
+.glossary {
+  margin-top: 40px;
+  columns: 2;
+  column-gap: 32px;
+}
+
+.glossary-item {
+  break-inside: avoid;
+  margin-bottom: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 18px;
+}
+
+.glossary-term {
+  font-family: 'Geist Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mint);
+  margin-bottom: 8px;
+}
+
+.glossary-def {
+  font-size: 13px;
+  color: var(--text-soft);
+  line-height: 1.55;
+}
+
+/* === FOOTER === */
+footer {
+  border-top: 1px solid var(--border);
+  margin-top: 64px;
+  padding: 48px 32px 64px;
+  max-width: 1120px;
+  margin-left: auto;
+  margin-right: auto;
+  display: flex;
+  justify-content: space-between;
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+footer .brand-mark { font-size: 14px; color: var(--mint); }
+
+/* === RESPONSIVE === */
+@media (max-width: 900px) {
+  main, .cover, footer { padding-left: 20px; padding-right: 20px; }
+  .findings { grid-template-columns: 1fr; }
+  .frameworks-grid { grid-template-columns: 1fr; }
+  .cover-meta { grid-template-columns: repeat(2, 1fr); }
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+  .phase { grid-template-columns: 1fr; }
+  .phase-marker { border-right: none; border-bottom: 1px solid var(--border); padding-bottom: 20px; padding-right: 0; }
+  .project-row, .projects-header { grid-template-columns: 32px 1fr 80px; row-gap: 4px; gap: 12px; padding: 16px; }
+  .projects-header > div:nth-child(n+4),
+  .project-row > div:nth-child(n+4) { grid-column: span 3; text-align: left; }
+  .glossary { columns: 1; }
+  .risk { grid-template-columns: 1fr; gap: 16px; }
+  .risk-level { display: inline-block; padding: 8px 16px; }
+  h2 { font-size: 32px; }
+  h1.cover-title { font-size: 48px; }
+  .status-bar { flex-wrap: wrap; gap: 12px; padding: 10px 20px; }
+}
+
+/* === PRINT === */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 10px;
+    background-image: none !important;
+  }
+  .status-bar, .cover-footer .mono::after { display: none; }
+  section { padding: 24px 0; page-break-inside: avoid; }
+  .cover { min-height: auto; }
+  .finding, .framework, .phase, .risk { page-break-inside: avoid; }
+  /* Note: pour print exécutif, recommander variant light theme via flag */
+}
+</style>
+
+</head>
+<body>
+
+<!-- ============ STATUS BAR (rappel app) ============ -->
+
+<div class="status-bar">
+  <div class="status-cell"><span class="dot"></span><span class="value">v13.1</span></div>
+  <div class="status-cell"><span class="label">LLM</span><span class="value">OK</span></div>
+  <div class="status-cell"><span class="label">workspace</span><span class="value">bmce_direct</span></div>
+  <div class="status-cell"><span class="label">analyzed</span><span class="value">12.05.2026 20:11</span></div>
+</div>
+
+<!-- ============ COVER ============ -->
+
+<div class="cover">
+  <div class="cover-header">
+    <div class="brand">
+      <span class="brand-mark">&gt;_</span>
+      <span class="brand-name">COMPLEO</span>
+      <span class="brand-divider"></span>
+      <span class="brand-version">workspace-audit</span>
+    </div>
+    <div class="confidential">● Confidentiel</div>
+  </div>
+
+  <div class="cover-body">
+    <div class="cover-eyebrow">workspace.analyze --target=bmce-direct</div>
+    <h1 class="cover-title">BMCEDirect<br><span class="accent">Banking Portfolio.</span></h1>
+    <p class="cover-subtitle">Cartographie applicative, plan de migration par tiers topologiques, et stratégie de transformation Spring Boot pour 19 services bancaires en production.</p>
+  </div>
+
+  <div class="cover-meta">
+    <div class="meta-cell">
+      <div class="label">Périmètre</div>
+      <div class="value">19</div>
+      <div class="value-sub">services BMCEDirect</div>
+    </div>
+    <div class="meta-cell">
+      <div class="label">Code analysé</div>
+      <div class="value">1 299</div>
+      <div class="value-sub">fichiers · ~98K LOC</div>
+    </div>
+    <div class="meta-cell">
+      <div class="label">Frameworks</div>
+      <div class="value">4</div>
+      <div class="value-sub">couches transverses</div>
+    </div>
+    <div class="meta-cell">
+      <div class="label">Tiers migration</div>
+      <div class="value">2</div>
+      <div class="value-sub">parallélisable T1</div>
+    </div>
+  </div>
+
+  <div class="cover-footer">
+    <span>Mai 2026 · Mission CGI Canada × BMCE Bank</span>
+    <span>Ref. WSA-2026-05-12</span>
+  </div>
+</div>
+
+<main>
+
+<!-- ============ EXECUTIVE SUMMARY ============ -->
+
+<section id="executive">
+  <div class="section-eyebrow">§ 01 — Synthèse exécutive</div>
+  <h2>Une plateforme bancaire <span class="accent">en attente</span> de sa modernisation.</h2>
+  <p class="lede">Les 19 services BMCEDirect partagent une architecture EAI cohérente, structurée autour de quatre frameworks propriétaires. Leur modernisation peut être conduite en deux temps, avec un point de bascule technique clairement identifié.</p>
+
+  <div class="findings">
+    <div class="finding">
+      <div class="finding-num">FINDING/01 <span class="finding-tag">Atout stratégique</span></div>
+      <h3>Cohérence architecturale forte</h3>
+      <p>Les 19 services suivent un même pattern : EJB Stateless · UseCase pattern (BaseUseCase, @UseCase) · Envelope EAI · ValueObject. Cette homogénéité est un atout — la migration de l'un éclaire la migration des autres.</p>
+    </div>
+
+```
+<div class="finding">
+  <div class="finding-num">FINDING/02 <span class="finding-tag">Tier 0 prioritaire</span></div>
+  <h3>Quatre frameworks à migrer en priorité</h3>
+  <p>Les packages <code>ma.eai.commons</code>, <code>ma.eai.ingdev.fwk</code>, <code>ma.eai.midw</code> et <code>ma.eai.boa.xbanking</code> concentrent 1 411 imports cumulés. Leur migration en premier déverrouille les 19 services.</p>
+</div>
+
+<div class="finding">
+  <div class="finding-num">FINDING/03 <span class="finding-tag">Parallélisable</span></div>
+  <h3>Services métier parallélisables</h3>
+  <p>Une fois les frameworks portés, les 19 services sont indépendants entre eux — aucune dépendance horizontale détectée. Trois équipes peuvent migrer en parallèle six à sept services chacune en 12-16 semaines.</p>
+</div>
+
+<div class="finding critical">
+  <div class="finding-num">FINDING/04 <span class="finding-tag">Point d'attention</span></div>
+  <h3>Dépendance forte à <code>Envelope</code></h3>
+  <p>176 imports répartis sur l'ensemble du portefeuille. Toute évolution du wrapper request/response EAI impactera 18 services sur 19. La migration de cette classe doit être traitée comme un événement de plateforme, pas comme un fix local.</p>
+</div>
+```
+
+  </div>
+</section>
+
+<!-- ============ METRICS ============ -->
+
+<section id="metrics">
+  <div class="section-eyebrow">§ 02 — Métriques workspace</div>
+  <h2>L'empreinte technique <span class="accent">en un coup d'œil.</span></h2>
+
+  <div class="metrics">
+    <div class="metric">
+      <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      <div class="metric-value">1 299</div>
+      <div class="metric-label">Fichiers Java</div>
+    </div>
+    <div class="metric">
+      <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      <div class="metric-value">~98K</div>
+      <div class="metric-label">Lignes de code</div>
+    </div>
+    <div class="metric">
+      <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+      <div class="metric-value">748</div>
+      <div class="metric-label">Classes framework</div>
+    </div>
+    <div class="metric">
+      <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18"/></svg>
+      <div class="metric-value">1 411</div>
+      <div class="metric-label">Imports ma.eai.*</div>
+    </div>
+    <div class="metric">
+      <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><circle cx="6" cy="18" r="2"/><path d="M8 6h8M8 18h8M6 8v8"/></svg>
+      <div class="metric-value">29</div>
+      <div class="metric-label">Arêtes DAG</div>
+    </div>
+  </div>
+
+  <p class="intro">Le workspace présente une distribution caractéristique : <strong style="color: var(--text);">une concentration forte sur 10 classes critiques</strong> du framework EAI (<code>Envelope</code>, <code>EaiLog</code>, <code>ValueObject</code>, <code>Log</code>, <code>Parser</code>...) qui couvrent à elles seules <strong style="color: var(--mint);">~75% des imports problématiques</strong> en compilation isolée. C'est le 80/20 qui détermine la stratégie de stub library transitoire.</p>
+</section>
+
+<!-- ============ DAG ============ -->
+
+<section id="architecture">
+  <div class="section-eyebrow">§ 03 — Cartographie des dépendances</div>
+  <h2>Graphe orienté <span class="accent">par tiers de migration.</span></h2>
+  <p class="lede">Le graphe de dépendances cross-projet est <strong style="color: var(--text);">acyclique et stratifié</strong>. Les frameworks transverses forment le Tier 0 ; les 19 services métier constituent le Tier 1, parallélisables entre eux car n'ayant aucune dépendance mutuelle directe.</p>
+
+  <div class="dag-container">
+    <div class="dag-tier-label">
+      <span class="badge">Tier 0</span>
+      <span>Frameworks transverses — à migrer en premier</span>
+    </div>
+
+```
+<div class="dag-tier dag-tier-0">
+  <div class="dag-node">
+    <div class="dag-node-name">ma.eai.commons</div>
+    <div class="dag-node-role">Wrapper EAI, parsing, utilities</div>
+    <div class="dag-node-stat">360 imports</div>
+  </div>
+  <div class="dag-node">
+    <div class="dag-node-name">ma.eai.ingdev.fwk</div>
+    <div class="dag-node-role">UseCase pattern, transactions</div>
+    <div class="dag-node-stat">270 imports</div>
+  </div>
+  <div class="dag-node">
+    <div class="dag-node-name">ma.eai.midw</div>
+    <div class="dag-node-role">Middleware, services synchrones</div>
+    <div class="dag-node-stat">210 imports</div>
+  </div>
+  <div class="dag-node">
+    <div class="dag-node-name">ma.eai.boa.xbanking</div>
+    <div class="dag-node-role">Framework métier xBanking</div>
+    <div class="dag-node-stat">573 imports</div>
+  </div>
+</div>
+
+<div class="dag-arrow">
+  <span class="icon">↓</span>
+  utilisés par
+</div>
+
+<div class="dag-tier-label">
+  <span class="badge" style="background: var(--surface); color: var(--text-muted); border-color: var(--border);">Tier 1</span>
+  <span>Services métier — parallélisables</span>
+</div>
+
+<div class="dag-tier dag-tier-1">
+  <div class="dag-node"><div class="dag-node-name">activation-carte</div><div class="dag-node-stat">35 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">avis-opere</div><div class="dag-node-stat">64 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">commande-chequier</div><div class="dag-node-stat">41 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">coordonnees-3dsecure</div><div class="dag-node-stat">8 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">demande-dotation</div><div class="dag-node-stat">13 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">interface-credit-jocker</div><div class="dag-node-stat">17 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">interface-send-sms</div><div class="dag-node-stat">9 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">mise-disposition</div><div class="dag-node-stat">109 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">operation-avenir</div><div class="dag-node-stat">67 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">opposition-carte</div><div class="dag-node-stat">22 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">produits-epargne</div><div class="dag-node-stat">176 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">push-notification</div><div class="dag-node-stat">39 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">releve-carte</div><div class="dag-node-stat">15 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">souscription-assistance</div><div class="dag-node-stat">128 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">souscription-opv</div><div class="dag-node-stat">112 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">tockenisation-carte</div><div class="dag-node-stat">60 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">transfert-euro</div><div class="dag-node-stat">212 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">vente-distance-carte</div><div class="dag-node-stat">102 fichiers</div></div>
+  <div class="dag-node"><div class="dag-node-name">virement-permanent</div><div class="dag-node-stat">70 fichiers</div></div>
+</div>
+```
+
+  </div>
+
+  <p class="intro" style="margin-top: 32px;"><em style="color: var(--text-muted);">Lecture :</em> chaque service du Tier 1 dépend directement de Tier 0, jamais d'un autre service du Tier 1. Cette propriété garantit la <strong style="color: var(--mint);">parallélisation totale</strong> de la phase 2 du programme (équipes simultanées sans réconciliation).</p>
+</section>
+
+<!-- ============ FRAMEWORKS ============ -->
+
+<section id="frameworks">
+  <div class="section-eyebrow">§ 04 — Analyse des frameworks</div>
+  <h2>Quatre couches transverses, <span class="accent">quatre cibles de migration.</span></h2>
+  <p class="lede">Chaque framework remplit un rôle métier distinct. Leur migration nécessite des cibles Spring Boot adaptées à leur fonction, pas une simple translation 1-pour-1.</p>
+
+  <div class="frameworks-grid">
+    <div class="framework">
+      <div class="framework-header">
+        <div>
+          <div class="framework-package">ma.eai.commons</div>
+          <div class="framework-title">Wrapper EAI · Parsing · Utilities</div>
+        </div>
+        <div class="framework-imports">360<small>imports</small></div>
+      </div>
+      <div class="framework-role">Couche commons partagée entre tous les services. Centre névralgique du protocole EAI : <strong style="color: var(--text);">Envelope</strong> (request/response wrapper utilisé 176 fois) sérialise les messages échangés entre services. <strong style="color: var(--text);">Parser</strong> (109 imports) opère sur ces enveloppes pour extraire les payloads métier. <strong style="color: var(--text);">ParsingException</strong> (67) signale les anomalies de format.</div>
+      <div class="framework-target">
+        <span class="label">Cible de migration recommandée</span>
+        <span class="value">nexa-commons</span> — DTO Spring + Jackson + Bean Validation
+      </div>
+      <div class="framework-classes">
+        <h4>Top 5 classes</h4>
+        <ul class="class-list">
+          <li><span>Envelope</span><span class="count">176</span></li>
+          <li><span>Parser</span><span class="count">109</span></li>
+          <li><span>ParsingException</span><span class="count">67</span></li>
+          <li><span>UtilString</span><span class="count">18</span></li>
+          <li><span>Constants</span><span class="count">9</span></li>
+        </ul>
+      </div>
+    </div>
+
+```
+<div class="framework">
+  <div class="framework-header">
+    <div>
+      <div class="framework-package">ma.eai.ingdev.fwk</div>
+      <div class="framework-title">UseCase Pattern · Transactions</div>
+    </div>
+    <div class="framework-imports">270<small>imports</small></div>
+  </div>
+  <div class="framework-role">Framework structurant pour la logique applicative. <strong style="color: var(--text);">BaseUseCase</strong> (42 imports) et l'annotation <strong style="color: var(--text);">@UseCase</strong> (42) implémentent un pattern de cas d'usage standardisé. <strong style="color: var(--text);">ValueObject</strong> (132) est la classe de base de tous les transferts de données métier. <strong style="color: var(--text);">FwkRollbackException</strong> (45) et <strong style="color: var(--text);">@ContinueOrStartTransaction</strong> (22) pilotent le contrôle transactionnel.</div>
+  <div class="framework-target">
+    <span class="label">Cible de migration recommandée</span>
+    <span class="value">nexa-fwk</span> — @Service Spring + @Transactional + AOP
+  </div>
+  <div class="framework-classes">
+    <h4>Top 5 classes</h4>
+    <ul class="class-list">
+      <li><span>EaiLog</span><span class="count">152</span></li>
+      <li><span>ValueObject</span><span class="count">132</span></li>
+      <li><span>FwkRollbackException</span><span class="count">45</span></li>
+      <li><span>BaseUseCase</span><span class="count">42</span></li>
+      <li><span>@UseCase</span><span class="count">42</span></li>
+    </ul>
+  </div>
+</div>
+
+<div class="framework">
+  <div class="framework-header">
+    <div>
+      <div class="framework-package">ma.eai.midw</div>
+      <div class="framework-title">Middleware · Connecteurs</div>
+    </div>
+    <div class="framework-imports">210<small>imports</small></div>
+  </div>
+  <div class="framework-role">Couche d'intégration vers les systèmes back-office. <strong style="color: var(--text);">Log</strong> (127) — second logger middleware, distinct d'EaiLog. <strong style="color: var(--text);">Services</strong> (74) et <strong style="color: var(--text);">SynchroneService</strong> (72) implémentent les appels synchrones vers les SI cœur (CBS, comptabilité, Swift, Monétique). Sensible aux latences réseau et aux SLA back-office.</div>
+  <div class="framework-target">
+    <span class="label">Cible de migration recommandée</span>
+    <span class="value">nexa-midw</span> — OpenFeign + Resilience4j + circuit breakers
+  </div>
+  <div class="framework-classes">
+    <h4>Top 5 classes</h4>
+    <ul class="class-list">
+      <li><span>Log</span><span class="count">127</span></li>
+      <li><span>Services</span><span class="count">74</span></li>
+      <li><span>SynchroneService</span><span class="count">72</span></li>
+      <li><span>Connector*</span><span class="count">~25</span></li>
+      <li><span>WriteFlux</span><span class="count">35</span></li>
+    </ul>
+  </div>
+</div>
+
+<div class="framework">
+  <div class="framework-header">
+    <div>
+      <div class="framework-package">ma.eai.boa.xbanking</div>
+      <div class="framework-title">Framework Métier xBanking</div>
+    </div>
+    <div class="framework-imports">573<small>imports</small></div>
+  </div>
+  <div class="framework-role">Le framework le plus volumineux : couche métier spécifique au domaine bancaire (cartes, virements, épargne, OPV). Distribué en sous-packages : <code>vo</code> (Value Objects métier, 97), <code>dto</code> (DTOs domain, 85), <code>service</code>, <code>entities</code>, <code>utils</code>. À traiter en plusieurs lots correspondant aux familles fonctionnelles.</div>
+  <div class="framework-target">
+    <span class="label">Cible de migration recommandée</span>
+    <span class="value">nexa-xbanking-*</span> — Modules Spring par domaine métier
+  </div>
+  <div class="framework-classes">
+    <h4>Top 5 classes</h4>
+    <ul class="class-list">
+      <li><span>utils.Constants</span><span class="count">94</span></li>
+      <li><span>util.WriteFlux</span><span class="count">35</span></li>
+      <li><span>util.Constants</span><span class="count">35</span></li>
+      <li><span>utils.Wording</span><span class="count">30</span></li>
+      <li><span>utils.CommonFunction</span><span class="count">30</span></li>
+    </ul>
+  </div>
+</div>
+```
+
+  </div>
+</section>
+
+<!-- ============ CALL FLOW ============ -->
+
+<section id="callflow">
+  <div class="section-eyebrow">§ 05 — Pattern d'appels typique</div>
+  <h2>Comment une requête <span class="accent">traverse la pile</span>.</h2>
+  <p class="lede">Reconstitution du pattern d'appels standard observé dans les 19 services. Comprendre ce flux est essentiel pour modéliser la transformation Spring sans rupture fonctionnelle.</p>
+
+  <div class="callflow">
+    <div class="callflow-line"><span class="actor">Client</span><span class="arrow">→</span><span class="target">POST /service/bmcedirect</span></div>
+    <div class="callflow-comment">Requête XML/JSON wrappée selon le contrat EAI</div>
+
+```
+<div class="callflow-line"><span class="actor">XbankingServlet</span><span class="arrow">→</span><span class="target">Parser.parse(req)</span></div>
+<div class="callflow-comment">Extraction du payload depuis l'Envelope d'entrée</div>
+
+<div class="callflow-line"><span class="actor">Parser</span><span class="arrow">→</span><span class="target">Envelope envIn</span></div>
+<div class="callflow-comment">Construction du wrapper request, en mémoire</div>
+
+<div class="callflow-line"><span class="actor">XbankingService</span><span class="arrow">→</span><span class="target">BaseUseCase.run(envIn, envOut)</span></div>
+<div class="callflow-comment">Dispatch vers le UseCase annoté @UseCase</div>
+
+<div class="callflow-line"><span class="actor">UseCase Impl</span><span class="arrow">→</span><span class="target">EaiLog.info("traceId=...")</span></div>
+<div class="callflow-comment">Trace d'audit en début de processing</div>
+
+<div class="callflow-line"><span class="actor">UseCase Impl</span><span class="arrow">→</span><span class="target">SynchroneService.call("CBS_OP")</span></div>
+<div class="callflow-comment">Appel synchrone au back-office via middleware</div>
+
+<div class="callflow-line"><span class="actor">UseCase Impl</span><span class="arrow">→</span><span class="target">Envelope envOut</span></div>
+<div class="callflow-comment">Construction de la réponse, sérialisation Parser.format</div>
+
+<div class="callflow-line"><span class="actor">Erreur métier</span><span class="arrow">→</span><span class="target">throw FwkRollbackException</span></div>
+<div class="callflow-comment">Rollback automatique sous @ContinueOrStartTransaction</div>
+```
+
+  </div>
+
+  <p class="intro" style="margin-top: 32px;"><strong style="color: var(--text);">Implication migration :</strong> chaque maillon a une cible Spring naturelle — Servlet → <code>@RestController</code>, Parser → Jackson, BaseUseCase → <code>@Service</code>, SynchroneService → OpenFeign, FwkRollbackException → <code>@Transactional(rollbackFor)</code>. Le mapping est <strong style="color: var(--mint);">direct et reproductible</strong>.</p>
+</section>
+
+<!-- ============ MIGRATION PLAN ============ -->
+
+<section id="plan">
+  <div class="section-eyebrow">§ 06 — Plan de migration</div>
+  <h2>Deux phases, <span class="accent">une trajectoire claire.</span></h2>
+
+  <div class="timeline">
+    <div class="phase">
+      <div class="phase-marker">
+        <div class="phase-num">▸ Phase I</div>
+        <div class="phase-duration">8-12<small>sem.</small></div>
+      </div>
+      <div class="phase-content">
+        <h3>Migration des frameworks transverses (Tier 0)</h3>
+        <p class="lede">Porter les 4 frameworks <code>ma.eai.*</code> en modules Spring Boot 3 indépendants. Chaque module est publié comme artefact Maven (groupId <code>com.nexa.bmce</code>) avec un contrat de compatibilité documenté.</p>
+        <div class="phase-items">
+          <div class="phase-item">nexa-commons (Envelope, Parser, utilities)</div>
+          <div class="phase-item">nexa-fwk (UseCase, ValueObject, transactions)</div>
+          <div class="phase-item">nexa-midw (connecteurs synchrones)</div>
+          <div class="phase-item">nexa-xbanking-* (modules métier)</div>
+        </div>
+        <p class="phase-rationale">Migration séquentielle : <em style="color: var(--mint);">commons → fwk → midw → xbanking</em>. Chaque module produit des tests d'API qui serviront de contrats pour la Phase II. Une équipe socle de 3-4 ingénieurs senior.</p>
+      </div>
+    </div>
+
+```
+<div class="phase">
+  <div class="phase-marker">
+    <div class="phase-num">▸ Phase II</div>
+    <div class="phase-duration">12-16<small>sem.</small></div>
+  </div>
+  <div class="phase-content">
+    <h3>Migration des 19 services métier (Tier 1)</h3>
+    <p class="lede">Les 19 services BMCEDirect sont migrés en parallèle par plusieurs équipes. Chaque service consomme les modules <code>com.nexa.bmce.*</code> de la Phase I — la cohérence est garantie automatiquement par le MigrationRegistry de COMPLEO.</p>
+    <div class="phase-items">
+      <div class="phase-item">Vague 1 : services petits (≤30 fichiers) — 6 services</div>
+      <div class="phase-item">Vague 2 : services moyens (30-100) — 7 services</div>
+      <div class="phase-item">Vague 3 : services gros (>100) — 6 services</div>
+      <div class="phase-item">Tests d'intégration end-to-end par vague</div>
+    </div>
+    <p class="phase-rationale">Aucune dépendance horizontale entre services Tier 1 — le parallélisme est total. 3 équipes de 4-5 ingénieurs migrent 6-7 services chacune. COMPLEO automatise <strong style="color: var(--mint);">70-85% du travail mécanique</strong> ; les équipes se concentrent sur la logique métier et les tests.</p>
+  </div>
+</div>
+```
+
+  </div>
+</section>
+
+<!-- ============ PROJECTS ============ -->
+
+<section id="projects">
+  <div class="section-eyebrow">§ 07 — Inventaire des services métier</div>
+  <h2>Les <span class="accent">19 services</span> du portefeuille.</h2>
+  <p class="lede">Chaque service correspond à une fonction métier identifiée. Le classement par taille croissante donne une vue naturelle de l'effort de migration.</p>
+
+  <div class="projects-grid">
+    <div class="projects-header">
+      <div>#</div><div>Service</div><div>Domaine</div><div>LOC</div><div>Fichiers</div><div>Taille</div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">01</div>
+      <div><div class="project-name">coordonnees-3dsecure-bmcedirect</div><div class="project-desc">Mise à jour coordonnées 3D Secure (paiements en ligne)</div></div>
+      <div class="project-domain">Sécurité Paiement</div>
+      <div class="project-metric">1 072<small>LOC</small></div>
+      <div class="project-metric">8<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill ok">Petit</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">02</div>
+      <div><div class="project-name">interface-send-sms</div><div class="project-desc">Passerelle d'envoi SMS transactionnels</div></div>
+      <div class="project-domain">Notification</div>
+      <div class="project-metric">560<small>LOC</small></div>
+      <div class="project-metric">9<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill ok">Petit</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">03</div>
+      <div><div class="project-name">demande-dotation</div><div class="project-desc">Demande d'approvisionnement DAB / agence</div></div>
+      <div class="project-domain">Trésorerie</div>
+      <div class="project-metric">3 028<small>LOC</small></div>
+      <div class="project-metric">13<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill ok">Petit</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">04</div>
+      <div><div class="project-name">releve-carte-bmcedirect</div><div class="project-desc">Génération de relevés de carte bancaire</div></div>
+      <div class="project-domain">Reporting</div>
+      <div class="project-metric">2 058<small>LOC</small></div>
+      <div class="project-metric">15<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill ok">Petit</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">05</div>
+      <div><div class="project-name">interface-credit-jocker</div><div class="project-desc">Interface vers système de crédit Jocker</div></div>
+      <div class="project-domain">Crédit</div>
+      <div class="project-metric">2 158<small>LOC</small></div>
+      <div class="project-metric">17<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill ok">Petit</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">06</div>
+      <div><div class="project-name">opposition-carte-bmcedirect</div><div class="project-desc">Mise en opposition de carte bancaire</div></div>
+      <div class="project-domain">Sécurité</div>
+      <div class="project-metric">2 523<small>LOC</small></div>
+      <div class="project-metric">22<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill ok">Petit</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">07</div>
+      <div><div class="project-name">activation-carte-bmcedirect</div><div class="project-desc">Activation de carte bancaire neuve</div></div>
+      <div class="project-domain">Cycle Carte</div>
+      <div class="project-metric">2 874<small>LOC</small></div>
+      <div class="project-metric">35<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill warn">Moyen</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">08</div>
+      <div><div class="project-name">push-notification</div><div class="project-desc">Service de notifications push mobile</div></div>
+      <div class="project-domain">Notification</div>
+      <div class="project-metric">2 454<small>LOC</small></div>
+      <div class="project-metric">39<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill warn">Moyen</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">09</div>
+      <div><div class="project-name">commande-chequier-bmcedirect</div><div class="project-desc">Commande de chéquier en ligne</div></div>
+      <div class="project-domain">Service Client</div>
+      <div class="project-metric">4 127<small>LOC</small></div>
+      <div class="project-metric">41<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill warn">Moyen</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">10</div>
+      <div><div class="project-name">tockenisation-carte-bmcedirect</div><div class="project-desc">Tokenisation de carte pour wallet (Apple Pay, etc.)</div></div>
+      <div class="project-domain">Tokenisation</div>
+      <div class="project-metric">4 137<small>LOC</small></div>
+      <div class="project-metric">60<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill warn">Moyen</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">11</div>
+      <div><div class="project-name">avis-opere</div><div class="project-desc">Notifications transactions sur compte</div></div>
+      <div class="project-domain">Notification Tx</div>
+      <div class="project-metric">3 808<small>LOC</small></div>
+      <div class="project-metric">64<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill warn">Moyen</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">12</div>
+      <div><div class="project-name">operation-avenir-services</div><div class="project-desc">Services produits Avenir (assurance vie)</div></div>
+      <div class="project-domain">Assurance Vie</div>
+      <div class="project-metric">5 233<small>LOC</small></div>
+      <div class="project-metric">67<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill warn">Moyen</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">13</div>
+      <div><div class="project-name">virement-permanent-bmcedirect</div><div class="project-desc">Gestion des virements permanents</div></div>
+      <div class="project-domain">Virements</div>
+      <div class="project-metric">11 258<small>LOC</small></div>
+      <div class="project-metric">70<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill warn">Moyen</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">14</div>
+      <div><div class="project-name">vente-distance-carte-monetique</div><div class="project-desc">Souscription carte à distance (e-commerce)</div></div>
+      <div class="project-domain">E-Commerce</div>
+      <div class="project-metric">10 757<small>LOC</small></div>
+      <div class="project-metric">102<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill crit">Gros</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">15</div>
+      <div><div class="project-name">mise-disposition-bmcedirect</div><div class="project-desc">Mise à disposition de fonds / encaissement</div></div>
+      <div class="project-domain">Trésorerie</div>
+      <div class="project-metric">12 329<small>LOC</small></div>
+      <div class="project-metric">109<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill crit">Gros</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">16</div>
+      <div><div class="project-name">souscription-opv-bmcedirect</div><div class="project-desc">Souscription Offre Publique de Vente (Bourse)</div></div>
+      <div class="project-domain">Bourse / OPV</div>
+      <div class="project-metric">13 441<small>LOC</small></div>
+      <div class="project-metric">112<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill crit">Gros</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">17</div>
+      <div><div class="project-name">souscription-assistance-bmcedirect</div><div class="project-desc">Souscription contrats d'assistance</div></div>
+      <div class="project-domain">Assurance</div>
+      <div class="project-metric">17 394<small>LOC</small></div>
+      <div class="project-metric">128<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill crit">Gros</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">18</div>
+      <div><div class="project-name">produits-epargne-bmcedirect</div><div class="project-desc">Gestion des produits d'épargne</div></div>
+      <div class="project-domain">Épargne</div>
+      <div class="project-metric">22 276<small>LOC</small></div>
+      <div class="project-metric">176<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill crit">Gros</span></div>
+    </div>
+    <div class="project-row">
+      <div class="project-num">19</div>
+      <div><div class="project-name">transfert-euro-bmce-direct</div><div class="project-desc">Transferts internationaux en euros (SWIFT/SEPA)</div></div>
+      <div class="project-domain">Transferts Int'l</div>
+      <div class="project-metric">17 132<small>LOC</small></div>
+      <div class="project-metric">212<small>fichiers</small></div>
+      <div class="project-status"><span class="status-pill crit">Gros</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ RISKS ============ -->
+
+<section id="risks">
+  <div class="section-eyebrow">§ 08 — Points de vigilance</div>
+  <h2>Quatre risques, <span class="accent">quatre mitigations.</span></h2>
+
+  <div class="risks-list">
+    <div class="risk">
+      <div class="risk-level high">R1</div>
+      <div class="risk-content">
+        <h3>Cohérence cross-projet de la classe Envelope</h3>
+        <p>Avec 176 imports répartis sur 18 services, toute évolution du contrat Envelope impacte la quasi-totalité du portefeuille. Sans gouvernance forte, on risque des incompatibilités cachées entre services migrés et non migrés pendant la phase de transition.</p>
+        <div class="risk-mitigation"><strong>Mitigation</strong> — MigrationRegistry de COMPLEO trace les versions de chaque artefact migré et applique les remplacements aux dépendants. Tests de contrat (Pact / Spring Cloud Contract) sur l'API d'Envelope dès la première migration.</div>
+      </div>
+      <div class="risk-meta">
+        <div class="label">Impact</div>
+        <div class="value">18/19 services</div>
+      </div>
+    </div>
+
+```
+<div class="risk">
+  <div class="risk-level med">R2</div>
+  <div class="risk-content">
+    <h3>Latence des connecteurs back-office (ma.eai.midw)</h3>
+    <p>SynchroneService et Services appellent des SI cœur (CBS, comptabilité, Swift) avec des SLA hétérogènes. La transformation en clients Spring (OpenFeign) doit préserver les timeouts métier existants, sous peine de cascades de timeout en production.</p>
+    <div class="risk-mitigation"><strong>Mitigation</strong> — Extraction préalable des paramètres timeout depuis le code legacy. Mapping 1-pour-1 vers configuration Resilience4j. Tests de charge sur environnement iso-prod avant bascule.</div>
+  </div>
+  <div class="risk-meta">
+    <div class="label">Impact</div>
+    <div class="value">Performance</div>
+  </div>
+</div>
+
+<div class="risk">
+  <div class="risk-level med">R3</div>
+  <div class="risk-content">
+    <h3>Non-déterminisme de la génération LLM</h3>
+    <p>COMPLEO utilise un LLM pour les transformations sémantiques complexes. Chaque exécution produit une variante du code Spring généré — les tests de compilation Maven montrent une stabilité variable sur les patterns de syntaxe (parenthèses multi-lignes, casts).</p>
+    <div class="risk-mitigation"><strong>Mitigation</strong> — Fine-tuning du modèle sur dataset BMCE (2 052 paires extraites) en cours. Stabilisation attendue sur les patterns récurrents. Couche post-traitement déterministe (CompileAutoFixer) en filet de sécurité.</div>
+  </div>
+  <div class="risk-meta">
+    <div class="label">Impact</div>
+    <div class="value">Productivité</div>
+  </div>
+</div>
+
+<div class="risk">
+  <div class="risk-level low">R4</div>
+  <div class="risk-content">
+    <h3>Sous-package xbanking volumineux et hétérogène</h3>
+    <p>ma.eai.boa.xbanking concentre 573 imports mais couvre des sous-domaines très différents (vo, dto, service, entities, utils, madCore, ProduitsEpargne, monetique). Une migration monolithique de ce framework allongerait la Phase I et créerait un goulet d'étranglement.</p>
+    <div class="risk-mitigation"><strong>Mitigation</strong> — Découpage par sous-package fonctionnel : nexa-xbanking-vo, nexa-xbanking-dto, nexa-xbanking-monetique, etc. Migration progressive avec releases successives au lieu d'un big-bang.</div>
+  </div>
+  <div class="risk-meta">
+    <div class="label">Impact</div>
+    <div class="value">Calendrier</div>
+  </div>
+</div>
+```
+
+  </div>
+</section>
+
+<!-- ============ GLOSSARY ============ -->
+
+<section id="glossary">
+  <div class="section-eyebrow">§ 09 — Glossaire</div>
+  <h2>Vocabulaire <span class="accent">technique partagé.</span></h2>
+
+  <div class="glossary">
+    <div class="glossary-item">
+      <div class="glossary-term">Envelope</div>
+      <div class="glossary-def">Wrapper request/response du framework EAI BMCE. Encapsule header (métadonnées de routage, traceId, security) et body (payload métier). Sérialisé en XML ou JSON selon contrat.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">UseCase</div>
+      <div class="glossary-def">Pattern structurant : chaque opération métier = une classe annotée @UseCase héritant de BaseUseCase, avec une méthode run(envIn, envOut). Équivalent au pattern Command.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">ValueObject</div>
+      <div class="glossary-def">Classe de base de tous les DTOs métier. Sérialisable, immutable conceptuellement, transportée à travers les couches. Équivalent Java EE des Bean DTOs.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">EaiLog / Log</div>
+      <div class="glossary-def">Deux loggers distincts coexistent : EaiLog (framework EAI, applicatif) et Log (middleware, système). À factoriser en SLF4J + MDC pendant la migration.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">FwkRollbackException</div>
+      <div class="glossary-def">Exception déclencheant un rollback de transaction. Cible Spring : RuntimeException standard sous @Transactional avec rollbackFor explicite.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">@ContinueOrStartTransaction</div>
+      <div class="glossary-def">Annotation EAI pilotant la propagation transactionnelle. Cible Spring : @Transactional(propagation=REQUIRED).</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">SynchroneService</div>
+      <div class="glossary-def">Connecteur d'appel synchrone vers un SI back-office (CBS, comptabilité, Swift). Bloquant. À migrer vers OpenFeign avec Resilience4j pour timeouts et circuit breakers.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">DAG (Directed Acyclic Graph)</div>
+      <div class="glossary-def">Graphe orienté sans cycle, représentant les dépendances entre projets. Permet le tri topologique qui donne l'ordre de migration optimal.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Tier de migration</div>
+      <div class="glossary-def">Niveau dans le DAG. Tier 0 = projets sans dépendances entrantes (à migrer en premier). Tier N = projets dont toutes les dépendances sont en Tiers 0..N-1.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">MigrationRegistry</div>
+      <div class="glossary-def">Composant COMPLEO qui mémorise les migrations effectuées et applique automatiquement les remplacements de dépendances (imports + pom.xml) aux projets dépendants migrés ultérieurement.</div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div>
+    <div style="margin-bottom: 4px;"><span class="brand-mark">&gt;_</span> COMPLEO · Java Legacy Modernizer</div>
+    <div style="color: var(--text-faint); margin-top: 4px;">Programme de modernisation système — Mai 2026</div>
+  </div>
+  <div style="text-align: right;">
+    <div style="margin-bottom: 4px;">workspace-audit.v13.1</div>
+    <div style="color: var(--red);">● Confidentiel</div>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,32 @@
+# ============================================================
+# EJB Client Modernizer — Inference (Ollama + Fine-tuned Model)
+# GPU-accelerated LLM inference for code modernization
+# ============================================================
+
+FROM ollama/ollama:latest AS base
+
+# Create model directory
+RUN mkdir -p /models
+
+# Copy the fine-tuned model GGUF (added after training completes)
+# COPY models/ejb-modernizer-32b-Q4_K_M.gguf /models/
+
+# Copy Modelfile for Ollama
+COPY docker/Modelfile /models/Modelfile
+
+# Environment
+ENV OLLAMA_HOST=0.0.0.0:11434
+ENV OLLAMA_MODELS=/root/.ollama/models
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+EXPOSE 11434
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+  CMD curl -f http://localhost:11434/api/tags || exit 1
+
+# Start Ollama and load model
+COPY docker/entrypoint-ollama.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

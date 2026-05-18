@@ -1,0 +1,578 @@
+[
+  {
+    "project": "boa-acl-test",
+    "totalFiles": 56,
+    "detectedCount": 50,
+    "detectionRate": 89.3,
+    "useCases": [
+      "ActiverCarteUC",
+      "BloquerCarteUC",
+      "ChargerClientDataUC",
+      "ConsulterSoldeUC",
+      "OuvrirCompteUC",
+      "ReceptionnerCarteUC",
+      "SimulerCreditUC",
+      "VirementUC"
+    ],
+    "dtos": [
+      "AsalDto",
+      "ActiverCarteVoIn",
+      "ActiverCarteVoOut",
+      "BloquerCarteVoIn",
+      "BloquerCarteVoOut",
+      "CarteDto",
+      "ChargerClientDataVoIn",
+      "ChargerClientDataVoOut",
+      "ConsulterSoldeVoIn",
+      "ConsulterSoldeVoOut",
+      "OuvrirCompteVoIn",
+      "OuvrirCompteVoOut",
+      "ReceptionnerCarteVoIn",
+      "ReceptionnerCarteVoOut",
+      "SimulerCreditVoIn",
+      "SimulerCreditVoOut",
+      "VirementVoIn",
+      "VirementVoOut"
+    ],
+    "enums": [
+      "Canal",
+      "DeviseCode",
+      "StatutCarte",
+      "TypeCarte",
+      "TypeCompte",
+      "TypeVirement"
+    ],
+    "exceptions": [
+      "AuthentificationException",
+      "CarteDejaActiveException",
+      "CarteInexistanteException",
+      "ClientInexistantException",
+      "CompteInexistantException",
+      "SoldeInsuffisantException",
+      "ParsingException",
+      "FwkRollbackException"
+    ],
+    "services": [
+      "AsalService",
+      "AuthenticationService",
+      "CompteService",
+      "MagixService",
+      "SynchroneService"
+    ],
+    "validators": [
+      "RIBValidator",
+      "ValidRIB"
+    ],
+    "remoteInterfaces": [],
+    "baseClasses": [
+      "UseCase",
+      "BaseUseCase",
+      "ValueObject"
+    ],
+    "unclassified": [
+      {
+        "className": "Constants",
+        "path": "Constants.java"
+      },
+      {
+        "className": "Envelope",
+        "path": "Envelope.java"
+      },
+      {
+        "className": "Parser",
+        "path": "Parser.java"
+      },
+      {
+        "className": "UtilHash",
+        "path": "UtilHash.java"
+      },
+      {
+        "className": "Services",
+        "path": "Services.java"
+      },
+      {
+        "className": "EaiLog",
+        "path": "EaiLog.java"
+      }
+    ],
+    "statelessEjbs": [],
+    "dtoFieldIssues": [],
+    "ucMapping": [
+      {
+        "className": "ActiverCarteUC",
+        "voIn": "ActiverCarteVoIn",
+        "voInResolved": true,
+        "voOut": "ActiverCarteVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "BloquerCarteUC",
+        "voIn": "BloquerCarteVoIn",
+        "voInResolved": true,
+        "voOut": "BloquerCarteVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "ChargerClientDataUC",
+        "voIn": "ChargerClientDataVoIn",
+        "voInResolved": true,
+        "voOut": "ChargerClientDataVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "ConsulterSoldeUC",
+        "voIn": "ConsulterSoldeVoIn",
+        "voInResolved": true,
+        "voOut": "ConsulterSoldeVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "OuvrirCompteUC",
+        "voIn": "OuvrirCompteVoIn",
+        "voInResolved": true,
+        "voOut": "OuvrirCompteVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "ReceptionnerCarteUC",
+        "voIn": "ReceptionnerCarteVoIn",
+        "voInResolved": true,
+        "voOut": "ReceptionnerCarteVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "SimulerCreditUC",
+        "voIn": "SimulerCreditVoIn",
+        "voInResolved": true,
+        "voOut": "SimulerCreditVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "VirementUC",
+        "voIn": "VirementVoIn",
+        "voInResolved": true,
+        "voOut": "VirementVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      }
+    ]
+  },
+  {
+    "project": "boa-ultimate-test",
+    "totalFiles": 78,
+    "detectedCount": 72,
+    "detectionRate": 92.3,
+    "useCases": [
+      "ActiverCarteUC",
+      "BloquerCarteUC",
+      "ChargerClientDataUC",
+      "CloturerCompteUC",
+      "ConsulterSoldeUC",
+      "EnvoyerNotificationUC",
+      "GenererDocumentUC",
+      "MajClientUC",
+      "OuvrirCompteUC",
+      "ReceptionnerCarteUC",
+      "SimulerCreditUC",
+      "VirementUC"
+    ],
+    "dtos": [
+      "AsalDto",
+      "ActiverCarteVoIn",
+      "ActiverCarteVoOut",
+      "AdresseDto",
+      "BeneficiaireDto",
+      "BloquerCarteVoIn",
+      "BloquerCarteVoOut",
+      "CarteDto",
+      "ChargerClientDataVoIn",
+      "ChargerClientDataVoOut",
+      "CloturerCompteVoIn",
+      "CloturerCompteVoOut",
+      "ConsulterSoldeVoIn",
+      "ConsulterSoldeVoOut",
+      "EnvoyerNotificationVoIn",
+      "EnvoyerNotificationVoOut",
+      "GenererDocumentVoIn",
+      "GenererDocumentVoOut",
+      "MajClientVoIn",
+      "MajClientVoOut",
+      "OuvrirCompteVoIn",
+      "OuvrirCompteVoOut",
+      "ReceptionnerCarteVoIn",
+      "ReceptionnerCarteVoOut",
+      "SimulerCreditVoIn",
+      "SimulerCreditVoOut",
+      "VirementVoIn",
+      "VirementVoOut"
+    ],
+    "enums": [
+      "Canal",
+      "DeviseCode",
+      "StatutCarte",
+      "StatutCompte",
+      "TypeCarte",
+      "TypeCompte",
+      "TypeDocument",
+      "TypeVirement"
+    ],
+    "exceptions": [
+      "AuthentificationException",
+      "CarteDejaActiveException",
+      "CarteInexistanteException",
+      "ClientInexistantException",
+      "CompteBloqueException",
+      "CompteInexistantException",
+      "DocumentNonDisponibleException",
+      "SoldeInsuffisantException",
+      "ParsingException",
+      "FwkRollbackException"
+    ],
+    "services": [
+      "AsalService",
+      "AuthenticationService",
+      "CompteService",
+      "MagixService",
+      "NotificationService",
+      "SynchroneService"
+    ],
+    "validators": [
+      "IBANValidator",
+      "RIBValidator",
+      "ValidIBAN",
+      "ValidRIB"
+    ],
+    "remoteInterfaces": [
+      "DocumentServiceRemote"
+    ],
+    "baseClasses": [
+      "UseCase",
+      "BaseUseCase",
+      "ValueObject"
+    ],
+    "unclassified": [
+      {
+        "className": "Constants",
+        "path": "Constants.java"
+      },
+      {
+        "className": "Envelope",
+        "path": "Envelope.java"
+      },
+      {
+        "className": "Parser",
+        "path": "Parser.java"
+      },
+      {
+        "className": "UtilHash",
+        "path": "UtilHash.java"
+      },
+      {
+        "className": "Services",
+        "path": "Services.java"
+      },
+      {
+        "className": "EaiLog",
+        "path": "EaiLog.java"
+      }
+    ],
+    "statelessEjbs": [],
+    "dtoFieldIssues": [],
+    "ucMapping": [
+      {
+        "className": "ActiverCarteUC",
+        "voIn": "ActiverCarteVoIn",
+        "voInResolved": true,
+        "voOut": "ActiverCarteVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "BloquerCarteUC",
+        "voIn": "BloquerCarteVoIn",
+        "voInResolved": true,
+        "voOut": "BloquerCarteVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "ChargerClientDataUC",
+        "voIn": "ChargerClientDataVoIn",
+        "voInResolved": true,
+        "voOut": "ChargerClientDataVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "CloturerCompteUC",
+        "voIn": "CloturerCompteVoIn",
+        "voInResolved": true,
+        "voOut": "CloturerCompteVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "ConsulterSoldeUC",
+        "voIn": "ConsulterSoldeVoIn",
+        "voInResolved": true,
+        "voOut": "ConsulterSoldeVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "EnvoyerNotificationUC",
+        "voIn": "EnvoyerNotificationVoIn",
+        "voInResolved": true,
+        "voOut": "EnvoyerNotificationVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "GenererDocumentUC",
+        "voIn": "GenererDocumentVoIn",
+        "voInResolved": true,
+        "voOut": "GenererDocumentVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "MajClientUC",
+        "voIn": "MajClientVoIn",
+        "voInResolved": true,
+        "voOut": "MajClientVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "OuvrirCompteUC",
+        "voIn": "OuvrirCompteVoIn",
+        "voInResolved": true,
+        "voOut": "OuvrirCompteVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "ReceptionnerCarteUC",
+        "voIn": "ReceptionnerCarteVoIn",
+        "voInResolved": true,
+        "voOut": "ReceptionnerCarteVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "SimulerCreditUC",
+        "voIn": "SimulerCreditVoIn",
+        "voInResolved": true,
+        "voOut": "SimulerCreditVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      },
+      {
+        "className": "VirementUC",
+        "voIn": "VirementVoIn",
+        "voInResolved": true,
+        "voOut": "VirementVoOut",
+        "voOutResolved": true,
+        "domain": "xbanking"
+      }
+    ]
+  },
+  {
+    "project": "activation-carte-bmcedirect-ejb",
+    "totalFiles": 68,
+    "detectedCount": 66,
+    "detectionRate": 97.1,
+    "useCases": [
+      "ActiverCarteUC",
+      "BloquerCarteUC",
+      "ReceptionnerCarteUC",
+      "ChargerClientDataUC",
+      "MajClientUC",
+      "CloturerCompteUC",
+      "ConsulterSoldeUC",
+      "OuvrirCompteUC",
+      "GenererDocumentUC",
+      "EnvoyerNotificationUC",
+      "VirementUC"
+    ],
+    "dtos": [
+      "ActiverCarteVoIn",
+      "ActiverCarteVoOut",
+      "BloquerCarteVoIn",
+      "BloquerCarteVoOut",
+      "CarteDto",
+      "ReceptionnerCarteVoIn",
+      "ReceptionnerCarteVoOut",
+      "ChargerClientDataVoIn",
+      "ChargerClientDataVoOut",
+      "MajClientVoIn",
+      "MajClientVoOut",
+      "AdresseDto",
+      "CloturerCompteVoIn",
+      "CloturerCompteVoOut",
+      "ConsulterSoldeVoIn",
+      "ConsulterSoldeVoOut",
+      "OuvrirCompteVoIn",
+      "OuvrirCompteVoOut",
+      "SimulerCreditVoIn",
+      "SimulerCreditVoOut",
+      "GenererDocumentVoIn",
+      "GenererDocumentVoOut",
+      "EnvoyerNotificationVoIn",
+      "EnvoyerNotificationVoOut",
+      "BeneficiaireDto",
+      "VirementVoIn",
+      "VirementVoOut"
+    ],
+    "enums": [
+      "MotifBlocage",
+      "StatutCarte",
+      "TypeCarte",
+      "Canal",
+      "DeviseCode",
+      "StatutCompte",
+      "TypeCompte"
+    ],
+    "exceptions": [
+      "CarteDejaActiveException",
+      "CarteExpireeException",
+      "CarteInexistanteException",
+      "CodeActivationInvalideException",
+      "ClientInexistantException",
+      "CompteBloqueException",
+      "CompteInexistantException",
+      "SoldeInsuffisantException",
+      "FwkRollbackException",
+      "ParsingException"
+    ],
+    "services": [
+      "MagixService"
+    ],
+    "validators": [
+      "NumCarteValidator",
+      "ValidNumCarte",
+      "IBANValidator",
+      "RIBValidator",
+      "ValidIBAN",
+      "ValidRIB"
+    ],
+    "remoteInterfaces": [],
+    "baseClasses": [
+      "UseCase",
+      "BaseUseCase",
+      "ValueObject"
+    ],
+    "unclassified": [
+      {
+        "className": "EaiLog",
+        "path": "EaiLog.java"
+      },
+      {
+        "className": "UtilHash",
+        "path": "UtilHash.java"
+      }
+    ],
+    "statelessEjbs": [
+      "SimulerCreditUC",
+      "UseCase"
+    ],
+    "dtoFieldIssues": [],
+    "ucMapping": [
+      {
+        "className": "ActiverCarteUC",
+        "voIn": "ActiverCarteVoIn",
+        "voInResolved": true,
+        "voOut": "ActiverCarteVoOut",
+        "voOutResolved": true,
+        "domain": "carte"
+      },
+      {
+        "className": "BloquerCarteUC",
+        "voIn": "BloquerCarteVoIn",
+        "voInResolved": true,
+        "voOut": "BloquerCarteVoOut",
+        "voOutResolved": true,
+        "domain": "carte"
+      },
+      {
+        "className": "ReceptionnerCarteUC",
+        "voIn": "ReceptionnerCarteVoIn",
+        "voInResolved": true,
+        "voOut": "ReceptionnerCarteVoOut",
+        "voOutResolved": true,
+        "domain": "carte"
+      },
+      {
+        "className": "ChargerClientDataUC",
+        "voIn": "UNRESOLVED",
+        "voInResolved": false,
+        "voOut": "UNRESOLVED",
+        "voOutResolved": false,
+        "domain": "client"
+      },
+      {
+        "className": "MajClientUC",
+        "voIn": "UNRESOLVED",
+        "voInResolved": false,
+        "voOut": "UNRESOLVED",
+        "voOutResolved": false,
+        "domain": "client"
+      },
+      {
+        "className": "CloturerCompteUC",
+        "voIn": "UNRESOLVED",
+        "voInResolved": false,
+        "voOut": "UNRESOLVED",
+        "voOutResolved": false,
+        "domain": "compte"
+      },
+      {
+        "className": "ConsulterSoldeUC",
+        "voIn": "UNRESOLVED",
+        "voInResolved": false,
+        "voOut": "UNRESOLVED",
+        "voOutResolved": false,
+        "domain": "compte"
+      },
+      {
+        "className": "OuvrirCompteUC",
+        "voIn": "UNRESOLVED",
+        "voInResolved": false,
+        "voOut": "UNRESOLVED",
+        "voOutResolved": false,
+        "domain": "compte"
+      },
+      {
+        "className": "GenererDocumentUC",
+        "voIn": "UNRESOLVED",
+        "voInResolved": false,
+        "voOut": "UNRESOLVED",
+        "voOutResolved": false,
+        "domain": "document"
+      },
+      {
+        "className": "EnvoyerNotificationUC",
+        "voIn": "UNRESOLVED",
+        "voInResolved": false,
+        "voOut": "UNRESOLVED",
+        "voOutResolved": false,
+        "domain": "notification"
+      },
+      {
+        "className": "VirementUC",
+        "voIn": "UNRESOLVED",
+        "voInResolved": false,
+        "voOut": "UNRESOLVED",
+        "voOutResolved": false,
+        "domain": "virement"
+      }
+    ]
+  }
+]

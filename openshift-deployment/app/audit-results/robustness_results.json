@@ -1,0 +1,171 @@
+{
+  "total": 15,
+  "passed": 14,
+  "failed": 1,
+  "success_rate": 93.3,
+  "tests": [
+    {
+      "name": "Fichier vide",
+      "passed": true,
+      "details": [],
+      "detected_techs": [],
+      "detected_issues": [],
+      "lines": 1
+    },
+    {
+      "name": "Fichier Python",
+      "passed": true,
+      "details": [],
+      "detected_techs": [],
+      "detected_issues": [],
+      "lines": 5
+    },
+    {
+      "name": "POJO simple",
+      "passed": true,
+      "details": [],
+      "detected_techs": [],
+      "detected_issues": [],
+      "lines": 13
+    },
+    {
+      "name": "Multi-tech",
+      "passed": true,
+      "details": [],
+      "detected_techs": [
+        "EJB",
+        "Hibernate",
+        "JMS",
+        "JPA",
+        "Servlet"
+      ],
+      "detected_issues": [],
+      "lines": 24
+    },
+    {
+      "name": "SQL Injection",
+      "passed": false,
+      "details": [
+        "MISS: Expected issue 'SQL Injection' not detected"
+      ],
+      "detected_techs": [
+        "JDBC"
+      ],
+      "detected_issues": [],
+      "lines": 15
+    },
+    {
+      "name": "Hardcoded credentials",
+      "passed": true,
+      "details": [],
+      "detected_techs": [],
+      "detected_issues": [
+        "Hardcoded Creds"
+      ],
+      "lines": 9
+    },
+    {
+      "name": "Empty catch blocks",
+      "passed": true,
+      "details": [],
+      "detected_techs": [
+        "EJB"
+      ],
+      "detected_issues": [
+        "Empty Catch"
+      ],
+      "lines": 15
+    },
+    {
+      "name": "God Class (50 methods)",
+      "passed": true,
+      "details": [],
+      "detected_techs": [
+        "EJB"
+      ],
+      "detected_issues": [
+        "System.out"
+      ],
+      "lines": 57
+    },
+    {
+      "name": "Transactions imbriquées",
+      "passed": true,
+      "details": [],
+      "detected_techs": [
+        "EJB",
+        "JPA"
+      ],
+      "detected_issues": [],
+      "lines": 31
+    },
+    {
+      "name": "SOAP complexe",
+      "passed": true,
+      "details": [],
+      "detected_techs": [
+        "SOAP"
+      ],
+      "detected_issues": [],
+      "lines": 22
+    },
+    {
+      "name": "Struts + JDBC",
+      "passed": true,
+      "details": [],
+      "detected_techs": [
+        "JDBC",
+        "Servlet",
+        "Struts"
+      ],
+      "detected_issues": [],
+      "lines": 25
+    },
+    {
+      "name": "Fichier 500+ lignes",
+      "passed": true,
+      "details": [],
+      "detected_techs": [
+        "JDBC"
+      ],
+      "detected_issues": [
+        "System.out"
+      ],
+      "lines": 1049
+    },
+    {
+      "name": "Unicode et accents",
+      "passed": true,
+      "details": [],
+      "detected_techs": [
+        "EJB"
+      ],
+      "detected_issues": [],
+      "lines": 15
+    },
+    {
+      "name": "Interface seule",
+      "passed": true,
+      "details": [],
+      "detected_techs": [
+        "EJB"
+      ],
+      "detected_issues": [],
+      "lines": 13
+    },
+    {
+      "name": "Batch + Hibernate",
+      "passed": true,
+      "details": [],
+      "detected_techs": [
+        "Batch",
+        "EJB",
+        "Hibernate"
+      ],
+      "detected_issues": [
+        "System.out"
+      ],
+      "lines": 23
+    }
+  ]
+}

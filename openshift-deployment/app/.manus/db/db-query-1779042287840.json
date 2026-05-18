@@ -1,0 +1,100 @@
+{
+  "query": "SELECT id, name, stars, forks, primaryLanguage, license, lastPushAt FROM projects WHERE stars > 0 ORDER BY stars DESC LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 7MtqdpAHC3Gogvx.19563b0ba7fa --database ZuBzGQ3A9ameWxvz3cohMD --execute SELECT id, name, stars, forks, primaryLanguage, license, lastPushAt FROM projects WHERE stars > 0 ORDER BY stars DESC LIMIT 10;",
+  "rows": [
+    {
+      "id": "934987",
+      "name": "open-banking-gateway",
+      "stars": "326",
+      "forks": "119",
+      "primaryLanguage": "Java",
+      "license": "AGPL-3.0",
+      "lastPushAt": "2026-01-09 14:11:45"
+    },
+    {
+      "id": "933785",
+      "name": "iban4j",
+      "stars": "299",
+      "forks": "133",
+      "primaryLanguage": "Java",
+      "license": "Apache-2.0",
+      "lastPushAt": "2026-05-01 01:22:37"
+    },
+    {
+      "id": "930001",
+      "name": "BankingSystem",
+      "stars": "262",
+      "forks": "206",
+      "primaryLanguage": "Java",
+      "license": "NULL",
+      "lastPushAt": "2025-01-06 01:46:58"
+    },
+    {
+      "id": "933786",
+      "name": "ATM-Machine",
+      "stars": "244",
+      "forks": "240",
+      "primaryLanguage": "Java",
+      "license": "MIT",
+      "lastPushAt": "2023-09-11 14:33:50"
+    },
+    {
+      "id": "932827",
+      "name": "Spring-Boot-Microservices-Banking-Application",
+      "stars": "222",
+      "forks": "162",
+      "primaryLanguage": "Java",
+      "license": "NULL",
+      "lastPushAt": "2025-01-18 02:21:16"
+    },
+    {
+      "id": "932828",
+      "name": "AxonBank",
+      "stars": "192",
+      "forks": "115",
+      "primaryLanguage": "Java",
+      "license": "Apache-2.0",
+      "lastPushAt": "2018-09-04 02:03:58"
+    },
+    {
+      "id": "930002",
+      "name": "BankApplication",
+      "stars": "140",
+      "forks": "74",
+      "primaryLanguage": "Java",
+      "license": "MIT",
+      "lastPushAt": "2023-07-07 17:56:49"
+    },
+    {
+      "id": "931982",
+      "name": "Online-banking-angular-springboot-mysql",
+      "stars": "130",
+      "forks": "98",
+      "primaryLanguage": "Java",
+      "license": "NULL",
+      "lastPushAt": "2026-05-08 18:53:05"
+    },
+    {
+      "id": "934988",
+      "name": "jbanking",
+      "stars": "122",
+      "forks": "57",
+      "primaryLanguage": "Java",
+      "license": "Apache-2.0",
+      "lastPushAt": "2026-02-17 10:52:58"
+    },
+    {
+      "id": "931001",
+      "name": "Bank-Management-System",
+      "stars": "99",
+      "forks": "43",
+      "primaryLanguage": "Java",
+      "license": "NULL",
+      "lastPushAt": "2020-01-25 12:44:07"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tname\tstars\tforks\tprimaryLanguage\tlicense\tlastPushAt\n934987\topen-banking-gateway\t326\t119\tJava\tAGPL-3.0\t2026-01-09 14:11:45\n933785\tiban4j\t299\t133\tJava\tApache-2.0\t2026-05-01 01:22:37\n930001\tBankingSystem\t262\t206\tJava\tNULL\t2025-01-06 01:46:58\n933786\tATM-Machine\t244\t240\tJava\tMIT\t2023-09-11 14:33:50\n932827\tSpring-Boot-Microservices-Banking-Application\t222\t162\tJava\tNULL\t2025-01-18 02:21:16\n932828\tAxonBank\t192\t115\tJava\tApache-2.0\t2018-09-04 02:03:58\n930002\tBankApplication\t140\t74\tJava\tMIT\t2023-07-07 17:56:49\n931982\tOnline-banking-angular-springboot-mysql\t130\t98\tJava\tNULL\t2026-05-08 18:53:05\n934988\tjbanking\t122\t57\tJava\tApache-2.0\t2026-02-17 10:52:58\n931001\tBank-Management-System\t99\t43\tJava\tNULL\t2020-01-25 12:44:07\n",
+  "stderr": "",
+  "execution_time_ms": 1133
+}

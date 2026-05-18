@@ -1,0 +1,1 @@
+ALTER TABLE `learning_rules` MODIFY COLUMN `chosen_option` varchar(100) NOT NULL DEFAULT '';

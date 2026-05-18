@@ -1,0 +1,164 @@
+# ============================================================
+# EJB Client Modernizer — Docker Compose (Local Development)
+# 100% autonomous — no internet dependency
+# ============================================================
+# Usage:
+#   docker-compose up -d          # Start all services
+#   docker-compose up -d --build  # Rebuild and start
+#   docker-compose logs -f        # Follow all logs
+#   docker-compose down -v        # Stop and remove volumes
+# ============================================================
+
+version: "3.9"
+
+services:
+  # ── MySQL Database ──────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: ejb-modernizer-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ejb-modernizer-2025}
+      MYSQL_DATABASE: ejb_modernizer
+      MYSQL_USER: ejb_app
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ejb-app-password}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./data/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-ejb-modernizer-2025}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ejb-net
+
+  # ── Backend (Node.js + Express + tRPC) ──────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: ejb-modernizer-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: mysql://ejb_app:${MYSQL_PASSWORD:-ejb-app-password}@mysql:3306/ejb_modernizer
+      JWT_SECRET: ${JWT_SECRET:-local-jwt-secret-change-in-production}
+      OLLAMA_URL: http://inference:11434
+      OLLAMA_MODEL: ejb-modernizer
+      STORAGE_PATH: /data/uploads
+      PIPELINE_URL: http://pipeline:8080
+      OWNER_OPEN_ID: local-admin
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads-data:/data/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - ejb-net
+
+  # ── Frontend (React + Nginx) ────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: ejb-modernizer-frontend
+    restart: unless-stopped
+    ports:
+      - "80:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ejb-net
+
+  # ── Inference (Ollama + Fine-tuned Model) ───────────────
+  inference:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.inference
+    container_name: ejb-modernizer-inference
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      NVIDIA_VISIBLE_DEVICES: all
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+      - ./models:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    networks:
+      - ejb-net
+
+  # ── Pipeline (JDK 21 + Maven + Gradle + SonarScanner) ──
+  pipeline:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.pipeline
+    container_name: ejb-modernizer-pipeline
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      WORKSPACE_DIR: /workspace
+      REPOS_DIR: /data/repos
+    ports:
+      - "8080:8080"
+    volumes:
+      - workspace-data:/workspace
+      - repos-data:/data/repos
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - ejb-net
+
+# ── Volumes ───────────────────────────────────────────────
+volumes:
+  mysql-data:
+    driver: local
+  uploads-data:
+    driver: local
+  ollama-data:
+    driver: local
+  workspace-data:
+    driver: local
+  repos-data:
+    driver: local
+
+# ── Network ───────────────────────────────────────────────
+networks:
+  ejb-net:
+    driver: bridge

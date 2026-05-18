@@ -1,0 +1,50 @@
+{
+  "query": "SELECT id, name, stars, forks, primaryLanguage, updatedAt FROM projects ORDER BY updatedAt DESC LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 7MtqdpAHC3Gogvx.19563b0ba7fa --database ZuBzGQ3A9ameWxvz3cohMD --execute SELECT id, name, stars, forks, primaryLanguage, updatedAt FROM projects ORDER BY updatedAt DESC LIMIT 5;",
+  "rows": [
+    {
+      "id": "935391",
+      "name": "banking-api",
+      "stars": "0",
+      "forks": "0",
+      "primaryLanguage": "Java",
+      "updatedAt": "2026-05-17 18:24:55"
+    },
+    {
+      "id": "935388",
+      "name": "Banking-API",
+      "stars": "0",
+      "forks": "0",
+      "primaryLanguage": "Java",
+      "updatedAt": "2026-05-17 18:24:55"
+    },
+    {
+      "id": "935390",
+      "name": "banking-api",
+      "stars": "0",
+      "forks": "0",
+      "primaryLanguage": "Java",
+      "updatedAt": "2026-05-17 18:24:55"
+    },
+    {
+      "id": "935389",
+      "name": "banking-api",
+      "stars": "0",
+      "forks": "0",
+      "primaryLanguage": "Java",
+      "updatedAt": "2026-05-17 18:24:55"
+    },
+    {
+      "id": "935392",
+      "name": "banking-api",
+      "stars": "0",
+      "forks": "0",
+      "primaryLanguage": "Java",
+      "updatedAt": "2026-05-17 18:24:55"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tname\tstars\tforks\tprimaryLanguage\tupdatedAt\n935391\tbanking-api\t0\t0\tJava\t2026-05-17 18:24:55\n935388\tBanking-API\t0\t0\tJava\t2026-05-17 18:24:55\n935390\tbanking-api\t0\t0\tJava\t2026-05-17 18:24:55\n935389\tbanking-api\t0\t0\tJava\t2026-05-17 18:24:55\n935392\tbanking-api\t0\t0\tJava\t2026-05-17 18:24:55\n",
+  "stderr": "",
+  "execution_time_ms": 386
+}

@@ -1,0 +1,8 @@
+{
+  "produced_non_stub": true,
+  "syntactically_valid": true,
+  "meaningful_logic": true,
+  "has_todo_markers": true,
+  "preserves_error_codes": true,
+  "quality": 0.9
+}

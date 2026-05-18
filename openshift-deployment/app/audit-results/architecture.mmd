@@ -1,0 +1,37 @@
+graph TB
+    subgraph "Interface Web"
+        A[Monaco Editor<br/>Multi-onglets] --> B[Bouton Analyser]
+        A --> C[Bouton Transformer]
+        D[Upload Fichier/Dossier/Projet] --> A
+    end
+    
+    subgraph "Moteurs d'Analyse"
+        B --> E[EJB Analyzer<br/>Injections, JNDI, InitialContext]
+        B --> F[Legacy Analyzer<br/>10 Technologies]
+        E --> G[Rapport Fusionné]
+        F --> G
+    end
+    
+    subgraph "Moteurs de Génération"
+        C --> H[Code Generator<br/>WebClient REST]
+        C --> I[Extended Generator<br/>8 Transformations]
+        C --> J[Microservice Extractor<br/>DDD Bounded Contexts]
+        C --> K[Cloud Generator<br/>Docker, K8s, Helm]
+        C --> L[AI Engine<br/>55+ Règles Déterministes]
+    end
+    
+    subgraph "Sorties"
+        H --> M[Code Spring Boot 3]
+        I --> M
+        J --> N[Proposition Microservices]
+        K --> O[Artefacts Cloud-Native]
+        L --> P[Rapport Qualité IA]
+        M --> Q[Export ZIP Maven]
+        P --> R[Export PDF]
+    end
+    
+    style A fill:#0d9488,color:#fff
+    style G fill:#f59e0b,color:#000
+    style M fill:#10b981,color:#fff
+    style O fill:#3b82f6,color:#fff
+    style P fill:#8b5cf6,color:#fff

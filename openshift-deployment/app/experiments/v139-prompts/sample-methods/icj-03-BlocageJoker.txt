@@ -1,0 +1,47 @@
+# Méthode actuellement stub (v13.8 output)
+@CompleoUnvalidated(severity = "STUB", legacyRef = "CreditJockerWebService.BlocageJoker", migrationDate = "2026-05-12")
+@Transactional
+public String BlocageJoker(Object request) {
+    // TODO: Migrer la logique SOAP de CreditJockerWebService.BlocageJoker
+    throw new CompleoUnvalidatedMethodException("BlocageJoker", "CreditJockerWebService.BlocageJoker", "STUB");
+}
+
+# Source legacy correspondante
+# Fichier : interface-credit-jocker/ws/salafin/CreditJockerWebService.java
+# Méthode : BlocageJoker
+@WebMethod(operationName = "BlocageJoker")
+public String BlocageJoker(@WebParam(name = "TYPBLOCAGE") String TYPBLOCAGE, @WebParam(name = "ETAT") String ETAT,
+        @WebParam(name = "NOCOMPTE") String NOCOMPTE, @WebParam(name = "DATEBLOCAGE") String DATEBLOCAGE,
+        @WebParam(name = "MOTIF") String MOTIF) throws Exception {
+    String fluxBlocageJoker = GenerateFlux.blocageJOKER(TYPBLOCAGE, ETAT, NOCOMPTE, DATEBLOCAGE, MOTIF);
+    SynchroneService posteAgenceSolde = null;
+    Log.setNewThreadId();
+    Log.setServiceName("BlocageJoker");
+    Log.info("Debut blocage joker: ");
+    try {
+        Log.info("TYPBLOCAGE: " + TYPBLOCAGE);
+        Log.info("ETAT: " + ETAT);
+        Log.info("NOCOMPTE: " + NOCOMPTE);
+        Log.info("DATEBLOCAGE: " + DATEBLOCAGE);
+        Log.info("MOTIF: " + MOTIF);
+        posteAgenceSolde = Services.find(Constants.UDDI_DECLIC_SERVICES, SynchroneService.class);
+    } catch (Exception e) {
+        Log.error(EXCEPTION_ERROR_LOGS, e);
+        Log.info("erreur : " + e);
+    }
+    if (posteAgenceSolde == null) {
+        return "";
+    }
+    Envelope reponseEJB = posteAgenceSolde.process(Parser.unmarshall(fluxBlocageJoker));
+    String reponseXml = Parser.marshall(reponseEJB);
+    Log.info("fin blocage joker  " + reponseXml);
+    return reponseXml;
+}
+
+# Contexte projet
+- Type : SOAP @WebService legacy
+- Domaine : Banking - Credit Card Blocking (Joker)
+- Framework : EJB stateless, SOAP document/literal
+- Classes utilisées : GenerateFlux, SynchroneService, Envelope, Parser, Constants
+- Pattern : Flux generation → EJB call → Marshall response → Return XML string
+- Catégorie échantillon : B (pass-through SOAP — génère un flux, appelle un service, retourne le XML brut)

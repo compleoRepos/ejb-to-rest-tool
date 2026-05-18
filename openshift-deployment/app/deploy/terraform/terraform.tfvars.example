@@ -1,0 +1,41 @@
+# ============================================================
+# Java Legacy Modernizer — Configuration Terraform
+# Copiez ce fichier: cp terraform.tfvars.example terraform.tfvars
+# Puis remplissez les valeurs
+# ============================================================
+
+# ---- AWS ----
+aws_region = "eu-west-3"  # Paris
+
+# ---- EC2 (GPU) ----
+ec2_instance_type = "g4dn.xlarge"  # 4 vCPU, 16 Go RAM, GPU T4 (~400 EUR/mois)
+ec2_volume_size   = 100             # Go de disque SSD
+
+# ---- Clé SSH ----
+# Générez une paire de clés: ssh-keygen -t ed25519 -f ~/.ssh/modernizer
+# Collez ici le contenu de ~/.ssh/modernizer.pub
+ssh_public_key = "ssh-ed25519 AAAA... votre-email@example.com"
+
+# Restreindre SSH à votre IP (recommandé)
+# Trouvez votre IP: curl ifconfig.me
+ssh_allowed_cidrs = ["0.0.0.0/0"]  # Remplacez par ["VOTRE_IP/32"]
+
+# ---- Base de données RDS ----
+rds_instance_class = "db.t3.small"  # 2 vCPU, 2 Go RAM (~30 EUR/mois)
+rds_storage_size   = 20              # Go
+db_password        = "CHANGEZ_MOI_MotDePasse_Fort_2026!"
+
+# ---- Sécurité ----
+jwt_secret = "CHANGEZ_MOI_64_caracteres_aleatoires_pour_signer_les_tokens_jwt"
+
+# ---- S3 (optionnel, laissez vide si vous utilisez le rôle IAM de l'instance) ----
+s3_access_key = ""
+s3_secret_key = ""
+
+# ---- Ollama LLM ----
+ollama_model = "deepseek-coder-v2:16b"  # Recommandé pour GPU T4 (16 Go VRAM)
+# Alternatives: "qwen2.5-coder:14b", "codellama:13b-instruct"
+
+# ---- Application ----
+github_repo = "https://github.com/compleoRepos/ejb-to-rest-tool.git"
+domain_name = ""  # Optionnel: "modernizer.votre-domaine.com"

@@ -1,0 +1,12 @@
+{
+  "total_entries": 7,
+  "generated_at": "2026-05-01T10:20:45.944097",
+  "by_category": {
+    "jsp_to_react": 2,
+    "jquery_ajax_to_react": 1,
+    "struts_to_react": 1,
+    "dao_to_api_service": 1,
+    "jsp_to_angular": 1,
+    "jsp_to_vue": 1
+  }
+}

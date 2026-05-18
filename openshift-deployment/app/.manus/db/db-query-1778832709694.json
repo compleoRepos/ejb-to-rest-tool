@@ -1,0 +1,13 @@
+{
+  "query": "SELECT COUNT(*) as total FROM projects; ",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 7MtqdpAHC3Gogvx.19563b0ba7fa --database ZuBzGQ3A9ameWxvz3cohMD --execute SELECT COUNT(*) as total FROM projects; ",
+  "rows": [
+    {
+      "total": "10000"
+    }
+  ],
+  "messages": [],
+  "stdout": "total\n10000\n",
+  "stderr": "",
+  "execution_time_ms": 360
+}

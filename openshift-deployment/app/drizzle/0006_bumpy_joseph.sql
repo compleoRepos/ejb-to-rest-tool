@@ -1,0 +1,1 @@
+ALTER TABLE `compleo_sessions` MODIFY COLUMN `id` varchar(128) NOT NULL;

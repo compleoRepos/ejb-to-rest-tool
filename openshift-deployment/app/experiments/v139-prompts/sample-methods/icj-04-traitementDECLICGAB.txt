@@ -1,0 +1,59 @@
+# Méthode actuellement stub (v13.8 output)
+@CompleoUnvalidated(severity = "STUB", legacyRef = "CreditJockerWebService.traitementDECLICGAB", migrationDate = "2026-05-12")
+@Transactional
+public ModelFlux traitementDECLICGAB(Object request) {
+    // TODO: Migrer la logique SOAP de CreditJockerWebService.traitementDECLICGAB
+    throw new CompleoUnvalidatedMethodException("traitementDECLICGAB", "CreditJockerWebService.traitementDECLICGAB", "STUB");
+}
+
+# Source legacy correspondante
+# Fichier : interface-credit-jocker/ws/salafin/CreditJockerWebService.java
+# Méthode : traitementDECLICGAB
+@WebMethod(operationName = "traitementDECLICGAB")
+public ModelFlux traitementDECLICGAB(@WebParam(name = "compte") String compte,
+        @WebParam(name = "mntTirage") String mntTirage, @WebParam(name = "libelle") String libelle,
+        @WebParam(name = "centreFrais") String centreFrais, @WebParam(name = "categorie") String categorie,
+        @WebParam(name = "dtDebTirage") String dtDebTirage, @WebParam(name = "dt1Echeance") String dt1Echeance,
+        @WebParam(name = "noDoss") String noDoss, @WebParam(name = "noTiers") String noTiers,
+        @WebParam(name = "nomClient") String nomClient, @WebParam(name = "durTirage") String durTirage,
+        @WebParam(name = "sourceOperation") String sourceOperation) throws Exception {
+    Log.setNewThreadId();
+    Log.setServiceName("traitementDECLICGAB");
+    Log.info("Debut Traitement DECLIC GAB");
+    String fluxTirageDeclic = GenerateFlux.traitementGAB(compte, mntTirage, libelle, centreFrais, categorie,
+            dtDebTirage, dt1Echeance, noDoss, noTiers, nomClient, durTirage, "GAB");
+    SynchroneService posteAgenceSolde = null;
+    try {
+        posteAgenceSolde = Services.find(Constants.UDDI_DECLIC_SERVICES, SynchroneService.class);
+    } catch (Exception e) {
+        Log.error(EXCEPTION_ERROR_LOGS, e);
+    }
+    ModelFlux fluxRetour = new ModelFlux();
+    Flux flux = new Flux();
+    if (posteAgenceSolde == null) {
+        flux.setCode("009");
+        fluxRetour.setFlux(flux);
+        return fluxRetour;
+    }
+    Envelope reponseEJB = posteAgenceSolde.process(Parser.unmarshall(fluxTirageDeclic));
+    reponseEJB = Parser.update(reponseEJB);
+    String code = reponseEJB.getNodeAsString(FLUX_CODE);
+    Log.info("code retour" + code);
+    if (code == null) {
+        flux.setCode("009");
+    } else {
+        flux.setCode(reponseEJB.getNodeAsString(FLUX_CODE));
+        flux.setMessage(reponseEJB.getNodeAsString("flux/message"));
+    }
+    fluxRetour.setFlux(flux);
+    Log.info("fin Traitement DECLIC GAB" + fluxRetour);
+    return fluxRetour;
+}
+
+# Contexte projet
+- Type : SOAP @WebService legacy
+- Domaine : Banking - Credit Processing (DECLIC GAB Channel)
+- Framework : EJB stateless, SOAP document/literal
+- Classes utilisées : ModelFlux, Flux, GenerateFlux, SynchroneService, Envelope, Parser, Constants
+- Pattern : Flux generation (12 params) → EJB call → Envelope parsing → Code check → DTO mapping
+- Catégorie échantillon : A (logique réelle avec if/else, parsing, DTO mapping)

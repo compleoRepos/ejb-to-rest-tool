@@ -1,0 +1,1100 @@
+[
+  {
+    "project": "boa-acl-test",
+    "ir": {
+      "projectName": "ejb-project",
+      "stats": {
+        "totalFiles": 56,
+        "totalLines": 809,
+        "useCaseCount": 8,
+        "dtoCount": 18,
+        "serviceCount": 5,
+        "enumCount": 6,
+        "exceptionCount": 8,
+        "validatorCount": 2,
+        "remoteInterfaceCount": 0,
+        "domainCount": 1,
+        "domains": [
+          "xbanking"
+        ]
+      },
+      "warnings": [],
+      "useCases": [
+        {
+          "className": "ActiverCarteUC",
+          "domain": "xbanking",
+          "httpMethod": "PUT",
+          "restPath": "/api/v1/xbanking/activer-carte",
+          "voInType": "ActiverCarteVoIn",
+          "voOutType": "ActiverCarteVoOut",
+          "injectedServices": [
+            {
+              "type": "AuthenticationService",
+              "name": "auth"
+            },
+            {
+              "type": "MagixService",
+              "name": "magix"
+            }
+          ]
+        },
+        {
+          "className": "BloquerCarteUC",
+          "domain": "xbanking",
+          "httpMethod": "PUT",
+          "restPath": "/api/v1/xbanking/bloquer-carte",
+          "voInType": "BloquerCarteVoIn",
+          "voOutType": "BloquerCarteVoOut",
+          "injectedServices": [
+            {
+              "type": "AuthenticationService",
+              "name": "auth"
+            },
+            {
+              "type": "MagixService",
+              "name": "magix"
+            }
+          ]
+        },
+        {
+          "className": "ChargerClientDataUC",
+          "domain": "xbanking",
+          "httpMethod": "GET",
+          "restPath": "/api/v1/xbanking/charger-client-data",
+          "voInType": "ChargerClientDataVoIn",
+          "voOutType": "ChargerClientDataVoOut",
+          "injectedServices": [
+            {
+              "type": "AsalService",
+              "name": "asal"
+            }
+          ]
+        },
+        {
+          "className": "ConsulterSoldeUC",
+          "domain": "xbanking",
+          "httpMethod": "GET",
+          "restPath": "/api/v1/xbanking/consulter-solde",
+          "voInType": "ConsulterSoldeVoIn",
+          "voOutType": "ConsulterSoldeVoOut",
+          "injectedServices": [
+            {
+              "type": "CompteService",
+              "name": "compteService"
+            }
+          ]
+        },
+        {
+          "className": "OuvrirCompteUC",
+          "domain": "xbanking",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/xbanking/ouvrir-compte",
+          "voInType": "OuvrirCompteVoIn",
+          "voOutType": "OuvrirCompteVoOut",
+          "injectedServices": [
+            {
+              "type": "CompteService",
+              "name": "compteService"
+            }
+          ]
+        },
+        {
+          "className": "ReceptionnerCarteUC",
+          "domain": "xbanking",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/xbanking/receptionner-carte",
+          "voInType": "ReceptionnerCarteVoIn",
+          "voOutType": "ReceptionnerCarteVoOut",
+          "injectedServices": [
+            {
+              "type": "AuthenticationService",
+              "name": "auth"
+            },
+            {
+              "type": "MagixService",
+              "name": "magix"
+            }
+          ]
+        },
+        {
+          "className": "SimulerCreditUC",
+          "domain": "xbanking",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/xbanking/simuler-credit",
+          "voInType": "SimulerCreditVoIn",
+          "voOutType": "SimulerCreditVoOut",
+          "injectedServices": []
+        },
+        {
+          "className": "VirementUC",
+          "domain": "xbanking",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/xbanking/virement",
+          "voInType": "VirementVoIn",
+          "voOutType": "VirementVoOut",
+          "injectedServices": [
+            {
+              "type": "AuthenticationService",
+              "name": "auth"
+            },
+            {
+              "type": "CompteService",
+              "name": "compteService"
+            }
+          ]
+        }
+      ],
+      "dtos": [
+        {
+          "className": "AsalDto",
+          "direction": "unknown",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ActiverCarteVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ActiverCarteVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "BloquerCarteVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "BloquerCarteVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "CarteDto",
+          "direction": "unknown",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ChargerClientDataVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ChargerClientDataVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ConsulterSoldeVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ConsulterSoldeVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "OuvrirCompteVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "OuvrirCompteVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ReceptionnerCarteVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ReceptionnerCarteVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "SimulerCreditVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "SimulerCreditVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "VirementVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "VirementVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        }
+      ]
+    },
+    "generation": {
+      "stats": {
+        "totalFiles": 47,
+        "controllers": 1,
+        "services": 1,
+        "dtos": 18,
+        "tests": 1,
+        "enums": 6,
+        "exceptions": 9,
+        "validators": 2,
+        "configFiles": 2,
+        "cloudFiles": 4,
+        "totalLinesGenerated": 1800
+      },
+      "warnings": [],
+      "fileCount": 47
+    },
+    "quality": {
+      "objectCount": 1,
+      "objectFiles": [
+        {
+          "path": "MIGRATION_REPORT.md",
+          "count": 1,
+          "lines": [
+            "| R9 | Strict types, never Object | Applied |"
+          ]
+        }
+      ],
+      "voidIssues": [],
+      "duplicateImports": []
+    }
+  },
+  {
+    "project": "boa-ultimate-test",
+    "ir": {
+      "projectName": "boa-ultimate-test",
+      "stats": {
+        "totalFiles": 78,
+        "totalLines": 1053,
+        "useCaseCount": 12,
+        "dtoCount": 28,
+        "serviceCount": 6,
+        "enumCount": 8,
+        "exceptionCount": 10,
+        "validatorCount": 4,
+        "remoteInterfaceCount": 1,
+        "domainCount": 1,
+        "domains": [
+          "xbanking"
+        ]
+      },
+      "warnings": [],
+      "useCases": [
+        {
+          "className": "ActiverCarteUC",
+          "domain": "xbanking",
+          "httpMethod": "PUT",
+          "restPath": "/api/v1/xbanking/activer-carte",
+          "voInType": "ActiverCarteVoIn",
+          "voOutType": "ActiverCarteVoOut",
+          "injectedServices": [
+            {
+              "type": "AuthenticationService",
+              "name": "auth"
+            },
+            {
+              "type": "MagixService",
+              "name": "magix"
+            }
+          ]
+        },
+        {
+          "className": "BloquerCarteUC",
+          "domain": "xbanking",
+          "httpMethod": "PUT",
+          "restPath": "/api/v1/xbanking/bloquer-carte",
+          "voInType": "BloquerCarteVoIn",
+          "voOutType": "BloquerCarteVoOut",
+          "injectedServices": [
+            {
+              "type": "AuthenticationService",
+              "name": "auth"
+            },
+            {
+              "type": "MagixService",
+              "name": "magix"
+            }
+          ]
+        },
+        {
+          "className": "ChargerClientDataUC",
+          "domain": "xbanking",
+          "httpMethod": "GET",
+          "restPath": "/api/v1/xbanking/charger-client-data",
+          "voInType": "ChargerClientDataVoIn",
+          "voOutType": "ChargerClientDataVoOut",
+          "injectedServices": [
+            {
+              "type": "AsalService",
+              "name": "asal"
+            }
+          ]
+        },
+        {
+          "className": "CloturerCompteUC",
+          "domain": "xbanking",
+          "httpMethod": "DELETE",
+          "restPath": "/api/v1/xbanking/cloturer-compte",
+          "voInType": "CloturerCompteVoIn",
+          "voOutType": "CloturerCompteVoOut",
+          "injectedServices": [
+            {
+              "type": "CompteService",
+              "name": "compteService"
+            }
+          ]
+        },
+        {
+          "className": "ConsulterSoldeUC",
+          "domain": "xbanking",
+          "httpMethod": "GET",
+          "restPath": "/api/v1/xbanking/consulter-solde",
+          "voInType": "ConsulterSoldeVoIn",
+          "voOutType": "ConsulterSoldeVoOut",
+          "injectedServices": [
+            {
+              "type": "CompteService",
+              "name": "compteService"
+            }
+          ]
+        },
+        {
+          "className": "EnvoyerNotificationUC",
+          "domain": "xbanking",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/xbanking/envoyer-notification",
+          "voInType": "EnvoyerNotificationVoIn",
+          "voOutType": "EnvoyerNotificationVoOut",
+          "injectedServices": [
+            {
+              "type": "NotificationService",
+              "name": "notifService"
+            }
+          ]
+        },
+        {
+          "className": "GenererDocumentUC",
+          "domain": "xbanking",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/xbanking/generer-document",
+          "voInType": "GenererDocumentVoIn",
+          "voOutType": "GenererDocumentVoOut",
+          "injectedServices": []
+        },
+        {
+          "className": "MajClientUC",
+          "domain": "xbanking",
+          "httpMethod": "PUT",
+          "restPath": "/api/v1/xbanking/maj-client",
+          "voInType": "MajClientVoIn",
+          "voOutType": "MajClientVoOut",
+          "injectedServices": []
+        },
+        {
+          "className": "OuvrirCompteUC",
+          "domain": "xbanking",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/xbanking/ouvrir-compte",
+          "voInType": "OuvrirCompteVoIn",
+          "voOutType": "OuvrirCompteVoOut",
+          "injectedServices": [
+            {
+              "type": "CompteService",
+              "name": "compteService"
+            }
+          ]
+        },
+        {
+          "className": "ReceptionnerCarteUC",
+          "domain": "xbanking",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/xbanking/receptionner-carte",
+          "voInType": "ReceptionnerCarteVoIn",
+          "voOutType": "ReceptionnerCarteVoOut",
+          "injectedServices": [
+            {
+              "type": "AuthenticationService",
+              "name": "auth"
+            },
+            {
+              "type": "MagixService",
+              "name": "magix"
+            }
+          ]
+        },
+        {
+          "className": "SimulerCreditUC",
+          "domain": "xbanking",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/xbanking/simuler-credit",
+          "voInType": "SimulerCreditVoIn",
+          "voOutType": "SimulerCreditVoOut",
+          "injectedServices": []
+        },
+        {
+          "className": "VirementUC",
+          "domain": "xbanking",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/xbanking/virement",
+          "voInType": "VirementVoIn",
+          "voOutType": "VirementVoOut",
+          "injectedServices": [
+            {
+              "type": "AuthenticationService",
+              "name": "auth"
+            },
+            {
+              "type": "CompteService",
+              "name": "compteService"
+            }
+          ]
+        }
+      ],
+      "dtos": [
+        {
+          "className": "AsalDto",
+          "direction": "unknown",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ActiverCarteVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ActiverCarteVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "AdresseDto",
+          "direction": "unknown",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "BeneficiaireDto",
+          "direction": "unknown",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "BloquerCarteVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "BloquerCarteVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "CarteDto",
+          "direction": "unknown",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ChargerClientDataVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ChargerClientDataVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "CloturerCompteVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "CloturerCompteVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ConsulterSoldeVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ConsulterSoldeVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "EnvoyerNotificationVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "EnvoyerNotificationVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "GenererDocumentVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "GenererDocumentVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "MajClientVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "MajClientVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "OuvrirCompteVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "OuvrirCompteVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ReceptionnerCarteVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ReceptionnerCarteVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "SimulerCreditVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "SimulerCreditVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "VirementVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "VirementVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        }
+      ]
+    },
+    "generation": {
+      "stats": {
+        "totalFiles": 64,
+        "controllers": 1,
+        "services": 2,
+        "dtos": 28,
+        "tests": 1,
+        "enums": 8,
+        "exceptions": 11,
+        "validators": 4,
+        "configFiles": 2,
+        "cloudFiles": 4,
+        "totalLinesGenerated": 2503
+      },
+      "warnings": [],
+      "fileCount": 64
+    },
+    "quality": {
+      "objectCount": 2,
+      "objectFiles": [
+        {
+          "path": "src/main/java/ma/eai/idev/boaultimatetest/adapter/DocumentServiceAdapter.java",
+          "count": 1,
+          "lines": [
+            "public Map<String, Object> getInfosDocument(String referenceDocument) {"
+          ]
+        },
+        {
+          "path": "MIGRATION_REPORT.md",
+          "count": 1,
+          "lines": [
+            "| R9 | Strict types, never Object | Applied |"
+          ]
+        }
+      ],
+      "voidIssues": [],
+      "duplicateImports": []
+    }
+  },
+  {
+    "project": "activation-carte-bmcedirect-ejb",
+    "ir": {
+      "projectName": "BMCE Direct - Module Carte EJB",
+      "stats": {
+        "totalFiles": 68,
+        "totalLines": 1396,
+        "useCaseCount": 12,
+        "dtoCount": 27,
+        "serviceCount": 1,
+        "enumCount": 7,
+        "exceptionCount": 10,
+        "validatorCount": 6,
+        "remoteInterfaceCount": 0,
+        "domainCount": 7,
+        "domains": [
+          "carte",
+          "client",
+          "compte",
+          "credit",
+          "document",
+          "notification",
+          "virement"
+        ]
+      },
+      "warnings": [],
+      "useCases": [
+        {
+          "className": "ActiverCarteUC",
+          "domain": "carte",
+          "httpMethod": "PUT",
+          "restPath": "/api/v1/carte/activer-carte",
+          "voInType": "ActiverCarteVoIn",
+          "voOutType": "ActiverCarteVoOut",
+          "injectedServices": [
+            {
+              "type": "MagixService",
+              "name": "magixService"
+            }
+          ]
+        },
+        {
+          "className": "BloquerCarteUC",
+          "domain": "carte",
+          "httpMethod": "PUT",
+          "restPath": "/api/v1/carte/bloquer-carte",
+          "voInType": "BloquerCarteVoIn",
+          "voOutType": "BloquerCarteVoOut",
+          "injectedServices": [
+            {
+              "type": "MagixService",
+              "name": "magixService"
+            }
+          ]
+        },
+        {
+          "className": "ReceptionnerCarteUC",
+          "domain": "carte",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/carte/receptionner-carte",
+          "voInType": "ReceptionnerCarteVoIn",
+          "voOutType": "ReceptionnerCarteVoOut",
+          "injectedServices": [
+            {
+              "type": "MagixService",
+              "name": "magixService"
+            }
+          ]
+        },
+        {
+          "className": "ChargerClientDataUC",
+          "domain": "client",
+          "httpMethod": "GET",
+          "restPath": "/api/v1/client/charger-client-data",
+          "voInType": "ChargerClientDataVoIn",
+          "voOutType": "ChargerClientDataVoOut",
+          "injectedServices": [
+            {
+              "type": "MagixService",
+              "name": "magixService"
+            }
+          ]
+        },
+        {
+          "className": "MajClientUC",
+          "domain": "client",
+          "httpMethod": "PUT",
+          "restPath": "/api/v1/client/maj-client",
+          "voInType": "MajClientVoIn",
+          "voOutType": "MajClientVoOut",
+          "injectedServices": [
+            {
+              "type": "MagixService",
+              "name": "magixService"
+            }
+          ]
+        },
+        {
+          "className": "CloturerCompteUC",
+          "domain": "compte",
+          "httpMethod": "DELETE",
+          "restPath": "/api/v1/compte/cloturer-compte",
+          "voInType": "CloturerCompteVoIn",
+          "voOutType": "CloturerCompteVoOut",
+          "injectedServices": [
+            {
+              "type": "MagixService",
+              "name": "magixService"
+            }
+          ]
+        },
+        {
+          "className": "ConsulterSoldeUC",
+          "domain": "compte",
+          "httpMethod": "GET",
+          "restPath": "/api/v1/compte/consulter-solde",
+          "voInType": "ConsulterSoldeVoIn",
+          "voOutType": "ConsulterSoldeVoOut",
+          "injectedServices": [
+            {
+              "type": "MagixService",
+              "name": "magixService"
+            }
+          ]
+        },
+        {
+          "className": "OuvrirCompteUC",
+          "domain": "compte",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/compte/ouvrir-compte",
+          "voInType": "OuvrirCompteVoIn",
+          "voOutType": "OuvrirCompteVoOut",
+          "injectedServices": [
+            {
+              "type": "MagixService",
+              "name": "magixService"
+            }
+          ]
+        },
+        {
+          "className": "SimulerCreditUC",
+          "domain": "credit",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/credit/simuler-credit",
+          "voInType": "SimulerCreditVoIn",
+          "voOutType": "SimulerCreditVoOut",
+          "injectedServices": [
+            {
+              "type": "MagixService",
+              "name": "magixService"
+            }
+          ]
+        },
+        {
+          "className": "GenererDocumentUC",
+          "domain": "document",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/document/generer-document",
+          "voInType": "GenererDocumentVoIn",
+          "voOutType": "GenererDocumentVoOut",
+          "injectedServices": []
+        },
+        {
+          "className": "EnvoyerNotificationUC",
+          "domain": "notification",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/notification/envoyer-notification",
+          "voInType": "EnvoyerNotificationVoIn",
+          "voOutType": "EnvoyerNotificationVoOut",
+          "injectedServices": []
+        },
+        {
+          "className": "VirementUC",
+          "domain": "virement",
+          "httpMethod": "POST",
+          "restPath": "/api/v1/virement/virement",
+          "voInType": "VirementVoIn",
+          "voOutType": "VirementVoOut",
+          "injectedServices": [
+            {
+              "type": "MagixService",
+              "name": "magixService"
+            }
+          ]
+        }
+      ],
+      "dtos": [
+        {
+          "className": "ActiverCarteVoIn",
+          "direction": "in",
+          "fieldCount": 5,
+          "fields": [
+            {
+              "name": "numCarte",
+              "type": "String",
+              "resolvedType": "String"
+            },
+            {
+              "name": "codeActivation",
+              "type": "String",
+              "resolvedType": "String"
+            },
+            {
+              "name": "corporateId",
+              "type": "String",
+              "resolvedType": "String"
+            },
+            {
+              "name": "canal",
+              "type": "String",
+              "resolvedType": "String"
+            },
+            {
+              "name": "numTelephone",
+              "type": "String",
+              "resolvedType": "String"
+            }
+          ]
+        },
+        {
+          "className": "ActiverCarteVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "BloquerCarteVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "BloquerCarteVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "CarteDto",
+          "direction": "unknown",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ReceptionnerCarteVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ReceptionnerCarteVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ChargerClientDataVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ChargerClientDataVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "MajClientVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "MajClientVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "AdresseDto",
+          "direction": "unknown",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "CloturerCompteVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "CloturerCompteVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ConsulterSoldeVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "ConsulterSoldeVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "OuvrirCompteVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "OuvrirCompteVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "SimulerCreditVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "SimulerCreditVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "GenererDocumentVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "GenererDocumentVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "EnvoyerNotificationVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "EnvoyerNotificationVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "BeneficiaireDto",
+          "direction": "unknown",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "VirementVoIn",
+          "direction": "in",
+          "fieldCount": 0,
+          "fields": []
+        },
+        {
+          "className": "VirementVoOut",
+          "direction": "out",
+          "fieldCount": 0,
+          "fields": []
+        }
+      ]
+    },
+    "generation": {
+      "stats": {
+        "totalFiles": 81,
+        "controllers": 7,
+        "services": 7,
+        "dtos": 27,
+        "tests": 7,
+        "enums": 7,
+        "exceptions": 11,
+        "validators": 6,
+        "configFiles": 2,
+        "cloudFiles": 4,
+        "totalLinesGenerated": 2958
+      },
+      "warnings": [],
+      "fileCount": 81
+    },
+    "quality": {
+      "objectCount": 1,
+      "objectFiles": [
+        {
+          "path": "MIGRATION_REPORT.md",
+          "count": 1,
+          "lines": [
+            "| R9 | Strict types, never Object | Applied |"
+          ]
+        }
+      ],
+      "voidIssues": [],
+      "duplicateImports": []
+    }
+  }
+]

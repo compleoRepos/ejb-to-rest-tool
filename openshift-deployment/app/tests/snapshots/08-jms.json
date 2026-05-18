@@ -1,0 +1,31 @@
+{
+  "fixtureId": "08-jms",
+  "timestamp": "2026-05-13T21:28:05.215Z",
+  "useCaseCount": 0,
+  "dtoCount": 0,
+  "enumCount": 0,
+  "exceptionCount": 0,
+  "generatedFileCount": 18,
+  "generatedFilePaths": [
+    "src/main/java/com/bank/ejbproject/EjbProjectApplication.java",
+    "src/main/java/com/bank/ejbproject/exception/GlobalExceptionHandler.java",
+    "src/main/java/com/bank/ejbproject/exception/BusinessRuleException.java",
+    "src/main/resources/application.yml",
+    "src/main/resources/application.properties",
+    "DATASOURCE_MIGRATION.md",
+    "Dockerfile",
+    "docker-compose.yml",
+    "k8s/deployment.yaml",
+    "k8s/service.yaml",
+    "pom.xml",
+    "MIGRATION_REPORT.md",
+    "QUALITY_SCORE.md",
+    "BIAN_MAPPING.md",
+    "ARCHITECTURE.md",
+    "MIGRATION_SUMMARY.md",
+    "src/main/java/com/bank/ejbproject/common/CompleoUnvalidated.java",
+    "src/main/java/com/bank/ejbproject/common/CompleoUnvalidatedMethodException.java"
+  ],
+  "score": 75,
+  "status": "WARN"
+}

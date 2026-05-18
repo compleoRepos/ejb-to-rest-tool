@@ -1,0 +1,9 @@
+{
+  "name": "ejb-modernizer-pipeline",
+  "version": "1.0.0",
+  "description": "Java compilation and analysis pipeline for EJB Modernizer",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

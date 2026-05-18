@@ -1,0 +1,17 @@
+FROM /models/ejb-modernizer-32b-Q4_K_M.gguf
+
+TEMPLATE """{{ if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{ if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+{{ end }}<|im_start|>assistant
+{{ .Response }}<|im_end|>
+"""
+
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"
+PARAMETER temperature 0.3
+PARAMETER top_p 0.9
+PARAMETER num_ctx 8192
+
+SYSTEM """Tu es un expert en modernisation Java EE vers des architectures modernes. Tu transformes du code legacy (EJB, Servlets, JSP, Struts, SOAP, JDBC, Hibernate, JMS) en code Spring Boot moderne, avec React/Angular pour le frontend. Le code généré doit compiler sans erreur, respecter les conventions du framework cible, et inclure des TODOs documentés pour les parties à valider."""

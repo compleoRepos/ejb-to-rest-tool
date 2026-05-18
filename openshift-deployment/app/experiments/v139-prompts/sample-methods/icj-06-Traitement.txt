@@ -1,0 +1,74 @@
+# Méthode actuellement stub (v13.8 output)
+@CompleoUnvalidated(severity = "STUB", legacyRef = "MonetiqueCreditJockerService.Traitement", migrationDate = "2026-05-12")
+@Transactional
+public FluxTraitementResponse Traitement(Object request) {
+    // TODO: Migrer la logique SOAP de MonetiqueCreditJockerWS.Traitement
+    throw new CompleoUnvalidatedMethodException("Traitement", "MonetiqueCreditJockerService.Traitement", "STUB");
+}
+
+# Source legacy correspondante
+# Fichier : interface-credit-jocker/ws/monetique/MonetiqueCreditJockerWS.java
+# Méthode : Traitement
+@WebMethod(operationName = "Traitement")
+public FluxTraitementResponse Traitement(@WebParam(name = "Compte") String compte,
+        @WebParam(name = "MntTirage") String mntTirage, @WebParam(name = "LibelleTirage") String libelleTirage,
+        @WebParam(name = "DureeTirage") String dureeTirage, @WebParam(name = "Canal") String canal,
+        @WebParam(name = "Reference") String reference) {
+    FluxTraitementResponse fluxTraitementResponse = new FluxTraitementResponse();
+    try {
+        String categorie = compte.substring(12, 15);
+        String centredefrais = compte.substring(3, 6) + compte.substring(10, 12);
+        LocalDate currentDate = LocalDate.now();
+        Long dureeTirageToAdd = Long.parseLong(dureeTirage);
+        LocalDate dateEcheance = currentDate.plusMonths(dureeTirageToAdd);
+        String dtDebTirage = DT_FORMATTER.format(currentDate);
+        String dt1Echeance = DT_FORMATTER.format(dateEcheance);
+        String noTiers = "0000000";
+        String nomClient = " ";
+        FluxSoldeResponse fluxSoldeResponse = this.getSolde(compte, canal, reference);
+        if (!"000".equals(fluxSoldeResponse.getCode())) {
+            fluxTraitementResponse.setCode(fluxSoldeResponse.getCode());
+            fluxTraitementResponse.setMessage(fluxSoldeResponse.getMessage());
+            return fluxTraitementResponse;
+        }
+        String noDoss = fluxSoldeResponse.getNoDoss();
+        String fluxTirageDeclic;
+        if ("GAB".equalsIgnoreCase(canal.toLowerCase())) {
+            String sourceOperation = "GAB";
+            fluxTirageDeclic = GenerateFlux.traitementGAB(compte, mntTirage, libelleTirage, centredefrais,
+                    categorie, dtDebTirage, dt1Echeance, noDoss, noTiers, nomClient, dureeTirage, sourceOperation);
+        } else if ("TPE".equalsIgnoreCase(canal.toLowerCase())) {
+            Float montantDouble = Float.parseFloat(mntTirage.trim());
+            double montantMinAutorise = 500.00;
+            Float montantMaxAutorise = Float.parseFloat(fluxSoldeResponse.getMntDisponible().trim());
+            if (montantDouble > montantMaxAutorise) {
+                fluxTraitementResponse.setCode("444");
+                fluxTraitementResponse.setMessage("Montant choisi est supéreur au Disponible");
+                return fluxTraitementResponse;
+            }
+            if (montantDouble < montantMinAutorise) {
+                fluxTraitementResponse.setCode("333");
+                fluxTraitementResponse.setMessage("Montant choisi est inférieur à 500 DH");
+                return fluxTraitementResponse;
+            }
+            fluxTirageDeclic = GenerateFlux.getFluxDeclicTPE(compte, mntTirage, nomClient, dureeTirage, canal);
+        } else {
+            String sourceOperation = "Immediat";
+            fluxTirageDeclic = GenerateFlux.traitementDECLIC(compte, mntTirage, libelleTirage, centredefrais,
+                    categorie, dtDebTirage, dt1Echeance, noDoss, noTiers, nomClient, dureeTirage, sourceOperation);
+        }
+        fluxTraitementResponse = traitementDeclic(fluxTirageDeclic);
+    } catch (Exception exception) {
+        fluxTraitementResponse.setCode("009");
+        fluxTraitementResponse.setMessage(Constants.PROBLEM_TECHNIQUE);
+    }
+    return fluxTraitementResponse;
+}
+
+# Contexte projet
+- Type : SOAP @WebService legacy
+- Domaine : Banking - Credit Processing (Monetique DECLIC) - Multi-channel (GAB/TPE/Immediat)
+- Framework : EJB stateless, SOAP document/literal
+- Classes utilisées : FluxTraitementResponse, FluxSoldeResponse, GenerateFlux, LocalDate, DateTimeFormatter, Constants
+- Pattern : String parsing (substring) → Date calculation → Solde check → Channel routing (GAB/TPE/else) → Amount validation → Flux generation → DECLIC processing
+- Catégorie échantillon : A (logique réelle COMPLEXE — multi-branch, validation montant, calcul date, appel interne getSolde)

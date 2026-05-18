@@ -1,0 +1,78 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipeline
+  namespace: ejb-modernizer
+  labels:
+    app.kubernetes.io/name: ejb-modernizer
+    app.kubernetes.io/component: pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pipeline
+  template:
+    metadata:
+      labels:
+        app: pipeline
+        app.kubernetes.io/name: ejb-modernizer
+        app.kubernetes.io/component: pipeline
+    spec:
+      containers:
+        - name: pipeline
+          image: ejb-modernizer-pipeline:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "8080"
+            - name: WORKSPACE_DIR
+              value: /workspace
+            - name: REPOS_DIR
+              value: /data/repos
+          volumeMounts:
+            - name: workspace-data
+              mountPath: /workspace
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: workspace-data
+          persistentVolumeClaim:
+            claimName: workspace-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pipeline
+  namespace: ejb-modernizer
+  labels:
+    app.kubernetes.io/name: ejb-modernizer
+    app.kubernetes.io/component: pipeline
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    app: pipeline

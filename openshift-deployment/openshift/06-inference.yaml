@@ -1,0 +1,96 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference
+  namespace: ejb-modernizer
+  labels:
+    app.kubernetes.io/name: ejb-modernizer
+    app.kubernetes.io/component: inference
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: inference
+  template:
+    metadata:
+      labels:
+        app: inference
+        app.kubernetes.io/name: ejb-modernizer
+        app.kubernetes.io/component: inference
+    spec:
+      # GPU node selector — adjust based on your OpenShift GPU node labels
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: inference
+          image: ejb-modernizer-inference:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 11434
+              protocol: TCP
+          env:
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "compute,utility"
+          volumeMounts:
+            - name: ollama-data
+              mountPath: /root/.ollama
+            - name: models-data
+              mountPath: /models
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "8"
+              memory: 32Gi
+              nvidia.com/gpu: "1"
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 180
+            periodSeconds: 60
+            timeoutSeconds: 10
+      volumes:
+        - name: ollama-data
+          persistentVolumeClaim:
+            claimName: ollama-data
+        - name: models-data
+          persistentVolumeClaim:
+            claimName: models-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference
+  namespace: ejb-modernizer
+  labels:
+    app.kubernetes.io/name: ejb-modernizer
+    app.kubernetes.io/component: inference
+spec:
+  type: ClusterIP
+  ports:
+    - port: 11434
+      targetPort: 11434
+      protocol: TCP
+  selector:
+    app: inference

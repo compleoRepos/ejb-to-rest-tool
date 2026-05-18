@@ -1,0 +1,97 @@
+# ============================================================
+# Java Legacy Modernizer — Docker Compose
+# Services: app (Node.js) + ollama (GPU LLM) + mysql (DB)
+# Usage: docker compose up -d
+# ============================================================
+
+services:
+
+  # ---- Application Node.js ----
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    container_name: modernizer-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: mysql://modernizer:${DB_PASSWORD}@mysql:3306/modernizer
+      JWT_SECRET: ${JWT_SECRET}
+      OLLAMA_BASE_URL: http://ollama:11434
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-eu-west-3}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - modernizer-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/compleo/sessions').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ---- Ollama LLM (GPU) ----
+  ollama:
+    image: ollama/ollama:latest
+    container_name: modernizer-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - modernizer-net
+
+  # ---- MySQL 8 ----
+  mysql:
+    image: mysql:8.0
+    container_name: modernizer-mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: modernizer
+      MYSQL_USER: modernizer
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max-connections=200
+      --innodb-buffer-pool-size=512M
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - modernizer-net
+
+volumes:
+  ollama-data:
+    driver: local
+  mysql-data:
+    driver: local
+
+networks:
+  modernizer-net:
+    driver: bridge

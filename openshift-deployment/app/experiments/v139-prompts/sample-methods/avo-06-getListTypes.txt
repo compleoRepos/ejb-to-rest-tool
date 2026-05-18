@@ -1,0 +1,24 @@
+# Méthode actuellement stub (v13.8 output)
+@CompleoUnvalidated(severity = "STUB", legacyRef = "IServiceRepDematImpl.getListTypes", migrationDate = "2026-05-12")
+@Transactional
+public List<TypeAoRd> getListTypes(String nature) {
+    // TODO: Migrer la logique de IServiceRepDematImpl.getListTypes
+    throw new CompleoUnvalidatedMethodException("getListTypes", "IServiceRepDematImpl.getListTypes", "STUB");
+}
+
+# Source legacy correspondante
+# Fichier : avis-opere/service/repdemat/IServiceRepDematImpl.java
+# Méthode : getListTypes
+@Override
+public List<TypeAoRd> getListTypes(String nature) {
+    EaiLog.info("category nature Service => " + nature);
+    return searchRepo.SearchTypes(nature);
+}
+
+# Contexte projet
+- Type : Spring @Service legacy
+- Domaine : Banking - Document Management (RepDemat)
+- Framework : Spring + custom EAI framework (@ContinueOrStartTransaction)
+- Classes utilisées : TypeAoRd (entity), SearchTypesRepDemat (repository), EaiLog
+- Pattern : Log → Delegate to repository → Return
+- Catégorie échantillon : C (quasi-vide — wrapper trivial, 1 log + 1 delegation)

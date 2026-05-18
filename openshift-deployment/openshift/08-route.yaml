@@ -1,0 +1,26 @@
+---
+# OpenShift Route — External access point
+# Routes traffic to the frontend Nginx which proxies API calls to backend
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: ejb-modernizer
+  namespace: ejb-modernizer
+  labels:
+    app.kubernetes.io/name: ejb-modernizer
+    app.kubernetes.io/component: frontend
+  annotations:
+    haproxy.router.openshift.io/timeout: 300s
+spec:
+  # Uncomment and set your custom hostname:
+  # host: ejb-modernizer.apps.your-cluster.example.com
+  to:
+    kind: Service
+    name: frontend
+    weight: 100
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

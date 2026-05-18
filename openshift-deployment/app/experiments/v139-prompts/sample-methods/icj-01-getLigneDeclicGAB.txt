@@ -1,0 +1,64 @@
+# Méthode actuellement stub (v13.8 output)
+@CompleoUnvalidated(severity = "STUB", legacyRef = "CreditJockerWebService.getLigneDeclicGAB", migrationDate = "2026-05-12")
+@Transactional
+public ModelFlux getLigneDeclicGAB(Object request) {
+    // TODO: Migrer la logique SOAP de CreditJockerWebService.getLigneDeclicGAB
+    throw new CompleoUnvalidatedMethodException("getLigneDeclicGAB", "CreditJockerWebService.getLigneDeclicGAB", "STUB");
+}
+
+# Source legacy correspondante
+# Fichier : interface-credit-jocker/ws/salafin/CreditJockerWebService.java
+# Méthode : getLigneDeclicGAB
+@WebMethod(operationName = "getLigneDeclicGAB")
+public ModelFlux getLigneDeclicGAB(@WebParam(name = "compte") String compte) throws Exception {
+    Log.setNewThreadId();
+    Log.setServiceName("getLigneDeclicGAB");
+    Log.info("Etape 1 : Debut fonction get ligne declic GAB");
+    String fluxLigneDeclic = GenerateFlux.getFluxLigneDeclicGAB(compte);
+    SynchroneService posteAgenceSolde = null;
+    try {
+        Log.info("num compte = " + compte);
+        posteAgenceSolde = Services.find(Constants.UDDI_DECLIC_SERVICES, SynchroneService.class);
+    } catch (Exception e) {
+        Log.error(EXCEPTION_ERROR_LOGS, e);
+    }
+    ModelFlux fluxRetour = new ModelFlux();
+    Flux flux = new Flux();
+    if (posteAgenceSolde == null) {
+        flux.setCode("222");
+        fluxRetour.setFlux(flux);
+        return fluxRetour;
+    }
+    Envelope reponseEJB = posteAgenceSolde.process(Parser.unmarshall(fluxLigneDeclic));
+    reponseEJB = Parser.update(reponseEJB);
+    Ligne ligne = new Ligne();
+    String code = reponseEJB.getNodeAsString(FLUX_CODE);
+    Log.info("code = " + code);
+    if (code != null) {
+        flux.setCode("222");
+    } else {
+        ligne.setMntTotal(reponseEJB.getNodeAsString("flux/ligne/mntTotal"));
+        ligne.setBlocageBase(reponseEJB.getNodeAsString("flux/ligne/blocageBase"));
+        ligne.setBlocageDoss(reponseEJB.getNodeAsString("flux/ligne/blocageDoss"));
+        ligne.setCode(reponseEJB.getNodeAsString("flux/ligne/code"));
+        ligne.setCompte(reponseEJB.getNodeAsString("flux/ligne/compte"));
+        ligne.setDateDoctroi(reponseEJB.getNodeAsString("flux/ligne/dateDoctroi"));
+        ligne.setEncours(reponseEJB.getNodeAsString("flux/ligne/encours"));
+        ligne.setImpayes(reponseEJB.getNodeAsString("flux/ligne/impayes"));
+        ligne.setMntDisponible(reponseEJB.getNodeAsString("flux/ligne/mntDisponible"));
+        ligne.setNbrImpaye(reponseEJB.getNodeAsString("flux/ligne/nbrImpaye"));
+        ligne.setNoDoss(reponseEJB.getNodeAsString("flux/ligne/noDoss"));
+        flux.setLigne(ligne);
+    }
+    fluxRetour.setFlux(flux);
+    Log.info("Etape fin : Fin fonction get ligne declic");
+    return fluxRetour;
+}
+
+# Contexte projet
+- Type : SOAP @WebService legacy
+- Domaine : Banking - Credit Line (DECLIC) - GAB Channel
+- Framework : EJB stateless, SOAP document/literal
+- Classes utilisées : ModelFlux, Flux, Ligne, GenerateFlux, SynchroneService, Envelope, Parser, Constants
+- Pattern : Flux XML generation → EJB service call → Envelope parsing → DTO mapping
+- Catégorie échantillon : A (logique réelle avec if/else, parsing XML, mapping DTO)

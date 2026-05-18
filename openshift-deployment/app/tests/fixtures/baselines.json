@@ -1,0 +1,18 @@
+{
+  "EJB BOA Classique": 0,
+  "EJB Direct @Stateless": 0,
+  "EJB + DAO séparé": 0,
+  "Servlet Simple": 0,
+  "Servlet Multi-Route": 0,
+  "EJB + Enum + Exception": 0,
+  "JDBC Pur": 0,
+  "JMS / Message-Driven": 0,
+  "SOAP WebService": 0,
+  "Struts Action": 0,
+  "Batch / Timer EJB": 0,
+  "Multi-Domaine": 0,
+  "Multi-DataSource": 0,
+  "EJB 2.x SessionBean": 0,
+  "Hibernate HQL": 0,
+  "Projet Mixte Complet": 0
+}

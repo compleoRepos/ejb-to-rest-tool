@@ -1,0 +1,22 @@
+{
+  "query": "SELECT status, COUNT(*) as cnt FROM projects GROUP BY status; ",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 7MtqdpAHC3Gogvx.19563b0ba7fa --database ZuBzGQ3A9ameWxvz3cohMD --execute SELECT status, COUNT(*) as cnt FROM projects GROUP BY status; ",
+  "rows": [
+    {
+      "status": "archived",
+      "cnt": "1657"
+    },
+    {
+      "status": "active",
+      "cnt": "6697"
+    },
+    {
+      "status": "completed",
+      "cnt": "1646"
+    }
+  ],
+  "messages": [],
+  "stdout": "status\tcnt\narchived\t1657\nactive\t6697\ncompleted\t1646\n",
+  "stderr": "",
+  "execution_time_ms": 294
+}
