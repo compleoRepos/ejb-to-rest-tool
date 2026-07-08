@@ -56,3 +56,28 @@
 - [x] Fix duplicate method names from same-named EJB operations (V2 suffix)
 - [x] E2E test via web API: 23/26 projects succeed (3 are Spring, not EJB)
 - [x] BIAN generation via tRPC: payment-order-wrapper generated with S3 ZIP URL
+
+## Corrections Audit — Objectif 9.5/10
+
+### P0 — Critiques
+- [x] BIAN: Fix RestTemplate.put() → utiliser exchange() pour PUT/DELETE
+- [x] BIAN: Ajouter Spring Security config (Keycloak OAuth2, dev=libre, prod=JWT)
+- [x] BIAN: Implémenter BianAclMapper avec méthodes de mapping réelles
+- [x] Adapter: @EJB déjà en place (confirmé par audit du code Java)
+
+### P1 — Importants
+- [x] BIAN: Ajouter TimeLimiter dans Resilience4j config
+- [x] BIAN: Ajouter GlobalExceptionHandler (@ControllerAdvice)
+- [x] BIAN: Séparer instances Resilience4j par adapter backend
+- [x] BIAN: Ajouter CORS configuration (WebMvcConfigurer)
+- [x] BIAN: Extraire interface pour RestAdapter (testabilité + SOLID-D)
+- [x] Adapter: @Produces/@Consumes déjà au niveau classe (confirmé par audit)
+
+### P2 — Améliorations
+- [x] BIAN: Ajouter profil mock (MockAdapter avec @Profile("mock"))
+- [x] Adapter: Ajouter Bean Validation (@Valid, @NotNull)
+- [x] Adapter: Ajouter Logger SLF4J (log.info/log.error dans chaque Resource)
+- [x] BIAN: Ajouter rate limiting (Resilience4j rateLimiter par adapter)
+- [x] Postman: Ajouter auth headers + test scripts (76/76 items avec tests)
+- [x] OpenAPI: Ajouter securitySchemes bearerAuth
+- [x] Mermaid: Diagrammes de séquence complets avec tous les participants
