@@ -19,8 +19,10 @@ import {
   Code,
   GitBranch,
   Globe,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
+import { trpc } from "@/lib/trpc";
 
 type TabMode = "ejb" | "json";
 
@@ -35,19 +37,33 @@ interface EjbProject {
 // ─── JSON/WSDL Upload Types ──────────────────────────────────────────────────
 interface JsonFile {
   name: string;
+  file: File;
   type: "json" | "wsdl";
   size: number;
-  content?: unknown;
   endpoints?: number;
+  adapterName?: string;
 }
 
 // ─── Generation Result ───────────────────────────────────────────────────────
-interface GenerationResult {
-  wrapperName: string;
+interface AdapterResult {
+  success: boolean;
+  projectName: string;
+  originalName?: string;
+  ejbCount: number;
+  methodCount: number;
+  filesGenerated: number;
+  zipUrl: string | null;
+  errors?: string[];
+}
+
+interface BianWrapperResult {
+  name: string;
   serviceDomain: string;
+  domainId: string;
   endpoints: number;
-  files: number;
-  status: "success" | "error";
+  filesGenerated: number;
+  zipUrl: string | null;
+  error?: string;
 }
 
 export default function Generator() {
@@ -109,9 +125,14 @@ function EjbUploadTab() {
   const [projects, setProjects] = useState<EjbProject[]>([]);
   const [gitUrl, setGitUrl] = useState("");
   const [sourceMode, setSourceMode] = useState<"file" | "git">("file");
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisStep, setAnalysisStep] = useState("");
-  const [results, setResults] = useState<GenerationResult[] | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationStep, setGenerationStep] = useState("");
+  const [results, setResults] = useState<AdapterResult[] | null>(null);
+  const [bianResults, setBianResults] = useState<BianWrapperResult[] | null>(null);
+
+  const adapterMutation = trpc.generate.adapterFromUpload.useMutation();
+  const bianMutation = trpc.generate.bian.useMutation();
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -168,38 +189,89 @@ function EjbUploadTab() {
       return;
     }
 
-    setIsAnalyzing(true);
+    setIsGenerating(true);
     setResults(null);
+    setBianResults(null);
 
-    const steps = [
-      "Extraction des archives...",
-      "Détection des technologies (EJB, Servlets, JSP, Struts, SOAP)...",
-      "Analyse des descripteurs (web.xml, ejb-jar.xml)...",
-      "Extraction des endpoints depuis les Servlets...",
-      "Extraction des EJB Session Beans...",
-      "Détection des services SOAP/WSDL...",
-      "Mapping vers les Service Domains BIAN...",
-      "Regroupement par domaine...",
-      "Génération des wrappers Spring Boot...",
-      "Compilation Maven & validation Swagger...",
-    ];
+    try {
+      // Step 1: Upload files
+      setGenerationStep("Upload des fichiers vers le serveur...");
+      setIsUploading(true);
 
-    for (const step of steps) {
-      setAnalysisStep(step);
-      await new Promise((r) => setTimeout(r, 900));
+      const formData = new FormData();
+      for (const project of projects) {
+        formData.append("files", project.file);
+      }
+
+      const uploadResponse = await fetch("/api/upload/ejb", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error("Échec de l'upload des fichiers");
+      }
+
+      const uploadData = await uploadResponse.json();
+      setIsUploading(false);
+
+      if (!uploadData.success || !uploadData.files?.length) {
+        throw new Error("Aucun fichier n'a été uploadé correctement");
+      }
+
+      // Step 2: Generate Adapters
+      setGenerationStep("Génération des Adapters JAX-RS...");
+
+      const adapterResult = await adapterMutation.mutateAsync({
+        uploadedFiles: uploadData.files.map((f: any) => ({
+          originalName: f.originalName,
+          storedPath: f.storedPath,
+          format: f.format,
+        })),
+      });
+
+      setResults(adapterResult.results as AdapterResult[]);
+
+      // Step 3: Generate BIAN Wrappers from successful adapters
+      const successfulAdapters = adapterResult.results.filter((r: any) => r.success);
+      if (successfulAdapters.length > 0) {
+        setGenerationStep("Regroupement par Service Domain BIAN...");
+        await new Promise((r) => setTimeout(r, 500));
+        setGenerationStep("Génération des Wrappers Spring Boot BIAN...");
+
+        // For BIAN generation, we need endpoint info from adapters
+        // Since we don't have parsed endpoint data from the adapter generation,
+        // we'll create minimal project entries for the BIAN generator
+        const bianProjects = successfulAdapters.map((adapter: any) => ({
+          adapterName: adapter.projectName.replace("-adapter", ""),
+          endpoints: Array.from({ length: adapter.methodCount || 1 }, (_, i) => ({
+            operation: `operation${i + 1}`,
+            method: "POST",
+            path: `/api/${adapter.projectName}/op${i + 1}`,
+            requestFields: [],
+            responseFields: [],
+          })),
+        }));
+
+        const bianResult = await bianMutation.mutateAsync({
+          projects: bianProjects,
+        });
+
+        setBianResults(bianResult.wrappers as BianWrapperResult[]);
+      }
+
+      setGenerationStep("");
+      toast.success(
+        `${adapterResult.results.length} adapter(s) générés, ${successfulAdapters.length} réussi(s)`
+      );
+    } catch (err: any) {
+      toast.error(err.message || "Erreur lors de la génération");
+      setGenerationStep("");
+    } finally {
+      setIsGenerating(false);
+      setIsUploading(false);
     }
-
-    // Simulate results
-    const mockResults: GenerationResult[] = [
-      { wrapperName: "card-administration-bmcedirect", serviceDomain: "Card Administration", endpoints: 13, files: 66, status: "success" },
-      { wrapperName: "payment-order-bmcedirect", serviceDomain: "Payment Order", endpoints: 12, files: 58, status: "success" },
-      { wrapperName: "customer-offer-bmcedirect", serviceDomain: "Customer Offer", endpoints: 6, files: 42, status: "success" },
-    ];
-
-    setResults(mockResults);
-    setIsAnalyzing(false);
-    setAnalysisStep("");
-    toast.success(`${mockResults.length} wrapper(s) générés avec succès`);
   };
 
   const formatSize = (bytes: number) => {
@@ -325,23 +397,28 @@ function EjbUploadTab() {
           </div>
         )}
 
-        {/* Analysis Progress */}
-        {isAnalyzing && (
+        {/* Generation Progress */}
+        {isGenerating && (
           <div className="p-6 rounded-lg border border-[oklch(0.78_0.15_200/0.3)] bg-[oklch(0.78_0.15_200/0.03)]">
             <div className="flex items-center gap-3 mb-3">
               <Loader2 className="w-5 h-5 text-cyan animate-spin" />
               <span className="font-display font-semibold">
-                Analyse en cours...
+                {isUploading ? "Upload en cours..." : "Génération en cours..."}
               </span>
             </div>
             <p className="text-sm text-muted-foreground font-mono ml-8">
-              {analysisStep}
+              {generationStep}
             </p>
           </div>
         )}
 
-        {/* Results */}
-        {results && <ResultsList results={results} />}
+        {/* Adapter Results */}
+        {results && <AdapterResultsList results={results} />}
+
+        {/* BIAN Wrapper Results */}
+        {bianResults && bianResults.length > 0 && (
+          <BianResultsList results={bianResults} />
+        )}
       </div>
 
       {/* Sidebar */}
@@ -353,8 +430,12 @@ function EjbUploadTab() {
           <div className="space-y-3">
             <StatRow label="Projets" value={projects.length.toString()} />
             <StatRow
-              label="Wrappers générés"
-              value={results ? results.length.toString() : "—"}
+              label="Adapters générés"
+              value={results ? results.filter((r) => r.success).length.toString() : "—"}
+            />
+            <StatRow
+              label="Wrappers BIAN"
+              value={bianResults ? bianResults.length.toString() : "—"}
             />
           </div>
         </div>
@@ -364,14 +445,14 @@ function EjbUploadTab() {
           disabled={
             (sourceMode === "file" && projects.length === 0) ||
             (sourceMode === "git" && !gitUrl.trim()) ||
-            isAnalyzing
+            isGenerating
           }
           className="w-full gap-2 font-display font-semibold h-12 bg-[oklch(0.78_0.15_200)] text-[oklch(0.13_0.02_230)] hover:bg-[oklch(0.82_0.15_200)] disabled:opacity-40 transition-all duration-150 active:scale-[0.97]"
         >
-          {isAnalyzing ? (
+          {isGenerating ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              Analyse en cours...
+              Génération en cours...
             </>
           ) : (
             <>
@@ -407,7 +488,9 @@ function JsonUploadTab() {
   const [files, setFiles] = useState<JsonFile[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationStep, setGenerationStep] = useState("");
-  const [results, setResults] = useState<GenerationResult[] | null>(null);
+  const [results, setResults] = useState<BianWrapperResult[] | null>(null);
+
+  const bianMutation = trpc.generate.bian.useMutation();
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -439,10 +522,11 @@ function JsonUploadTab() {
           const endpoints = json.endpoints?.length || 0;
           parsed.push({
             name: file.name,
+            file,
             type: "json",
             size: file.size,
-            content: json,
             endpoints,
+            adapterName: json.adapter_name || file.name.replace(/\.json$/, ""),
           });
         } catch {
           toast.error(`Erreur de parsing: ${file.name}`);
@@ -451,9 +535,10 @@ function JsonUploadTab() {
         // WSDL / XML
         parsed.push({
           name: file.name,
+          file,
           type: "wsdl",
           size: file.size,
-          endpoints: Math.floor(Math.random() * 5) + 2, // simulated
+          endpoints: 0,
         });
       }
     }
@@ -475,62 +560,88 @@ function JsonUploadTab() {
     setIsGenerating(true);
     setResults(null);
 
-    const steps = [
-      "Parsing des fichiers JSON...",
-      "Parsing des fichiers WSDL...",
-      "Extraction des opérations et signatures...",
-      "Mapping vers les Service Domains BIAN...",
-      "Regroupement par domaine...",
-      "Génération des wrappers Spring Boot...",
-      "Génération des diagrammes de séquence...",
-      "Compilation Maven & validation Swagger...",
-    ];
+    try {
+      // Step 1: Upload JSON files to server
+      setGenerationStep("Upload des fichiers JSON vers le serveur...");
 
-    for (const step of steps) {
-      setGenerationStep(step);
-      await new Promise((r) => setTimeout(r, 700));
-    }
-
-    // Simulate BIAN mapping
-    const bianMapping: Record<string, { domain: string; count: number }> = {};
-    for (const file of files) {
-      let domain = "Unknown";
-      const name = file.name.toLowerCase();
-
-      if (name.includes("carte") || name.includes("card") || name.includes("3dsecure") || name.includes("token") || name.includes("monetique") || name.includes("releve") || name.includes("vente")) {
-        domain = "Card Administration";
-      } else if (name.includes("chequier") || name.includes("dotation") || name.includes("disposition") || name.includes("virement") || name.includes("payment")) {
-        domain = "Payment Order";
-      } else if (name.includes("epargne") || name.includes("assistance") || name.includes("opv") || name.includes("offer")) {
-        domain = "Customer Offer";
-      } else if (name.includes("notification") || name.includes("sms")) {
-        domain = "Party Notification";
-      } else if (name.includes("avenir") || name.includes("opere") || name.includes("account")) {
-        domain = "Current Account";
-      } else if (name.includes("credit") || name.includes("jocker") || name.includes("loan")) {
-        domain = "Consumer Loan";
-      } else if (name.includes("transfert") || name.includes("euro") || name.includes("exchange")) {
-        domain = "Foreign Exchange";
+      const formData = new FormData();
+      for (const file of files) {
+        formData.append("files", file.file);
       }
 
-      if (!bianMapping[domain]) bianMapping[domain] = { domain, count: 0 };
-      bianMapping[domain].count += file.endpoints || 0;
+      const uploadResponse = await fetch("/api/upload/json", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error("Échec de l'upload des fichiers");
+      }
+
+      const uploadData = await uploadResponse.json();
+
+      if (!uploadData.success || !uploadData.files?.length) {
+        throw new Error("Aucun fichier n'a été uploadé correctement");
+      }
+
+      // Step 2: Build BIAN projects from uploaded JSON data
+      setGenerationStep("Parsing des fichiers et extraction des endpoints...");
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Read JSON content from files for endpoint extraction
+      const bianProjects = [];
+      for (const file of files) {
+        if (file.type === "json") {
+          const text = await file.file.text();
+          try {
+            const json = JSON.parse(text);
+            const adapterName = json.adapter_name || file.name.replace(/\.json$/, "");
+            const endpoints = (json.endpoints || []).map((ep: any) => ({
+              operation: ep.operation || ep.name || "unknown",
+              method: ep.method || "POST",
+              path: ep.path || `/api/${adapterName}/${ep.operation || "op"}`,
+              requestFields: (ep.request_fields || ep.requestFields || []).map((f: any) => ({
+                name: f.name || f,
+                type: f.type || "String",
+                required: f.required ?? false,
+              })),
+              responseFields: (ep.response_fields || ep.responseFields || []).map((f: any) => ({
+                name: f.name || f,
+                type: f.type || "String",
+                required: f.required ?? false,
+              })),
+            }));
+
+            bianProjects.push({ adapterName, endpoints });
+          } catch {
+            // Skip invalid JSON
+          }
+        }
+      }
+
+      if (bianProjects.length === 0) {
+        throw new Error("Aucun fichier JSON valide avec des endpoints");
+      }
+
+      // Step 3: Generate BIAN Wrappers
+      setGenerationStep("Mapping vers les Service Domains BIAN...");
+      await new Promise((r) => setTimeout(r, 300));
+      setGenerationStep("Génération des Wrappers Spring Boot BIAN...");
+
+      const bianResult = await bianMutation.mutateAsync({
+        projects: bianProjects,
+      });
+
+      setResults(bianResult.wrappers as BianWrapperResult[]);
+      setGenerationStep("");
+      toast.success(`${bianResult.wrappers.length} wrapper(s) BIAN générés avec succès`);
+    } catch (err: any) {
+      toast.error(err.message || "Erreur lors de la génération");
+      setGenerationStep("");
+    } finally {
+      setIsGenerating(false);
     }
-
-    const generatedResults: GenerationResult[] = Object.entries(bianMapping).map(
-      ([domain, info]) => ({
-        wrapperName: domain.toLowerCase().replace(/\s+/g, "-") + "-bmcedirect",
-        serviceDomain: domain,
-        endpoints: info.count,
-        files: 40 + info.count * 4,
-        status: "success" as const,
-      })
-    );
-
-    setResults(generatedResults);
-    setIsGenerating(false);
-    setGenerationStep("");
-    toast.success(`${generatedResults.length} wrapper(s) générés avec succès`);
   };
 
   const totalEndpoints = files.reduce((sum, f) => sum + (f.endpoints || 0), 0);
@@ -640,7 +751,7 @@ function JsonUploadTab() {
         )}
 
         {/* Results */}
-        {results && <ResultsList results={results} />}
+        {results && <BianResultsList results={results} />}
       </div>
 
       {/* Sidebar */}
@@ -661,7 +772,7 @@ function JsonUploadTab() {
             <div className="border-t border-border my-2" />
             <StatRow label="Total endpoints" value={totalEndpoints.toString()} />
             <StatRow
-              label="Wrappers estimés"
+              label="Wrappers générés"
               value={results ? results.length.toString() : "—"}
             />
           </div>
@@ -710,12 +821,13 @@ function JsonUploadTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Shared Components
 // ═══════════════════════════════════════════════════════════════════════════════
-function ResultsList({ results }: { results: GenerationResult[] }) {
+
+function AdapterResultsList({ results }: { results: AdapterResult[] }) {
   return (
     <div className="space-y-4 mt-8">
       <h3 className="font-display font-semibold text-lg flex items-center gap-2">
         <CheckCircle className="w-5 h-5 text-[oklch(0.82_0.25_140)]" />
-        Wrappers générés
+        Adapters JAX-RS générés
       </h3>
       <div className="space-y-3">
         {results.map((result, index) => (
@@ -725,27 +837,89 @@ function ResultsList({ results }: { results: GenerationResult[] }) {
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-3">
-                {result.status === "success" ? (
+                {result.success ? (
                   <CheckCircle className="w-4 h-4 text-[oklch(0.82_0.25_140)]" />
                 ) : (
                   <AlertCircle className="w-4 h-4 text-destructive" />
                 )}
                 <span className="font-mono text-sm font-medium">
-                  {result.wrapperName}
+                  {result.projectName}
                 </span>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="text-xs gap-1 border-border hover:border-[oklch(0.78_0.15_200/0.5)] hover:text-cyan"
-              >
-                Télécharger ZIP
-              </Button>
+              {result.success && result.zipUrl && (
+                <a href={result.zipUrl} target="_blank" rel="noopener noreferrer">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs gap-1 border-border hover:border-[oklch(0.78_0.15_200/0.5)] hover:text-cyan"
+                  >
+                    <Download className="w-3 h-3" />
+                    Télécharger ZIP
+                  </Button>
+                </a>
+              )}
+            </div>
+            <div className="flex items-center gap-4 text-xs text-muted-foreground ml-7">
+              {result.success ? (
+                <>
+                  <span>{result.ejbCount} EJBs</span>
+                  <span>{result.methodCount} méthodes</span>
+                  <span>{result.filesGenerated} fichiers</span>
+                </>
+              ) : (
+                <span className="text-destructive">
+                  {result.errors?.join(", ") || "Aucun EJB détecté"}
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BianResultsList({ results }: { results: BianWrapperResult[] }) {
+  return (
+    <div className="space-y-4 mt-8">
+      <h3 className="font-display font-semibold text-lg flex items-center gap-2">
+        <CheckCircle className="w-5 h-5 text-[oklch(0.82_0.25_140)]" />
+        Wrappers BIAN Spring Boot
+      </h3>
+      <div className="space-y-3">
+        {results.map((result, index) => (
+          <div
+            key={index}
+            className="p-4 rounded-lg border border-border bg-card hover:border-[oklch(0.78_0.15_200/0.3)] transition-colors"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-3">
+                {!result.error ? (
+                  <CheckCircle className="w-4 h-4 text-[oklch(0.82_0.25_140)]" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-destructive" />
+                )}
+                <span className="font-mono text-sm font-medium">
+                  {result.name}
+                </span>
+              </div>
+              {result.zipUrl && (
+                <a href={result.zipUrl} target="_blank" rel="noopener noreferrer">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs gap-1 border-border hover:border-[oklch(0.78_0.15_200/0.5)] hover:text-cyan"
+                  >
+                    <Download className="w-3 h-3" />
+                    Télécharger ZIP
+                  </Button>
+                </a>
+              )}
             </div>
             <div className="flex items-center gap-4 text-xs text-muted-foreground ml-7">
               <span>SD: {result.serviceDomain}</span>
               <span>{result.endpoints} endpoints</span>
-              <span>{result.files} fichiers</span>
+              <span>{result.filesGenerated} fichiers</span>
             </div>
           </div>
         ))}

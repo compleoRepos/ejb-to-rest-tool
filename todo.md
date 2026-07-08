@@ -34,11 +34,11 @@
 - [x] Documentation generation (README, DEVELOPER-GUIDE, DEPLOYMENT, ARCHITECTURE)
 
 ## Frontend — Two-tab IHM
-- [ ] Onglet "Adapters" : upload d'un seul projet EJB → génère UN module WAR
-- [ ] Onglet "Wrappers BIAN" : upload de PLUSIEURS projets EJB/contrats REST → regroupe par Service Domain → génère Spring Boot
-- [ ] Replace mock setTimeout logic with real API calls
-- [ ] Real-time progress updates during generation
-- [ ] Working ZIP download buttons
+- [x] Onglet "EJB" : upload de projets EJB (ZIP/JAR/WAR) → génère Adapters JAX-RS + Wrappers BIAN
+- [x] Onglet "JSON" : upload de fichiers JSON descripteurs → génère Wrappers BIAN Spring Boot
+- [x] Replace mock logic with real fetch + tRPC API calls
+- [x] Progress step indicators during generation
+- [x] Working ZIP download buttons (S3 URLs)
 - [ ] Results page shows real generated data from DB
 
 ## Database schema
@@ -54,3 +54,5 @@
 - [x] Verify all 8 BIAN wrappers compile with Maven (mvn compile = 0 errors)
 - [x] Fix Lombok @AllArgsConstructor duplicate constructor issue
 - [x] Fix duplicate method names from same-named EJB operations (V2 suffix)
+- [x] E2E test via web API: 23/26 projects succeed (3 are Spring, not EJB)
+- [x] BIAN generation via tRPC: payment-order-wrapper generated with S3 ZIP URL
