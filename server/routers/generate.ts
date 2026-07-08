@@ -12,10 +12,20 @@ import { generateBianWrappers, packageBianAsZip } from "../generators/bianGenera
 import type { BianProject, AdapterEndpoint } from "../generators/bianGenerator";
 import { storagePut } from "../storage";
 import { UPLOAD_DIR } from "../upload";
+import { createProject, updateProjectStatus, createGeneration, updateGeneration, getAllGenerations, getAllProjects } from "../db";
 
 const WORK_DIR = path.join(os.tmpdir(), "ejb-to-rest-gen");
 
 export const generateRouter = router({
+  /**
+   * List all generations (for the Results page).
+   */
+  list: publicProcedure.query(async () => {
+    const gens = await getAllGenerations();
+    const projs = await getAllProjects();
+    return { generations: gens, projects: projs };
+  }),
+
   /**
    * Generate an Adapter WAR project from an uploaded EJB ZIP.
    */
@@ -36,7 +46,7 @@ export const generateRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "No files provided" });
       }
 
-      const results = [];
+      const results: any[] = [];
 
       for (const filePath of filePaths) {
         const fileName = path.basename(filePath, path.extname(filePath));
@@ -175,7 +185,7 @@ export const generateRouter = router({
       });
 
       // Package each wrapper as ZIP and upload
-      const wrapperResults = [];
+      const wrapperResults: any[] = [];
       for (const wrapper of result.wrappers) {
         try {
           const zipPath = path.join(WORK_DIR, `${wrapper.name}.zip`);
@@ -187,6 +197,27 @@ export const generateRouter = router({
             zipBuffer,
             "application/zip"
           );
+
+          // Persist BIAN generation to DB
+          const projectId = await createProject({
+            userId: 0,
+            name: wrapper.name,
+            originalFileName: wrapper.name,
+            status: 'parsed',
+            metadata: { serviceDomain: wrapper.serviceDomain, domainId: wrapper.domainId, endpoints: wrapper.endpoints },
+          });
+          if (projectId) {
+            await createGeneration({
+              userId: 0,
+              projectId,
+              mode: 'bian',
+              status: 'completed',
+              zipStorageKey: key,
+              zipUrl: url,
+              stats: { endpoints: wrapper.endpoints, filesGenerated: wrapper.filesGenerated, serviceDomain: wrapper.serviceDomain },
+              completedAt: new Date(),
+            });
+          }
 
           wrapperResults.push({
             name: wrapper.name,
@@ -240,10 +271,9 @@ export const generateRouter = router({
     )
     .mutation(async ({ input }) => {
       const { uploadedFiles } = input;
-      const filePaths = uploadedFiles.map((f) => f.storedPath);
 
       // Reuse the adapter generation logic
-      const results = [];
+      const results: any[] = [];
 
       for (const file of uploadedFiles) {
         const fileName = file.originalName.replace(/\.[^.]+$/, "");
@@ -303,6 +333,27 @@ export const generateRouter = router({
             "application/zip"
           );
 
+          // Persist to DB
+          const projectId = await createProject({
+            userId: 0,
+            name: artifactId,
+            originalFileName: file.originalName,
+            status: 'parsed',
+            metadata: { ejbCount: genResult.ejbCount, methodCount: genResult.methodCount },
+          });
+          if (projectId) {
+            await createGeneration({
+              userId: 0,
+              projectId,
+              mode: 'adapter',
+              status: 'completed',
+              zipStorageKey: key,
+              zipUrl: url,
+              stats: { ejbCount: genResult.ejbCount, methodCount: genResult.methodCount, filesGenerated: genResult.filesGenerated },
+              completedAt: new Date(),
+            });
+          }
+
           results.push({
             success: true,
             projectName: artifactId,
@@ -317,6 +368,9 @@ export const generateRouter = router({
           await fs.rm(outputDir, { recursive: true, force: true }).catch(() => {});
           await fs.rm(zipPath, { force: true }).catch(() => {});
         } else {
+          // Detect non-EJB projects and provide helpful message
+          const errorMsg = genResult.errors.join(" ");
+          const isNonEjb = errorMsg.includes("No EJB") || errorMsg.includes("no EJB") || genResult.ejbCount === 0;
           results.push({
             success: false,
             projectName: artifactId,
@@ -327,6 +381,10 @@ export const generateRouter = router({
             zipUrl: null,
             zipKey: null,
             errors: genResult.errors,
+            isNonEjb,
+            hint: isNonEjb
+              ? "Ce projet ne contient pas d'annotations EJB (@Stateless, @Remote, @Local). Il utilise probablement Spring (@RestController, @Service) ou des Servlets. Le g\u00e9n\u00e9rateur Adapter ne supporte que les projets EJB."
+              : undefined,
           });
         }
       }

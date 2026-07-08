@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, users, projects, ejbEndpoints, generations, type InsertProject, type InsertEjbEndpoint, type InsertGeneration } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +89,79 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// ─── Project Persistence ─────────────────────────────────────────────────────
+
+export async function createProject(data: Omit<InsertProject, 'id' | 'createdAt' | 'updatedAt'>) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(projects).values(data);
+  return result[0].insertId;
+}
+
+export async function updateProjectStatus(id: number, status: 'uploaded' | 'parsed' | 'error', metadata?: any) {
+  const db = await getDb();
+  if (!db) return;
+  const updateData: any = { status };
+  if (metadata) updateData.metadata = metadata;
+  await db.update(projects).set(updateData).where(eq(projects.id, id));
+}
+
+export async function getProjectsByUser(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(projects).where(eq(projects.userId, userId)).orderBy(desc(projects.createdAt));
+}
+
+export async function getAllProjects() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(projects).orderBy(desc(projects.createdAt));
+}
+
+// ─── Endpoint Persistence ────────────────────────────────────────────────────
+
+export async function createEndpoints(data: Omit<InsertEjbEndpoint, 'id' | 'createdAt'>[]) {
+  const db = await getDb();
+  if (!db || data.length === 0) return;
+  await db.insert(ejbEndpoints).values(data);
+}
+
+export async function getEndpointsByProject(projectId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(ejbEndpoints).where(eq(ejbEndpoints.projectId, projectId));
+}
+
+// ─── Generation Persistence ──────────────────────────────────────────────────
+
+export async function createGeneration(data: Omit<InsertGeneration, 'id' | 'createdAt'>) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(generations).values(data);
+  return result[0].insertId;
+}
+
+export async function updateGeneration(id: number, data: Partial<InsertGeneration>) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(generations).set(data).where(eq(generations.id, id));
+}
+
+export async function getGenerationsByUser(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(generations).where(eq(generations.userId, userId)).orderBy(desc(generations.createdAt));
+}
+
+export async function getAllGenerations() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(generations).orderBy(desc(generations.createdAt)).limit(100);
+}
+
+export async function getGenerationWithProject(generationId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(generations).where(eq(generations.id, generationId)).limit(1);
+  return result.length > 0 ? result[0] : null;
+}

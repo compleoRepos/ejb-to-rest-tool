@@ -94,7 +94,7 @@ const BIAN_DOMAIN_RULES: Array<{ keywords: string[]; domain: string; domainId: s
   { keywords: ["reporting", "report", "dematerialise"], domain: "Regulatory Reporting", domainId: "regulatory-reporting" },
 ];
 
-function inferBianDomain(adapterName: string): { domain: string; domainId: string } {
+export function inferBianDomain(adapterName: string): { domain: string; domainId: string } {
   const lower = adapterName.toLowerCase();
   for (const rule of BIAN_DOMAIN_RULES) {
     if (rule.keywords.some((kw) => lower.includes(kw))) {
@@ -106,7 +106,7 @@ function inferBianDomain(adapterName: string): { domain: string; domainId: strin
 
 // ─── BIAN Action Term Mapping ─────────────────────────────────────────────────
 
-function inferBianActionTerm(operation: string, method: string): string {
+export function inferBianActionTerm(operation: string, method: string): string {
   const lower = operation.toLowerCase();
   if (lower.startsWith("find") || lower.startsWith("get") || lower.startsWith("search") || lower.startsWith("list") || lower.startsWith("count") || lower.startsWith("sum")) return "Retrieve";
   if (lower.startsWith("save") || lower.startsWith("create") || lower.startsWith("add") || lower.startsWith("insert") || lower.startsWith("enrg")) return "Initiate";
@@ -292,6 +292,9 @@ async function generateSpringBootProject(opts: SpringBootGenOptions): Promise<vo
   await generateBianDeveloperGuide(outputDir, artifactId, serviceDomain, basePackage, endpoints, rawEndpoints);
   await generateBianDeploymentGuide(outputDir, artifactId, serviceDomain);
   await generateBianArchitecture(outputDir, artifactId, serviceDomain, domainId);
+  // Postman + Mermaid
+  await generatePostmanCollection(outputDir, artifactId, serviceDomain, domainId, endpoints, rawEndpoints);
+  await generateMermaidDiagrams(outputDir, artifactId, serviceDomain, endpoints, rawEndpoints);
 }
 
 // ─── File Generators ──────────────────────────────────────────────────────────
@@ -1362,7 +1365,7 @@ async function generateBianArchitecture(dir: string, artifactId: string, service
 
 // ─── Utility Functions ────────────────────────────────────────────────────────
 
-function toPascalCase(str: string): string {
+export function toPascalCase(str: string): string {
   return str
     .replace(/[-_]+/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase())
@@ -1439,4 +1442,123 @@ export async function packageBianAsZip(sourceDir: string, outputZipPath: string)
     archive.directory(sourceDir, false);
     archive.finalize();
   });
+}
+
+
+// ─── Postman Collection Generator ────────────────────────────────────────────
+
+async function generatePostmanCollection(
+  dir: string,
+  artifactId: string,
+  serviceDomain: string,
+  domainId: string,
+  endpoints: ResolvedEndpoint[],
+  rawEndpoints: Array<AdapterEndpoint & { adapterName: string }>
+): Promise<void> {
+  const baseUrl = `{{base_url}}`;
+  const items = endpoints.map((ep) => {
+    const httpMethod = ep.method.toUpperCase();
+    const bianPath = `/api/v1/${domainId}/${ep.adapterName}/${ep.bianPathSegment}`;
+
+    const requestBody: any = {};
+    if (httpMethod === "POST" || httpMethod === "PUT") {
+      const bodyFields: Record<string, string> = {};
+      for (const f of ep.requestFields) {
+        bodyFields[f.name] = `{{${f.name}}}`;
+      }
+      requestBody.mode = "raw";
+      requestBody.raw = JSON.stringify(bodyFields, null, 2);
+      requestBody.options = { raw: { language: "json" } };
+    }
+
+    return {
+      name: `${ep.javaMethodName} (${ep.adapterName})`,
+      request: {
+        method: httpMethod,
+        header: [
+          { key: "Content-Type", value: "application/json" },
+          { key: "Accept", value: "application/json" },
+        ],
+        url: {
+          raw: `${baseUrl}${bianPath}`,
+          host: [baseUrl],
+          path: bianPath.split("/").filter(Boolean),
+        },
+        ...(httpMethod === "POST" || httpMethod === "PUT" ? { body: requestBody } : {}),
+      },
+      response: [],
+    };
+  });
+
+  const collection = {
+    info: {
+      name: `${serviceDomain} - ${artifactId}`,
+      description: `Collection Postman pour le wrapper BIAN ${serviceDomain} (${domainId}).\nGenere automatiquement a partir des endpoints Adapter.`,
+      schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    },
+    variable: [
+      { key: "base_url", value: `http://localhost:8080` },
+    ],
+    item: items,
+  };
+
+  await fs.writeFile(
+    path.join(dir, "docs", `${artifactId}-postman-collection.json`),
+    JSON.stringify(collection, null, 2)
+  );
+}
+
+// ─── Mermaid Sequence Diagram Generator ──────────────────────────────────────
+
+async function generateMermaidDiagrams(
+  dir: string,
+  artifactId: string,
+  serviceDomain: string,
+  endpoints: ResolvedEndpoint[],
+  rawEndpoints: Array<AdapterEndpoint & { adapterName: string }>
+): Promise<void> {
+  const docsDir = path.join(dir, "docs");
+
+  // Generate one diagram per endpoint
+  for (const ep of endpoints) {
+    const bianPath = `/api/v1/${ep.adapterName}/${ep.bianPathSegment}`;
+    const httpMethod = ep.method.toUpperCase();
+
+    const diagram = `sequenceDiagram
+    participant Client
+    participant Controller as ${toPascalCase(artifactId)}Controller
+    participant Service as ${toPascalCase(artifactId)}Service
+    participant Adapter as RestAdapter
+    participant Backend as Adapter ${ep.adapterName}
+
+    Client->>+Controller: ${httpMethod} ${bianPath}
+    Controller->>+Service: ${ep.javaMethodName}(request)
+    Service->>Service: Validate input
+    Service->>+Adapter: call${toPascalCase(ep.javaMethodName)}(dto)
+    Note over Adapter: Resilience4j<br/>Circuit Breaker + Retry
+    Adapter->>+Backend: ${httpMethod} ${ep.path}
+    Backend-->>-Adapter: Response JSON
+    Adapter-->>-Service: Mapped DTO
+    Service-->>-Controller: ApiResponse<T>
+    Controller-->>-Client: HTTP ${httpMethod === "POST" ? "201" : "200"} JSON
+`;
+
+    const fileName = `sequence-${ep.adapterName}-${ep.javaMethodName}.mmd`;
+    await fs.writeFile(path.join(docsDir, fileName), diagram);
+  }
+
+  // Generate an overview diagram
+  const adapterNames = Array.from(new Set(endpoints.map((e) => e.adapterName)));
+  const overviewDiagram = `sequenceDiagram
+    participant Client as API Consumer
+    participant Gateway as ${toPascalCase(artifactId)}
+    ${adapterNames.map((a) => `participant ${a} as Adapter ${a}`).join("\n    ")}
+
+    Note over Client,${adapterNames[adapterNames.length - 1] || "Gateway"}: ${serviceDomain} Wrapper - Vue d'ensemble
+
+    ${endpoints.slice(0, 8).map((ep) => `Client->>Gateway: ${ep.method.toUpperCase()} /api/v1/${ep.adapterName}/${ep.bianPathSegment}
+    Gateway->>${ep.adapterName}: Forward to legacy adapter`).join("\n    ")}
+`;
+
+  await fs.writeFile(path.join(docsDir, `overview-${artifactId}.mmd`), overviewDiagram);
 }
