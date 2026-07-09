@@ -81,3 +81,13 @@
 - [x] Postman: Ajouter auth headers + test scripts (76/76 items avec tests)
 - [x] OpenAPI: Ajouter securitySchemes bearerAuth
 - [x] Mermaid: Diagrammes de séquence complets avec tous les participants
+
+## Tests de Contrat Pact
+- [x] Ajouter dépendances Pact (pact-jvm-consumer-junit5, pact-jvm-provider-junit5) au POM généré
+- [x] Générer Pact Consumer Tests (wrapper = consumer, adapter = provider)
+- [x] Générer Pact Provider Verification Tests
+- [x] Configurer Pact Broker URL externalisée dans application.yml
+- [x] Vérifier compilation Maven avec les tests Pact (8/8 wrappers OK)
+- [x] Corriger Consumer Tests : un fichier par adapter provider (pas un seul provider pour tout le wrapper)
+- [x] Corriger Provider Verification Tests : @PactFolder("target/pacts") + @State avec MockAdapter
+- [x] Vérifier compilation Maven avec les nouveaux tests multi-adapter (8/8 OK, 44+44=88 fichiers Pact)

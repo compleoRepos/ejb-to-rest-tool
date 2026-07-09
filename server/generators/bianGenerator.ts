@@ -280,6 +280,8 @@ async function generateSpringBootProject(opts: SpringBootGenOptions): Promise<vo
   await generateDockerfile(outputDir, artifactId);
   await generateOpenApiSpec(outputDir, serviceDomain, domainId, basePackage, endpoints);
   await generateTests(outputDir, pkgPath, basePackage, serviceDomain, domainId, endpoints);
+  await generatePactConsumerTest(outputDir, pkgPath, basePackage, serviceDomain, domainId, endpoints, rawEndpoints);
+  await generatePactProviderVerificationTest(outputDir, pkgPath, basePackage, serviceDomain, domainId, endpoints, rawEndpoints);
 
   // Documentation
   await generateBianReadme(outputDir, artifactId, serviceDomain, domainId, rawEndpoints);
@@ -401,6 +403,26 @@ async function generatePom(dir: string, groupId: string, artifactId: string, bas
             <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- Pact Contract Testing -->
+        <dependency>
+            <groupId>au.com.dius.pact.consumer</groupId>
+            <artifactId>junit5</artifactId>
+            <version>4.6.7</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>au.com.dius.pact.provider</groupId>
+            <artifactId>junit5</artifactId>
+            <version>4.6.7</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>au.com.dius.pact.provider</groupId>
+            <artifactId>junit5spring</artifactId>
+            <version>4.6.7</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -419,6 +441,19 @@ async function generatePom(dir: string, groupId: string, artifactId: string, bas
                             <version>1.18.30</version>
                         </path>
                     </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <!-- Pact: publish contracts to broker -->
+            <plugin>
+                <groupId>au.com.dius.pact.provider</groupId>
+                <artifactId>maven</artifactId>
+                <version>4.6.7</version>
+                <configuration>
+                    <pactBrokerUrl>\${PACT_BROKER_URL:http://localhost:9292}</pactBrokerUrl>
+                    <pactBrokerToken>\${PACT_BROKER_TOKEN:}</pactBrokerToken>
+                    <tags>
+                        <tag>\${GIT_BRANCH:main}</tag>
+                    </tags>
                 </configuration>
             </plugin>
             <plugin>
@@ -548,6 +583,14 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
     operationsSorter: method
+
+# Pact Contract Testing
+pact:
+  broker:
+    url: \${PACT_BROKER_URL:http://localhost:9292}
+    token: \${PACT_BROKER_TOKEN:}
+  verifier:
+    publishResults: \${PACT_PUBLISH_RESULTS:false}
 
 # Logging
 logging:
@@ -2058,6 +2101,218 @@ async function countFiles(dir: string): Promise<number> {
     }
   } catch { /* ignore */ }
   return count;
+}
+
+// ─── Pact Consumer Test ─────────────────────────────────────────────────────
+
+async function generatePactConsumerTest(
+  dir: string, pkgPath: string, basePackage: string,
+  serviceDomain: string, domainId: string,
+  endpoints: ResolvedEndpoint[],
+  rawEndpoints: Array<AdapterEndpoint & { adapterName: string }>
+): Promise<void> {
+  const consumerName = domainId + "-wrapper";
+  // Group endpoints by their adapter (provider) name for correct Pact attribution
+  const adapterNames = Array.from(new Set(rawEndpoints.map((e) => e.adapterName)));
+
+  // If only one adapter, generate a single test class (simple case)
+  // If multiple adapters, generate one test class per adapter provider
+  for (const adapterName of adapterNames) {
+    const adapterEndpoints = endpoints.filter((ep) => ep.adapterName === adapterName);
+    if (adapterEndpoints.length === 0) continue;
+
+    const providerName = adapterName;
+    const adapterSuffix = adapterNames.length > 1 ? toPascalCase(getAdapterPrefix(adapterName)) : "";
+    const className = toPascalCase(domainId) + adapterSuffix + "ConsumerPactTest";
+
+    const importSet = new Set<string>();
+    for (const ep of adapterEndpoints) {
+      importSet.add(`import ${basePackage}.dto.request.${ep.dtoPrefix}Request;`);
+      importSet.add(`import ${basePackage}.dto.response.${ep.dtoPrefix}Response;`);
+    }
+    const imports = Array.from(importSet).sort().join("\n");
+
+    const interactions = adapterEndpoints.map((ep) => {
+      const reqDto = ep.dtoPrefix + "Request";
+      const respDto = ep.dtoPrefix + "Response";
+      const httpMethod = ep.method.toUpperCase();
+      const interactionName = `${ep.javaMethodName} returns ${httpMethod === "GET" ? "data" : "success"}`;
+      const epPath = ep.path.startsWith("/") ? ep.path : "/" + ep.path;
+
+      let bodyPart = "";
+      if (httpMethod !== "GET" && httpMethod !== "DELETE") {
+        bodyPart = `
+                    .body(new PactDslJsonBody()
+                        .stringType("status", "OK"))`;
+      }
+
+      const responseBody = ep.responseFields.length > 0
+        ? ep.responseFields.slice(0, 3).map((f) => `                        .stringType("${f.name}", "test-value")`).join("\n")
+        : `                        .stringType("status", "OK")`;
+
+      return `
+    @Pact(consumer = "${consumerName}", provider = "${providerName}")
+    public RequestResponsePact ${ep.javaMethodName}Pact(PactDslWithProvider builder) {
+        return builder
+                .given("${ep.operation} endpoint is available")
+                .uponReceiving("${interactionName}")
+                    .path("${epPath}")
+                    .method("${httpMethod}")${bodyPart}
+                .willRespondWith()
+                    .status(200)
+                    .headers(Map.of("Content-Type", "application/json"))
+                    .body(new PactDslJsonBody()
+${responseBody})
+                .toPact();
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "${ep.javaMethodName}Pact")
+    void test_${ep.javaMethodName}(MockServer mockServer) {
+        RestTemplate restTemplate = new RestTemplate();
+        String url = mockServer.getUrl() + "${epPath}";
+        ResponseEntity<${respDto}> response = restTemplate.${httpMethod === "GET" ? "getForEntity(url, " + respDto + ".class)" : httpMethod === "DELETE" ? "exchange(url, HttpMethod.DELETE, null, " + respDto + ".class)" : httpMethod === "PUT" ? "exchange(url, HttpMethod.PUT, new HttpEntity<>(new " + reqDto + "()), " + respDto + ".class)" : "postForEntity(url, new " + reqDto + "(), " + respDto + ".class)"};
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody()).isNotNull();
+    }`;
+    }).join("\n");
+
+    const content = `package ${basePackage};
+
+${imports}
+import au.com.dius.pact.consumer.MockServer;
+import au.com.dius.pact.consumer.dsl.PactDslJsonBody;
+import au.com.dius.pact.consumer.dsl.PactDslWithProvider;
+import au.com.dius.pact.consumer.junit5.PactConsumerTestExt;
+import au.com.dius.pact.consumer.junit5.PactTestFor;
+import au.com.dius.pact.core.model.RequestResponsePact;
+import au.com.dius.pact.core.model.annotations.Pact;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.client.RestTemplate;
+
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Pact Consumer Contract Tests for ${serviceDomain} Wrapper.
+ * Provider: ${providerName}
+ *
+ * These tests define the contract between this wrapper (consumer)
+ * and the adapter "${providerName}" (provider).
+ *
+ * Run: mvn test -Dtest=${className}
+ * Publish: mvn pact:publish
+ */
+@ExtendWith(PactConsumerTestExt.class)
+@PactTestFor(providerName = "${providerName}")
+class ${className} {
+${interactions}
+}
+`;
+    await fs.writeFile(path.join(dir, `src/test/java/${pkgPath}/${className}.java`), content);
+  }
+}
+
+// ─── Pact Provider Verification Test ────────────────────────────────────────
+
+async function generatePactProviderVerificationTest(
+  dir: string, pkgPath: string, basePackage: string,
+  serviceDomain: string, domainId: string,
+  endpoints: ResolvedEndpoint[],
+  rawEndpoints: Array<AdapterEndpoint & { adapterName: string }>
+): Promise<void> {
+  const adapterNames = Array.from(new Set(rawEndpoints.map((e) => e.adapterName)));
+
+  // Generate one Provider Verification Test per adapter provider
+  // The wrapper starts in mock profile and exposes the adapter's endpoints via MockAdapter.
+  // This verifies the wrapper can serve the contract as a pass-through provider.
+  for (const adapterName of adapterNames) {
+    const adapterEndpoints = endpoints.filter((ep) => ep.adapterName === adapterName);
+    if (adapterEndpoints.length === 0) continue;
+
+    const providerName = adapterName;
+    const adapterSuffix = adapterNames.length > 1 ? toPascalCase(getAdapterPrefix(adapterName)) : "";
+    const className = toPascalCase(domainId) + adapterSuffix + "ProviderPactTest";
+
+    const stateHandlers = adapterEndpoints.map((ep) => {
+      return `
+    @State("${ep.operation} endpoint is available")
+    void ${ep.javaMethodName}State() {
+        // MockAdapter is active (@Profile("mock")) — returns predefined responses.
+        // No additional setup needed: the mock profile provides stable test data.
+        log.info("Provider state ready (mock profile): ${ep.operation}");
+    }`;
+    }).join("\n");
+
+    const content = `package ${basePackage};
+
+import au.com.dius.pact.provider.junit5.HttpTestTarget;
+import au.com.dius.pact.provider.junit5.PactVerificationContext;
+import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider;
+import au.com.dius.pact.provider.junitsupport.Provider;
+import au.com.dius.pact.provider.junitsupport.State;
+import au.com.dius.pact.provider.junitsupport.loader.PactBroker;
+import au.com.dius.pact.provider.junitsupport.loader.PactBrokerAuth;
+import au.com.dius.pact.provider.junitsupport.loader.PactFolder;
+import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.test.context.ActiveProfiles;
+
+/**
+ * Pact Provider Verification Test for adapter: ${providerName}
+ * Service Domain: ${serviceDomain}
+ *
+ * This test starts the wrapper in mock profile and verifies that
+ * the wrapper's REST endpoints fulfill the Pact contract.
+ *
+ * The MockAdapter (@Profile("mock")) provides stable responses,
+ * allowing contract verification without the real adapter backend.
+ *
+ * Usage:
+ *   Local verification (from consumer's target/pacts/):
+ *     mvn test -Dtest=${className} -Dpact.verifier.publishResults=false
+ *
+ *   Broker verification:
+ *     mvn test -Dtest=${className} -Dpact.broker.url=http://broker:9292
+ *
+ * To verify against the real adapter (integration):
+ *   Deploy the adapter WAR, then run with -Dspring.profiles.active=dev
+ *   and point HttpTestTarget to the adapter's host:port.
+ */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@ActiveProfiles({"dev", "mock"})
+@Provider("${providerName}")
+@PactFolder("target/pacts")
+@Slf4j
+class ${className} {
+
+    @LocalServerPort
+    private int port;
+
+    @BeforeEach
+    void setUp(PactVerificationContext context) {
+        context.setTarget(new HttpTestTarget("localhost", port));
+    }
+
+    @TestTemplate
+    @ExtendWith(PactVerificationInvocationContextProvider.class)
+    void pactVerificationTestTemplate(PactVerificationContext context) {
+        context.verifyInteraction();
+    }
+${stateHandlers}
+}
+`;
+    await fs.writeFile(path.join(dir, `src/test/java/${pkgPath}/${className}.java`), content);
+  }
 }
 
 /**
