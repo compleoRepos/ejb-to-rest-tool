@@ -33,12 +33,19 @@ export interface FieldDef {
   name: string;
   type: string;
   required?: boolean;
+  /** Nested child fields (for object/list-of-object types) */
+  children?: FieldDef[];
+  /** If true, this field is a List<T> */
+  isList?: boolean;
 }
 
 export interface BianProject {
   adapterName: string;
   endpoints: AdapterEndpoint[];
+  /** Override BIAN service domain (e.g. "Payment Order") — if not set, inferred from adapter name */
   serviceDomain?: string;
+  /** Override the backend base URL for this adapter (e.g. "http://10.0.1.5:9080/myapp/api") */
+  backendUrl?: string;
 }
 
 export interface BianGenerationOptions {
@@ -152,9 +159,17 @@ function resolveEndpoints(endpoints: Array<AdapterEndpoint & { adapterName: stri
 }
 
 function getAdapterPrefix(adapterName: string): string {
+  // Use the full adapter name (minus generic suffixes) to avoid collisions
+  // between adapters with similar first segments (e.g. "carte-consultation" vs "carte-opposition")
   const parts = adapterName.split("-").filter((p) => p !== "bmcedirect" && p !== "bmce" && p.length > 2);
   if (parts.length === 0) return toPascalCase(adapterName.split("-")[0]);
-  return toPascalCase(parts.slice(0, 2).join("-"));
+  let result = toPascalCase(parts.join("-"));
+  // Java class names cannot start with a digit — prefix with underscore-less form
+  if (/^[0-9]/.test(result)) {
+    result = "Secure" + result.replace(/^3[dD][sS]ecure/i, "ThreeD").replace(/^\d+/, "");
+    if (result === "Secure") result = "Num" + toPascalCase(parts.join("-"));
+  }
+  return result;
 }
 
 // ─── Main Generation Function ─────────────────────────────────────────────────
@@ -164,7 +179,7 @@ export async function generateBianWrappers(options: BianGenerationOptions): Prom
   const errors: string[] = [];
   const wrappers: BianWrapperInfo[] = [];
 
-  const domainGroups = new Map<string, { domain: string; domainId: string; endpoints: Array<AdapterEndpoint & { adapterName: string }> }>();
+  const domainGroups = new Map<string, { domain: string; domainId: string; endpoints: Array<AdapterEndpoint & { adapterName: string; backendUrl?: string }> }>();
 
   for (const project of projects) {
     const { domain, domainId } = project.serviceDomain
@@ -177,7 +192,7 @@ export async function generateBianWrappers(options: BianGenerationOptions): Prom
 
     const group = domainGroups.get(domainId)!;
     for (const ep of project.endpoints) {
-      group.endpoints.push({ ...ep, adapterName: project.adapterName });
+      group.endpoints.push({ ...ep, adapterName: project.adapterName, backendUrl: project.backendUrl });
     }
   }
 
@@ -267,9 +282,24 @@ async function generateSpringBootProject(opts: SpringBootGenOptions): Promise<vo
   await generateCorsConfig(outputDir, pkgPath, basePackage);
   await generateGlobalExceptionHandler(outputDir, pkgPath, basePackage);
 
-  // Business layers
-  await generateController(outputDir, pkgPath, basePackage, serviceDomain, domainId, endpoints);
-  await generateService(outputDir, pkgPath, basePackage, serviceDomain, domainId, endpoints);
+  // Business layers — split by adapter for multi-EJB wrappers
+  const adapterGroups = groupEndpointsByAdapter(endpoints);
+  if (adapterGroups.size > 1) {
+    // Multi-adapter: one controller + service per adapter, but all reference the shared adapter interface
+    for (const [adapterName, adapterEndpoints] of adapterGroups) {
+      let adapterDomainId = toKebabCase(adapterName.replace(/-bmcedirect$/, ""));
+      // Java class names cannot start with a digit
+      if (/^\d/.test(adapterDomainId)) {
+        adapterDomainId = adapterDomainId.replace(/^3dsecure/, "three-d-secure").replace(/^\d+/, "n");
+      }
+      await generateController(outputDir, pkgPath, basePackage, serviceDomain, adapterDomainId, adapterEndpoints);
+      await generateService(outputDir, pkgPath, basePackage, serviceDomain, adapterDomainId, adapterEndpoints, domainId);
+    }
+  } else {
+    // Single-adapter: one controller for the whole domain
+    await generateController(outputDir, pkgPath, basePackage, serviceDomain, domainId, endpoints);
+    await generateService(outputDir, pkgPath, basePackage, serviceDomain, domainId, endpoints);
+  }
   await generateRestAdapterInterface(outputDir, pkgPath, basePackage, domainId, endpoints);
   await generateRestAdapter(outputDir, pkgPath, basePackage, domainId, endpoints, rawEndpoints);
   await generateMockAdapter(outputDir, pkgPath, basePackage, domainId, endpoints);
@@ -497,9 +527,14 @@ public class ${className} {
 
 // ─── application.yml (main) ──────────────────────────────────────────────────
 
-async function generateApplicationYml(dir: string, artifactId: string, domainId: string, endpoints: Array<AdapterEndpoint & { adapterName: string }>, basePackage: string): Promise<void> {
+async function generateApplicationYml(dir: string, artifactId: string, domainId: string, endpoints: Array<AdapterEndpoint & { adapterName: string; backendUrl?: string }>, basePackage: string): Promise<void> {
   const adapters = Array.from(new Set(endpoints.map((e) => e.adapterName)));
-  const adapterUrls = adapters.map((a) => `    ${a}: \${${a.toUpperCase().replace(/-/g, "_")}_URL:http://localhost:8080/${a}/api}`).join("\n");
+  // Use the backendUrl provided per adapter, or fallback to env variable with sensible default
+  const adapterUrls = adapters.map((a) => {
+    const epWithUrl = endpoints.find((e) => e.adapterName === a && e.backendUrl);
+    const defaultUrl = epWithUrl?.backendUrl || "http://localhost:8080";
+    return `    ${a}: \${${a.toUpperCase().replace(/-/g, "_")}_URL:${defaultUrl}}`;
+  }).join("\n");
 
   // Per-adapter Resilience4j instances
   const cbInstances = adapters.map((a) => `      ${a}:
@@ -592,11 +627,11 @@ pact:
   verifier:
     publishResults: \${PACT_PUBLISH_RESULTS:false}
 
-# Logging
+# Logging (use INFO by default; override in application-dev.yml for DEBUG)
 logging:
   level:
     root: INFO
-    ${basePackage}: DEBUG
+    ${basePackage}: INFO
     io.github.resilience4j: INFO
 `;
   await fs.writeFile(path.join(dir, "src/main/resources/application.yml"), content);
@@ -746,20 +781,22 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
  * CORS configuration — allows cross-origin requests from configured origins.
+ * Uses allowedOriginPatterns instead of allowedOrigins to avoid the
+ * IllegalArgumentException when allowCredentials=true with wildcard "*".
  */
 @Configuration
 public class CorsConfig implements WebMvcConfigurer {
 
-    @Value("\${app.cors.allowed-origins:*}")
-    private String allowedOrigins;
+    @Value("\${app.cors.allowed-origin-patterns:*}")
+    private String allowedOriginPatterns;
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/api/**")
-                .allowedOrigins(allowedOrigins.split(","))
-                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+        registry.addMapping("/**")
+                .allowedOriginPatterns(allowedOriginPatterns.split(","))
+                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH")
                 .allowedHeaders("*")
-                .exposedHeaders("X-Request-Id")
+                .exposedHeaders("X-Request-Id", "Authorization")
                 .allowCredentials(true)
                 .maxAge(3600);
     }
@@ -928,10 +965,12 @@ ${methods}
 
 // ─── Service Layer (per-adapter Resilience4j instances) ──────────────────────
 
-async function generateService(dir: string, pkgPath: string, basePackage: string, serviceDomain: string, domainId: string, endpoints: ResolvedEndpoint[]): Promise<void> {
+async function generateService(dir: string, pkgPath: string, basePackage: string, serviceDomain: string, domainId: string, endpoints: ResolvedEndpoint[], sharedAdapterDomainId?: string): Promise<void> {
   const className = toPascalCase(domainId) + "Service";
-  const adapterInterfaceName = "I" + toPascalCase(domainId) + "RestAdapter";
-  const adapterVar = toCamelCase(domainId) + "RestAdapter";
+  // When called for a sub-adapter, reference the shared adapter interface from the parent domain
+  const effectiveAdapterDomainId = sharedAdapterDomainId || domainId;
+  const adapterInterfaceName = "I" + toPascalCase(effectiveAdapterDomainId) + "RestAdapter";
+  const adapterVar = toCamelCase(effectiveAdapterDomainId) + "RestAdapter";
 
   const importSet = new Set<string>();
   for (const ep of endpoints) {
@@ -1057,12 +1096,15 @@ async function generateRestAdapter(dir: string, pkgPath: string, basePackage: st
   const imports = Array.from(importSet).sort().join("\n");
 
   const adapterUrlFields = adapterNames.map((a) => {
-    const fieldName = toCamelCase(a) + "Url";
+    let fieldName = toCamelCase(a) + "Url";
+    // Java identifiers cannot start with a digit
+    if (/^\d/.test(fieldName)) fieldName = "adapter" + toPascalCase(a) + "Url";
     return `    @Value("\${adapter.urls.${a}}")\n    private String ${fieldName};`;
   }).join("\n\n");
 
   const initLines = adapterNames.map((a) => {
-    const fieldName = toCamelCase(a) + "Url";
+    let fieldName = toCamelCase(a) + "Url";
+    if (/^\d/.test(fieldName)) fieldName = "adapter" + toPascalCase(a) + "Url";
     return `        adapterUrls.put("${a}", ${fieldName});`;
   }).join("\n");
 
@@ -1239,7 +1281,7 @@ public class ApiResponse<T> {
 `;
   await fs.writeFile(path.join(dir, `src/main/java/${pkgPath}/dto/response/ApiResponse.java`), apiResponse);
 
-  // Generate unique Request/Response DTOs for each endpoint
+  // Generate unique Request/Response DTOs for each endpoint (with nested DTO support)
   const generated = new Set<string>();
   for (const ep of endpoints) {
     const reqClassName = ep.dtoPrefix + "Request";
@@ -1248,52 +1290,69 @@ public class ApiResponse<T> {
     if (generated.has(reqClassName)) continue;
     generated.add(reqClassName);
 
-    const hasReqFields = ep.requestFields && ep.requestFields.length > 0;
-    const hasRespFields = ep.responseFields && ep.responseFields.length > 0;
+    // Generate Request DTO + nested children
+    await generateDtoClass(dir, pkgPath, basePackage, "request", reqClassName, ep.requestFields || [], true);
+    // Generate Response DTO + nested children
+    await generateDtoClass(dir, pkgPath, basePackage, "response", respClassName, ep.responseFields || [], false);
+  }
+}
 
-    // Request DTO with @NotNull on required fields
-    const reqFields = (ep.requestFields || []).map((f) => {
-      const annotation = f.required ? "    @NotNull\n" : "";
-      return `${annotation}    private ${mapJavaType(f.type)} ${f.name};`;
-    }).join("\n");
+/**
+ * Generate a single DTO class file with support for nested objects/lists.
+ * Recursively generates child DTO classes in the same package.
+ */
+async function generateDtoClass(
+  dir: string, pkgPath: string, basePackage: string,
+  subPackage: "request" | "response", className: string,
+  fields: FieldDef[], isRequest: boolean
+): Promise<void> {
+  const hasFields = fields.length > 0;
+  const hasRequired = isRequest && fields.some((f) => f.required);
+  const hasLists = fields.some((f) => f.isList || (f.children && f.children.length > 0 && f.isList));
+  const hasNestedObjects = fields.some((f) => f.children && f.children.length > 0 && !f.isList);
+  const hasValid = isRequest && fields.some((f) => f.children && f.children.length > 0);
 
-    const respFields = (ep.responseFields || []).map((f) => `    private ${mapJavaType(f.type)} ${f.name};`).join("\n");
+  // Build field declarations
+  const fieldLines = fields.map((f) => {
+    const javaType = resolveFieldJavaType(f, className);
+    const annotations: string[] = [];
+    if (isRequest && f.required) annotations.push("    @NotNull");
+    if (isRequest && f.children && f.children.length > 0) annotations.push("    @Valid");
+    const annotationStr = annotations.length > 0 ? annotations.join("\n") + "\n" : "";
+    return `${annotationStr}    private ${javaType} ${f.name};`;
+  }).join("\n");
 
-    const reqAnnotations = hasReqFields
-      ? `@Data\n@Builder\n@NoArgsConstructor\n@AllArgsConstructor`
-      : `@Data\n@Builder\n@NoArgsConstructor`;
-    const respAnnotations = hasRespFields
-      ? `@Data\n@Builder\n@NoArgsConstructor\n@AllArgsConstructor`
-      : `@Data\n@Builder\n@NoArgsConstructor`;
+  // Build imports
+  const imports: string[] = [];
+  imports.push("import lombok.Builder;");
+  imports.push("import lombok.Data;");
+  imports.push("import lombok.NoArgsConstructor;");
+  if (hasFields) imports.push("import lombok.AllArgsConstructor;");
+  if (hasRequired) imports.push("import jakarta.validation.constraints.NotNull;");
+  if (hasValid) imports.push("import jakarta.validation.Valid;");
+  if (hasLists) imports.push("import java.util.List;");
+  imports.sort();
 
-    const hasRequired = (ep.requestFields || []).some((f) => f.required);
+  const annotations = hasFields
+    ? `@Data\n@Builder\n@NoArgsConstructor\n@AllArgsConstructor`
+    : `@Data\n@Builder\n@NoArgsConstructor`;
 
-    const reqContent = `package ${basePackage}.dto.request;
+  const content = `package ${basePackage}.dto.${subPackage};
 
-${hasRequired ? "import jakarta.validation.constraints.NotNull;\n" : ""}import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-${hasReqFields ? "import lombok.AllArgsConstructor;\n" : ""}
-${reqAnnotations}
-public class ${reqClassName} {
-${reqFields || "    // Fields to be defined based on the adapter contract"}
+${imports.join("\n")}
+
+${annotations}
+public class ${className} {
+${fieldLines || "    // Fields to be defined based on the adapter contract"}
 }
 `;
 
-    const respContent = `package ${basePackage}.dto.response;
+  await fs.writeFile(path.join(dir, `src/main/java/${pkgPath}/dto/${subPackage}/${className}.java`), content);
 
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-${hasRespFields ? "import lombok.AllArgsConstructor;\n" : ""}
-${respAnnotations}
-public class ${respClassName} {
-${respFields || "    // Fields to be defined based on the adapter contract"}
-}
-`;
-
-    await fs.writeFile(path.join(dir, `src/main/java/${pkgPath}/dto/request/${reqClassName}.java`), reqContent);
-    await fs.writeFile(path.join(dir, `src/main/java/${pkgPath}/dto/response/${respClassName}.java`), respContent);
+  // Recursively generate nested DTO classes
+  const nestedDtos = collectNestedDtos(fields, className);
+  for (const nested of nestedDtos) {
+    await generateDtoClass(dir, pkgPath, basePackage, subPackage, nested.className, nested.fields, isRequest);
   }
 }
 
@@ -2061,6 +2120,20 @@ function toKebabCase(str: string): string {
     .replace(/--+/g, "-");
 }
 
+/**
+ * Group resolved endpoints by their adapter name.
+ * Used to split controllers/services per-adapter in multi-EJB wrappers.
+ */
+function groupEndpointsByAdapter(endpoints: ResolvedEndpoint[]): Map<string, ResolvedEndpoint[]> {
+  const groups = new Map<string, ResolvedEndpoint[]>();
+  for (const ep of endpoints) {
+    const existing = groups.get(ep.adapterName) || [];
+    existing.push(ep);
+    groups.set(ep.adapterName, existing);
+  }
+  return groups;
+}
+
 function getSpringHttpAnnotation(method: string): string {
   switch (method) {
     case "GET": return "@GetMapping";
@@ -2087,8 +2160,49 @@ function mapJavaType(type: string): string {
     Float: "Float",
     date: "String",
     Date: "String",
+    BigDecimal: "java.math.BigDecimal",
+    bigdecimal: "java.math.BigDecimal",
+    LocalDate: "java.time.LocalDate",
+    LocalDateTime: "java.time.LocalDateTime",
   };
-  return typeMap[type] || "String";
+  return typeMap[type] || type;
+}
+
+/**
+ * Resolve the Java type for a field, handling nested objects and lists.
+ * Returns the class name (which may be a generated nested DTO).
+ */
+function resolveFieldJavaType(field: FieldDef, parentClassName: string): string {
+  if (field.children && field.children.length > 0) {
+    // Nested object type — class name derived from field name
+    const nestedClassName = parentClassName + toPascalCase(field.name);
+    if (field.isList) {
+      return `java.util.List<${nestedClassName}>`;
+    }
+    return nestedClassName;
+  }
+  const baseType = mapJavaType(field.type);
+  if (field.isList) {
+    return `java.util.List<${baseType}>`;
+  }
+  return baseType;
+}
+
+/**
+ * Collect all nested DTO classes that need to be generated from a field tree.
+ * Returns an array of { className, fields } for each nested type.
+ */
+function collectNestedDtos(fields: FieldDef[], parentClassName: string): Array<{ className: string; fields: FieldDef[]; parentPackage: string }> {
+  const result: Array<{ className: string; fields: FieldDef[]; parentPackage: string }> = [];
+  for (const field of fields) {
+    if (field.children && field.children.length > 0) {
+      const nestedClassName = parentClassName + toPascalCase(field.name);
+      result.push({ className: nestedClassName, fields: field.children, parentPackage: "" });
+      // Recursively collect deeper nesting
+      result.push(...collectNestedDtos(field.children, nestedClassName));
+    }
+  }
+  return result;
 }
 
 async function countFiles(dir: string): Promise<number> {

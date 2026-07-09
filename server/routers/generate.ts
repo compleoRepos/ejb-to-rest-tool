@@ -147,6 +147,10 @@ export const generateRouter = router({
           z.object({
             adapterName: z.string(),
             filePath: z.string().optional(),
+            /** URL complète du backend adapter (ex: http://host:port/context). Injectée dans application.yml. */
+            backendUrl: z.string().optional(),
+            /** Override manuel du domaine BIAN (ex: "Payment Order"). Si absent, inféré automatiquement. */
+            serviceDomainName: z.string().optional(),
             endpoints: z.array(
               z.object({
                 operation: z.string(),
@@ -175,6 +179,8 @@ export const generateRouter = router({
       const bianProjects: BianProject[] = projects.map((p) => ({
         adapterName: p.adapterName,
         endpoints: p.endpoints as AdapterEndpoint[],
+        ...(p.backendUrl ? { backendUrl: p.backendUrl } : {}),
+        ...(p.serviceDomainName ? { serviceDomainName: p.serviceDomainName } : {}),
       }));
 
       const result = await generateBianWrappers({

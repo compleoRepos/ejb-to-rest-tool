@@ -91,3 +91,20 @@
 - [x] Corriger Consumer Tests : un fichier par adapter provider (pas un seul provider pour tout le wrapper)
 - [x] Corriger Provider Verification Tests : @PactFolder("target/pacts") + @State avec MockAdapter
 - [x] Vérifier compilation Maven avec les nouveaux tests multi-adapter (8/8 OK, 44+44=88 fichiers Pact)
+
+## Corrections Audit Utilisateur v2 — Objectif 9.7/10
+
+### Bloquant
+- [x] DTOs imbriqués : supporter les objets/listes nested dans le descripteur JSON (générer classes DTO enfants)
+- [x] CORS : remplacer allowedOrigins("*") + allowCredentials(true) par allowedOriginPatterns("*")
+
+### Important
+- [x] URL backend : permettre de renseigner l'URL complète par EJB (pas de port/suffixe en dur)
+- [x] Sous-packages par EJB : un controller + service par adapter dans les wrappers multi-EJB
+- [x] Préfixe complet : utiliser le nom complet de l'adapter (pas seulement 2 segments)
+- [x] Domaine BIAN configurable : permettre la sélection manuelle du domaine et du nom de service
+
+### Améliorations
+- [x] Logs : niveau INFO par défaut (pas DEBUG)
+- [x] Port : configurable via SERVER_PORT env variable (default 8081)
+- [x] Java identifiers : fix noms commençant par un chiffre (3dsecure → ThreeDSecure)
