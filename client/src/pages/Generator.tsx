@@ -42,6 +42,12 @@ interface JsonFile {
   size: number;
   endpoints?: number;
   adapterName?: string;
+  /** Backend URL detected from JSON or manually set */
+  backendUrl?: string;
+  /** BIAN Service Domain detected from JSON or manually set */
+  serviceDomain?: string;
+  /** Nested DTO fields detected (for preview) */
+  nestedFields?: { endpoint: string; field: string; childCount: number; isList: boolean }[];
 }
 
 // ─── Generation Result ───────────────────────────────────────────────────────
@@ -520,6 +526,27 @@ function JsonUploadTab() {
           const text = await file.text();
           const json = JSON.parse(text);
           const endpoints = json.endpoints?.length || 0;
+
+          // Extract backendUrl and serviceDomain from JSON
+          const backendUrl = json.adapter_base_url || json.backendUrl || json.backend_url || "";
+          const serviceDomain = json.bian?.service_domain || json.service_domain || json.serviceDomain || "";
+
+          // Detect nested DTO fields for preview
+          const nestedFields: JsonFile["nestedFields"] = [];
+          for (const ep of json.endpoints || []) {
+            const allFields = [...(ep.request_fields || ep.requestFields || []), ...(ep.response_fields || ep.responseFields || [])];
+            for (const f of allFields) {
+              if (f.children && Array.isArray(f.children) && f.children.length > 0) {
+                nestedFields.push({
+                  endpoint: ep.operation || ep.name || "unknown",
+                  field: f.name,
+                  childCount: f.children.length,
+                  isList: !!f.isList || !!f.is_list,
+                });
+              }
+            }
+          }
+
           parsed.push({
             name: file.name,
             file,
@@ -527,6 +554,9 @@ function JsonUploadTab() {
             size: file.size,
             endpoints,
             adapterName: json.adapter_name || file.name.replace(/\.json$/, ""),
+            backendUrl: backendUrl || undefined,
+            serviceDomain: serviceDomain || undefined,
+            nestedFields: nestedFields.length > 0 ? nestedFields : undefined,
           });
         } catch {
           toast.error(`Erreur de parsing: ${file.name}`);
@@ -621,9 +651,9 @@ function JsonUploadTab() {
               responseFields: (ep.response_fields || ep.responseFields || []).map(mapField),
             }));
 
-            // Also extract backendUrl and serviceDomain from the JSON descriptor
-            const backendUrl = json.adapter_base_url || json.backendUrl || json.backend_url;
-            const serviceDomainName = json.bian?.service_domain || json.service_domain || json.serviceDomain;
+            // Use per-file manual overrides from the UI, fallback to JSON values
+            const backendUrl = file.backendUrl || json.adapter_base_url || json.backendUrl || json.backend_url;
+            const serviceDomainName = file.serviceDomain || json.bian?.service_domain || json.service_domain || json.serviceDomain;
             bianProjects.push({
               adapterName,
               endpoints,
@@ -723,29 +753,76 @@ function JsonUploadTab() {
             {files.map((file, index) => (
               <div
                 key={index}
-                className="flex items-center justify-between px-4 py-3 rounded-md border border-border bg-card/50 group"
+                className="px-4 py-3 rounded-md border border-border bg-card/50 group space-y-2"
               >
-                <div className="flex items-center gap-3">
-                  {file.type === "json" ? (
-                    <FileJson className="w-4 h-4 text-cyan" />
-                  ) : (
-                    <Globe className="w-4 h-4 text-[oklch(0.75_0.15_280)]" />
-                  )}
-                  <span className="font-mono text-sm">{file.name}</span>
-                  <span className="text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded">
-                    {file.endpoints || 0} endpoint
-                    {(file.endpoints || 0) > 1 ? "s" : ""}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {formatSize(file.size)}
-                  </span>
+                {/* File header row */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {file.type === "json" ? (
+                      <FileJson className="w-4 h-4 text-cyan" />
+                    ) : (
+                      <Globe className="w-4 h-4 text-[oklch(0.75_0.15_280)]" />
+                    )}
+                    <span className="font-mono text-sm">{file.name}</span>
+                    <span className="text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded">
+                      {file.endpoints || 0} endpoint
+                      {(file.endpoints || 0) > 1 ? "s" : ""}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatSize(file.size)}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => removeFile(index)}
+                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity duration-150"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-                <button
-                  onClick={() => removeFile(index)}
-                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity duration-150"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+
+                {/* Editable config fields (JSON files only) */}
+                {file.type === "json" && (
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div>
+                      <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Backend URL</label>
+                      <input
+                        type="text"
+                        placeholder="http://host:port/context"
+                        value={file.backendUrl || ""}
+                        onChange={(e) => {
+                          setFiles((prev) => prev.map((f, i) => i === index ? { ...f, backendUrl: e.target.value || undefined } : f));
+                        }}
+                        className="w-full mt-0.5 px-2 py-1 text-xs font-mono rounded border border-border bg-secondary/30 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-[oklch(0.78_0.15_200)]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Service Domain BIAN</label>
+                      <input
+                        type="text"
+                        placeholder="Ex: Payment Order"
+                        value={file.serviceDomain || ""}
+                        onChange={(e) => {
+                          setFiles((prev) => prev.map((f, i) => i === index ? { ...f, serviceDomain: e.target.value || undefined } : f));
+                        }}
+                        className="w-full mt-0.5 px-2 py-1 text-xs font-mono rounded border border-border bg-secondary/30 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-[oklch(0.78_0.15_200)]"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Nested DTO preview */}
+                {file.nestedFields && file.nestedFields.length > 0 && (
+                  <div className="pt-1 border-t border-border/50">
+                    <span className="text-[10px] uppercase tracking-wider text-[oklch(0.82_0.25_140)] font-medium">DTOs imbriqués détectés</span>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {file.nestedFields.map((nf, nfi) => (
+                        <span key={nfi} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[oklch(0.82_0.25_140/0.1)] text-[oklch(0.82_0.25_140)] border border-[oklch(0.82_0.25_140/0.2)]">
+                          {nf.field}{nf.isList ? "[]" : ""} ({nf.childCount} champs)
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

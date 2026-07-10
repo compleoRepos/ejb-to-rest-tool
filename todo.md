@@ -131,3 +131,9 @@
 - [x] Audit final output : chaque fichier généré est commenté et sécurisé
 - [x] Type 'number' mappé vers BigDecimal (fix compilation)
 - [x] Push Git final (ed773fa)
+
+## Améliorations IHM + Présentation
+
+- [ ] Ajouter champs de saisie manuelle backendUrl et serviceDomain dans l'IHM (par fichier JSON uploadé)
+- [ ] Ajouter aperçu des DTOs imbriqués détectés avant génération
+- [ ] Mettre à jour la présentation BOA avec les vrais chiffres (700 JH adapters + 550 JH wrappers = 1250 JH)
