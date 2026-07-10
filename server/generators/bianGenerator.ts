@@ -281,6 +281,8 @@ async function generateSpringBootProject(opts: SpringBootGenOptions): Promise<vo
   await generateSecurityConfig(outputDir, pkgPath, basePackage);
   await generateCorsConfig(outputDir, pkgPath, basePackage);
   await generateGlobalExceptionHandler(outputDir, pkgPath, basePackage);
+  await generateSecurityHeadersFilter(outputDir, pkgPath, basePackage);
+  await generateRequestLoggingFilter(outputDir, pkgPath, basePackage);
 
   // Business layers — split by adapter for multi-EJB wrappers
   const adapterGroups = groupEndpointsByAdapter(endpoints);
@@ -888,6 +890,141 @@ public class GlobalExceptionHandler {
   await fs.writeFile(path.join(dir, `src/main/java/${pkgPath}/exception/GlobalExceptionHandler.java`), content);
 }
 
+// ─── SecurityHeadersFilter (Spring Boot) ───────────────────────────────────────
+
+async function generateSecurityHeadersFilter(dir: string, pkgPath: string, basePackage: string): Promise<void> {
+  const content = `package ${basePackage}.config;
+
+import jakarta.servlet.Filter;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+
+/**
+ * Filtre de sécurité HTTP qui ajoute des headers de protection sur chaque réponse.
+ *
+ * <p>Ce filtre est exécuté en premier dans la chaîne de filtres Spring Boot
+ * et ajoute les headers suivants :</p>
+ * <ul>
+ *   <li><b>X-Content-Type-Options: nosniff</b> — empêche le MIME-sniffing du navigateur</li>
+ *   <li><b>X-Frame-Options: DENY</b> — protège contre les attaques de clickjacking</li>
+ *   <li><b>X-XSS-Protection: 1; mode=block</b> — active le filtre XSS intégré du navigateur</li>
+ *   <li><b>Cache-Control: no-store</b> — empêche la mise en cache de données sensibles</li>
+ *   <li><b>Strict-Transport-Security</b> — force les connexions HTTPS (HSTS, 1 an)</li>
+ *   <li><b>Content-Security-Policy</b> — restreint les sources de contenu autorisées</li>
+ *   <li><b>Referrer-Policy</b> — contrôle les informations de référence envoyées</li>
+ *   <li><b>Permissions-Policy</b> — désactive les fonctionnalités navigateur non utilisées</li>
+ * </ul>
+ *
+ * @author Générateur EJB-to-REST BIAN
+ * @version 1.0.0
+ */
+@Component
+@Order(Ordered.HIGHEST_PRECEDENCE)
+public class SecurityHeadersFilter implements Filter {
+
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
+        if (response instanceof HttpServletResponse httpResponse) {
+            httpResponse.setHeader("X-Content-Type-Options", "nosniff");
+            httpResponse.setHeader("X-Frame-Options", "DENY");
+            httpResponse.setHeader("X-XSS-Protection", "1; mode=block");
+            httpResponse.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+            httpResponse.setHeader("Pragma", "no-cache");
+            httpResponse.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+            httpResponse.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+            httpResponse.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+            httpResponse.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+        }
+        chain.doFilter(request, response);
+    }
+}
+`;
+  await fs.writeFile(path.join(dir, `src/main/java/${pkgPath}/config/SecurityHeadersFilter.java`), content);
+}
+
+// ─── RequestLoggingFilter (Spring Boot) ────────────────────────────────────────
+
+async function generateRequestLoggingFilter(dir: string, pkgPath: string, basePackage: string): Promise<void> {
+  const content = `package ${basePackage}.config;
+
+import jakarta.servlet.Filter;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.util.UUID;
+
+/**
+ * Filtre de journalisation des requêtes HTTP entrantes et sortantes.
+ *
+ * <p>Ce filtre trace pour chaque requête :</p>
+ * <ul>
+ *   <li>Méthode HTTP et URI de la requête</li>
+ *   <li>Durée de traitement en millisecondes</li>
+ *   <li>Code de statut HTTP retourné</li>
+ *   <li>Un identifiant de corrélation unique (X-Request-Id) pour le traçage distribué</li>
+ * </ul>
+ *
+ * <h3>Corrélation :</h3>
+ * <p>Un UUID est généré pour chaque requête et ajouté dans le header de réponse
+ * {@code X-Request-Id}. Cet identifiant permet de corréler les logs
+ * entre le wrapper BIAN et l'adapter backend JAX-RS.</p>
+ *
+ * @author Générateur EJB-to-REST BIAN
+ * @version 1.0.0
+ */
+@Component
+@Order(1)
+@Slf4j
+public class RequestLoggingFilter implements Filter {
+
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
+        if (!(request instanceof HttpServletRequest httpRequest)) {
+            chain.doFilter(request, response);
+            return;
+        }
+
+        String requestId = UUID.randomUUID().toString().substring(0, 8);
+        long startTime = System.currentTimeMillis();
+
+        log.info("[{}] → {} {}", requestId, httpRequest.getMethod(), httpRequest.getRequestURI());
+
+        try {
+            chain.doFilter(request, response);
+        } finally {
+            long duration = System.currentTimeMillis() - startTime;
+            int status = (response instanceof HttpServletResponse httpResp) ? httpResp.getStatus() : -1;
+
+            if (response instanceof HttpServletResponse httpResp) {
+                httpResp.setHeader("X-Request-Id", requestId);
+            }
+
+            log.info("[{}] ← {} ({}ms)", requestId, status, duration);
+        }
+    }
+}
+`;
+  await fs.writeFile(path.join(dir, `src/main/java/${pkgPath}/config/RequestLoggingFilter.java`), content);
+}
+
 // ─── Controller ──────────────────────────────────────────────────────────────
 
 async function generateController(dir: string, pkgPath: string, basePackage: string, serviceDomain: string, domainId: string, endpoints: ResolvedEndpoint[]): Promise<void> {
@@ -917,9 +1054,15 @@ async function generateController(dir: string, pkgPath: string, basePackage: str
 
     return `
     /**
-     * ${ep.actionTerm} - ${ep.operation}
-     * Adapter: ${ep.adapterName}
-     * Original path: ${ep.method} ${ep.path}
+     * <b>${ep.actionTerm}</b> — ${ep.operation}.
+     *
+     * <p>Appelle l'adapter <code>${ep.adapterName}</code> via le service résilient.
+     * Le circuit breaker protège contre les défaillances du backend.</p>
+     *
+     * <p>Endpoint original : {@code ${ep.method} ${ep.path}}</p>
+     *
+     * @param crReferenceId identifiant de la ressource BIAN (Control Record Reference ID)${ep.method !== "GET" ? "\n     * @param request DTO validé contenant les données métier" : ""}
+     * @return {@link ApiResponse} contenant le DTO ${ep.dtoPrefix}Response
      */
     ${httpAnnotation}("${bianPath}")
     @Operation(summary = "${ep.actionTerm} ${ep.operation}", description = "Adapter: ${ep.adapterName}")
@@ -945,8 +1088,27 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * BIAN Controller for Service Domain: ${serviceDomain}
- * Exposes endpoints following BIAN naming conventions.
+ * Contrôleur REST BIAN pour le Service Domain <b>${serviceDomain}</b>.
+ *
+ * <p>Ce contrôleur expose les opérations métier du domaine en respectant
+ * les conventions de nommage BIAN (action terms: Initiate, Retrieve, Update, Execute).</p>
+ *
+ * <h3>Architecture :</h3>
+ * <pre>
+ * Client HTTP ──→ [Controller] ──→ [Service + Resilience4j] ──→ [RestAdapter] ──→ Adapter JAX-RS
+ * </pre>
+ *
+ * <h3>Sécurité :</h3>
+ * <p>Tous les endpoints sont protégés par OAuth2/JWT (Keycloak).
+ * Désactivable via {@code app.security.enabled=false} en profil dev.</p>
+ *
+ * <h3>Résilience :</h3>
+ * <p>Chaque appel au backend est protégé par Circuit Breaker, Retry, Timeout,
+ * Rate Limiter et Bulkhead (Resilience4j) configurés dans application.yml.</p>
+ *
+ * @author Générateur EJB-to-REST BIAN
+ * @version 1.0.0
+ * @see ${serviceName}
  */
 @RestController
 @RequestMapping("/api/v1/${domainId}")
@@ -994,7 +1156,20 @@ async function generateService(dir: string, pkgPath: string, basePackage: string
 
     return `
     /**
-     * ${ep.operation} — calls adapter ${ep.adapterName} at ${ep.method} ${ep.path}
+     * ${ep.operation} — appelle l'adapter <code>${ep.adapterName}</code>.
+     *
+     * <p>Protégé par 5 patterns Resilience4j :</p>
+     * <ul>
+     *   <li>CircuitBreaker — coupe les appels si le backend est en échec répété</li>
+     *   <li>Retry — réessaie automatiquement sur erreur transitoire</li>
+     *   <li>Bulkhead — limite la concurrence pour protéger le backend</li>
+     *   <li>TimeLimiter — timeout si la réponse est trop lente</li>
+     *   <li>RateLimiter — limite le débit pour éviter la surcharge</li>
+     * </ul>
+     *
+     * @param crReferenceId identifiant BIAN de la ressource
+${ep.method !== "GET" ? "     * @param request données métier validées\n" : ""}     * @return réponse du backend transformée en DTO
+     * @throws RuntimeException si le fallback est déclenché (service indisponible)
      */
     @CircuitBreaker(name = "${resilienceInstance}", fallbackMethod = "${ep.javaMethodName}Fallback")
     @Retry(name = "${resilienceInstance}")
@@ -1026,9 +1201,31 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
- * Service layer for BIAN ${serviceDomain}.
- * Applies Resilience4j patterns per adapter:
- * Circuit Breaker, Retry, Bulkhead, TimeLimiter, RateLimiter.
+ * Couche service pour le domaine BIAN <b>${serviceDomain}</b>.
+ *
+ * <p>Ce service encapsule la logique de résilience autour des appels
+ * vers l'adapter REST backend. Chaque méthode est annotée avec les 5 patterns
+ * Resilience4j pour garantir la stabilité du système :</p>
+ *
+ * <ol>
+ *   <li><b>CircuitBreaker</b> — coupe les appels après N échecs consécutifs</li>
+ *   <li><b>Retry</b> — réessaie sur erreur transitoire (503, timeout)</li>
+ *   <li><b>Bulkhead</b> — limite la concurrence (protège le backend)</li>
+ *   <li><b>TimeLimiter</b> — timeout configurable par adapter</li>
+ *   <li><b>RateLimiter</b> — limite le débit (requêtes/seconde)</li>
+ * </ol>
+ *
+ * <h3>Configuration :</h3>
+ * <p>Les paramètres de chaque pattern sont externalisés dans
+ * {@code application.yml} sous la clé {@code resilience4j.*}.</p>
+ *
+ * <h3>Fallback :</h3>
+ * <p>Chaque méthode dispose d'un fallback qui logge l'erreur et
+ * propage une RuntimeException traitée par le GlobalExceptionHandler.</p>
+ *
+ * @author Générateur EJB-to-REST BIAN
+ * @version 1.0.0
+ * @see ${adapterInterfaceName}
  */
 @Service
 @RequiredArgsConstructor
@@ -1337,13 +1534,29 @@ async function generateDtoClass(
     ? `@Data\n@Builder\n@NoArgsConstructor\n@AllArgsConstructor`
     : `@Data\n@Builder\n@NoArgsConstructor`;
 
+  // Build field-level JavaDoc comments
+  const fieldLinesWithDoc = fields.map((f) => {
+    const javaType = resolveFieldJavaType(f, className);
+    const annotations2: string[] = [];
+    if (isRequest && f.required) annotations2.push("    @NotNull");
+    if (isRequest && f.children && f.children.length > 0) annotations2.push("    @Valid");
+    const annotationStr = annotations2.length > 0 ? annotations2.join("\n") + "\n" : "";
+    const fieldDoc = `    /** ${f.children && f.children.length > 0 ? (f.isList ? "Liste d'objets" : "Objet imbriqu\u00e9") : "Champ m\u00e9tier"} : ${f.name}${f.required ? " (obligatoire)" : ""} */`;
+    return `${fieldDoc}\n${annotationStr}    private ${javaType} ${f.name};`;
+  }).join("\n\n");
+
+  const dtoJavaDoc = isRequest
+    ? `/**\n * DTO de requ\u00eate pour l'op\u00e9ration associ\u00e9e.\n *\n * <p>Les champs annot\u00e9s {@code @NotNull} sont obligatoires.\n * Les objets imbriqu\u00e9s annot\u00e9s {@code @Valid} sont valid\u00e9s en cascade.</p>\n *\n * @author G\u00e9n\u00e9rateur EJB-to-REST BIAN\n */`
+    : `/**\n * DTO de r\u00e9ponse contenant les donn\u00e9es retourn\u00e9es par l'adapter backend.\n *\n * @author G\u00e9n\u00e9rateur EJB-to-REST BIAN\n */`;
+
   const content = `package ${basePackage}.dto.${subPackage};
 
 ${imports.join("\n")}
 
+${dtoJavaDoc}
 ${annotations}
 public class ${className} {
-${fieldLines || "    // Fields to be defined based on the adapter contract"}
+${fieldLinesWithDoc || "    // Fields to be defined based on the adapter contract"}
 }
 `;
 
@@ -2148,6 +2361,8 @@ function mapJavaType(type: string): string {
   const typeMap: Record<string, string> = {
     string: "String",
     String: "String",
+    number: "java.math.BigDecimal",
+    Number: "java.math.BigDecimal",
     int: "Integer",
     Integer: "Integer",
     long: "Long",

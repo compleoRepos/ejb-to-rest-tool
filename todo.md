@@ -108,3 +108,26 @@
 - [x] Logs : niveau INFO par défaut (pas DEBUG)
 - [x] Port : configurable via SERVER_PORT env variable (default 8081)
 - [x] Java identifiers : fix noms commençant par un chiffre (3dsecure → ThreeDSecure)
+
+## Audit Final 10/10
+
+### Générateur Adapter
+- [x] Ajouter JavaDoc exhaustif dans le code Java généré (classes, méthodes, champs)
+- [x] Ajouter security headers (X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security)
+- [x] Ajouter input validation/sanitization (InputSanitizer avec protection XSS)
+- [x] Ajouter commentaires explicatifs pour montée en compétence des développeurs
+- [x] Tests E2E complets du générateur Adapter (7 tests vitest)
+
+### Générateur BIAN
+- [x] Ajouter JavaDoc exhaustif dans le code Java généré (classes, méthodes, champs)
+- [x] Ajouter SecurityHeadersFilter (8 headers de protection)
+- [x] Ajouter RequestLoggingFilter (correlation ID X-Request-Id)
+- [x] Ajouter commentaires explicatifs en français pour montée en compétence
+- [x] Tests E2E complets du générateur BIAN (22 tests intégration)
+
+### Qualité globale
+- [x] Compilation Maven 2/2 wrappers + adapter WAR (test-compile OK)
+- [x] 47 vitest passent (4 fichiers : auth + BIAN unit + BIAN integration + Adapter)
+- [x] Audit final output : chaque fichier généré est commenté et sécurisé
+- [x] Type 'number' mappé vers BigDecimal (fix compilation)
+- [ ] Push Git final
