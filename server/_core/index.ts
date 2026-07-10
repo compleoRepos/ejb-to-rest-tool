@@ -9,6 +9,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { uploadRouter } from "../upload";
+import { downloadRouter } from "../localDownload";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -39,6 +40,8 @@ async function startServer() {
   registerOAuthRoutes(app);
   // File upload routes
   app.use("/api/upload", uploadRouter);
+  // Local download fallback (when S3 storagePut fails)
+  app.use("/api/download", downloadRouter);
   // tRPC API
   app.use(
     "/api/trpc",

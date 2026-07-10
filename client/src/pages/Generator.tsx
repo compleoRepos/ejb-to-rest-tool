@@ -945,8 +945,8 @@ function AdapterResultsList({ results }: { results: AdapterResult[] }) {
                   {result.projectName}
                 </span>
               </div>
-              {result.success && result.zipUrl && (
-                <a href={result.zipUrl} target="_blank" rel="noopener noreferrer">
+              {result.zipUrl && (
+                <a href={result.zipUrl} download>
                   <Button
                     size="sm"
                     variant="outline"
@@ -995,15 +995,22 @@ function BianResultsList({ results }: { results: BianWrapperResult[] }) {
               <div className="flex items-center gap-3">
                 {!result.error ? (
                   <CheckCircle className="w-4 h-4 text-[oklch(0.82_0.25_140)]" />
+                ) : result.zipUrl ? (
+                  <AlertCircle className="w-4 h-4 text-yellow-500" />
                 ) : (
                   <AlertCircle className="w-4 h-4 text-destructive" />
                 )}
                 <span className="font-mono text-sm font-medium">
                   {result.name}
                 </span>
+                {result.error && result.zipUrl && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-500 font-medium">
+                    téléchargement local
+                  </span>
+                )}
               </div>
               {result.zipUrl && (
-                <a href={result.zipUrl} target="_blank" rel="noopener noreferrer">
+                <a href={result.zipUrl} download>
                   <Button
                     size="sm"
                     variant="outline"

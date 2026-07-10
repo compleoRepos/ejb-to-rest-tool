@@ -134,6 +134,16 @@
 
 ## Améliorations IHM + Présentation
 
-- [ ] Ajouter champs de saisie manuelle backendUrl et serviceDomain dans l'IHM (par fichier JSON uploadé)
-- [ ] Ajouter aperçu des DTOs imbriqués détectés avant génération
-- [ ] Mettre à jour la présentation BOA avec les vrais chiffres (700 JH adapters + 550 JH wrappers = 1250 JH)
+- [x] Ajouter champs de saisie manuelle backendUrl et serviceDomain dans l'IHM (par fichier JSON uploadé)
+- [x] Ajouter aperçu des DTOs imbriqués détectés avant génération
+- [x] Mettre à jour la présentation BOA avec les vrais chiffres (700 JH adapters + 550 JH wrappers = 1250 JH)
+
+## Bug Fix — Bouton Télécharger ZIP
+
+- [x] Fix bouton Télécharger ZIP qui disparaît quand storagePut échoue
+- [x] Implémenter endpoint fallback local /api/download/:id (Express Router)
+- [x] Appliquer le fallback dans le routeur BIAN (try storagePut → catch → registerLocalDownload)
+- [x] Appliquer le fallback dans le routeur Adapter (même pattern)
+- [x] Appliquer le fallback dans le routeur AdapterFromUpload (même pattern)
+- [x] Frontend : afficher le bouton Télécharger ZIP même en mode fallback local (badge jaune "téléchargement local")
+- [x] 47 tests vitest passent après la correction

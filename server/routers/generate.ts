@@ -11,6 +11,7 @@ import { generateAdapter, generateAdapterDocumentation, packageAsZip } from "../
 import { generateBianWrappers, packageBianAsZip } from "../generators/bianGenerator";
 import type { BianProject, AdapterEndpoint } from "../generators/bianGenerator";
 import { storagePut } from "../storage";
+import { registerLocalDownload } from "../localDownload";
 import { UPLOAD_DIR } from "../upload";
 import { createProject, updateProjectStatus, createGeneration, updateGeneration, getAllGenerations, getAllProjects } from "../db";
 
@@ -109,13 +110,22 @@ export const generateRouter = router({
           const zipPath = path.join(WORK_DIR, `${artifactId}.zip`);
           await packageAsZip(outputDir, zipPath);
 
-          // Upload to S3
-          const zipBuffer = await fs.readFile(zipPath);
-          const { key, url } = await storagePut(
-            `generations/adapter/${artifactId}.zip`,
-            zipBuffer,
-            "application/zip"
-          );
+          // Upload to S3 with local fallback
+          let url: string;
+          let key: string | null = null;
+          try {
+            const zipBuffer = await fs.readFile(zipPath);
+            const s3Result = await storagePut(
+              `generations/adapter/${artifactId}.zip`,
+              zipBuffer,
+              "application/zip"
+            );
+            url = s3Result.url;
+            key = s3Result.key;
+          } catch (s3Err: any) {
+            console.warn(`[Adapter] S3 upload failed for ${artifactId}, using local fallback: ${s3Err.message}`);
+            url = await registerLocalDownload(zipPath, `${artifactId}.zip`);
+          }
 
           results.push({
             success: true,
@@ -203,16 +213,28 @@ export const generateRouter = router({
       // Package each wrapper as ZIP and upload
       const wrapperResults: any[] = [];
       for (const wrapper of result.wrappers) {
+        const zipPath = path.join(WORK_DIR, `${wrapper.name}.zip`);
         try {
-          const zipPath = path.join(WORK_DIR, `${wrapper.name}.zip`);
           await packageBianAsZip(wrapper.outputDir, zipPath);
 
-          const zipBuffer = await fs.readFile(zipPath);
-          const { key, url } = await storagePut(
-            `generations/bian/${wrapper.name}.zip`,
-            zipBuffer,
-            "application/zip"
-          );
+          let url: string;
+          let key: string | null = null;
+
+          try {
+            // Tentative d'upload vers S3
+            const zipBuffer = await fs.readFile(zipPath);
+            const s3Result = await storagePut(
+              `generations/bian/${wrapper.name}.zip`,
+              zipBuffer,
+              "application/zip"
+            );
+            url = s3Result.url;
+            key = s3Result.key;
+          } catch (s3Err: any) {
+            // Fallback local : servir le ZIP depuis /api/download/:id
+            console.warn(`[BIAN] S3 upload failed for ${wrapper.name}, using local fallback: ${s3Err.message}`);
+            url = await registerLocalDownload(zipPath, `${wrapper.name}.zip`);
+          }
 
           // Persist BIAN generation to DB
           const projectId = await createProject({
@@ -247,13 +269,20 @@ export const generateRouter = router({
 
           await fs.rm(zipPath, { force: true }).catch(() => {});
         } catch (err: any) {
+          // Erreur fatale (packaging ZIP échoué) — tenter le fallback local si le ZIP existe
+          let fallbackUrl: string | null = null;
+          try {
+            await fs.access(zipPath);
+            fallbackUrl = await registerLocalDownload(zipPath, `${wrapper.name}.zip`);
+          } catch { /* ZIP n'existe pas, pas de fallback possible */ }
+
           wrapperResults.push({
             name: wrapper.name,
             serviceDomain: wrapper.serviceDomain,
             domainId: wrapper.domainId,
             endpoints: wrapper.endpoints,
             filesGenerated: wrapper.filesGenerated,
-            zipUrl: null,
+            zipUrl: fallbackUrl,
             zipKey: null,
             error: err.message,
           });
@@ -342,12 +371,22 @@ export const generateRouter = router({
           const zipPath = path.join(WORK_DIR, `${artifactId}.zip`);
           await packageAsZip(outputDir, zipPath);
 
-          const zipBuffer = await fs.readFile(zipPath);
-          const { key, url } = await storagePut(
-            `generations/adapter/${artifactId}.zip`,
-            zipBuffer,
-            "application/zip"
-          );
+          // Upload to S3 with local fallback
+          let url: string;
+          let key: string | null = null;
+          try {
+            const zipBuffer = await fs.readFile(zipPath);
+            const s3Result = await storagePut(
+              `generations/adapter/${artifactId}.zip`,
+              zipBuffer,
+              "application/zip"
+            );
+            url = s3Result.url;
+            key = s3Result.key;
+          } catch (s3Err: any) {
+            console.warn(`[AdapterFromUpload] S3 upload failed for ${artifactId}, using local fallback: ${s3Err.message}`);
+            url = await registerLocalDownload(zipPath, `${artifactId}.zip`);
+          }
 
           // Persist to DB
           const projectId = await createProject({
