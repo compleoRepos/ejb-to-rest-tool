@@ -589,6 +589,22 @@ function JsonUploadTab() {
       setGenerationStep("Parsing des fichiers et extraction des endpoints...");
       await new Promise((r) => setTimeout(r, 300));
 
+      // Recursive field mapper supporting nested objects and lists
+      const mapField = (f: any): any => {
+        if (typeof f === "string") return { name: f, type: "String", required: false };
+        const mapped: any = {
+          name: f.name || "unknown",
+          type: f.type || "String",
+          required: f.required ?? false,
+        };
+        if (f.description) mapped.description = f.description;
+        if (f.isList || f.is_list) mapped.isList = true;
+        if (f.children && Array.isArray(f.children) && f.children.length > 0) {
+          mapped.children = f.children.map(mapField);
+        }
+        return mapped;
+      };
+
       // Read JSON content from files for endpoint extraction
       const bianProjects = [];
       for (const file of files) {
@@ -601,19 +617,19 @@ function JsonUploadTab() {
               operation: ep.operation || ep.name || "unknown",
               method: ep.method || "POST",
               path: ep.path || `/api/${adapterName}/${ep.operation || "op"}`,
-              requestFields: (ep.request_fields || ep.requestFields || []).map((f: any) => ({
-                name: f.name || f,
-                type: f.type || "String",
-                required: f.required ?? false,
-              })),
-              responseFields: (ep.response_fields || ep.responseFields || []).map((f: any) => ({
-                name: f.name || f,
-                type: f.type || "String",
-                required: f.required ?? false,
-              })),
+              requestFields: (ep.request_fields || ep.requestFields || []).map(mapField),
+              responseFields: (ep.response_fields || ep.responseFields || []).map(mapField),
             }));
 
-            bianProjects.push({ adapterName, endpoints });
+            // Also extract backendUrl and serviceDomain from the JSON descriptor
+            const backendUrl = json.adapter_base_url || json.backendUrl || json.backend_url;
+            const serviceDomainName = json.bian?.service_domain || json.service_domain || json.serviceDomain;
+            bianProjects.push({
+              adapterName,
+              endpoints,
+              ...(backendUrl ? { backendUrl } : {}),
+              ...(serviceDomainName ? { serviceDomainName } : {}),
+            });
           } catch {
             // Skip invalid JSON
           }
@@ -803,11 +819,17 @@ function JsonUploadTab() {
           <pre className="text-[10px] font-mono text-muted-foreground bg-secondary/50 p-3 rounded overflow-x-auto leading-relaxed">
 {`{
   "adapter_name": "...",
+  "adapter_base_url": "http://host:port/ctx",
+  "bian": { "service_domain": "..." },
   "endpoints": [{
     "operation": "...",
     "method": "POST",
-    "path": "/backend/...",
-    "request_fields": [...],
+    "path": "/api/...",
+    "request_fields": [
+      { "name": "x", "type": "String" },
+      { "name": "addr", "type": "Object",
+        "children": [...], "isList": false }
+    ],
     "response_fields": [...]
   }]
 }`}

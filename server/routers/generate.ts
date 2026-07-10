@@ -16,6 +16,16 @@ import { createProject, updateProjectStatus, createGeneration, updateGeneration,
 
 const WORK_DIR = path.join(os.tmpdir(), "ejb-to-rest-gen");
 
+/** Recursive field schema supporting nested objects and lists */
+const fieldSchema: z.ZodType<any> = z.object({
+  name: z.string(),
+  type: z.string(),
+  required: z.boolean().optional(),
+  description: z.string().optional(),
+  children: z.lazy(() => z.array(fieldSchema)).optional(),
+  isList: z.boolean().optional(),
+});
+
 export const generateRouter = router({
   /**
    * List all generations (for the Results page).
@@ -156,8 +166,8 @@ export const generateRouter = router({
                 operation: z.string(),
                 method: z.string(),
                 path: z.string(),
-                requestFields: z.array(z.object({ name: z.string(), type: z.string(), required: z.boolean().optional() })).default([]),
-                responseFields: z.array(z.object({ name: z.string(), type: z.string(), required: z.boolean().optional() })).default([]),
+                requestFields: z.array(z.lazy(() => fieldSchema)).default([]),
+                responseFields: z.array(z.lazy(() => fieldSchema)).default([]),
               })
             ),
           })
@@ -180,7 +190,7 @@ export const generateRouter = router({
         adapterName: p.adapterName,
         endpoints: p.endpoints as AdapterEndpoint[],
         ...(p.backendUrl ? { backendUrl: p.backendUrl } : {}),
-        ...(p.serviceDomainName ? { serviceDomainName: p.serviceDomainName } : {}),
+        ...(p.serviceDomainName ? { serviceDomain: p.serviceDomainName } : {}),
       }));
 
       const result = await generateBianWrappers({

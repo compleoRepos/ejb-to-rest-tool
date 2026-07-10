@@ -130,4 +130,4 @@
 - [x] 47 vitest passent (4 fichiers : auth + BIAN unit + BIAN integration + Adapter)
 - [x] Audit final output : chaque fichier généré est commenté et sécurisé
 - [x] Type 'number' mappé vers BigDecimal (fix compilation)
-- [ ] Push Git final
+- [x] Push Git final (ed773fa)
