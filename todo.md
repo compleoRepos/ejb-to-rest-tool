@@ -199,8 +199,8 @@
 - [x] Mettre à jour la documentation (README, INSTALL.md, DEPLOYMENT-WAS.md) pour WAS Traditional
 
 ## Couverture FunctionCodeParser — Patterns alternatifs
-- [ ] Analyser les 11 projets V1 fallback pour identifier les patterns de dispatch
-- [ ] Catégoriser les patterns alternatifs (switch/if-else/map/etc.)
-- [ ] Implémenter les extensions dans FunctionCodeParser
-- [ ] Tester avec les 26 projets — objectif : réduire le nombre de V1 fallback
-- [ ] Rebuild JAR, push GitHub, save checkpoint
+- [x] Analyser les 11 projets V1 fallback pour identifier les patterns de dispatch
+- [x] Catégoriser les patterns alternatifs (Pattern A: UCStrategie @UseCase, Pattern B: enum switch, Pattern D: simple single function)
+- [x] Implémenter les extensions dans le parser (EjbZipParser: enum indexing dans fullClassBodies + FunctionCodeParser: comment stripping dans extractEnumFunctionCodes)
+- [x] Tester avec les 26 projets — résultat : 19 V2, 4 V1 (@WebService), 3 non-EJB (0 erreurs)
+- [x] Rebuild JAR, push GitHub, save checkpoint
