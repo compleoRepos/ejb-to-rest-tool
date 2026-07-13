@@ -147,3 +147,9 @@
 - [x] Appliquer le fallback dans le routeur AdapterFromUpload (même pattern)
 - [x] Frontend : afficher le bouton Télécharger ZIP même en mode fallback local (badge jaune "téléchargement local")
 - [x] 47 tests vitest passent après la correction
+
+## Bug Fix — JAR path introuvable en déploiement
+
+- [x] Bundler le JAR jaxrs-wrapper-generator dans server/lib/ (inclus dans le projet)
+- [x] Rendre le chemin JAR configurable : env JAXRS_GENERATOR_JAR > bundled > sandbox dev path
+- [x] 47 tests vitest passent après la correction

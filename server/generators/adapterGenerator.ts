@@ -6,10 +6,41 @@
 import { spawn } from "child_process";
 import path from "path";
 import fs from "fs/promises";
+import { existsSync, createWriteStream } from "fs";
 import { ZipArchive } from "archiver";
-import { createWriteStream } from "fs";
 
-const JAR_PATH = "/home/ubuntu/jaxrs-wrapper-generator/target/jaxrs-wrapper-generator-1.0.0-SNAPSHOT.jar";
+/**
+ * Chemin vers le JAR du générateur JAX-RS.
+ * Priorité : variable d'env JAXRS_GENERATOR_JAR > server/lib/jaxrs-wrapper-generator.jar (bundled) > chemin sandbox dev.
+ */
+const JAR_PATH = (() => {
+  if (process.env.JAXRS_GENERATOR_JAR) {
+    return process.env.JAXRS_GENERATOR_JAR;
+  }
+
+  // In dev: import.meta.dirname = /home/ubuntu/ejb-to-rest-tool-v2/server/generators
+  // In prod (bundled): import.meta.dirname = /app/dist  (esbuild output)
+  const thisDir = import.meta.dirname;
+
+  // Candidate paths for the bundled JAR
+  const candidates = [
+    // Dev mode: relative to server/generators/ → go up to project root → server/lib/
+    path.resolve(thisDir, "..", "lib", "jaxrs-wrapper-generator.jar"),
+    // Production (esbuild bundles to dist/): go up to project root → server/lib/
+    path.resolve(thisDir, "..", "server", "lib", "jaxrs-wrapper-generator.jar"),
+    // Alternative production path: JAR copied next to dist/
+    path.resolve(thisDir, "lib", "jaxrs-wrapper-generator.jar"),
+    // Sandbox dev path (works during local development in Manus sandbox)
+    "/home/ubuntu/jaxrs-wrapper-generator/target/jaxrs-wrapper-generator-1.0.0-SNAPSHOT.jar",
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+
+  // Fallback: return the sandbox path (will fail at runtime with a clear error)
+  return candidates[candidates.length - 1];
+})();
 
 export interface AdapterGenerationOptions {
   inputPath: string; // Path to extracted EJB project directory or ZIP
