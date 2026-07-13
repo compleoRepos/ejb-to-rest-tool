@@ -161,7 +161,7 @@
 - [x] Intégrer le parseur dans le générateur Adapter (Java CLI) — enrichFieldsFromClassMap
 - [x] Mettre à jour le générateur BIAN pour utiliser les vrais champs quand disponibles
 - [x] Écrire des tests et vérifier la compilation (60/60 tests Java passent)
-- [ ] Push sur GitHub
+- [x] Push sur GitHub (1c3ad03)
 
 ## Feature — Structure multi-modules Maven (EAR + EJB + WAR)
 
@@ -171,4 +171,23 @@
 - [x] Module WAR/Web: contient le code REST (Resources, Converters, DTOs) + Dockerfile + install_app + run-local
 - [x] Parent POM: coordonne les 3 modules avec les bonnes dépendances
 - [x] Tests et compilation Maven du projet multi-modules (60/60 Java tests + 47/47 vitest)
-- [ ] Push sur GitHub
+- [x] Push sur GitHub (1c3ad03)
+
+## Retour Audit Adapter — 14 points (Hakim)
+
+### BLOQUANT
+- [x] Point 1+10: Réutiliser l'EJB d'origine comme dépendance (pas de régénération de stubs vides); aligner type/interface/JNDI binding
+- [ ] Point 2: Gérer les exceptions vérifiées (ParsingException) dans le converter généré (try/catch ou throws)
+- [ ] Point 3+4: Hériter du POM parent du projet source; reprendre les coordonnées Maven exactes (pas de versions inventées)
+- [x] Point 5: Construire l'Envelope avec dispatch path réel + code fonction via addNode (compatible Envelope API)
+- [x] Point 6: Dériver les opérations REST des codes fonction (switch/enum dans process) pas des noms de méthodes Java
+- [ ] Point 7+8: Cibler WebSphere Traditional (pas Liberty); déployer l'EAR complet (pas le WAR seul)
+- [x] Point 9: Accéder à l'EJB par lookup JNDI programmatique (InitialContext) pas par @EJB sur champ
+
+### IMPORTANT
+- [x] Point 11: Mapper la structure de réponse réelle (outputFields du FunctionCodeInfo) pas seulement code/message
+- [x] Point 12: Ne pas placer de corps de requête sur un @GET → utiliser @QueryParam (≤3 champs) ou basculer en @POST
+- [x] Point 13: Générer un endpoint de test par fonction _TST de l'EJB (sous /test/ sub-path)
+
+### CONFORT
+- [x] Point 14: Supprimer les signatures d'outil (@author, mentions du générateur) du code V2 produit
