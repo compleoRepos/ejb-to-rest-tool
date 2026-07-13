@@ -191,3 +191,9 @@
 
 ### CONFORT
 - [x] Point 14: Supprimer les signatures d'outil (@author, mentions du générateur) du code V2 produit
+
+## E2E Test V2 — Tous les projets sources
+
+- [ ] Tester la génération V2 sur tous les projets batch2-flat (26 projets)
+- [ ] Vérifier que le code V2 contient: JNDI lookup, ParsingException, function codes, WAS Traditional Dockerfile
+- [ ] Mettre à jour la documentation (README, DEPLOYMENT) pour WAS Traditional
