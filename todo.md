@@ -177,11 +177,11 @@
 
 ### BLOQUANT
 - [x] Point 1+10: Réutiliser l'EJB d'origine comme dépendance (pas de régénération de stubs vides); aligner type/interface/JNDI binding
-- [ ] Point 2: Gérer les exceptions vérifiées (ParsingException) dans le converter généré (try/catch ou throws)
-- [ ] Point 3+4: Hériter du POM parent du projet source; reprendre les coordonnées Maven exactes (pas de versions inventées)
+- [x] Point 2: Gérer les exceptions vérifiées (ParsingException) dans le Resource V2 (catch ParsingException → 400 Bad Request)
+- [x] Point 3+4: Hériter du POM parent du projet source; reprendre les coordonnées Maven (sourceGroupId/sourceArtifactId-rest/sourceVersion)
 - [x] Point 5: Construire l'Envelope avec dispatch path réel + code fonction via addNode (compatible Envelope API)
 - [x] Point 6: Dériver les opérations REST des codes fonction (switch/enum dans process) pas des noms de méthodes Java
-- [ ] Point 7+8: Cibler WebSphere Traditional (pas Liberty); déployer l'EAR complet (pas le WAR seul)
+- [x] Point 7+8: Cibler WebSphere Traditional (ibmcom/websphere-traditional); déployer l'EAR via wsadmin (install_app.py)
 - [x] Point 9: Accéder à l'EJB par lookup JNDI programmatique (InitialContext) pas par @EJB sur champ
 
 ### IMPORTANT
