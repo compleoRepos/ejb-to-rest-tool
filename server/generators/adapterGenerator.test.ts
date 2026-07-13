@@ -32,7 +32,7 @@ describe("Adapter Generator (Java CLI)", () => {
 
   it("generates SecurityHeadersFilter", async () => {
     const outputDir = path.join(OUTPUT_BASE, "test-basic");
-    const filterPath = path.join(outputDir, "src/main/java/ma/bmce/adapter/config/SecurityHeadersFilter.java");
+    const filterPath = path.join(outputDir, "test-adapter-web/src/main/java/ma/bmce/adapter/config/SecurityHeadersFilter.java");
     const content = await fs.readFile(filterPath, "utf-8");
 
     expect(content).toContain("X-Content-Type-Options");
@@ -45,7 +45,7 @@ describe("Adapter Generator (Java CLI)", () => {
 
   it("generates RequestLoggingFilter", async () => {
     const outputDir = path.join(OUTPUT_BASE, "test-basic");
-    const filterPath = path.join(outputDir, "src/main/java/ma/bmce/adapter/config/RequestLoggingFilter.java");
+    const filterPath = path.join(outputDir, "test-adapter-web/src/main/java/ma/bmce/adapter/config/RequestLoggingFilter.java");
     const content = await fs.readFile(filterPath, "utf-8");
 
     expect(content).toContain("@Provider");
@@ -55,7 +55,7 @@ describe("Adapter Generator (Java CLI)", () => {
 
   it("generates InputSanitizer with XSS protection", async () => {
     const outputDir = path.join(OUTPUT_BASE, "test-basic");
-    const sanitizerPath = path.join(outputDir, "src/main/java/ma/bmce/adapter/config/InputSanitizer.java");
+    const sanitizerPath = path.join(outputDir, "test-adapter-web/src/main/java/ma/bmce/adapter/config/InputSanitizer.java");
     const content = await fs.readFile(sanitizerPath, "utf-8");
 
     expect(content).toContain("sanitize");
@@ -68,11 +68,11 @@ describe("Adapter Generator (Java CLI)", () => {
 
   it("generates Resource with comprehensive JavaDoc", async () => {
     const outputDir = path.join(OUTPUT_BASE, "test-basic");
-    const files = await fs.readdir(path.join(outputDir, "src/main/java/ma/bmce/adapter/resource"));
+    const files = await fs.readdir(path.join(outputDir, "test-adapter-web/src/main/java/ma/bmce/adapter/resource"));
     expect(files.length).toBeGreaterThan(0);
 
     const resourceContent = await fs.readFile(
-      path.join(outputDir, "src/main/java/ma/bmce/adapter/resource", files[0]),
+      path.join(outputDir, "test-adapter-web/src/main/java/ma/bmce/adapter/resource", files[0]),
       "utf-8"
     );
 
@@ -93,8 +93,11 @@ describe("Adapter Generator (Java CLI)", () => {
     const pomContent = await fs.readFile(path.join(outputDir, "pom.xml"), "utf-8");
 
     expect(pomContent).toContain("<groupId>ma.bmce</groupId>");
-    expect(pomContent).toContain("<artifactId>test-adapter</artifactId>");
-    expect(pomContent).toContain("<packaging>war</packaging>");
+    expect(pomContent).toContain("<artifactId>test-adapter-pom</artifactId>");
+    expect(pomContent).toContain("<packaging>pom</packaging>");
+    // Web module should have WAR packaging
+    const webPomContent = await fs.readFile(path.join(outputDir, "test-adapter-web/pom.xml"), "utf-8");
+    expect(webPomContent).toContain("<packaging>war</packaging>");
   });
 
   it("generates documentation files", async () => {

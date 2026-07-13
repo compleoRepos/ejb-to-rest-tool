@@ -153,3 +153,22 @@
 - [x] Bundler le JAR jaxrs-wrapper-generator dans server/lib/ (inclus dans le projet)
 - [x] Rendre le chemin JAR configurable : env JAXRS_GENERATOR_JAR > bundled > sandbox dev path
 - [x] 47 tests vitest passent après la correction
+
+## Feature — Extraction réelle des champs DTO depuis le code source Java
+
+- [x] Analyser comment les champs DTO sont actuellement générés (génériques field1/field2)
+- [x] Implémenter un parseur Java source pour extraire les vrais noms de champs (DtoClassParser)
+- [x] Intégrer le parseur dans le générateur Adapter (Java CLI) — enrichFieldsFromClassMap
+- [x] Mettre à jour le générateur BIAN pour utiliser les vrais champs quand disponibles
+- [x] Écrire des tests et vérifier la compilation (60/60 tests Java passent)
+- [ ] Push sur GitHub
+
+## Feature — Structure multi-modules Maven (EAR + EJB + WAR)
+
+- [x] Adapter generator: produire une structure multi-modules Maven (parent POM + EJB module + EAR module + WAR module)
+- [x] Module EJB: contient les interfaces EJB et les beans
+- [x] Module EAR: packaging EAR avec dépendances EJB + WAR
+- [x] Module WAR/Web: contient le code REST (Resources, Converters, DTOs) + Dockerfile + install_app + run-local
+- [x] Parent POM: coordonne les 3 modules avec les bonnes dépendances
+- [x] Tests et compilation Maven du projet multi-modules (60/60 Java tests + 47/47 vitest)
+- [ ] Push sur GitHub
