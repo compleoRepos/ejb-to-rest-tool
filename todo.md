@@ -204,3 +204,12 @@
 - [x] Implémenter les extensions dans le parser (EjbZipParser: enum indexing dans fullClassBodies + FunctionCodeParser: comment stripping dans extractEnumFunctionCodes)
 - [x] Tester avec les 26 projets — résultat : 19 V2, 4 V1 (@WebService), 3 non-EJB (0 erreurs)
 - [x] Rebuild JAR, push GitHub, save checkpoint
+
+## Fix Structure Adapter — 4 points
+
+- [x] README V2 : documenter la structure 2 modules (web + ear) au lieu de 3 modules (ejb + web + ear)
+- [x] README V2 : remplacer mention @EJB(lookup=...) par InitialContext JNDI
+- [x] README V2 : corriger docker build path (build context = racine, pas cd web)
+- [x] FunctionCodeParser : filtrer les switch secondaires (canal A/G/I/M) — commande-chequier 7→3 endpoints
+- [x] README V2 : endpoint listing utilise fc.deriveEndpointName() (pas camelToKebab sur ALL-CAPS)
+- [x] 90 tests Java passent, 0 erreurs sur 26 projets E2E, push GitHub (4ee8d3d)
