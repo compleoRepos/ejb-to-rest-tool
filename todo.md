@@ -213,3 +213,26 @@
 - [x] FunctionCodeParser : filtrer les switch secondaires (canal A/G/I/M) — commande-chequier 7→3 endpoints
 - [x] README V2 : endpoint listing utilise fc.deriveEndpointName() (pas camelToKebab sur ALL-CAPS)
 - [x] 90 tests Java passent, 0 erreurs sur 26 projets E2E, push GitHub (4ee8d3d)
+
+## V3 Iteration — 10 points d'adaptation (Hakim)
+
+### BLOQUANT
+- [x] Point 1: Noms de méthodes converter uniques par code FONCTION complet (suffixe _TST inclus)
+- [x] Point 2: throws ParsingException sur toutes les méthodes from*Envelope du converter
+- [x] Point 3: groupId cohérent entre EAR et WEB (hériter du parent — pomGroupId)
+- [x] Point 4: slf4j-api + slf4j-jdk14 scope compile avec version 1.7.36
+- [x] Point 5: Générer web.xml Servlet 3.1 avec IBMRestServlet explicite
+
+### IMPORTANT
+- [x] Point 6: Envelope d'entrée setService + setMethod + setBody (pas addNode)
+- [x] Point 7: DTOs de sortie structurés (nested objects/lists quand classMap contient les classes DTO; fallback code/message/rawBody sinon)
+- [x] Point 8: Assets conteneurisation WAS 9.0.5.14 fonctionnels (Dockerfile, install_app.py, run-local)
+
+### CONFORT
+- [x] Point 9: Resource JAX-RS en POJO (pas CDI, pas beans.xml, lazy JNDI lookup)
+- [x] Point 10: Retirer toute marque d'outillage des commentaires générés
+
+### Résultat
+- [x] 90 tests Java passent, 23/23 projets EJB générés sans erreur
+- [x] Push GitHub jaxrs-wrapper-generator (7e40be3)
+- [x] Push GitHub ejb-to-rest-tool (main)
