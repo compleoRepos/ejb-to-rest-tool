@@ -8,6 +8,7 @@ import path from "path";
 import fs from "fs/promises";
 import { existsSync, createWriteStream } from "fs";
 import { ZipArchive } from "archiver";
+import { applyOutputMappingFix, includeSourceModules, fixWebPomDependencies, fixEarFinalName, writeDeployTooling } from "./outputMappingFix";
 
 /**
  * Chemin vers le JAR du générateur JAX-RS.
@@ -109,6 +110,43 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
           log,
         });
         return;
+      }
+
+      // Aligner le mapping de sortie sur la couche adaptateur validée (JNDI + flux JSON).
+      try {
+        await applyOutputMappingFix(outputDir);
+      } catch (fixErr) {
+        // Le correctif de sortie ne doit jamais faire échouer la génération.
+        stderr += `\n[outputMappingFix] ${(fixErr as Error).message}`;
+      }
+
+      // Retirer les dépendances framework sans version qui cassent le build.
+      try {
+        await fixWebPomDependencies(outputDir);
+      } catch (pomErr) {
+        stderr += `\n[fixWebPomDependencies] ${(pomErr as Error).message}`;
+      }
+
+      // finalName de l'EAR = artifactId (aligne le nom du .ear sur le Dockerfile).
+      try {
+        await fixEarFinalName(outputDir);
+      } catch (earErr) {
+        stderr += `\n[fixEarFinalName] ${(earErr as Error).message}`;
+      }
+
+      // Inclure les modules source d'origine (EJB au réacteur, EAR conservé + .ear dans le web).
+      try {
+        await includeSourceModules(outputDir, inputPath);
+      } catch (modErr) {
+        stderr += `\n[includeSourceModules] ${(modErr as Error).message}`;
+      }
+
+      // Remplacer les stubs de deploiement par l'outillage WAS valide. Doit rester
+      // apres includeSourceModules : l'outillage se cale sur les modules ejb et ear.
+      try {
+        await writeDeployTooling(outputDir);
+      } catch (depErr) {
+        stderr += `\n[writeDeployTooling] ${(depErr as Error).message}`;
       }
 
       // Count generated files

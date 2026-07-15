@@ -8,6 +8,7 @@ import path from "path";
 import fs from "fs/promises";
 import os from "os";
 import { generateAdapter, generateAdapterDocumentation, packageAsZip } from "../generators/adapterGenerator";
+import { detectBasePackage } from "../generators/outputMappingFix";
 import { generateBianWrappers, packageBianAsZip } from "../generators/bianGenerator";
 import type { BianProject, AdapterEndpoint } from "../generators/bianGenerator";
 import { storagePut } from "../storage";
@@ -62,8 +63,10 @@ export const generateRouter = router({
       for (const filePath of filePaths) {
         const fileName = path.basename(filePath, path.extname(filePath));
         const name = projectName || fileName;
-        const artifactId = input.artifactId || `${name}-adapter`;
-        const basePackage = input.basePackage || `${groupId}.${name.replace(/[-_]/g, "")}`;
+        // Le projet garde le nom d'entrée (sans "adapter") ; "adapter" n'apparait
+        // que dans le nom du ZIP telecharge.
+        const artifactId = input.artifactId || name;
+        const deliverableName = `${name}-adapter`;
 
         const outputDir = path.join(WORK_DIR, `adapter-${Date.now()}-${name}`);
         await fs.mkdir(outputDir, { recursive: true });
@@ -93,6 +96,12 @@ export const generateRouter = router({
           }
         }
 
+        // Meme espace de nommage que l'EJB initial (detecte des sources).
+        const basePackage =
+          input.basePackage ||
+          (await detectBasePackage(inputPath)) ||
+          `${groupId}.${name.replace(/[-_]/g, "")}`;
+
         // Run the Java generator
         const result = await generateAdapter({
           inputPath,
@@ -106,8 +115,8 @@ export const generateRouter = router({
           // Generate documentation
           await generateAdapterDocumentation(outputDir, artifactId, result.ejbCount, result.methodCount);
 
-          // Package as ZIP
-          const zipPath = path.join(WORK_DIR, `${artifactId}.zip`);
+          // Package as ZIP (le "adapter" ne vit que dans le nom du livrable).
+          const zipPath = path.join(WORK_DIR, `${deliverableName}.zip`);
           await packageAsZip(outputDir, zipPath);
 
           // Upload to S3 with local fallback
@@ -116,15 +125,15 @@ export const generateRouter = router({
           try {
             const zipBuffer = await fs.readFile(zipPath);
             const s3Result = await storagePut(
-              `generations/adapter/${artifactId}.zip`,
+              `generations/adapter/${deliverableName}.zip`,
               zipBuffer,
               "application/zip"
             );
             url = s3Result.url;
             key = s3Result.key;
           } catch (s3Err: any) {
-            console.warn(`[Adapter] S3 upload failed for ${artifactId}, using local fallback: ${s3Err.message}`);
-            url = await registerLocalDownload(zipPath, `${artifactId}.zip`);
+            console.warn(`[Adapter] S3 upload failed for ${deliverableName}, using local fallback: ${s3Err.message}`);
+            url = await registerLocalDownload(zipPath, `${deliverableName}.zip`);
           }
 
           results.push({
@@ -322,9 +331,10 @@ export const generateRouter = router({
 
       for (const file of uploadedFiles) {
         const fileName = file.originalName.replace(/\.[^.]+$/, "");
-        const artifactId = `${fileName}-adapter`;
-        const groupId = "ma.bmce.adapter";
-        const basePackage = `ma.bmce.adapter.${fileName.replace(/[-_]/g, "")}`;
+        // Le projet garde le nom d'entree ; "adapter" seulement dans le ZIP.
+        const artifactId = fileName;
+        const deliverableName = `${fileName}-adapter`;
+        const groupId = "ma.bmce";
 
         const outputDir = path.join(WORK_DIR, `adapter-${Date.now()}-${fileName}`);
         await fs.mkdir(outputDir, { recursive: true });
@@ -357,6 +367,10 @@ export const generateRouter = router({
           }
         }
 
+        // Meme espace de nommage que l'EJB initial (detecte des sources).
+        const basePackage =
+          (await detectBasePackage(inputPath)) || `${groupId}.${fileName.replace(/[-_]/g, "")}`;
+
         const genResult = await generateAdapter({
           inputPath,
           outputDir,
@@ -368,7 +382,7 @@ export const generateRouter = router({
         if (genResult.success) {
           await generateAdapterDocumentation(outputDir, artifactId, genResult.ejbCount, genResult.methodCount);
 
-          const zipPath = path.join(WORK_DIR, `${artifactId}.zip`);
+          const zipPath = path.join(WORK_DIR, `${deliverableName}.zip`);
           await packageAsZip(outputDir, zipPath);
 
           // Upload to S3 with local fallback
@@ -377,15 +391,15 @@ export const generateRouter = router({
           try {
             const zipBuffer = await fs.readFile(zipPath);
             const s3Result = await storagePut(
-              `generations/adapter/${artifactId}.zip`,
+              `generations/adapter/${deliverableName}.zip`,
               zipBuffer,
               "application/zip"
             );
             url = s3Result.url;
             key = s3Result.key;
           } catch (s3Err: any) {
-            console.warn(`[AdapterFromUpload] S3 upload failed for ${artifactId}, using local fallback: ${s3Err.message}`);
-            url = await registerLocalDownload(zipPath, `${artifactId}.zip`);
+            console.warn(`[AdapterFromUpload] S3 upload failed for ${deliverableName}, using local fallback: ${s3Err.message}`);
+            url = await registerLocalDownload(zipPath, `${deliverableName}.zip`);
           }
 
           // Persist to DB
