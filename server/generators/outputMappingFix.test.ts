@@ -196,6 +196,52 @@ describe("includeSourceModules", () => {
     const earInWeb = path.join(out, "demande-dotation-adapter-web", "demande-dotation-ear.ear");
     expect(await fs.readFile(earInWeb, "utf-8")).toBe("EAR");
   });
+
+  it("réaligne le parent du module cloné sur l'agrégateur généré", async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "incmod-parent-"));
+    const src = path.join(base, "in", "mise-disposition-bmcedirect");
+    const dst = path.join(base, "out", "mise-disposition-bmcedirect");
+
+    await fs.mkdir(path.join(src, "mise-disposition-bmcedirect-ejb"), { recursive: true });
+    await fs.writeFile(
+      path.join(src, "mise-disposition-bmcedirect-ejb", "pom.xml"),
+      `<project>
+  <artifactId>mise-disposition-bmcedirect-ejb</artifactId>
+  <parent>
+    <groupId>ma.eai.boa.xbanking</groupId>
+    <artifactId>mise-disposition-bmcedirect-pom</artifactId>
+    <version>3.0.0-SNAPSHOT</version>
+  </parent>
+</project>
+`
+    );
+
+    await fs.mkdir(dst, { recursive: true });
+    await fs.writeFile(
+      path.join(dst, "pom.xml"),
+      `<project>
+  <parent>
+    <groupId>ma.eai.midw</groupId>
+    <artifactId>general-settings</artifactId>
+    <version>2024.06</version>
+  </parent>
+  <artifactId>mise-disposition-bmcedirect-pom-rest</artifactId>
+  <modules>
+  </modules>
+</project>
+`
+    );
+
+    await includeSourceModules(dst, src);
+
+    const ejbPom = await fs.readFile(
+      path.join(dst, "mise-disposition-bmcedirect-ejb", "pom.xml"),
+      "utf-8"
+    );
+    expect(ejbPom).toContain("<artifactId>mise-disposition-bmcedirect-pom-rest</artifactId>");
+    expect(ejbPom).not.toContain("<artifactId>mise-disposition-bmcedirect-pom</artifactId>");
+    await fs.rm(base, { recursive: true, force: true });
+  });
 });
 
 describe("detectBasePackage", () => {

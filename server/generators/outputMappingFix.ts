@@ -246,6 +246,27 @@ function readPackageFromContent(content: string): string | null {
  *   `.ear` pré-buildé (présent dans leur `target/`) est déposé dans le module web.
  * Ne fait rien si l'entrée ne contient pas de tels modules (projets mono-module).
  */
+/**
+ * Retourne l'artifactId propre d'un pom (celui du projet, pas celui du parent),
+ * en écartant d'abord le bloc <parent>. Null si introuvable.
+ */
+function projectArtifactId(pom: string): string | null {
+  const withoutParent = pom.replace(/<parent>[\s\S]*?<\/parent>/, "");
+  const m = withoutParent.match(/<artifactId>\s*([^<]+?)\s*<\/artifactId>/);
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * Réécrit l'artifactId du bloc <parent> d'un pom module vers newArtifactId.
+ * Sans bloc <parent>, le pom est renvoyé inchangé.
+ */
+function rewriteParentArtifactId(pom: string, newArtifactId: string): string {
+  return pom.replace(
+    /(<parent>[\s\S]*?<artifactId>)\s*[^<]+?\s*(<\/artifactId>[\s\S]*?<\/parent>)/,
+    `$1${newArtifactId}$2`
+  );
+}
+
 export async function includeSourceModules(outputDir: string, inputPath: string): Promise<string[]> {
   const touched: string[] = [];
   if (!inputPath) return touched;
@@ -264,6 +285,8 @@ export async function includeSourceModules(outputDir: string, inputPath: string)
   } catch {
     parentPom = "";
   }
+
+  const reactorArtifactId = projectArtifactId(parentPom);
 
   // Répertoire du module web généré (pour y déposer le .ear pré-buildé).
   let webModuleDir: string | null = null;
@@ -292,6 +315,19 @@ export async function includeSourceModules(outputDir: string, inputPath: string)
     if (!(await fileExists(destModule))) {
       await copyDir(srcModule, destModule);
       touched.push(destModule);
+
+      // Le module source déclare le parent de l'agrégateur d'origine
+      // (ex. <name>-pom). L'agrégateur généré porte un artifactId différent
+      // (ex. <name>-pom-rest) : réaligner sinon Maven ne résout pas le parent.
+      if (reactorArtifactId) {
+        const destPom = path.join(destModule, "pom.xml");
+        const original = await fs.readFile(destPom, "utf-8");
+        const aligned = rewriteParentArtifactId(original, reactorArtifactId);
+        if (aligned !== original) {
+          await fs.writeFile(destPom, aligned, "utf-8");
+          touched.push(destPom);
+        }
+      }
     }
 
     // Seul l'EJB rejoint le réacteur (dépendance de l'EAR adaptateur).
