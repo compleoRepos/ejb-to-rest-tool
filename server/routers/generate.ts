@@ -8,6 +8,7 @@ import path from "path";
 import fs from "fs/promises";
 import os from "os";
 import { generateAdapter, generateAdapterDocumentation, packageAsZip } from "../generators/adapterGenerator";
+import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "../generators/javaRuntime";
 import { detectBasePackage } from "../generators/outputMappingFix";
 import { generateBianWrappers, packageBianAsZip } from "../generators/bianGenerator";
 import type { BianProject, AdapterEndpoint } from "../generators/bianGenerator";
@@ -30,6 +31,42 @@ const fieldSchema: z.ZodType<any> = z.object({
 
 export const generateRouter = router({
   /**
+   * Vérifie qu'un chemin de JDK fournit un java exécutable en version >= 17.
+   */
+  checkJdk: publicProcedure
+    .input(z.object({ jdkHome: z.string() }))
+    .mutation(async ({ input }) => {
+      const jdkHome = input.jdkHome.trim();
+      if (!jdkHome) {
+        return { valid: false, version: null, atLeast17: false, message: "Chemin vide." };
+      }
+      let javaBin: string;
+      try {
+        javaBin = resolveJavaBinary(jdkHome).javaBin;
+      } catch (err) {
+        return { valid: false, version: null, atLeast17: false, message: (err as Error).message };
+      }
+      const info = await detectJavaVersion(javaBin);
+      if (!info.ok) {
+        return { valid: false, version: null, atLeast17: false, message: "Impossible d'exécuter java à ce chemin." };
+      }
+      if (!info.atLeast17) {
+        return {
+          valid: false,
+          version: info.version,
+          atLeast17: false,
+          message: `Java ${info.version} détecté (< ${MIN_JAVA_MAJOR}).`,
+        };
+      }
+      return {
+        valid: true,
+        version: info.version,
+        atLeast17: true,
+        message: `Java ${info.version} détecté`,
+      };
+    }),
+
+  /**
    * List all generations (for the Results page).
    */
   list: publicProcedure.query(async () => {
@@ -49,10 +86,11 @@ export const generateRouter = router({
         groupId: z.string().default("ma.bmce.adapter"),
         artifactId: z.string().optional(),
         basePackage: z.string().optional(),
+        jdkHome: z.string().optional(),
       })
     )
     .mutation(async ({ input }) => {
-      const { filePaths, projectName, groupId } = input;
+      const { filePaths, projectName, groupId, jdkHome } = input;
 
       if (filePaths.length === 0) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "No files provided" });
@@ -109,6 +147,7 @@ export const generateRouter = router({
           groupId,
           artifactId,
           basePackage,
+          jdkHome,
         });
 
         if (result.success) {
@@ -321,10 +360,11 @@ export const generateRouter = router({
             format: z.string(),
           })
         ),
+        jdkHome: z.string().optional(),
       })
     )
     .mutation(async ({ input }) => {
-      const { uploadedFiles } = input;
+      const { uploadedFiles, jdkHome } = input;
 
       // Reuse the adapter generation logic
       const results: any[] = [];
@@ -377,6 +417,7 @@ export const generateRouter = router({
           groupId,
           artifactId,
           basePackage,
+          jdkHome,
         });
 
         if (genResult.success) {
