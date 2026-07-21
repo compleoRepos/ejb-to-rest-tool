@@ -186,6 +186,56 @@ export async function applyOutputMappingFix(outputDir: string): Promise<string[]
   return touched;
 }
 
+/**
+ * Aligne le nom JNDI de lookup des resources sur le binding-name reel declare
+ * dans le descripteur IBM (ibm-ejb-jar-bnd.xml). Le moteur emet le nom court du
+ * bean (@Stateless name, ex. MdService), alors que WebSphere publie le bean sous
+ * son binding-name (ex. ejb/MdService) : sans alignement, le lookup echoue
+ * (NameNotFoundException) au premier appel. A defaut de binding declare, le nom
+ * court est prefixe par "ejb/".
+ */
+export async function fixJndiBindingNames(outputDir: string): Promise<string[]> {
+  const touched: string[] = [];
+
+  const bindings = new Map<string, string>();
+  const bndFiles = await collectNamedFiles(outputDir, "ibm-ejb-jar-bnd.xml");
+  for (const bnd of bndFiles) {
+    const xml = await fs.readFile(bnd, "utf-8");
+    const re = /<interface\b[^>]*\bclass="([^"]+)"[^>]*\bbinding-name="([^"]+)"/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(xml)) !== null) {
+      bindings.set(m[1].trim(), m[2].trim());
+    }
+  }
+
+  const javaFiles = await collectJavaFiles(outputDir);
+  const resourceFiles = javaFiles.filter((f) => f.endsWith("Resource.java"));
+
+  for (const resource of resourceFiles) {
+    const content = await fs.readFile(resource, "utf-8");
+    const current = content.match(/JNDI_NAME\s*=\s*"([^"]*)"/);
+    if (!current) continue;
+    const currentName = current[1];
+
+    let target: string | null = null;
+    const cast = content.match(/\(\s*(\w+)\s*\)\s*new\s+InitialContext\(\)\.lookup/);
+    if (cast) {
+      const imp = content.match(new RegExp(`import\\s+([\\w.]+\\.${cast[1]});`));
+      if (imp && bindings.has(imp[1])) target = bindings.get(imp[1])!;
+    }
+    if (!target && bindings.size === 1) target = [...bindings.values()][0];
+    if (!target) target = currentName.startsWith("ejb/") ? currentName : `ejb/${currentName}`;
+
+    if (target === currentName) continue;
+    const patched = content.replace(/(JNDI_NAME\s*=\s*")[^"]*(")/, `$1${target}$2`);
+    if (patched === content) continue;
+    await fs.writeFile(resource, patched, "utf-8");
+    touched.push(resource);
+  }
+
+  return touched;
+}
+
 async function patchResource(file: string): Promise<boolean> {
   let content = await fs.readFile(file, "utf-8");
   const original = content;
@@ -574,6 +624,10 @@ export async function writeDeployTooling(outputDir: string): Promise<string[]> {
 }
 
 async function collectPomFiles(dir: string): Promise<string[]> {
+  return collectNamedFiles(dir, "pom.xml");
+}
+
+async function collectNamedFiles(dir: string, filename: string): Promise<string[]> {
   const out: string[] = [];
   async function walk(d: string) {
     let entries: import("fs").Dirent[] = [];
@@ -587,7 +641,7 @@ async function collectPomFiles(dir: string): Promise<string[]> {
       if (e.isDirectory()) {
         if (e.name === "target" || e.name === ".git" || e.name === "node_modules") continue;
         await walk(full);
-      } else if (e.isFile() && e.name === "pom.xml") {
+      } else if (e.isFile() && e.name === filename) {
         out.push(full);
       }
     }

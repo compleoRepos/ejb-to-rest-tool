@@ -8,7 +8,7 @@ import path from "path";
 import fs from "fs/promises";
 import { existsSync, createWriteStream } from "fs";
 import { ZipArchive } from "archiver";
-import { applyOutputMappingFix, includeSourceModules, fixWebPomDependencies, fixEarFinalName, writeDeployTooling } from "./outputMappingFix";
+import { applyOutputMappingFix, includeSourceModules, fixWebPomDependencies, fixEarFinalName, fixJndiBindingNames, writeDeployTooling } from "./outputMappingFix";
 import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "./javaRuntime";
 import { writeEndpointDescriptor } from "./descriptorGenerator";
 
@@ -180,6 +180,14 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         await includeSourceModules(outputDir, inputPath);
       } catch (modErr) {
         stderr += `\n[includeSourceModules] ${(modErr as Error).message}`;
+      }
+
+      // Aligner le lookup JNDI des resources sur le binding-name du descripteur
+      // IBM (present dans le module ejb clone ci-dessus).
+      try {
+        await fixJndiBindingNames(outputDir);
+      } catch (jndiErr) {
+        stderr += `\n[fixJndiBindingNames] ${(jndiErr as Error).message}`;
       }
 
       // Remplacer les stubs de deploiement par l'outillage WAS valide. Doit rester

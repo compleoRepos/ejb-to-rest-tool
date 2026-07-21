@@ -13,6 +13,7 @@ import {
   detectBasePackage,
   fixWebPomDependencies,
   fixEarFinalName,
+  fixJndiBindingNames,
   writeDeployTooling,
 } from "./outputMappingFix";
 
@@ -240,6 +241,64 @@ describe("includeSourceModules", () => {
     );
     expect(ejbPom).toContain("<artifactId>mise-disposition-bmcedirect-pom-rest</artifactId>");
     expect(ejbPom).not.toContain("<artifactId>mise-disposition-bmcedirect-pom</artifactId>");
+    await fs.rm(base, { recursive: true, force: true });
+  });
+});
+
+describe("fixJndiBindingNames", () => {
+  it("aligne le lookup sur le binding-name du descripteur IBM", async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "jndi-"));
+    const ejbMeta = path.join(base, "mad-ejb", "src", "main", "resources", "META-INF");
+    const webRes = path.join(base, "mad-web", "src", "main", "java", "ma", "bmce", "resource");
+    await fs.mkdir(ejbMeta, { recursive: true });
+    await fs.mkdir(webRes, { recursive: true });
+    await fs.writeFile(
+      path.join(ejbMeta, "ibm-ejb-jar-bnd.xml"),
+      `<ejb-jar-bnd>
+  <session name="MdService">
+    <interface class="ma.eai.midw.connectors.SynchroneService" binding-name="ejb/MdService" />
+  </session>
+</ejb-jar-bnd>`
+    );
+    await fs.writeFile(
+      path.join(webRes, "SynchroneResource.java"),
+      `package ma.bmce.resource;
+import ma.eai.midw.connectors.SynchroneService;
+public class SynchroneResource {
+    private static final String JNDI_NAME = "MdService";
+    private SynchroneService getEjbService() {
+        return (SynchroneService) new InitialContext().lookup(JNDI_NAME);
+    }
+}
+`
+    );
+
+    await fixJndiBindingNames(base);
+    const res = await fs.readFile(path.join(webRes, "SynchroneResource.java"), "utf-8");
+    expect(res).toContain('JNDI_NAME = "ejb/MdService"');
+    expect(res).not.toContain('JNDI_NAME = "MdService"');
+    await fs.rm(base, { recursive: true, force: true });
+  });
+
+  it("prefixe ejb/ par defaut quand aucun descripteur n'est present", async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "jndi-nobnd-"));
+    const webRes = path.join(base, "mad-web", "src", "main", "java", "ma", "bmce", "resource");
+    await fs.mkdir(webRes, { recursive: true });
+    await fs.writeFile(
+      path.join(webRes, "SynchroneResource.java"),
+      `package ma.bmce.resource;
+import ma.eai.midw.connectors.SynchroneService;
+public class SynchroneResource {
+    private static final String JNDI_NAME = "MdService";
+    private SynchroneService getEjbService() {
+        return (SynchroneService) new InitialContext().lookup(JNDI_NAME);
+    }
+}
+`
+    );
+    await fixJndiBindingNames(base);
+    const res = await fs.readFile(path.join(webRes, "SynchroneResource.java"), "utf-8");
+    expect(res).toContain('JNDI_NAME = "ejb/MdService"');
     await fs.rm(base, { recursive: true, force: true });
   });
 });
