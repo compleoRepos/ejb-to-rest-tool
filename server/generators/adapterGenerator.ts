@@ -8,7 +8,18 @@ import path from "path";
 import fs from "fs/promises";
 import { existsSync, createWriteStream } from "fs";
 import { ZipArchive } from "archiver";
-import { applyOutputMappingFix, includeSourceModules, fixWebPomDependencies, fixEarFinalName, writeDeployTooling } from "./outputMappingFix";
+import { applyOutputMappingFix, includeSourceModules, fixWebPomDependencies, fixEarFinalName, fixJndiBindingNames, writeDeployTooling } from "./outputMappingFix";
+import { fixTypedResponseMapping } from "./typedResponseFix";
+import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "./javaRuntime";
+import { writeEndpointDescriptor } from "./descriptorGenerator";
+
+/**
+ * Message unique renvoyé quand le java utilisé est trop ancien pour le moteur.
+ */
+function tooOldJavaMessage(version: string | null): string {
+  const detected = version ?? "inconnue";
+  return `Le générateur nécessite Java ${MIN_JAVA_MAJOR} ou supérieur. Java détecté : ${detected}. Renseignez le chemin d'un JDK ${MIN_JAVA_MAJOR}+ dans le champ prévu.`;
+}
 
 /**
  * Chemin vers le JAR du générateur JAX-RS.
@@ -49,6 +60,7 @@ export interface AdapterGenerationOptions {
   groupId: string;
   artifactId: string;
   basePackage: string;
+  jdkHome?: string; // JDK dédié au moteur (sinon GENERATOR_JAVA_HOME, sinon java du PATH)
 }
 
 export interface AdapterGenerationResult {
@@ -65,10 +77,37 @@ export interface AdapterGenerationResult {
  * Run the Java CLI to generate an Adapter WAR project from an EJB source.
  */
 export async function generateAdapter(options: AdapterGenerationOptions): Promise<AdapterGenerationResult> {
-  const { inputPath, outputDir, groupId, artifactId, basePackage } = options;
+  const { inputPath, outputDir, groupId, artifactId, basePackage, jdkHome } = options;
 
   // Ensure output directory exists
   await fs.mkdir(outputDir, { recursive: true });
+
+  const emptyResult = (errors: string[]): AdapterGenerationResult => ({
+    success: false,
+    outputDir,
+    ejbCount: 0,
+    methodCount: 0,
+    filesGenerated: 0,
+    errors,
+    log: "",
+  });
+
+  // Résolution du binaire java (jdkHome > GENERATOR_JAVA_HOME > PATH).
+  let javaBin: string;
+  try {
+    javaBin = resolveJavaBinary(jdkHome).javaBin;
+  } catch (err) {
+    return emptyResult([(err as Error).message]);
+  }
+
+  // Pré-vérification de version : ne pas lancer le moteur avec un java trop ancien.
+  const versionInfo = await detectJavaVersion(javaBin);
+  if (!versionInfo.ok) {
+    return emptyResult([`Impossible d'exécuter java (${javaBin}). ${versionInfo.raw}`.trim()]);
+  }
+  if (!versionInfo.atLeast17) {
+    return emptyResult([tooOldJavaMessage(versionInfo.version)]);
+  }
 
   return new Promise((resolve) => {
     const args = [
@@ -83,7 +122,7 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
     let stdout = "";
     let stderr = "";
 
-    const proc = spawn("java", args, {
+    const proc = spawn(javaBin, args, {
       cwd: outputDir,
       env: { ...process.env },
     });
@@ -100,13 +139,16 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
       const log = stdout + "\n" + stderr;
       
       if (code !== 0) {
+        const message = /UnsupportedClassVersionError/.test(log)
+          ? tooOldJavaMessage(versionInfo.version)
+          : stderr || `Process exited with code ${code}`;
         resolve({
           success: false,
           outputDir,
           ejbCount: 0,
           methodCount: 0,
           filesGenerated: 0,
-          errors: [stderr || `Process exited with code ${code}`],
+          errors: [message],
           log,
         });
         return;
@@ -118,6 +160,13 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
       } catch (fixErr) {
         // Le correctif de sortie ne doit jamais faire échouer la génération.
         stderr += `\n[outputMappingFix] ${(fixErr as Error).message}`;
+      }
+
+      // Aligner les converters sur les DTO de réponse typés (champs objet et listes).
+      try {
+        await fixTypedResponseMapping(outputDir);
+      } catch (typedErr) {
+        stderr += `\n[fixTypedResponseMapping] ${(typedErr as Error).message}`;
       }
 
       // Retirer les dépendances framework sans version qui cassent le build.
@@ -141,12 +190,27 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         stderr += `\n[includeSourceModules] ${(modErr as Error).message}`;
       }
 
+      // Aligner le lookup JNDI des resources sur le binding-name du descripteur
+      // IBM (present dans le module ejb clone ci-dessus).
+      try {
+        await fixJndiBindingNames(outputDir);
+      } catch (jndiErr) {
+        stderr += `\n[fixJndiBindingNames] ${(jndiErr as Error).message}`;
+      }
+
       // Remplacer les stubs de deploiement par l'outillage WAS valide. Doit rester
       // apres includeSourceModules : l'outillage se cale sur les modules ejb et ear.
       try {
         await writeDeployTooling(outputDir);
       } catch (depErr) {
         stderr += `\n[writeDeployTooling] ${(depErr as Error).message}`;
+      }
+
+      // Descripteur JSON des endpoints, ré-uploadable dans le générateur de wrappers.
+      try {
+        await writeEndpointDescriptor(outputDir, artifactId);
+      } catch (descErr) {
+        stderr += `\n[writeEndpointDescriptor] ${(descErr as Error).message}`;
       }
 
       // Count generated files

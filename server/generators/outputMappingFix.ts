@@ -20,6 +20,9 @@ import path from "path";
 const ENVELOPE_JSON_TEMPLATE = (converterPackage: string): string => `package ${converterPackage};
 
 import java.io.ByteArrayInputStream;
+import java.lang.reflect.Method;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -57,6 +60,40 @@ public final class EnvelopeJson {
             body = envelope.toString();
         }
         return fromXml(body);
+    }
+
+    /**
+     * Lit un nœud du flux sous forme d'entier long, 0 si le nœud est absent ou non numérique.
+     */
+    public static long toLong(Envelope envelope, String path) {
+        String value;
+        try {
+            value = envelope.getNodeAsString(path);
+        } catch (Exception e) {
+            return 0L;
+        }
+        if (value == null || value.trim().isEmpty()) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
+
+    /**
+     * Construit un objet typé à partir du nœud désigné par le chemin dans le flux.
+     */
+    public static <T> T toBean(Envelope envelope, String path, Class<T> type) {
+        return convert(valueAt(toJson(envelope), path), type);
+    }
+
+    /**
+     * Construit une liste d'objets typés à partir du nœud désigné par le chemin.
+     */
+    public static <T> List<T> toBeanList(Envelope envelope, String path, Class<T> type) {
+        return convertList(valueAt(toJson(envelope), path), type);
     }
 
     static Object fromXml(String xml) {
@@ -129,6 +166,126 @@ public final class EnvelopeJson {
         }
         return result;
     }
+
+    @SuppressWarnings("unchecked")
+    private static Object valueAt(Object root, String path) {
+        if (path == null || path.trim().isEmpty()) {
+            return root;
+        }
+        Object current = root;
+        String[] segments = path.split("/");
+        int index = (segments.length > 0 && "flux".equalsIgnoreCase(segments[0])) ? 1 : 0;
+        for (; index < segments.length; index++) {
+            String segment = segments[index];
+            if (segment.isEmpty()) {
+                continue;
+            }
+            if (current instanceof List) {
+                List<Object> list = (List<Object>) current;
+                current = list.isEmpty() ? null : list.get(0);
+            }
+            if (!(current instanceof Map)) {
+                return null;
+            }
+            current = lookup((Map<String, Object>) current, segment);
+        }
+        return current;
+    }
+
+    private static Object lookup(Map<String, Object> map, String name) {
+        if (map.containsKey(name)) {
+            return map.get(name);
+        }
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            if (entry.getKey() != null && entry.getKey().equalsIgnoreCase(name)) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T convert(Object value, Class<T> type) {
+        if (value == null) {
+            return null;
+        }
+        if (type == String.class) {
+            return (value instanceof String) ? (T) value : null;
+        }
+        if (value instanceof List) {
+            List<Object> list = (List<Object>) value;
+            return list.isEmpty() ? null : convert(list.get(0), type);
+        }
+        if (!(value instanceof Map)) {
+            return null;
+        }
+        Map<String, Object> map = (Map<String, Object>) value;
+        try {
+            T target = type.getDeclaredConstructor().newInstance();
+            for (Method setter : type.getMethods()) {
+                if (!setter.getName().startsWith("set") || setter.getParameterTypes().length != 1) {
+                    continue;
+                }
+                Object raw = lookup(map, decapitalize(setter.getName().substring(3)));
+                if (raw == null) {
+                    continue;
+                }
+                Class<?> parameterType = setter.getParameterTypes()[0];
+                Object converted = List.class.isAssignableFrom(parameterType)
+                        ? convertList(raw, itemType(setter))
+                        : convert(raw, parameterType);
+                if (converted != null) {
+                    setter.invoke(target, converted);
+                }
+            }
+            return target;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> List<T> convertList(Object value, Class<T> type) {
+        List<T> result = new ArrayList<T>();
+        if (value == null) {
+            return result;
+        }
+        List<Object> items;
+        if (value instanceof List) {
+            items = (List<Object>) value;
+        } else {
+            items = new ArrayList<Object>();
+            items.add(value);
+        }
+        for (Object item : items) {
+            T converted = convert(item, type);
+            if (converted != null) {
+                result.add(converted);
+            }
+        }
+        return result;
+    }
+
+    private static Class<?> itemType(Method setter) {
+        Type generic = setter.getGenericParameterTypes()[0];
+        if (generic instanceof ParameterizedType) {
+            Type[] arguments = ((ParameterizedType) generic).getActualTypeArguments();
+            if (arguments.length == 1 && arguments[0] instanceof Class) {
+                return (Class<?>) arguments[0];
+            }
+        }
+        return String.class;
+    }
+
+    private static String decapitalize(String name) {
+        if (name.isEmpty()) {
+            return name;
+        }
+        if (name.length() > 1 && Character.isUpperCase(name.charAt(1))) {
+            return name;
+        }
+        return Character.toLowerCase(name.charAt(0)) + name.substring(1);
+    }
 }
 `;
 
@@ -181,6 +338,56 @@ export async function applyOutputMappingFix(outputDir: string): Promise<string[]
   for (const codeMapper of codeMapperFiles) {
     const changed = await patchCodeMapper(codeMapper);
     if (changed) touched.push(codeMapper);
+  }
+
+  return touched;
+}
+
+/**
+ * Aligne le nom JNDI de lookup des resources sur le binding-name reel declare
+ * dans le descripteur IBM (ibm-ejb-jar-bnd.xml). Le moteur emet le nom court du
+ * bean (@Stateless name, ex. MdService), alors que WebSphere publie le bean sous
+ * son binding-name (ex. ejb/MdService) : sans alignement, le lookup echoue
+ * (NameNotFoundException) au premier appel. A defaut de binding declare, le nom
+ * court est prefixe par "ejb/".
+ */
+export async function fixJndiBindingNames(outputDir: string): Promise<string[]> {
+  const touched: string[] = [];
+
+  const bindings = new Map<string, string>();
+  const bndFiles = await collectNamedFiles(outputDir, "ibm-ejb-jar-bnd.xml");
+  for (const bnd of bndFiles) {
+    const xml = await fs.readFile(bnd, "utf-8");
+    const re = /<interface\b[^>]*\bclass="([^"]+)"[^>]*\bbinding-name="([^"]+)"/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(xml)) !== null) {
+      bindings.set(m[1].trim(), m[2].trim());
+    }
+  }
+
+  const javaFiles = await collectJavaFiles(outputDir);
+  const resourceFiles = javaFiles.filter((f) => f.endsWith("Resource.java"));
+
+  for (const resource of resourceFiles) {
+    const content = await fs.readFile(resource, "utf-8");
+    const current = content.match(/JNDI_NAME\s*=\s*"([^"]*)"/);
+    if (!current) continue;
+    const currentName = current[1];
+
+    let target: string | null = null;
+    const cast = content.match(/\(\s*(\w+)\s*\)\s*new\s+InitialContext\(\)\.lookup/);
+    if (cast) {
+      const imp = content.match(new RegExp(`import\\s+([\\w.]+\\.${cast[1]});`));
+      if (imp && bindings.has(imp[1])) target = bindings.get(imp[1])!;
+    }
+    if (!target && bindings.size === 1) target = [...bindings.values()][0];
+    if (!target) target = currentName.startsWith("ejb/") ? currentName : `ejb/${currentName}`;
+
+    if (target === currentName) continue;
+    const patched = content.replace(/(JNDI_NAME\s*=\s*")[^"]*(")/, `$1${target}$2`);
+    if (patched === content) continue;
+    await fs.writeFile(resource, patched, "utf-8");
+    touched.push(resource);
   }
 
   return touched;
@@ -246,6 +453,27 @@ function readPackageFromContent(content: string): string | null {
  *   `.ear` pré-buildé (présent dans leur `target/`) est déposé dans le module web.
  * Ne fait rien si l'entrée ne contient pas de tels modules (projets mono-module).
  */
+/**
+ * Retourne l'artifactId propre d'un pom (celui du projet, pas celui du parent),
+ * en écartant d'abord le bloc <parent>. Null si introuvable.
+ */
+function projectArtifactId(pom: string): string | null {
+  const withoutParent = pom.replace(/<parent>[\s\S]*?<\/parent>/, "");
+  const m = withoutParent.match(/<artifactId>\s*([^<]+?)\s*<\/artifactId>/);
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * Réécrit l'artifactId du bloc <parent> d'un pom module vers newArtifactId.
+ * Sans bloc <parent>, le pom est renvoyé inchangé.
+ */
+function rewriteParentArtifactId(pom: string, newArtifactId: string): string {
+  return pom.replace(
+    /(<parent>[\s\S]*?<artifactId>)\s*[^<]+?\s*(<\/artifactId>[\s\S]*?<\/parent>)/,
+    `$1${newArtifactId}$2`
+  );
+}
+
 export async function includeSourceModules(outputDir: string, inputPath: string): Promise<string[]> {
   const touched: string[] = [];
   if (!inputPath) return touched;
@@ -264,6 +492,8 @@ export async function includeSourceModules(outputDir: string, inputPath: string)
   } catch {
     parentPom = "";
   }
+
+  const reactorArtifactId = projectArtifactId(parentPom);
 
   // Répertoire du module web généré (pour y déposer le .ear pré-buildé).
   let webModuleDir: string | null = null;
@@ -292,6 +522,19 @@ export async function includeSourceModules(outputDir: string, inputPath: string)
     if (!(await fileExists(destModule))) {
       await copyDir(srcModule, destModule);
       touched.push(destModule);
+
+      // Le module source déclare le parent de l'agrégateur d'origine
+      // (ex. <name>-pom). L'agrégateur généré porte un artifactId différent
+      // (ex. <name>-pom-rest) : réaligner sinon Maven ne résout pas le parent.
+      if (reactorArtifactId) {
+        const destPom = path.join(destModule, "pom.xml");
+        const original = await fs.readFile(destPom, "utf-8");
+        const aligned = rewriteParentArtifactId(original, reactorArtifactId);
+        if (aligned !== original) {
+          await fs.writeFile(destPom, aligned, "utf-8");
+          touched.push(destPom);
+        }
+      }
     }
 
     // Seul l'EJB rejoint le réacteur (dépendance de l'EAR adaptateur).
@@ -538,6 +781,10 @@ export async function writeDeployTooling(outputDir: string): Promise<string[]> {
 }
 
 async function collectPomFiles(dir: string): Promise<string[]> {
+  return collectNamedFiles(dir, "pom.xml");
+}
+
+async function collectNamedFiles(dir: string, filename: string): Promise<string[]> {
   const out: string[] = [];
   async function walk(d: string) {
     let entries: import("fs").Dirent[] = [];
@@ -551,7 +798,7 @@ async function collectPomFiles(dir: string): Promise<string[]> {
       if (e.isDirectory()) {
         if (e.name === "target" || e.name === ".git" || e.name === "node_modules") continue;
         await walk(full);
-      } else if (e.isFile() && e.name === "pom.xml") {
+      } else if (e.isFile() && e.name === filename) {
         out.push(full);
       }
     }

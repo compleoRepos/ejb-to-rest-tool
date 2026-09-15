@@ -13,6 +13,7 @@ import {
   detectBasePackage,
   fixWebPomDependencies,
   fixEarFinalName,
+  fixJndiBindingNames,
   writeDeployTooling,
 } from "./outputMappingFix";
 
@@ -195,6 +196,110 @@ describe("includeSourceModules", () => {
   it("dépose le .ear pré-buildé dans le module web", async () => {
     const earInWeb = path.join(out, "demande-dotation-adapter-web", "demande-dotation-ear.ear");
     expect(await fs.readFile(earInWeb, "utf-8")).toBe("EAR");
+  });
+
+  it("réaligne le parent du module cloné sur l'agrégateur généré", async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "incmod-parent-"));
+    const src = path.join(base, "in", "mise-disposition-bmcedirect");
+    const dst = path.join(base, "out", "mise-disposition-bmcedirect");
+
+    await fs.mkdir(path.join(src, "mise-disposition-bmcedirect-ejb"), { recursive: true });
+    await fs.writeFile(
+      path.join(src, "mise-disposition-bmcedirect-ejb", "pom.xml"),
+      `<project>
+  <artifactId>mise-disposition-bmcedirect-ejb</artifactId>
+  <parent>
+    <groupId>ma.eai.boa.xbanking</groupId>
+    <artifactId>mise-disposition-bmcedirect-pom</artifactId>
+    <version>3.0.0-SNAPSHOT</version>
+  </parent>
+</project>
+`
+    );
+
+    await fs.mkdir(dst, { recursive: true });
+    await fs.writeFile(
+      path.join(dst, "pom.xml"),
+      `<project>
+  <parent>
+    <groupId>ma.eai.midw</groupId>
+    <artifactId>general-settings</artifactId>
+    <version>2024.06</version>
+  </parent>
+  <artifactId>mise-disposition-bmcedirect-pom-rest</artifactId>
+  <modules>
+  </modules>
+</project>
+`
+    );
+
+    await includeSourceModules(dst, src);
+
+    const ejbPom = await fs.readFile(
+      path.join(dst, "mise-disposition-bmcedirect-ejb", "pom.xml"),
+      "utf-8"
+    );
+    expect(ejbPom).toContain("<artifactId>mise-disposition-bmcedirect-pom-rest</artifactId>");
+    expect(ejbPom).not.toContain("<artifactId>mise-disposition-bmcedirect-pom</artifactId>");
+    await fs.rm(base, { recursive: true, force: true });
+  });
+});
+
+describe("fixJndiBindingNames", () => {
+  it("aligne le lookup sur le binding-name du descripteur IBM", async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "jndi-"));
+    const ejbMeta = path.join(base, "mad-ejb", "src", "main", "resources", "META-INF");
+    const webRes = path.join(base, "mad-web", "src", "main", "java", "ma", "bmce", "resource");
+    await fs.mkdir(ejbMeta, { recursive: true });
+    await fs.mkdir(webRes, { recursive: true });
+    await fs.writeFile(
+      path.join(ejbMeta, "ibm-ejb-jar-bnd.xml"),
+      `<ejb-jar-bnd>
+  <session name="MdService">
+    <interface class="ma.eai.midw.connectors.SynchroneService" binding-name="ejb/MdService" />
+  </session>
+</ejb-jar-bnd>`
+    );
+    await fs.writeFile(
+      path.join(webRes, "SynchroneResource.java"),
+      `package ma.bmce.resource;
+import ma.eai.midw.connectors.SynchroneService;
+public class SynchroneResource {
+    private static final String JNDI_NAME = "MdService";
+    private SynchroneService getEjbService() {
+        return (SynchroneService) new InitialContext().lookup(JNDI_NAME);
+    }
+}
+`
+    );
+
+    await fixJndiBindingNames(base);
+    const res = await fs.readFile(path.join(webRes, "SynchroneResource.java"), "utf-8");
+    expect(res).toContain('JNDI_NAME = "ejb/MdService"');
+    expect(res).not.toContain('JNDI_NAME = "MdService"');
+    await fs.rm(base, { recursive: true, force: true });
+  });
+
+  it("prefixe ejb/ par defaut quand aucun descripteur n'est present", async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "jndi-nobnd-"));
+    const webRes = path.join(base, "mad-web", "src", "main", "java", "ma", "bmce", "resource");
+    await fs.mkdir(webRes, { recursive: true });
+    await fs.writeFile(
+      path.join(webRes, "SynchroneResource.java"),
+      `package ma.bmce.resource;
+import ma.eai.midw.connectors.SynchroneService;
+public class SynchroneResource {
+    private static final String JNDI_NAME = "MdService";
+    private SynchroneService getEjbService() {
+        return (SynchroneService) new InitialContext().lookup(JNDI_NAME);
+    }
+}
+`
+    );
+    await fixJndiBindingNames(base);
+    const res = await fs.readFile(path.join(webRes, "SynchroneResource.java"), "utf-8");
+    expect(res).toContain('JNDI_NAME = "ejb/MdService"');
+    await fs.rm(base, { recursive: true, force: true });
   });
 });
 

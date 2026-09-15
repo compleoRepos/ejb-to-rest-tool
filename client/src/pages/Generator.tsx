@@ -3,7 +3,7 @@
  * 1. Upload de projets EJB (ZIP/JAR/WAR) pour analyse automatique du code source
  * 2. Upload de fichiers JSON descripteurs (ou WSDL) pour génération directe
  */
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Header from "@/components/Header";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,11 +20,14 @@ import {
   GitBranch,
   Globe,
   Download,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 
 type TabMode = "ejb" | "json";
+
+const JDK_HOME_STORAGE_KEY = "ejb-to-rest.generatorJdkHome";
 
 // ─── EJB Upload Types ────────────────────────────────────────────────────────
 interface EjbProject {
@@ -136,9 +139,38 @@ function EjbUploadTab() {
   const [generationStep, setGenerationStep] = useState("");
   const [results, setResults] = useState<AdapterResult[] | null>(null);
   const [bianResults, setBianResults] = useState<BianWrapperResult[] | null>(null);
+  const [jdkHome, setJdkHome] = useState("");
+  const [jdkStatus, setJdkStatus] = useState<{ valid: boolean; message: string } | null>(null);
+  const [jdkChecking, setJdkChecking] = useState(false);
 
   const adapterMutation = trpc.generate.adapterFromUpload.useMutation();
   const bianMutation = trpc.generate.bian.useMutation();
+  const checkJdkMutation = trpc.generate.checkJdk.useMutation();
+
+  useEffect(() => {
+    const saved = localStorage.getItem(JDK_HOME_STORAGE_KEY);
+    if (saved) setJdkHome(saved);
+  }, []);
+
+  const verifyJdk = async () => {
+    const value = jdkHome.trim();
+    if (!value) {
+      setJdkStatus(null);
+      return;
+    }
+    setJdkChecking(true);
+    try {
+      const res = await checkJdkMutation.mutateAsync({ jdkHome: value });
+      setJdkStatus({ valid: res.valid, message: res.message });
+      if (res.valid) {
+        localStorage.setItem(JDK_HOME_STORAGE_KEY, value);
+      }
+    } catch (err: any) {
+      setJdkStatus({ valid: false, message: err.message || "Vérification impossible" });
+    } finally {
+      setJdkChecking(false);
+    }
+  };
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -235,6 +267,7 @@ function EjbUploadTab() {
           storedPath: f.storedPath,
           format: f.format,
         })),
+        ...(jdkHome.trim() ? { jdkHome: jdkHome.trim() } : {}),
       });
 
       setResults(adapterResult.results as AdapterResult[]);
@@ -444,6 +477,46 @@ function EjbUploadTab() {
               value={bianResults ? bianResults.length.toString() : "—"}
             />
           </div>
+        </div>
+
+        <div className="p-5 rounded-lg border border-border bg-card">
+          <label className="text-sm font-medium text-muted-foreground block mb-2">
+            Chemin du JDK (17 ou plus)
+          </label>
+          <input
+            type="text"
+            placeholder="C:\Program Files\Zulu\zulu-21"
+            value={jdkHome}
+            onChange={(e) => {
+              setJdkHome(e.target.value);
+              setJdkStatus(null);
+            }}
+            onBlur={verifyJdk}
+            className="w-full px-3 py-2 rounded-md bg-secondary border border-border text-foreground font-mono text-xs placeholder:text-muted-foreground/50 focus:outline-none focus:border-[oklch(0.78_0.15_200/0.5)] transition-colors"
+          />
+          {jdkChecking ? (
+            <div className="flex items-center gap-1.5 mt-2 text-xs text-muted-foreground">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Vérification...
+            </div>
+          ) : jdkStatus ? (
+            <div
+              className={`flex items-center gap-1.5 mt-2 text-xs ${
+                jdkStatus.valid ? "text-[oklch(0.82_0.25_140)]" : "text-destructive"
+              }`}
+            >
+              {jdkStatus.valid ? (
+                <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+              ) : (
+                <XCircle className="w-3.5 h-3.5 shrink-0" />
+              )}
+              <span>{jdkStatus.message}</span>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground mt-2">
+              Vide = java du système. Sert uniquement au moteur de génération.
+            </p>
+          )}
         </div>
 
         <Button
