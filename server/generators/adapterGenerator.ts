@@ -9,6 +9,7 @@ import fs from "fs/promises";
 import { existsSync, createWriteStream } from "fs";
 import { ZipArchive } from "archiver";
 import { applyOutputMappingFix, includeSourceModules, fixWebPomDependencies, fixEarFinalName, fixJndiBindingNames, writeDeployTooling } from "./outputMappingFix";
+import { fixTypedResponseMapping } from "./typedResponseFix";
 import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "./javaRuntime";
 import { writeEndpointDescriptor } from "./descriptorGenerator";
 
@@ -159,6 +160,13 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
       } catch (fixErr) {
         // Le correctif de sortie ne doit jamais faire échouer la génération.
         stderr += `\n[outputMappingFix] ${(fixErr as Error).message}`;
+      }
+
+      // Aligner les converters sur les DTO de réponse typés (champs objet et listes).
+      try {
+        await fixTypedResponseMapping(outputDir);
+      } catch (typedErr) {
+        stderr += `\n[fixTypedResponseMapping] ${(typedErr as Error).message}`;
       }
 
       // Retirer les dépendances framework sans version qui cassent le build.

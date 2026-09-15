@@ -20,6 +20,9 @@ import path from "path";
 const ENVELOPE_JSON_TEMPLATE = (converterPackage: string): string => `package ${converterPackage};
 
 import java.io.ByteArrayInputStream;
+import java.lang.reflect.Method;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -57,6 +60,40 @@ public final class EnvelopeJson {
             body = envelope.toString();
         }
         return fromXml(body);
+    }
+
+    /**
+     * Lit un nœud du flux sous forme d'entier long, 0 si le nœud est absent ou non numérique.
+     */
+    public static long toLong(Envelope envelope, String path) {
+        String value;
+        try {
+            value = envelope.getNodeAsString(path);
+        } catch (Exception e) {
+            return 0L;
+        }
+        if (value == null || value.trim().isEmpty()) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
+
+    /**
+     * Construit un objet typé à partir du nœud désigné par le chemin dans le flux.
+     */
+    public static <T> T toBean(Envelope envelope, String path, Class<T> type) {
+        return convert(valueAt(toJson(envelope), path), type);
+    }
+
+    /**
+     * Construit une liste d'objets typés à partir du nœud désigné par le chemin.
+     */
+    public static <T> List<T> toBeanList(Envelope envelope, String path, Class<T> type) {
+        return convertList(valueAt(toJson(envelope), path), type);
     }
 
     static Object fromXml(String xml) {
@@ -128,6 +165,126 @@ public final class EnvelopeJson {
             }
         }
         return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object valueAt(Object root, String path) {
+        if (path == null || path.trim().isEmpty()) {
+            return root;
+        }
+        Object current = root;
+        String[] segments = path.split("/");
+        int index = (segments.length > 0 && "flux".equalsIgnoreCase(segments[0])) ? 1 : 0;
+        for (; index < segments.length; index++) {
+            String segment = segments[index];
+            if (segment.isEmpty()) {
+                continue;
+            }
+            if (current instanceof List) {
+                List<Object> list = (List<Object>) current;
+                current = list.isEmpty() ? null : list.get(0);
+            }
+            if (!(current instanceof Map)) {
+                return null;
+            }
+            current = lookup((Map<String, Object>) current, segment);
+        }
+        return current;
+    }
+
+    private static Object lookup(Map<String, Object> map, String name) {
+        if (map.containsKey(name)) {
+            return map.get(name);
+        }
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            if (entry.getKey() != null && entry.getKey().equalsIgnoreCase(name)) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T convert(Object value, Class<T> type) {
+        if (value == null) {
+            return null;
+        }
+        if (type == String.class) {
+            return (value instanceof String) ? (T) value : null;
+        }
+        if (value instanceof List) {
+            List<Object> list = (List<Object>) value;
+            return list.isEmpty() ? null : convert(list.get(0), type);
+        }
+        if (!(value instanceof Map)) {
+            return null;
+        }
+        Map<String, Object> map = (Map<String, Object>) value;
+        try {
+            T target = type.getDeclaredConstructor().newInstance();
+            for (Method setter : type.getMethods()) {
+                if (!setter.getName().startsWith("set") || setter.getParameterTypes().length != 1) {
+                    continue;
+                }
+                Object raw = lookup(map, decapitalize(setter.getName().substring(3)));
+                if (raw == null) {
+                    continue;
+                }
+                Class<?> parameterType = setter.getParameterTypes()[0];
+                Object converted = List.class.isAssignableFrom(parameterType)
+                        ? convertList(raw, itemType(setter))
+                        : convert(raw, parameterType);
+                if (converted != null) {
+                    setter.invoke(target, converted);
+                }
+            }
+            return target;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> List<T> convertList(Object value, Class<T> type) {
+        List<T> result = new ArrayList<T>();
+        if (value == null) {
+            return result;
+        }
+        List<Object> items;
+        if (value instanceof List) {
+            items = (List<Object>) value;
+        } else {
+            items = new ArrayList<Object>();
+            items.add(value);
+        }
+        for (Object item : items) {
+            T converted = convert(item, type);
+            if (converted != null) {
+                result.add(converted);
+            }
+        }
+        return result;
+    }
+
+    private static Class<?> itemType(Method setter) {
+        Type generic = setter.getGenericParameterTypes()[0];
+        if (generic instanceof ParameterizedType) {
+            Type[] arguments = ((ParameterizedType) generic).getActualTypeArguments();
+            if (arguments.length == 1 && arguments[0] instanceof Class) {
+                return (Class<?>) arguments[0];
+            }
+        }
+        return String.class;
+    }
+
+    private static String decapitalize(String name) {
+        if (name.isEmpty()) {
+            return name;
+        }
+        if (name.length() > 1 && Character.isUpperCase(name.charAt(1))) {
+            return name;
+        }
+        return Character.toLowerCase(name.charAt(0)) + name.substring(1);
     }
 }
 `;
