@@ -10,6 +10,7 @@ import os from "os";
 import { generateAdapter, generateAdapterDocumentation, packageAsZip } from "../generators/adapterGenerator";
 import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "../generators/javaRuntime";
 import { detectBasePackage } from "../generators/outputMappingFix";
+import { extractArchive } from "../generators/archiveExtract";
 import { generateBianWrappers, packageBianAsZip } from "../generators/bianGenerator";
 import type { BianProject, AdapterEndpoint } from "../generators/bianGenerator";
 import { storagePut } from "../storage";
@@ -116,9 +117,8 @@ export const generateRouter = router({
           // Extract ZIP first
           const extractDir = path.join(WORK_DIR, `extract-${Date.now()}-${name}`);
           await fs.mkdir(extractDir, { recursive: true });
-          const { execSync } = await import("child_process");
-          execSync(`unzip -o -q "${filePath}" -d "${extractDir}"`);
-          
+          await extractArchive(filePath, extractDir);
+
           // Find the actual project root (look for src/ or pom.xml)
           const entries = await fs.readdir(extractDir);
           if (entries.length === 1) {
@@ -385,13 +385,7 @@ export const generateRouter = router({
         if (file.format === "zip" || file.format === "jar" || file.format === "war") {
           const extractDir = path.join(WORK_DIR, `extract-${Date.now()}-${fileName}`);
           await fs.mkdir(extractDir, { recursive: true });
-          const { execSync } = await import("child_process");
-          try {
-            execSync(`unzip -o -q "${file.storedPath}" -d "${extractDir}"`, { timeout: 30000 });
-          } catch {
-            // Try jar for JAR/WAR files
-            execSync(`cd "${extractDir}" && jar xf "${file.storedPath}"`, { timeout: 30000 });
-          }
+          await extractArchive(file.storedPath, extractDir);
 
           const entries = await fs.readdir(extractDir);
           if (entries.length === 1) {
