@@ -14,6 +14,8 @@ interface DescriptorField {
   name: string;
   type: string;
   required?: boolean;
+  isList?: boolean;
+  children?: DescriptorField[];
 }
 
 interface DescriptorEndpoint {
@@ -165,11 +167,65 @@ function parseDtoFields(
   } catch {
     return [];
   }
+  const classOpen = content.search(new RegExp(`class\\s+${className}\\b[^{]*\\{`));
+  if (classOpen < 0) return [];
+  const open = content.indexOf("{", classOpen);
+  return fieldsOfClass(content.slice(open + 1, matchingClose(content, open)), 0);
+}
+
+/**
+ * Champs de premier niveau d'un corps de classe. Un champ typé par une classe
+ * imbriquée du DTO devient un objet (`children`), une List devient `isList`.
+ */
+function fieldsOfClass(body: string, depth: number): DescriptorField[] {
+  const nested = new Map<string, string>();
+  let topLevel = "";
+  let i = 0;
+  while (i < body.length) {
+    const cls = body.slice(i).match(/^\s*(?:public\s+|private\s+|protected\s+)?static\s+class\s+(\w+)[^{]*\{/);
+    if (cls) {
+      const open = i + cls[0].length - 1;
+      const close = matchingClose(body, open);
+      nested.set(cls[1], body.slice(open + 1, close));
+      i = close + 1;
+      continue;
+    }
+    if (body[i] === "{") {
+      const close = matchingClose(body, i);
+      i = close + 1;
+      continue;
+    }
+    topLevel += body[i];
+    i++;
+  }
+
   const fields: DescriptorField[] = [];
-  for (const m of content.matchAll(/^\s*private\s+(?!static)([\w.<>]+)\s+(\w+)\s*;/gm)) {
-    fields.push({ name: m[2], type: mapType(m[1]), required: false });
+  for (const m of topLevel.matchAll(/^\s*private\s+(?!static)([\w.<>, ]+?)\s+(\w+)\s*;/gm)) {
+    const javaType = m[1].replace(/\s+/g, "");
+    const list = javaType.match(/^(?:List|ArrayList|Set|Collection)<(.+)>$/);
+    const item = list ? list[1] : javaType;
+    const field: DescriptorField = { name: m[2], type: mapType(item), required: false };
+    if (list) field.isList = true;
+    const child = nested.get(item);
+    if (child !== undefined && depth < 8) {
+      field.type = "Object";
+      field.children = fieldsOfClass(child, depth + 1);
+    }
+    fields.push(field);
   }
   return fields;
+}
+
+function matchingClose(src: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return src.length - 1;
 }
 
 /**

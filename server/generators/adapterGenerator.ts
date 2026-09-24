@@ -10,6 +10,8 @@ import { existsSync, createWriteStream } from "fs";
 import { ZipArchive } from "archiver";
 import { applyOutputMappingFix, includeSourceModules, fixWebPomDependencies, fixEarFinalName, fixJndiBindingNames, writeDeployTooling } from "./outputMappingFix";
 import { fixTypedResponseMapping } from "./typedResponseFix";
+import { fixUseCaseEnvelopes } from "./useCaseEnvelopeFix";
+import { fixDuplicateDtoProperties } from "./duplicatePropertyFix";
 import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "./javaRuntime";
 import { writeEndpointDescriptor } from "./descriptorGenerator";
 
@@ -198,6 +200,22 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         stderr += `\n[fixJndiBindingNames] ${(jndiErr as Error).message}`;
       }
 
+      // Flux des EJB eai-fwk-ejb (UCStrategie) : <flux><entete><fonction>UC</fonction></entete>
+      // <object class="VoIn">...</object></flux>, DTO de requete aligne sur la VoIn.
+      try {
+        const ucReport = await fixUseCaseEnvelopes(outputDir, inputPath);
+        for (const warning of ucReport.warnings) stderr += `\n[fixUseCaseEnvelopes] ${warning}`;
+      } catch (ucErr) {
+        stderr += `\n[fixUseCaseEnvelopes] ${(ucErr as Error).message}`;
+      }
+
+      // DTO dont deux champs ne different que par la casse : accesseurs en double.
+      try {
+        await fixDuplicateDtoProperties(outputDir);
+      } catch (dupErr) {
+        stderr += `\n[fixDuplicateDtoProperties] ${(dupErr as Error).message}`;
+      }
+
       // Remplacer les stubs de deploiement par l'outillage WAS valide. Doit rester
       // apres includeSourceModules : l'outillage se cale sur les modules ejb et ear.
       try {
@@ -230,7 +248,7 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         methodCount,
         filesGenerated,
         errors: [],
-        log,
+        log: stdout + "\n" + stderr,
       });
     });
 
