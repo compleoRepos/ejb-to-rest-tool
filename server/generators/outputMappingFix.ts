@@ -599,6 +599,93 @@ export async function fixWebPomDependencies(outputDir: string): Promise<string[]
 }
 
 /**
+ * Reporte dans le pom web les dépendances `ma.eai.*` déclarées par le module `*-ejb`
+ * voisin, en scope `provided`. Quand le parent n'hérite pas le framework (parent
+ * `ma.eai.midw:general-settings`), l'EJB déclare lui-même `commons-services`,
+ * `sop-connector-interfaces` ou `midw-integration` en `provided`, scope non transitif :
+ * sans ce report, `Envelope` et `SynchroneService` sont introuvables à la compilation
+ * du web. Coordonnées, version et exclusions reprises telles que l'EJB les déclare.
+ * À appeler après `includeSourceModules`, qui dépose le module `*-ejb` dans la sortie.
+ */
+export async function addWebFrameworkDependencies(outputDir: string): Promise<string[]> {
+  const touched: string[] = [];
+  const pomFiles = await collectPomFiles(outputDir);
+  for (const pom of pomFiles) {
+    if (!pom.replace(/\\/g, "/").toLowerCase().endsWith("-web/pom.xml")) continue;
+    const content = await fs.readFile(pom, "utf-8");
+    const updated = await addEjbFrameworkDependencies(pom, content);
+    if (updated !== content) {
+      await fs.writeFile(pom, updated, "utf-8");
+      touched.push(pom);
+    }
+  }
+  return touched;
+}
+
+async function addEjbFrameworkDependencies(webPom: string, content: string): Promise<string> {
+  const projectDir = path.dirname(path.dirname(webPom));
+  let entries: string[];
+  try {
+    entries = await fs.readdir(projectDir);
+  } catch {
+    return content;
+  }
+  const ejbDir = entries.find((e) => e.toLowerCase().endsWith("-ejb"));
+  if (!ejbDir) return content;
+  let ejbPom: string;
+  try {
+    ejbPom = await fs.readFile(path.join(projectDir, ejbDir, "pom.xml"), "utf-8");
+  } catch {
+    return content;
+  }
+  ejbPom = ejbPom.replace(/<!--[\s\S]*?-->/g, "").replace(/<dependencyManagement>[\s\S]*?<\/dependencyManagement>/g, "");
+  const depsSection = ejbPom.match(/<dependencies>([\s\S]*?)<\/dependencies>/);
+  if (!depsSection) return content;
+
+  const declared = new Set<string>();
+  const webDeps = content.replace(/<dependencyManagement>[\s\S]*?<\/dependencyManagement>/g, "");
+  for (const m of webDeps.matchAll(/<dependency>([\s\S]*?)<\/dependency>/g)) {
+    const g = m[1].match(/<groupId>\s*([^<\s]+)\s*<\/groupId>/)?.[1];
+    const a = m[1].match(/<artifactId>\s*([^<\s]+)\s*<\/artifactId>/)?.[1];
+    if (g && a) declared.add(`${g}:${a}`);
+  }
+
+  const blocks: string[] = [];
+  for (const m of depsSection[1].matchAll(/<dependency>([\s\S]*?)<\/dependency>/g)) {
+    const body = m[1];
+    const g = body.match(/<groupId>\s*([^<\s]+)\s*<\/groupId>/)?.[1];
+    const a = body.match(/<artifactId>\s*([^<\s]+)\s*<\/artifactId>/)?.[1];
+    if (!g || !a || !g.startsWith("ma.eai.")) continue;
+    if (/<scope>\s*test\s*<\/scope>/.test(body)) continue;
+    if (declared.has(`${g}:${a}`)) continue;
+    declared.add(`${g}:${a}`);
+    const version = body.match(/<version>\s*([^<\s]+)\s*<\/version>/)?.[1];
+    const exclusions = body.match(/[ \t]*<exclusions>[\s\S]*?<\/exclusions>/)?.[0];
+    const lines = [
+      "        <dependency>",
+      `            <groupId>${g}</groupId>`,
+      `            <artifactId>${a}</artifactId>`,
+    ];
+    if (version) lines.push(`            <version>${version}</version>`);
+    lines.push("            <scope>provided</scope>");
+    if (exclusions) {
+      const raw = exclusions.split(/\r?\n/).filter((l) => l.trim().length > 0).map((l) => l.replace(/\t/g, "    "));
+      const indent = Math.min(...raw.map((l) => l.length - l.trimStart().length));
+      for (const l of raw) lines.push("            " + l.slice(indent));
+    }
+    lines.push("        </dependency>");
+    blocks.push(lines.join("\n"));
+  }
+  if (blocks.length === 0) return content;
+
+  const closing = content.lastIndexOf("</dependencies>");
+  const dmClose = content.lastIndexOf("</dependencyManagement>");
+  if (closing < 0 || closing < dmClose) return content;
+  const lineStart = content.lastIndexOf("\n", closing) + 1;
+  return content.slice(0, lineStart) + "\n" + blocks.join("\n\n") + "\n" + content.slice(lineStart);
+}
+
+/**
  * Fixe le `finalName` du module EAR sur l'artifactId (sans version), comme le pom
  * d'entrée. Sinon Maven produit `<artifactId>-<version>.ear` alors que le Dockerfile
  * généré copie `<artifactId>.ear` → le COPY Docker échoue.

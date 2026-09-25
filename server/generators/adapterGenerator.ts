@@ -8,7 +8,7 @@ import path from "path";
 import fs from "fs/promises";
 import { existsSync, createWriteStream } from "fs";
 import { ZipArchive } from "archiver";
-import { applyOutputMappingFix, includeSourceModules, fixWebPomDependencies, fixEarFinalName, fixJndiBindingNames, writeDeployTooling } from "./outputMappingFix";
+import { applyOutputMappingFix, includeSourceModules, fixWebPomDependencies, addWebFrameworkDependencies, fixEarFinalName, fixJndiBindingNames, writeDeployTooling } from "./outputMappingFix";
 import { fixTypedResponseMapping } from "./typedResponseFix";
 import { fixUseCaseEnvelopes } from "./useCaseEnvelopeFix";
 import { fixDuplicateDtoProperties } from "./duplicatePropertyFix";
@@ -196,6 +196,13 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         await includeSourceModules(outputDir, inputPath);
       } catch (modErr) {
         stderr += `\n[includeSourceModules] ${(modErr as Error).message}`;
+      }
+
+      // Reporter dans le web les dépendances framework déclarées par l'EJB (parent sans framework hérité).
+      try {
+        await addWebFrameworkDependencies(outputDir);
+      } catch (depErr) {
+        stderr += `\n[addWebFrameworkDependencies] ${(depErr as Error).message}`;
       }
 
       // Aligner le lookup JNDI des resources sur le binding-name du descripteur
