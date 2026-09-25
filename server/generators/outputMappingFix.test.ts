@@ -12,6 +12,7 @@ import {
   includeSourceModules,
   detectBasePackage,
   fixWebPomDependencies,
+  addWebFrameworkDependencies,
   fixEarFinalName,
   fixJndiBindingNames,
   writeDeployTooling,
@@ -359,6 +360,83 @@ describe("fixWebPomDependencies", () => {
     expect(result).not.toContain("eai-midw-connectors");
     expect(result).not.toContain("slf4j-jdk14");
     expect(result).toContain("demande-dotation-ejb");
+    await fs.rm(base, { recursive: true, force: true });
+  });
+});
+
+describe("addWebFrameworkDependencies", () => {
+  it("reporte en provided les dépendances ma.eai.* déclarées par l'EJB voisin", async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "webdep-"));
+    const webDir = path.join(base, "opposition-carte-web");
+    const ejbDir = path.join(base, "opposition-carte-ejb");
+    await fs.mkdir(webDir, { recursive: true });
+    await fs.mkdir(ejbDir, { recursive: true });
+    await fs.writeFile(path.join(ejbDir, "pom.xml"), `<project>
+  <dependencyManagement>
+    <dependencies>
+      <dependency><groupId>ma.eai.managed</groupId><artifactId>ignored</artifactId></dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>ma.eai.sop</groupId>
+      <artifactId>sop-connector-interfaces</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>ma.eai.idev</groupId>
+      <artifactId>midw-integration</artifactId>
+      <version>1.5.14</version>
+      <exclusions>
+        <exclusion>
+          <groupId>org.springframework</groupId>
+          <artifactId>spring-jms</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>ma.eai.test</groupId>
+      <artifactId>test-only</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.axis</groupId>
+      <artifactId>axis</artifactId>
+      <version>1.4</version>
+    </dependency>
+  </dependencies>
+</project>
+`);
+    await fs.writeFile(path.join(webDir, "pom.xml"), `<project>
+  <dependencies>
+    <dependency>
+      <groupId>ma.eai.sop</groupId>
+      <artifactId>sop-connector-interfaces</artifactId>
+      <scope>provided</scope>
+    </dependency>
+  </dependencies>
+</project>
+`);
+    const touched = await addWebFrameworkDependencies(base);
+    const result = await fs.readFile(path.join(webDir, "pom.xml"), "utf-8");
+    expect(touched).toHaveLength(1);
+    expect(result.match(/sop-connector-interfaces/g)).toHaveLength(1);
+    expect(result).toContain("<groupId>ma.eai.idev</groupId>");
+    expect(result).toContain("<version>1.5.14</version>");
+    expect(result).toContain("<artifactId>spring-jms</artifactId>");
+    expect(result).not.toContain("test-only");
+    expect(result).not.toContain("axis");
+    expect(result).not.toContain("ignored");
+    expect(result.match(/<scope>provided<\/scope>/g)).toHaveLength(2);
+    await fs.rm(base, { recursive: true, force: true });
+  });
+
+  it("ne touche pas un pom web sans module EJB voisin", async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "webdep-"));
+    const webDir = path.join(base, "seul-web");
+    await fs.mkdir(webDir, { recursive: true });
+    await fs.writeFile(path.join(webDir, "pom.xml"), "<project><dependencies></dependencies></project>");
+    expect(await addWebFrameworkDependencies(base)).toHaveLength(0);
     await fs.rm(base, { recursive: true, force: true });
   });
 });
