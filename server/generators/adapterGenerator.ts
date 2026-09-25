@@ -12,6 +12,8 @@ import { applyOutputMappingFix, includeSourceModules, fixWebPomDependencies, fix
 import { fixTypedResponseMapping } from "./typedResponseFix";
 import { fixUseCaseEnvelopes } from "./useCaseEnvelopeFix";
 import { fixDuplicateDtoProperties } from "./duplicatePropertyFix";
+import { prepareEngineInput } from "./engineInputFix";
+import { removeNonEjbExposures } from "./nonEjbExposureFix";
 import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "./javaRuntime";
 import { writeEndpointDescriptor } from "./descriptorGenerator";
 
@@ -111,10 +113,13 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
     return emptyResult([tooOldJavaMessage(versionInfo.version)]);
   }
 
+  // Copie de l'entrée sans les commentaires des enum, que le moteur lit comme des codes fonction.
+  const engineInput = await prepareEngineInput(inputPath);
+
   return new Promise((resolve) => {
     const args = [
       "-jar", JAR_PATH,
-      inputPath,
+      engineInput.path,
       "-o", outputDir,
       "-g", groupId,
       "-a", artifactId,
@@ -138,6 +143,7 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
     });
 
     proc.on("close", async (code) => {
+      await engineInput.cleanup().catch(() => undefined);
       const log = stdout + "\n" + stderr;
       
       if (code !== 0) {
@@ -200,6 +206,14 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         stderr += `\n[fixJndiBindingNames] ${(jndiErr as Error).message}`;
       }
 
+      // Interfaces clientes de web services et interfaces @Local : pas des EJB appelables.
+      try {
+        const removals = await removeNonEjbExposures(outputDir, inputPath);
+        for (const r of removals) stderr += `\n[removeNonEjbExposures] ${r.target} retire (${r.reason})`;
+      } catch (nonEjbErr) {
+        stderr += `\n[removeNonEjbExposures] ${(nonEjbErr as Error).message}`;
+      }
+
       // Flux des EJB eai-fwk-ejb (UCStrategie) : <flux><entete><fonction>UC</fonction></entete>
       // <object class="VoIn">...</object></flux>, DTO de requete aligne sur la VoIn.
       try {
@@ -253,6 +267,7 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
     });
 
     proc.on("error", (err) => {
+      void engineInput.cleanup().catch(() => undefined);
       resolve({
         success: false,
         outputDir,
