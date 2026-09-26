@@ -1,11 +1,22 @@
 import type { Express } from "express";
+import fs from "fs";
+import path from "path";
 import { ENV } from "./env";
+import { resolveLocalStoragePath } from "../storage";
 
 export function registerStorageProxy(app: Express) {
   app.get("/manus-storage/*", async (req, res) => {
     const key = (req.params as Record<string, string>)[0];
     if (!key) {
       res.status(400).send("Missing storage key");
+      return;
+    }
+
+    // Local fallback: serve the object from disk when it exists there.
+    const localPath = resolveLocalStoragePath(key);
+    if (localPath && fs.existsSync(localPath)) {
+      res.set("Cache-Control", "no-store");
+      res.download(localPath, path.basename(key));
       return;
     }
 

@@ -13,6 +13,7 @@ import { fixTypedResponseMapping } from "./typedResponseFix";
 import { fixUseCaseEnvelopes } from "./useCaseEnvelopeFix";
 import { fixDuplicateDtoProperties } from "./duplicatePropertyFix";
 import { prepareEngineInput } from "./engineInputFix";
+import { removeDeadResponseMapping } from "./deadCodeFix";
 import { removeNonEjbExposures } from "./nonEjbExposureFix";
 import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "./javaRuntime";
 import { writeEndpointDescriptor } from "./descriptorGenerator";
@@ -235,6 +236,13 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         await fixDuplicateDtoProperties(outputDir);
       } catch (dupErr) {
         stderr += `\n[fixDuplicateDtoProperties] ${(dupErr as Error).message}`;
+      }
+
+      // Conversion de réponse jamais utilisée : appel fromXxxEnvelope, méthodes et accesseurs orphelins.
+      try {
+        await removeDeadResponseMapping(outputDir);
+      } catch (deadErr) {
+        stderr += `\n[removeDeadResponseMapping] ${(deadErr as Error).message}`;
       }
 
       // Remplacer les stubs de deploiement par l'outillage WAS valide. Doit rester
