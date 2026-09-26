@@ -80,6 +80,10 @@ public final class EnvelopeJson {
         return map;
     }
 
+    /**
+     * Convertit une valeur.
+     */
+    @SuppressWarnings("unchecked")
     private static <T> T convert(Object value, Class<T> type) {
         return convertList(value, type) == null ? null : null;
     }
@@ -124,7 +128,7 @@ describe("removeDeadResponseMapping", () => {
     const json = await fs.readFile(path.join(src, "converter", "EnvelopeJson.java"), "utf-8");
     expect(json).toContain("toJson");
     expect(json).toContain("fromXml");
-    for (const gone of ["toBean", "lookup", "convert(", "convertList", "java.lang.reflect.Method", "java.util.Map"]) {
+    for (const gone of ["toBean", "lookup", "convert(", "convertList", "java.lang.reflect.Method", "java.util.Map", "@SuppressWarnings", "Convertit une valeur."]) {
       expect(json).not.toContain(gone);
     }
 
