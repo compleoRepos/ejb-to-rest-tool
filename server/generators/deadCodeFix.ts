@@ -88,8 +88,12 @@ export function listMethods(src: string): MethodSpan[] {
     const close = matchingBrace(src, open);
     if (close < 0) continue;
     let start = m.index;
-    const before = src.slice(0, start);
-    const doc = before.match(/[ \t]*\/\*\*(?:(?!\*\/)[\s\S])*\*\/[ \t]*\r?\n$/);
+    for (;;) {
+      const ann = src.slice(0, start).match(/[ \t]*@\w+(?:\([^)]*\))?[ \t]*\r?\n$/);
+      if (!ann) break;
+      start -= ann[0].length;
+    }
+    const doc = src.slice(0, start).match(/[ \t]*\/\*\*(?:(?!\*\/)[\s\S])*\*\/[ \t]*\r?\n$/);
     if (doc) start -= doc[0].length;
     const lead = src.slice(0, start).match(/(\r?\n)[ \t]*\r?\n$/);
     if (lead) start -= lead[0].length - lead[1].length;
