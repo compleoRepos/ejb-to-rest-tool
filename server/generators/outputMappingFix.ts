@@ -829,7 +829,7 @@ docker run -d --name "$CONTAINER" -p "\${HOST_PORT}:9080" -p 9443:9443 "$IMAGE" 
 echo "=== Attente du demarrage ==="
 BASE="http://localhost:\${HOST_PORT}/$APP_CONTEXT/api"
 LOGS=""
-for i in $(seq 1 84); do
+for i in $(seq 1 120); do
     LOGS="$(docker logs "$CONTAINER" 2>&1 || true)"
     case "$LOGS" in *"open for e-business"*) break ;; esac
     sleep 5

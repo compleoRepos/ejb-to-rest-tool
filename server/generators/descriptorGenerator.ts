@@ -106,7 +106,7 @@ async function parseResource(
       subPath = pm[1];
       continue;
     }
-    const sig = line.match(/public\s+Response\s+(\w+)\s*\(([^)]*)\)/);
+    const sig = line.match(/public\s+Response\s+(\w+)\s*\(((?:[^()]|\([^()]*\))*)\)/);
     if (sig && httpMethod) {
       const methodName = sig[1];
       const params = sig[2];
@@ -177,8 +177,8 @@ function parseDtoFields(
  * Champs de premier niveau d'un corps de classe. Un champ typé par une classe
  * imbriquée du DTO devient un objet (`children`), une List devient `isList`.
  */
-function fieldsOfClass(body: string, depth: number): DescriptorField[] {
-  const nested = new Map<string, string>();
+function fieldsOfClass(body: string, depth: number, inherited: Map<string, string> = new Map()): DescriptorField[] {
+  const nested = new Map<string, string>(inherited);
   let topLevel = "";
   let i = 0;
   while (i < body.length) {
@@ -209,7 +209,7 @@ function fieldsOfClass(body: string, depth: number): DescriptorField[] {
     const child = nested.get(item);
     if (child !== undefined && depth < 8) {
       field.type = "Object";
-      field.children = fieldsOfClass(child, depth + 1);
+      field.children = fieldsOfClass(child, depth + 1, nested);
     }
     fields.push(field);
   }
