@@ -204,7 +204,7 @@ function fieldsOfClass(body: string, depth: number): DescriptorField[] {
     const javaType = m[1].replace(/\s+/g, "");
     const list = javaType.match(/^(?:List|ArrayList|Set|Collection)<(.+)>$/);
     const item = list ? list[1] : javaType;
-    const field: DescriptorField = { name: m[2], type: mapType(item), required: false };
+    const field: DescriptorField = { name: jsonPropertyName(m[2]), type: mapType(item), required: false };
     if (list) field.isList = true;
     const child = nested.get(item);
     if (child !== undefined && depth < 8) {
@@ -214,6 +214,15 @@ function fieldsOfClass(body: string, depth: number): DescriptorField[] {
     fields.push(field);
   }
   return fields;
+}
+
+/**
+ * Nom JSON d'un champ de DTO tel que Jackson 1 le lit par ses accesseurs : les majuscules
+ * de tete passent en minuscules (IdCtr -> idCtr, URLRetour -> urlretour).
+ */
+export function jsonPropertyName(field: string): string {
+  const m = field.match(/^[A-Z]+/);
+  return m ? m[0].toLowerCase() + field.slice(m[0].length) : field;
 }
 
 function matchingClose(src: string, open: number): number {
