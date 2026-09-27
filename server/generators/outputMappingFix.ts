@@ -715,15 +715,17 @@ USER root
 RUN mkdir -p /app/logs && chown -R was:root /app && chmod -R g+w /app
 USER was
 COPY --chown=was:root libs/ /opt/IBM/WebSphere/AppServer/lib/ext/
+COPY --chown=was:root sharedlib/ /work/sharedlib/
 COPY --chown=was:root app.ear /work/app.ear
 COPY --chown=was:root install_app.py /work/install_app.py
 RUN /opt/IBM/WebSphere/AppServer/bin/wsadmin.sh -lang jython -conntype NONE -f /work/install_app.py
 EXPOSE 9080 9443 9060 9043
 `;
 
-const INSTALL_APP = (appName: string, jndiNames: string[]): string => `ear     = '/work/app.ear'
+const INSTALL_APP = (appName: string, jndiNames: string[], jvmProperties: Record<string, string> = {}): string => `ear     = '/work/app.ear'
 appName = '${appName}'
 datasources = [${jndiNames.map((n) => `'${n}'`).join(", ")}]
+jvmProperties = [${Object.entries(jvmProperties).map(([k, v]) => `['${k}', '${v}']`).join(", ")}]
 
 cell = AdminConfig.list('Cell')
 
@@ -755,8 +757,21 @@ for jndi in datasources:
     propSet = AdminConfig.showAttribute(ds, 'propertySet')
     AdminConfig.create('J2EEResourceProperty', propSet, [['name', 'createDatabase'], ['type', 'java.lang.String'], ['value', 'create']])
 
+jvm = AdminConfig.list('JavaVirtualMachine', AdminConfig.getid('/Server:server1/'))
+for name, value in jvmProperties:
+    print 'Propriete JVM %s=%s' % (name, value)
+    AdminConfig.create('Property', jvm, [['name', name], ['value', value]])
+
+import os
+options = ['-appname', appName, '-MapWebModToVH', [['.*', '.*', 'default_host']], '-usedefaultbindings']
+jars = ['/work/sharedlib/' + j for j in os.listdir('/work/sharedlib') if j.endswith('.jar')]
+if jars:
+    print 'Bibliotheque partagee de %d jars associee a l application' % len(jars)
+    AdminConfig.create('Library', cell, [['name', 'neobank-fwk'], ['classPath', ';'.join(jars)]])
+    options = options + ['-MapSharedLibForMod', [[appName, 'META-INF/application.xml', 'neobank-fwk']]]
+
 print 'Installation de %s' % appName
-AdminApp.install(ear, ['-appname', appName, '-MapWebModToVH', [['.*', '.*', 'default_host']], '-usedefaultbindings'])
+AdminApp.install(ear, options)
 AdminConfig.save()
 print 'Installation terminee'
 `;
@@ -798,6 +813,10 @@ rm -rf "$WEB_DIR/libs" && mkdir -p "$WEB_DIR/libs"
 ( cd "$PROJECT_DIR" && "$MVN" -o -q -pl "$EJB_MODULE" "\${DEP_PLUGIN}:copy-dependencies" -DincludeScope=compile -DoutputDirectory="$WEB_DIR/libs" )
 for api in $SERVER_APIS; do rm -f "$WEB_DIR/libs/\${api}"*.jar; done
 rm -f "$WEB_DIR/libs/"eai-fwk-logging-cloud*.jar
+rm -rf "$WEB_DIR/sharedlib" && mkdir -p "$WEB_DIR/sharedlib"
+if ls "$WEB_DIR/libs/"eai-fwk-ejb*.jar >/dev/null 2>&1; then
+    mv "$WEB_DIR/libs/"*.jar "$WEB_DIR/sharedlib/"
+fi
 
 echo "=== Copie EAR ==="
 cp "$PROJECT_DIR/$EAR_MODULE/target/$EAR_FILE" "$WEB_DIR/app.ear"
@@ -859,7 +878,8 @@ export async function writeDeployTooling(outputDir: string): Promise<string[]> {
 
   await fs.writeFile(dockerfile, DOCKERFILE, "utf-8");
   const jndiNames = await collectDatasourceNames(path.join(outputDir, ejbName));
-  await fs.writeFile(installApp, INSTALL_APP(app, jndiNames), "utf-8");
+  const jvmProperties = await collectJvmProperties(path.join(outputDir, ejbName));
+  await fs.writeFile(installApp, INSTALL_APP(app, jndiNames, jvmProperties), "utf-8");
   await fs.writeFile(runLocal, RUN_LOCAL({ ejb: ejbName, ear: earName, earFile, app }), "utf-8");
   touched.push(dockerfile, installApp, runLocal);
 
@@ -893,8 +913,44 @@ export async function collectDatasourceNames(ejbDir: string): Promise<string[]> 
     let m: RegExpExecArray | null;
     while ((m = re.exec(xml)) !== null) names.add((m[1] || m[2]).trim());
   }
+  for (const file of await collectMainResources(ejbDir, ".properties")) {
+    const props = await fs.readFile(file, "utf-8");
+    const re = /^[^#\n]*jndi[^=\n]*=\s*(jdbc\/[\w.-]+)\s*$/gim;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(props)) !== null) names.add(m[1].trim());
+  }
   if (names.size === 0) names.add("jdbc/ebankdirect_xa");
   return [...names].sort();
+}
+
+/**
+ * Proprietes de JVM posees par le socle et attendues par l'EJB : execution.env=was quand un contexte
+ * Spring importe applicationContext-${execution.env}.xml et que applicationContext-was.xml existe.
+ */
+export async function collectJvmProperties(ejbDir: string): Promise<Record<string, string>> {
+  const xmls = await collectMainResources(ejbDir, ".xml");
+  let usesEnv = false;
+  let hasWas = false;
+  for (const file of xmls) {
+    if (path.basename(file) === "applicationContext-was.xml") hasWas = true;
+    if ((await fs.readFile(file, "utf-8")).includes("${execution.env}")) usesEnv = true;
+  }
+  return usesEnv && hasWas ? { "execution.env": "was" } : {};
+}
+
+async function collectMainResources(dir: string, ext: string): Promise<string[]> {
+  const out: string[] = [];
+  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const e of entries) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      if (e.name === "target" || e.name === "test" || e.name === "node_modules") continue;
+      out.push(...(await collectMainResources(full, ext)));
+    } else if (e.name.endsWith(ext) && full.split(path.sep).includes("resources")) {
+      out.push(full);
+    }
+  }
+  return out;
 }
 
 async function collectPomFiles(dir: string): Promise<string[]> {
