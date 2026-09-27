@@ -16,6 +16,7 @@ import { prepareEngineInput } from "./engineInputFix";
 import { removeDeadResponseMapping } from "./deadCodeFix";
 import { fixReturnCodeReading } from "./returnCodeFix";
 import { fixRequestFields } from "./requestFieldsFix";
+import { restoreOriginalPoms } from "./pomPreservationFix";
 import { removeNonEjbExposures } from "./nonEjbExposureFix";
 import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "./javaRuntime";
 import { writeEndpointDescriptor } from "./descriptorGenerator";
@@ -264,6 +265,14 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         await fixReturnCodeReading(outputDir);
       } catch (rcErr) {
         stderr += `\n[fixReturnCodeReading] ${(rcErr as Error).message}`;
+      }
+
+      // Poms du depot d'origine conserves : le projet livre remplace le depot.
+      try {
+        const poms = await restoreOriginalPoms(outputDir, inputPath);
+        for (const s of poms.skipped) stderr += `\n[restoreOriginalPoms] ${s}`;
+      } catch (pomErr) {
+        stderr += `\n[restoreOriginalPoms] ${(pomErr as Error).message}`;
       }
 
       // Remplacer les stubs de deploiement par l'outillage WAS valide. Doit rester

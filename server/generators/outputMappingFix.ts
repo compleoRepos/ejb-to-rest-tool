@@ -819,7 +819,9 @@ if ls "$WEB_DIR/libs/"eai-fwk-ejb*.jar >/dev/null 2>&1; then
 fi
 
 echo "=== Copie EAR ==="
-cp "$PROJECT_DIR/$EAR_MODULE/target/$EAR_FILE" "$WEB_DIR/app.ear"
+EAR_PATH="$PROJECT_DIR/$EAR_MODULE/target/$EAR_FILE"
+[ -f "$EAR_PATH" ] || EAR_PATH="$(ls "$PROJECT_DIR/$EAR_MODULE/target/"*.ear | head -1)"
+cp "$EAR_PATH" "$WEB_DIR/app.ear"
 
 echo "=== docker build + run ==="
 docker build --build-arg WAS_IMAGE="$WAS_IMAGE" -t "$IMAGE" "$WEB_DIR"
