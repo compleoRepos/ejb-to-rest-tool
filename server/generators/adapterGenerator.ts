@@ -15,6 +15,7 @@ import { fixDuplicateDtoProperties } from "./duplicatePropertyFix";
 import { prepareEngineInput } from "./engineInputFix";
 import { removeDeadResponseMapping } from "./deadCodeFix";
 import { fixReturnCodeReading } from "./returnCodeFix";
+import { fixRequestFields } from "./requestFieldsFix";
 import { removeNonEjbExposures } from "./nonEjbExposureFix";
 import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "./javaRuntime";
 import { writeEndpointDescriptor } from "./descriptorGenerator";
@@ -237,6 +238,18 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         await fixDuplicateDtoProperties(outputDir);
       } catch (dupErr) {
         stderr += `\n[fixDuplicateDtoProperties] ${(dupErr as Error).message}`;
+      }
+
+      // Champs d'entree des EJB historiques, retrouves par analyse statique de l'EJB fonction par fonction.
+      try {
+        const fields = await fixRequestFields(outputDir);
+        for (const f of fields.functions) {
+          if (f.relay) stderr += `\n[fixRequestFields] ${f.code} : relais vers un service aval, parametres libres acceptes`;
+          if (f.lists.length) stderr += `\n[fixRequestFields] ${f.code} : listes non transmises ${f.lists.join(", ")}`;
+        }
+        for (const s of fields.skipped) stderr += `\n[fixRequestFields] ${s}`;
+      } catch (rfErr) {
+        stderr += `\n[fixRequestFields] ${(rfErr as Error).message}`;
       }
 
       // Conversion de réponse jamais utilisée : appel fromXxxEnvelope, méthodes et accesseurs orphelins.

@@ -715,14 +715,17 @@ USER root
 RUN mkdir -p /app/logs && chown -R was:root /app && chmod -R g+w /app
 USER was
 COPY --chown=was:root libs/ /opt/IBM/WebSphere/AppServer/lib/ext/
+COPY --chown=was:root sharedlib/ /work/sharedlib/
 COPY --chown=was:root app.ear /work/app.ear
 COPY --chown=was:root install_app.py /work/install_app.py
 RUN /opt/IBM/WebSphere/AppServer/bin/wsadmin.sh -lang jython -conntype NONE -f /work/install_app.py
 EXPOSE 9080 9443 9060 9043
 `;
 
-const INSTALL_APP = (appName: string): string => `ear     = '/work/app.ear'
+const INSTALL_APP = (appName: string, jndiNames: string[], jvmProperties: Record<string, string> = {}): string => `ear     = '/work/app.ear'
 appName = '${appName}'
+datasources = [${jndiNames.map((n) => `'${n}'`).join(", ")}]
+jvmProperties = [${Object.entries(jvmProperties).map(([k, v]) => `['${k}', '${v}']`).join(", ")}]
 
 cell = AdminConfig.list('Cell')
 
@@ -743,18 +746,32 @@ for t in AdminConfig.listTemplates('JDBCProvider').splitlines():
 print 'Creation du provider JDBC Derby XA'
 jdbc = AdminConfig.createUsingTemplate('JDBCProvider', cell, [['name', 'DerbyXA-ebankdirect']], template)
 
-print 'Creation de la DataSource jdbc/ebankdirect_xa'
-ds = AdminTask.createDatasource(jdbc, [
-    '-name', 'ebankdirect_xa',
-    '-jndiName', 'jdbc/ebankdirect_xa',
-    '-dataStoreHelperClassName', 'com.ibm.websphere.rsadapter.DerbyDataStoreHelper',
-    '-componentManagedAuthenticationAlias', '',
-    '-configureResourceProperties', [['databaseName', 'java.lang.String', '/work/ebankdb']]])
-propSet = AdminConfig.showAttribute(ds, 'propertySet')
-AdminConfig.create('J2EEResourceProperty', propSet, [['name', 'createDatabase'], ['type', 'java.lang.String'], ['value', 'create']])
+for jndi in datasources:
+    print 'Creation de la DataSource %s' % jndi
+    ds = AdminTask.createDatasource(jdbc, [
+        '-name', jndi.split('/')[-1],
+        '-jndiName', jndi,
+        '-dataStoreHelperClassName', 'com.ibm.websphere.rsadapter.DerbyDataStoreHelper',
+        '-componentManagedAuthenticationAlias', '',
+        '-configureResourceProperties', [['databaseName', 'java.lang.String', '/work/ebankdb']]])
+    propSet = AdminConfig.showAttribute(ds, 'propertySet')
+    AdminConfig.create('J2EEResourceProperty', propSet, [['name', 'createDatabase'], ['type', 'java.lang.String'], ['value', 'create']])
+
+jvm = AdminConfig.list('JavaVirtualMachine', AdminConfig.getid('/Server:server1/'))
+for name, value in jvmProperties:
+    print 'Propriete JVM %s=%s' % (name, value)
+    AdminConfig.create('Property', jvm, [['name', name], ['value', value]])
+
+import os
+options = ['-appname', appName, '-MapWebModToVH', [['.*', '.*', 'default_host']], '-usedefaultbindings']
+jars = ['/work/sharedlib/' + j for j in os.listdir('/work/sharedlib') if j.endswith('.jar')]
+if jars:
+    print 'Bibliotheque partagee de %d jars associee a l application' % len(jars)
+    AdminConfig.create('Library', cell, [['name', 'neobank-fwk'], ['classPath', ';'.join(jars)]])
+    options = options + ['-MapSharedLibForMod', [[appName, 'META-INF/application.xml', 'neobank-fwk']]]
 
 print 'Installation de %s' % appName
-AdminApp.install(ear, ['-appname', appName, '-MapWebModToVH', [['.*', '.*', 'default_host']], '-usedefaultbindings'])
+AdminApp.install(ear, options)
 AdminConfig.save()
 print 'Installation terminee'
 `;
@@ -779,6 +796,8 @@ WAS_IMAGE="\${WAS_IMAGE:-icr.io/appcafe/websphere-traditional:9.0.5.14}"
 DEP_PLUGIN="org.apache.maven.plugins:maven-dependency-plugin:2.8"
 SERVER_APIS="jsr311-api javaee-api javax.servlet-api servlet-api javax.json-api javax.json-1"
 
+if [ -n "\${JAVA_HOME_8:-}" ]; then export JAVA_HOME="$JAVA_HOME_8"; fi
+
 MVN="\${MVN:-mvn}"
 if ! command -v "$MVN" >/dev/null 2>&1; then
     for c in "/c/Users/$USERNAME/tools/apache-maven-3.9.9/bin/mvn" "/c/Users/Pro/tools/apache-maven-3.9.9/bin/mvn"; do
@@ -794,6 +813,10 @@ rm -rf "$WEB_DIR/libs" && mkdir -p "$WEB_DIR/libs"
 ( cd "$PROJECT_DIR" && "$MVN" -o -q -pl "$EJB_MODULE" "\${DEP_PLUGIN}:copy-dependencies" -DincludeScope=compile -DoutputDirectory="$WEB_DIR/libs" )
 for api in $SERVER_APIS; do rm -f "$WEB_DIR/libs/\${api}"*.jar; done
 rm -f "$WEB_DIR/libs/"eai-fwk-logging-cloud*.jar
+rm -rf "$WEB_DIR/sharedlib" && mkdir -p "$WEB_DIR/sharedlib"
+if ls "$WEB_DIR/libs/"eai-fwk-ejb*.jar >/dev/null 2>&1; then
+    mv "$WEB_DIR/libs/"*.jar "$WEB_DIR/sharedlib/"
+fi
 
 echo "=== Copie EAR ==="
 cp "$PROJECT_DIR/$EAR_MODULE/target/$EAR_FILE" "$WEB_DIR/app.ear"
@@ -805,11 +828,16 @@ docker run -d --name "$CONTAINER" -p "\${HOST_PORT}:9080" -p 9443:9443 "$IMAGE" 
 
 echo "=== Attente du demarrage ==="
 BASE="http://localhost:\${HOST_PORT}/$APP_CONTEXT/api"
-for i in $(seq 1 60); do
-    code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "$BASE" 2>/dev/null || echo 000)
-    [ "$code" != "000" ] && break
+LOGS=""
+for i in $(seq 1 120); do
+    LOGS="$(docker logs "$CONTAINER" 2>&1 || true)"
+    case "$LOGS" in *"open for e-business"*) break ;; esac
     sleep 5
 done
+case "$LOGS" in *"Application started: $APP_CONTEXT"*) ;; *)
+    echo "Application $APP_CONTEXT non demarree, voir : docker logs $CONTAINER" >&2
+    exit 1 ;;
+esac
 echo "Serveur demarre. API: $BASE"
 echo "Endpoints de test (mock, suffixe --tst), ex: $BASE/synchrone/test/lstcrts--tst"
 `;
@@ -817,8 +845,8 @@ echo "Endpoints de test (mock, suffixe --tst), ex: $BASE/synchrone/test/lstcrts-
 /**
  * Remplace les scripts de deploiement generes (stubs non fonctionnels) par
  * l'outillage valide de bout en bout : Dockerfile (WAS icr.io, /app/logs
- * inscriptible, libs framework en lib/ext), install_app.py (DataSource Derby XA
- * jdbc/ebankdirect_xa + install), run-local.sh (build -> libs -> EAR -> Docker).
+ * inscriptible, libs framework en lib/ext), install_app.py (une DataSource Derby XA
+ * par reference jdbc/* de l'EJB + install), run-local.sh (build -> libs -> EAR -> Docker).
  */
 export async function writeDeployTooling(outputDir: string): Promise<string[]> {
   const touched: string[] = [];
@@ -849,7 +877,9 @@ export async function writeDeployTooling(outputDir: string): Promise<string[]> {
   const runLocal = path.join(webDir, "run-local.sh");
 
   await fs.writeFile(dockerfile, DOCKERFILE, "utf-8");
-  await fs.writeFile(installApp, INSTALL_APP(app), "utf-8");
+  const jndiNames = await collectDatasourceNames(path.join(outputDir, ejbName));
+  const jvmProperties = await collectJvmProperties(path.join(outputDir, ejbName));
+  await fs.writeFile(installApp, INSTALL_APP(app, jndiNames, jvmProperties), "utf-8");
   await fs.writeFile(runLocal, RUN_LOCAL({ ejb: ejbName, ear: earName, earFile, app }), "utf-8");
   touched.push(dockerfile, installApp, runLocal);
 
@@ -865,6 +895,62 @@ export async function writeDeployTooling(outputDir: string): Promise<string[]> {
     }
   }
   return touched;
+}
+
+/**
+ * Noms JNDI jdbc/* references par le module EJB (ibm-ejb-jar-bnd.xml, ejb-jar.xml), tries.
+ * A defaut de reference declaree, jdbc/ebankdirect_xa.
+ */
+export async function collectDatasourceNames(ejbDir: string): Promise<string[]> {
+  const names = new Set<string>();
+  for (const file of [
+    ...(await collectNamedFiles(ejbDir, "ibm-ejb-jar-bnd.xml")),
+    ...(await collectNamedFiles(ejbDir, "ejb-jar.xml")),
+  ]) {
+    if (file.split(path.sep).includes("target")) continue;
+    const xml = await fs.readFile(file, "utf-8");
+    const re = /binding-name="(jdbc\/[^"]+)"|<res-ref-name>\s*(jdbc\/[^<\s]+)\s*<\/res-ref-name>/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(xml)) !== null) names.add((m[1] || m[2]).trim());
+  }
+  for (const file of await collectMainResources(ejbDir, ".properties")) {
+    const props = await fs.readFile(file, "utf-8");
+    const re = /^[^#\n]*jndi[^=\n]*=\s*(jdbc\/[\w.-]+)\s*$/gim;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(props)) !== null) names.add(m[1].trim());
+  }
+  if (names.size === 0) names.add("jdbc/ebankdirect_xa");
+  return [...names].sort();
+}
+
+/**
+ * Proprietes de JVM posees par le socle et attendues par l'EJB : execution.env=was quand un contexte
+ * Spring importe applicationContext-${execution.env}.xml et que applicationContext-was.xml existe.
+ */
+export async function collectJvmProperties(ejbDir: string): Promise<Record<string, string>> {
+  const xmls = await collectMainResources(ejbDir, ".xml");
+  let usesEnv = false;
+  let hasWas = false;
+  for (const file of xmls) {
+    if (path.basename(file) === "applicationContext-was.xml") hasWas = true;
+    if ((await fs.readFile(file, "utf-8")).includes("${execution.env}")) usesEnv = true;
+  }
+  return usesEnv && hasWas ? { "execution.env": "was" } : {};
+}
+
+async function collectMainResources(dir: string, ext: string): Promise<string[]> {
+  const out: string[] = [];
+  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const e of entries) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      if (e.name === "target" || e.name === "test" || e.name === "node_modules") continue;
+      out.push(...(await collectMainResources(full, ext)));
+    } else if (e.name.endsWith(ext) && full.split(path.sep).includes("resources")) {
+      out.push(full);
+    }
+  }
+  return out;
 }
 
 async function collectPomFiles(dir: string): Promise<string[]> {

@@ -7,10 +7,11 @@
  * échoué. Ce correctif :
  * - remplace la lecture par EnvelopeJson.returnCode / returnMessage, qui cherchent ces balises
  *   sous le flux et rendent le code technique 009 quand l'EJB n'a rien renvoyé ;
- * - fait de tout code différent de 000, 00 ou 0 une erreur, statut du barème s'il existe,
- *   409 sinon (refus métier, non rejouable) ;
- * - parse le corps sans réencodage, pour respecter l'encodage déclaré (ISO-8859-1).
- * La famille use case (object/codeRetour, isTechnicalError) n'est pas concernée.
+ * - fait de tout code qui n'est pas composé uniquement de zéros (000, 00, 00000) une erreur,
+ *   statut du barème s'il existe, 409 sinon (refus métier, non rejouable) ;
+ * - parse le corps sans réencodage, pour respecter l'encodage déclaré (ISO-8859-1) ;
+ * - famille use case (object/codeRetour) : l'erreur globale de l'EJB reste en 500, un code
+ *   retour d'erreur de la VoOut suit la même règle au lieu de sortir en 200.
  */
 import fs from "fs/promises";
 import path from "path";
@@ -116,7 +117,7 @@ const RETURN_CODE_METHODS = `
 `;
 
 const IS_SUCCESS_NEW = `    public static boolean isSuccess(String code) {
-        return "000".equals(code) || "00".equals(code) || "0".equals(code);
+        return code != null && code.trim().matches("0+");
     }`;
 
 const IS_ERROR_NEW = `    public static boolean isError(String code) {
@@ -136,6 +137,14 @@ export async function fixReturnCodeReading(outputDir: string): Promise<string[]>
 
   for (const file of javaFiles.filter((f) => f.endsWith("Resource.java"))) {
     const content = await fs.readFile(file, "utf-8");
+    if (content.includes(`getNodeAsString("object/codeRetour")`)) {
+      const patched = patchUseCaseResourceSource(content);
+      if (patched !== content) {
+        await fs.writeFile(file, patched, "utf-8");
+        touched.push(file);
+      }
+      continue;
+    }
     if (!content.includes(`getNodeAsString("flux/code")`)) continue;
     const patched = patchResourceSource(content);
     if (patched === content) continue;
@@ -170,6 +179,22 @@ export function patchResourceSource(content: string): string {
   return content
     .split(`envelopeOut.getNodeAsString("flux/code")`).join("EnvelopeJson.returnCode(envelopeOut)")
     .split(`envelopeOut.getNodeAsString("flux/message")`).join("EnvelopeJson.returnMessage(envelopeOut)");
+}
+
+const USE_CASE_TECHNICAL_BLOCK = /(if \(converter\.isTechnicalError\(code, message\)\) \{\s*return Response\.status\(Response\.Status\.INTERNAL_SERVER_ERROR\)\s*\.entity\(new ErrorResponse\(code, message\)\)\s*\.build\(\);\s*\})/g;
+
+export function patchUseCaseResourceSource(content: string): string {
+  if (content.includes("CodeMapper.isError(code)")) return content;
+  return content.replace(
+    USE_CASE_TECHNICAL_BLOCK,
+    `$1
+
+            if (CodeMapper.isError(code)) {
+                return Response.status(CodeMapper.toHttpStatus(code))
+                        .entity(new ErrorResponse(code, message))
+                        .build();
+            }`
+  );
 }
 
 export function patchEnvelopeJsonSource(content: string): string {

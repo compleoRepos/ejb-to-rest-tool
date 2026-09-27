@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { patchResourceSource, patchEnvelopeJsonSource, patchCodeMapperSource } from "./returnCodeFix";
+import { patchResourceSource, patchEnvelopeJsonSource, patchCodeMapperSource, patchUseCaseResourceSource } from "./returnCodeFix";
 
 const RESOURCE = `            String code = envelopeOut.getNodeAsString("flux/code");
             String message = envelopeOut.getNodeAsString("flux/message");
@@ -67,9 +67,26 @@ describe("returnCodeFix", () => {
 
   it("fait de tout code non succes une erreur", () => {
     const out = patchCodeMapperSource(CODE_MAPPER);
-    expect(out).toContain(`"000".equals(code) || "00".equals(code) || "0".equals(code)`);
+    expect(out).toContain(`code.trim().matches("0+")`);
     expect(out).toContain("return !isSuccess(code.trim());");
     expect(out).toContain("Response.Status.CONFLICT;");
     expect(out).not.toContain("non répertorié");
+  });
+
+  it("traite les codes d'erreur de la famille use case", () => {
+    const uc = `            String code = envelopeOut.getNodeAsString("object/codeRetour");
+            String message = envelopeOut.getNodeAsString("object/messageRetour");
+
+            if (converter.isTechnicalError(code, message)) {
+                return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                        .entity(new ErrorResponse(code, message))
+                        .build();
+            }
+
+            return Response.ok(EnvelopeJson.toJson(envelopeOut)).build();`;
+    const out = patchUseCaseResourceSource(uc);
+    expect(out).toContain("if (CodeMapper.isError(code)) {");
+    expect(out.indexOf("isTechnicalError")).toBeLessThan(out.indexOf("CodeMapper.isError"));
+    expect(patchUseCaseResourceSource(out)).toBe(out);
   });
 });
