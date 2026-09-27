@@ -14,6 +14,7 @@ import { fixUseCaseEnvelopes } from "./useCaseEnvelopeFix";
 import { fixDuplicateDtoProperties } from "./duplicatePropertyFix";
 import { prepareEngineInput } from "./engineInputFix";
 import { removeDeadResponseMapping } from "./deadCodeFix";
+import { fixReturnCodeReading } from "./returnCodeFix";
 import { removeNonEjbExposures } from "./nonEjbExposureFix";
 import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "./javaRuntime";
 import { writeEndpointDescriptor } from "./descriptorGenerator";
@@ -243,6 +244,13 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         await removeDeadResponseMapping(outputDir);
       } catch (deadErr) {
         stderr += `\n[removeDeadResponseMapping] ${(deadErr as Error).message}`;
+      }
+
+      // Code retour des EJB historiques (CODRET, codeRetour...) au lieu de flux/code, reponse vide en erreur technique.
+      try {
+        await fixReturnCodeReading(outputDir);
+      } catch (rcErr) {
+        stderr += `\n[fixReturnCodeReading] ${(rcErr as Error).message}`;
       }
 
       // Remplacer les stubs de deploiement par l'outillage WAS valide. Doit rester
