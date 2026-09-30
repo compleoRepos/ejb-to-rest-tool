@@ -16,6 +16,7 @@ import {
   fixEarFinalName,
   fixJndiBindingNames,
   writeDeployTooling,
+  writeProjectReadme,
 } from "./outputMappingFix";
 
 const BASE = "ma.bmce.adapter.demandedotation";
@@ -501,6 +502,7 @@ describe("writeDeployTooling", () => {
     const runLocal = await fs.readFile(path.join(webDir, "run-local.sh"), "utf-8");
     expect(runLocal).toContain("copy-dependencies");
     expect(runLocal).toContain("eai-fwk-logging-cloud");
+    expect(runLocal).not.toContain("/c/Users/");
   });
 
   it("retire les stubs de deploiement du generateur", async () => {
@@ -514,5 +516,59 @@ describe("writeDeployTooling", () => {
     await fs.mkdir(path.join(partial, "demande-dotation-ear"), { recursive: true });
     await expect(writeDeployTooling(partial)).rejects.toThrow("-ejb");
     await fs.rm(partial, { recursive: true, force: true });
+  });
+});
+
+describe("writeProjectReadme", () => {
+  it("decrit les modules et les ressources lues dans le projet", async () => {
+    const out = await fs.mkdtemp(path.join(os.tmpdir(), "readme-"));
+    const web = path.join(out, "neobank-demande-dotation-web");
+    const ejb = path.join(out, "neobank-demande-dotation-ejb");
+    const ear = path.join(out, "neobank-demande-dotation-ear");
+    await fs.mkdir(path.join(web, "src/main/java/res"), { recursive: true });
+    await fs.mkdir(path.join(web, "src/main/resources/descriptor"), { recursive: true });
+    await fs.mkdir(path.join(ejb, "src/main/resources/META-INF"), { recursive: true });
+    await fs.mkdir(path.join(ejb, "src/main/java/util"), { recursive: true });
+    await fs.mkdir(ear, { recursive: true });
+    await fs.mkdir(path.join(out, "sql"));
+    await fs.writeFile(path.join(ear, "pom.xml"), "<contextRoot>/neobank-demande-dotation</contextRoot>");
+    await fs.writeFile(path.join(web, "src/main/java/res/R.java"), 'String JNDI_NAME = "ejb/DotationService";');
+    await fs.writeFile(path.join(web, "src/main/resources/descriptor/neobank-demande-dotation.json"), "{}");
+    await fs.writeFile(
+      path.join(ejb, "src/main/resources/META-INF/ibm-ejb-jar-bnd.xml"),
+      '<resource-ref name="jdbc/ebankdirect_xa" binding-name="jdbc/ebankdirect_xa"/>'
+    );
+    await fs.writeFile(path.join(ejb, "src/main/java/util/P.java"), 'String D = "neobank.parametrage.dir";');
+    for (const f of ["DEPLOYMENT.md", "ARCHITECTURE.md", "DEVELOPER-GUIDE.md"]) {
+      await fs.writeFile(path.join(out, f), "x");
+    }
+
+    const { generateAdapterDocumentation } = await import("./adapterGenerator");
+    await generateAdapterDocumentation(out, "neobank-demande-dotation", 1, 1);
+    const readme = await fs.readFile(path.join(out, "README.md"), "utf-8");
+
+    expect(readme).toContain("# neobank-demande-dotation");
+    expect(readme).toContain("`ejb/DotationService`");
+    expect(readme).toContain("`jdbc/ebankdirect_xa`");
+    expect(readme).toContain("`neobank.parametrage.dir`");
+    expect(readme).toContain("`/neobank-demande-dotation/api`");
+    expect(readme).toContain("descriptor/neobank-demande-dotation.json");
+    expect(readme).toContain("`sql/`");
+    expect(readme).not.toMatch(/Liberty|@EJB/);
+    for (const f of ["DEPLOYMENT.md", "ARCHITECTURE.md", "DEVELOPER-GUIDE.md"]) {
+      await expect(fs.access(path.join(out, f))).rejects.toThrow();
+    }
+    await fs.rm(out, { recursive: true, force: true });
+  });
+
+  it("ne presume aucune datasource quand l EJB n en declare pas", async () => {
+    const out = await fs.mkdtemp(path.join(os.tmpdir(), "readme-vide-"));
+    await fs.mkdir(path.join(out, "projet-seul-ejb"));
+    await writeProjectReadme(out, "projet-seul");
+    const readme = await fs.readFile(path.join(out, "README.md"), "utf-8");
+    expect(readme).toContain("# projet-seul");
+    expect(readme).toContain("- Aucune datasource.");
+    expect(readme).not.toContain("jdbc/");
+    await fs.rm(out, { recursive: true, force: true });
   });
 });

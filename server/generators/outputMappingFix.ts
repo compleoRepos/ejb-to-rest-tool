@@ -16,6 +16,7 @@
  */
 import fs from "fs/promises";
 import path from "path";
+import { existsSync } from "fs";
 
 const ENVELOPE_JSON_TEMPLATE = (converterPackage: string): string => `package ${converterPackage};
 
@@ -799,11 +800,6 @@ SERVER_APIS="jsr311-api javaee-api javax.servlet-api servlet-api javax.json-api 
 if [ -n "\${JAVA_HOME_8:-}" ]; then export JAVA_HOME="$JAVA_HOME_8"; fi
 
 MVN="\${MVN:-mvn}"
-if ! command -v "$MVN" >/dev/null 2>&1; then
-    for c in "/c/Users/$USERNAME/tools/apache-maven-3.9.9/bin/mvn" "/c/Users/Pro/tools/apache-maven-3.9.9/bin/mvn"; do
-        [ -f "$c" ] && MVN="$c" && break
-    done
-fi
 
 echo "=== Build (mvn install) ==="
 ( cd "$PROJECT_DIR" && "$MVN" -o -q clean install -DskipTests )
@@ -900,10 +896,108 @@ export async function writeDeployTooling(outputDir: string): Promise<string[]> {
 }
 
 /**
- * Noms JNDI jdbc/* references par le module EJB (ibm-ejb-jar-bnd.xml, ejb-jar.xml), tries.
- * A defaut de reference declaree, jdbc/ebankdirect_xa.
+ * README livre a la racine du projet : modules, construction, ressources attendues sur le serveur,
+ * points d'entree. Toutes les valeurs sont lues dans les modules presents.
  */
-export async function collectDatasourceNames(ejbDir: string): Promise<string[]> {
+export async function writeProjectReadme(outputDir: string, projectName: string): Promise<string> {
+  const dirs = (await fs.readdir(outputDir, { withFileTypes: true }))
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name);
+  const webName = dirs.find((d) => d.toLowerCase().endsWith("-web"));
+  const ejbName = dirs.find((d) => d.toLowerCase().endsWith("-ejb"));
+  const earName = dirs.find((d) => d.toLowerCase().endsWith("-ear"));
+  const app = webName ? webName.replace(/-web$/i, "") : projectName;
+
+  let contextRoot = `/${app}`;
+  if (earName) {
+    const earPom = await fs.readFile(path.join(outputDir, earName, "pom.xml"), "utf-8").catch(() => "");
+    const m = earPom.match(/<contextRoot>\s*([^<\s]+)\s*<\/contextRoot>/);
+    if (m) contextRoot = m[1].startsWith("/") ? m[1] : `/${m[1]}`;
+  }
+
+  const beans = new Set<string>();
+  if (webName) {
+    for (const file of await collectNamedFilesByExt(path.join(outputDir, webName), ".java")) {
+      const src = await fs.readFile(file, "utf-8");
+      const re = /JNDI_NAME\s*=\s*"([^"]+)"/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(src)) !== null) beans.add(m[1]);
+    }
+  }
+
+  const datasources = ejbName ? await collectDatasourceNames(path.join(outputDir, ejbName), true) : [];
+  const jvm = ejbName ? await collectJvmProperties(path.join(outputDir, ejbName)) : {};
+  let parametrage = false;
+  if (ejbName) {
+    for (const file of await collectNamedFilesByExt(path.join(outputDir, ejbName), ".java")) {
+      if ((await fs.readFile(file, "utf-8")).includes("neobank.parametrage.dir")) {
+        parametrage = true;
+        break;
+      }
+    }
+  }
+  const descriptor = webName
+    ? path.join(webName, "src", "main", "resources", "descriptor", `${app}.json`)
+    : null;
+  const hasDescriptor = descriptor ? existsSync(path.join(outputDir, descriptor)) : false;
+  const hasSql = existsSync(path.join(outputDir, "sql"));
+
+  const lines: string[] = [];
+  lines.push(`# ${app}`, "");
+  lines.push(`Service EJB expose en REST (JAX-RS), EJB et API livres dans le meme EAR.`, "");
+  lines.push("## Modules", "", "| Module | Role |", "|---|---|");
+  if (ejbName) lines.push(`| \`${ejbName}\` | module EJB |`);
+  if (webName) lines.push(`| \`${webName}\` | API REST, context root \`${contextRoot}\`, chemin \`/api\` |`);
+  if (earName) lines.push(`| \`${earName}\` | archive a deployer, \`${earName}.ear\` |`);
+  lines.push("", "## Construction", "");
+  lines.push("JDK 8, a la racine du projet :", "", "    mvn clean install", "");
+  if (earName) lines.push(`Archive produite : \`${earName}/target/${earName}.ear\`.`, "");
+  lines.push("## Ressources attendues sur le serveur", "");
+  for (const b of [...beans].sort()) lines.push(`- Liaison EJB : \`${b}\``);
+  for (const d of datasources) lines.push(`- Datasource : \`${d}\``);
+  if (datasources.length === 0) lines.push("- Aucune datasource.");
+  for (const [k, v] of Object.entries(jvm)) lines.push(`- Propriete JVM : \`${k}=${v}\``);
+  if (parametrage) {
+    lines.push(
+      `- Propriete JVM : \`neobank.parametrage.dir\`, repertoire du fichier externe \`${app}.properties\`. ` +
+        "Absent, les valeurs embarquees s'appliquent."
+    );
+  }
+  lines.push("- Bibliotheques du socle `ma.eai.*` fournies par le serveur, sans `eai-fwk-logging-cloud`.", "");
+  lines.push("## Points d'entree", "");
+  lines.push(`Base : \`${contextRoot}/api\`.`);
+  if (hasDescriptor) lines.push(`Operations decrites dans \`${descriptor!.split(path.sep).join("/")}\`.`);
+  lines.push("Les operations suffixees `--tst` appellent les fonctions de test de l'EJB.", "");
+  if (hasSql) lines.push("## Base", "", "Scripts a jouer avant le premier demarrage : `sql/`.", "");
+  if (webName) {
+    lines.push("## Test local", "", `WebSphere traditional 9.0.5 sous Docker : \`${webName}/run-local.sh\`.`, "");
+  }
+
+  const readme = path.join(outputDir, "README.md");
+  await fs.writeFile(readme, lines.join("\n"), "utf-8");
+  return readme;
+}
+
+async function collectNamedFilesByExt(dir: string, ext: string): Promise<string[]> {
+  const out: string[] = [];
+  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const e of entries) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      if (e.name === "target" || e.name === "test" || e.name === "node_modules") continue;
+      out.push(...(await collectNamedFilesByExt(full, ext)));
+    } else if (e.name.endsWith(ext)) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+/**
+ * Noms JNDI jdbc/* references par le module EJB (ibm-ejb-jar-bnd.xml, ejb-jar.xml), tries.
+ * A defaut de reference declaree, jdbc/ebankdirect_xa, sauf si declaredOnly.
+ */
+export async function collectDatasourceNames(ejbDir: string, declaredOnly = false): Promise<string[]> {
   const names = new Set<string>();
   for (const file of [
     ...(await collectNamedFiles(ejbDir, "ibm-ejb-jar-bnd.xml")),
@@ -921,7 +1015,7 @@ export async function collectDatasourceNames(ejbDir: string): Promise<string[]> 
     let m: RegExpExecArray | null;
     while ((m = re.exec(props)) !== null) names.add(m[1].trim());
   }
-  if (names.size === 0) names.add("jdbc/ebankdirect_xa");
+  if (names.size === 0 && !declaredOnly) names.add("jdbc/ebankdirect_xa");
   return [...names].sort();
 }
 
