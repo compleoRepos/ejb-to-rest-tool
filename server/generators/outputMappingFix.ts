@@ -925,7 +925,7 @@ export async function writeProjectReadme(outputDir: string, projectName: string)
     }
   }
 
-  const datasources = ejbName ? await collectDatasourceNames(path.join(outputDir, ejbName)) : [];
+  const datasources = ejbName ? await collectDatasourceNames(path.join(outputDir, ejbName), true) : [];
   const jvm = ejbName ? await collectJvmProperties(path.join(outputDir, ejbName)) : {};
   let parametrage = false;
   if (ejbName) {
@@ -955,6 +955,7 @@ export async function writeProjectReadme(outputDir: string, projectName: string)
   lines.push("## Ressources attendues sur le serveur", "");
   for (const b of [...beans].sort()) lines.push(`- Liaison EJB : \`${b}\``);
   for (const d of datasources) lines.push(`- Datasource : \`${d}\``);
+  if (datasources.length === 0) lines.push("- Aucune datasource.");
   for (const [k, v] of Object.entries(jvm)) lines.push(`- Propriete JVM : \`${k}=${v}\``);
   if (parametrage) {
     lines.push(
@@ -994,9 +995,9 @@ async function collectNamedFilesByExt(dir: string, ext: string): Promise<string[
 
 /**
  * Noms JNDI jdbc/* references par le module EJB (ibm-ejb-jar-bnd.xml, ejb-jar.xml), tries.
- * A defaut de reference declaree, jdbc/ebankdirect_xa.
+ * A defaut de reference declaree, jdbc/ebankdirect_xa, sauf si declaredOnly.
  */
-export async function collectDatasourceNames(ejbDir: string): Promise<string[]> {
+export async function collectDatasourceNames(ejbDir: string, declaredOnly = false): Promise<string[]> {
   const names = new Set<string>();
   for (const file of [
     ...(await collectNamedFiles(ejbDir, "ibm-ejb-jar-bnd.xml")),
@@ -1014,7 +1015,7 @@ export async function collectDatasourceNames(ejbDir: string): Promise<string[]> 
     let m: RegExpExecArray | null;
     while ((m = re.exec(props)) !== null) names.add(m[1].trim());
   }
-  if (names.size === 0) names.add("jdbc/ebankdirect_xa");
+  if (names.size === 0 && !declaredOnly) names.add("jdbc/ebankdirect_xa");
   return [...names].sort();
 }
 

@@ -561,10 +561,14 @@ describe("writeProjectReadme", () => {
     await fs.rm(out, { recursive: true, force: true });
   });
 
-  it("reste utilisable sans modules", async () => {
+  it("ne presume aucune datasource quand l EJB n en declare pas", async () => {
     const out = await fs.mkdtemp(path.join(os.tmpdir(), "readme-vide-"));
+    await fs.mkdir(path.join(out, "projet-seul-ejb"));
     await writeProjectReadme(out, "projet-seul");
-    expect(await fs.readFile(path.join(out, "README.md"), "utf-8")).toContain("# projet-seul");
+    const readme = await fs.readFile(path.join(out, "README.md"), "utf-8");
+    expect(readme).toContain("# projet-seul");
+    expect(readme).toContain("- Aucune datasource.");
+    expect(readme).not.toContain("jdbc/");
     await fs.rm(out, { recursive: true, force: true });
   });
 });
