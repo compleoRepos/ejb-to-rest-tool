@@ -152,7 +152,7 @@ export const generateRouter = router({
 
         if (result.success) {
           // Generate documentation
-          await generateAdapterDocumentation(outputDir, artifactId, result.ejbCount, result.methodCount);
+          await generateAdapterDocumentation(outputDir, artifactId, result.ejbCount, result.methodCount, result.repositoryReadme);
 
           // Package as ZIP (le "adapter" ne vit que dans le nom du livrable).
           const zipPath = path.join(WORK_DIR, `${deliverableName}.zip`);
@@ -415,7 +415,7 @@ export const generateRouter = router({
         });
 
         if (genResult.success) {
-          await generateAdapterDocumentation(outputDir, artifactId, genResult.ejbCount, genResult.methodCount);
+          await generateAdapterDocumentation(outputDir, artifactId, genResult.ejbCount, genResult.methodCount, genResult.repositoryReadme);
 
           const zipPath = path.join(WORK_DIR, `${deliverableName}.zip`);
           await packageAsZip(outputDir, zipPath);

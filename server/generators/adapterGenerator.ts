@@ -19,6 +19,7 @@ import { fixRequestFields } from "./requestFieldsFix";
 import { restoreOriginalPoms } from "./pomPreservationFix";
 import { removeNonEjbExposures } from "./nonEjbExposureFix";
 import { fixRequestLogging } from "./requestLoggingFix";
+import { withoutGeneratedWeb, keepRepositoryFiles, hasRepositoryReadme } from "./repositoryFix";
 import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "./javaRuntime";
 import { writeEndpointDescriptor } from "./descriptorGenerator";
 
@@ -80,6 +81,8 @@ export interface AdapterGenerationResult {
   filesGenerated: number;
   errors: string[];
   log: string;
+  /** Le dépôt d'entrée porte son README, rendu tel quel. */
+  repositoryReadme?: boolean;
 }
 
 /**
@@ -118,8 +121,12 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
     return emptyResult([tooOldJavaMessage(versionInfo.version)]);
   }
 
+  // Module web d'une génération précédente écarté : le nouveau le remplace entièrement.
+  const source = await withoutGeneratedWeb(inputPath);
+  const sourcePath = source.path;
+
   // Copie de l'entrée sans les commentaires des enum, que le moteur lit comme des codes fonction.
-  const engineInput = await prepareEngineInput(inputPath);
+  const engineInput = await prepareEngineInput(sourcePath);
 
   return new Promise((resolve) => {
     const args = [
@@ -150,6 +157,7 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
     proc.on("close", async (code) => {
       await engineInput.cleanup().catch(() => undefined);
       const log = stdout + "\n" + stderr;
+      if (code !== 0) await source.cleanup().catch(() => undefined);
       
       if (code !== 0) {
         const message = /UnsupportedClassVersionError/.test(log)
@@ -198,7 +206,7 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
 
       // Inclure les modules source d'origine (EJB au réacteur, EAR conservé + .ear dans le web).
       try {
-        await includeSourceModules(outputDir, inputPath);
+        await includeSourceModules(outputDir, sourcePath);
       } catch (modErr) {
         stderr += `\n[includeSourceModules] ${(modErr as Error).message}`;
       }
@@ -220,7 +228,7 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
 
       // Interfaces clientes de web services et interfaces @Local : pas des EJB appelables.
       try {
-        const removals = await removeNonEjbExposures(outputDir, inputPath);
+        const removals = await removeNonEjbExposures(outputDir, sourcePath);
         for (const r of removals) stderr += `\n[removeNonEjbExposures] ${r.target} retire (${r.reason})`;
       } catch (nonEjbErr) {
         stderr += `\n[removeNonEjbExposures] ${(nonEjbErr as Error).message}`;
@@ -229,7 +237,7 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
       // Flux des EJB eai-fwk-ejb (UCStrategie) : <flux><entete><fonction>UC</fonction></entete>
       // <object class="VoIn">...</object></flux>, DTO de requete aligne sur la VoIn.
       try {
-        const ucReport = await fixUseCaseEnvelopes(outputDir, inputPath);
+        const ucReport = await fixUseCaseEnvelopes(outputDir, sourcePath);
         for (const warning of ucReport.warnings) stderr += `\n[fixUseCaseEnvelopes] ${warning}`;
       } catch (ucErr) {
         stderr += `\n[fixUseCaseEnvelopes] ${(ucErr as Error).message}`;
@@ -277,7 +285,7 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
 
       // Poms du depot d'origine conserves : le projet livre remplace le depot.
       try {
-        const poms = await restoreOriginalPoms(outputDir, inputPath);
+        const poms = await restoreOriginalPoms(outputDir, sourcePath);
         for (const s of poms.skipped) stderr += `\n[restoreOriginalPoms] ${s}`;
       } catch (pomErr) {
         stderr += `\n[restoreOriginalPoms] ${(pomErr as Error).message}`;
@@ -298,6 +306,16 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         stderr += `\n[writeEndpointDescriptor] ${(descErr as Error).message}`;
       }
 
+      // Fichiers du depot hors module web (docs/, sql/, README...) rendus a l'octet pres.
+      let repositoryReadme = false;
+      try {
+        await keepRepositoryFiles(outputDir, inputPath);
+        repositoryReadme = await hasRepositoryReadme(inputPath);
+      } catch (repoErr) {
+        stderr += `\n[keepRepositoryFiles] ${(repoErr as Error).message}`;
+      }
+      await source.cleanup().catch(() => undefined);
+
       // Count generated files
       const filesGenerated = await countFiles(outputDir);
       
@@ -316,11 +334,13 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         filesGenerated,
         errors: [],
         log: stdout + "\n" + stderr,
+        repositoryReadme,
       });
     });
 
     proc.on("error", (err) => {
       void engineInput.cleanup().catch(() => undefined);
+      void source.cleanup().catch(() => undefined);
       resolve({
         success: false,
         outputDir,
@@ -335,18 +355,20 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
 }
 
 /**
- * Documentation livree avec le projet : un README factuel, tire des modules generes.
+ * Documentation livree avec le projet : un README factuel, tire des modules generes, sauf si le depot
+ * d'entree porte deja le sien.
  */
 export async function generateAdapterDocumentation(
   outputDir: string,
   projectName: string,
   _ejbCount: number,
-  _methodCount: number
+  _methodCount: number,
+  keepReadme = false
 ): Promise<void> {
   for (const obsolete of ["DEVELOPER-GUIDE.md", "DEPLOYMENT.md", "ARCHITECTURE.md"]) {
     await fs.rm(path.join(outputDir, obsolete), { force: true });
   }
-  await writeProjectReadme(outputDir, projectName);
+  if (!keepReadme) await writeProjectReadme(outputDir, projectName);
 }
 
 /**
