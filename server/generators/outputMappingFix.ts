@@ -17,6 +17,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { existsSync } from "fs";
+import { rewriteWebSocle } from "./webPomFix";
 
 const ENVELOPE_JSON_TEMPLATE = (converterPackage: string): string => `package ${converterPackage};
 
@@ -30,8 +31,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -102,9 +105,7 @@ public final class EnvelopeJson {
             return new LinkedHashMap<String, Object>();
         }
         try {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(false);
-            DocumentBuilder builder = factory.newDocumentBuilder();
+            DocumentBuilder builder = newBuilder();
             Document doc = builder.parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
             Element flux = locateFlux(doc);
             return elementToValue(flux);
@@ -112,6 +113,30 @@ public final class EnvelopeJson {
             Map<String, Object> fallback = new LinkedHashMap<String, Object>();
             fallback.put("rawBody", xml);
             return fallback;
+        }
+    }
+
+    /**
+     * Analyseur sans DTD ni entité externe.
+     */
+    static DocumentBuilder newBuilder() throws ParserConfigurationException {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(false);
+        factory.setXIncludeAware(false);
+        factory.setExpandEntityReferences(false);
+        feature(factory, XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        feature(factory, "http://apache.org/xml/features/disallow-doctype-decl", true);
+        feature(factory, "http://xml.org/sax/features/external-general-entities", false);
+        feature(factory, "http://xml.org/sax/features/external-parameter-entities", false);
+        feature(factory, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        return factory.newDocumentBuilder();
+    }
+
+    private static void feature(DocumentBuilderFactory factory, String name, boolean value) {
+        try {
+            factory.setFeature(name, value);
+        } catch (ParserConfigurationException unsupported) {
+            return;
         }
     }
 
@@ -600,12 +625,11 @@ export async function fixWebPomDependencies(outputDir: string): Promise<string[]
 }
 
 /**
- * Reporte dans le pom web les dépendances `ma.eai.*` déclarées par le module `*-ejb`
- * voisin, en scope `provided`. Quand le parent n'hérite pas le framework (parent
- * `ma.eai.midw:general-settings`), l'EJB déclare lui-même `commons-services`,
- * `sop-connector-interfaces` ou `midw-integration` en `provided`, scope non transitif :
- * sans ce report, `Envelope` et `SynchroneService` sont introuvables à la compilation
- * du web. Coordonnées, version et exclusions reprises telles que l'EJB les déclare.
+ * Reporte dans le pom web le socle dont l'adaptateur a besoin, pris dans le pom du module `*-ejb`
+ * voisin (`Envelope`, `ParsingException`, `SynchroneService`), en scope `provided`, logback et log4j
+ * exclus. Quand le parent n'hérite pas le framework (parent `ma.eai.midw:general-settings`), l'EJB
+ * déclare lui-même ce socle en `provided`, scope non transitif : sans ce report, ces classes sont
+ * introuvables à la compilation du web. Sélection détaillée dans `webPomFix`.
  * À appeler après `includeSourceModules`, qui dépose le module `*-ejb` dans la sortie.
  */
 export async function addWebFrameworkDependencies(outputDir: string): Promise<string[]> {
@@ -639,51 +663,7 @@ async function addEjbFrameworkDependencies(webPom: string, content: string): Pro
   } catch {
     return content;
   }
-  ejbPom = ejbPom.replace(/<!--[\s\S]*?-->/g, "").replace(/<dependencyManagement>[\s\S]*?<\/dependencyManagement>/g, "");
-  const depsSection = ejbPom.match(/<dependencies>([\s\S]*?)<\/dependencies>/);
-  if (!depsSection) return content;
-
-  const declared = new Set<string>();
-  const webDeps = content.replace(/<dependencyManagement>[\s\S]*?<\/dependencyManagement>/g, "");
-  for (const m of webDeps.matchAll(/<dependency>([\s\S]*?)<\/dependency>/g)) {
-    const g = m[1].match(/<groupId>\s*([^<\s]+)\s*<\/groupId>/)?.[1];
-    const a = m[1].match(/<artifactId>\s*([^<\s]+)\s*<\/artifactId>/)?.[1];
-    if (g && a) declared.add(`${g}:${a}`);
-  }
-
-  const blocks: string[] = [];
-  for (const m of depsSection[1].matchAll(/<dependency>([\s\S]*?)<\/dependency>/g)) {
-    const body = m[1];
-    const g = body.match(/<groupId>\s*([^<\s]+)\s*<\/groupId>/)?.[1];
-    const a = body.match(/<artifactId>\s*([^<\s]+)\s*<\/artifactId>/)?.[1];
-    if (!g || !a || !g.startsWith("ma.eai.")) continue;
-    if (/<scope>\s*test\s*<\/scope>/.test(body)) continue;
-    if (declared.has(`${g}:${a}`)) continue;
-    declared.add(`${g}:${a}`);
-    const version = body.match(/<version>\s*([^<\s]+)\s*<\/version>/)?.[1];
-    const exclusions = body.match(/[ \t]*<exclusions>[\s\S]*?<\/exclusions>/)?.[0];
-    const lines = [
-      "        <dependency>",
-      `            <groupId>${g}</groupId>`,
-      `            <artifactId>${a}</artifactId>`,
-    ];
-    if (version) lines.push(`            <version>${version}</version>`);
-    lines.push("            <scope>provided</scope>");
-    if (exclusions) {
-      const raw = exclusions.split(/\r?\n/).filter((l) => l.trim().length > 0).map((l) => l.replace(/\t/g, "    "));
-      const indent = Math.min(...raw.map((l) => l.length - l.trimStart().length));
-      for (const l of raw) lines.push("            " + l.slice(indent));
-    }
-    lines.push("        </dependency>");
-    blocks.push(lines.join("\n"));
-  }
-  if (blocks.length === 0) return content;
-
-  const closing = content.lastIndexOf("</dependencies>");
-  const dmClose = content.lastIndexOf("</dependencyManagement>");
-  if (closing < 0 || closing < dmClose) return content;
-  const lineStart = content.lastIndexOf("\n", closing) + 1;
-  return content.slice(0, lineStart) + "\n" + blocks.join("\n\n") + "\n" + content.slice(lineStart);
+  return rewriteWebSocle(content, ejbPom, ejbDir);
 }
 
 /**
