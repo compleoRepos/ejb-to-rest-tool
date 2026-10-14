@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
-import { findGeneratedWeb, withoutGeneratedWeb, keepRepositoryFiles, hasRepositoryReadme } from "./repositoryFix";
+import { findGeneratedWeb, withoutGeneratedWeb, keepRepositoryFiles, hasRepositoryReadme, previousWebBasePackage } from "./repositoryFix";
 import { generateAdapterDocumentation } from "./adapterGenerator";
 
 const LATIN1 = Buffer.from([0x63, 0x6f, 0x6e, 0x74, 0x72, 0xf4, 0x6c, 0x65, 0x0d, 0x0a]);
@@ -106,6 +106,13 @@ describe("depot qui porte deja son module web", () => {
     expect(await read(output, "README.md")).toEqual(await read(input, "README.md"));
     expect(await read(output, "sql/sequences.sql")).toEqual(await read(input, "sql/sequences.sql"));
     expect(await read(output, ".gitignore")).toEqual(await read(input, ".gitignore"));
+  });
+
+  it("reprend le paquetage de base du module web deja genere", async () => {
+    await write(input, "neobank-x-web/src/main/java/ma/eai/boa/xbanking/config/JaxRsApplication.java", "package ma.eai.boa.xbanking.config;\r\n\r\npublic class JaxRsApplication {}\r\n");
+    expect(await previousWebBasePackage(input)).toBe("ma.eai.boa.xbanking");
+    await fs.rm(path.join(input, "neobank-x-web/src/main/resources/descriptor"), { recursive: true });
+    expect(await previousWebBasePackage(input)).toBeNull();
   });
 
   it("le README du depot n'est pas reecrit par la documentation", async () => {

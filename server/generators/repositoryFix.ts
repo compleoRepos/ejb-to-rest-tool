@@ -66,6 +66,22 @@ export async function keepRepositoryFiles(outputDir: string, inputPath: string):
   return copied;
 }
 
+/**
+ * Paquetage de base du module web d'une génération précédente, lu sur `JaxRsApplication` (`<base>.config`).
+ * Le reprendre évite de renommer toutes les classes du web à chaque régénération.
+ */
+export async function previousWebBasePackage(inputPath: string): Promise<string | null> {
+  const web = await findGeneratedWeb(inputPath);
+  if (!web) return null;
+  for (const rel of await listFiles(path.join(inputPath, web, "src", "main", "java"), "")) {
+    if (!rel.endsWith("/config/JaxRsApplication.java")) continue;
+    const content = await fs.readFile(path.join(inputPath, web, "src", "main", "java", rel), "utf-8");
+    const pkg = content.match(/^\s*package\s+([\w.]+)\.config\s*;/m)?.[1];
+    if (pkg) return pkg;
+  }
+  return null;
+}
+
 export async function hasRepositoryReadme(inputPath: string): Promise<boolean> {
   return exists(path.join(inputPath, "README.md"));
 }
