@@ -20,6 +20,7 @@ import { restoreOriginalPoms } from "./pomPreservationFix";
 import { removeNonEjbExposures } from "./nonEjbExposureFix";
 import { fixRequestLogging } from "./requestLoggingFix";
 import { withoutGeneratedWeb, keepRepositoryFiles, hasRepositoryReadme } from "./repositoryFix";
+import { writeFormattingFiles } from "./formattingFix";
 import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "./javaRuntime";
 import { writeEndpointDescriptor } from "./descriptorGenerator";
 
@@ -304,6 +305,13 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         await writeEndpointDescriptor(outputDir, artifactId);
       } catch (descErr) {
         stderr += `\n[writeEndpointDescriptor] ${(descErr as Error).message}`;
+      }
+
+      // .editorconfig, .gitattributes, formateur du module web (profil desactive par defaut).
+      try {
+        await writeFormattingFiles(outputDir);
+      } catch (fmtErr) {
+        stderr += `\n[writeFormattingFiles] ${(fmtErr as Error).message}`;
       }
 
       // Fichiers du depot hors module web (docs/, sql/, README...) rendus a l'octet pres.
