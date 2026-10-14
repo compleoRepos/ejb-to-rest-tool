@@ -18,6 +18,7 @@ import { fixReturnCodeReading } from "./returnCodeFix";
 import { fixRequestFields } from "./requestFieldsFix";
 import { restoreOriginalPoms } from "./pomPreservationFix";
 import { removeNonEjbExposures } from "./nonEjbExposureFix";
+import { fixRequestLogging } from "./requestLoggingFix";
 import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "./javaRuntime";
 import { writeEndpointDescriptor } from "./descriptorGenerator";
 
@@ -265,6 +266,13 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         await fixReturnCodeReading(outputDir);
       } catch (rcErr) {
         stderr += `\n[fixReturnCodeReading] ${(rcErr as Error).message}`;
+      }
+
+      // Journal des requetes : chemin seul, sans les parametres.
+      try {
+        await fixRequestLogging(outputDir);
+      } catch (logErr) {
+        stderr += `\n[fixRequestLogging] ${(logErr as Error).message}`;
       }
 
       // Poms du depot d'origine conserves : le projet livre remplace le depot.

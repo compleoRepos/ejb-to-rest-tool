@@ -366,7 +366,7 @@ describe("fixWebPomDependencies", () => {
 });
 
 describe("addWebFrameworkDependencies", () => {
-  it("reporte en provided les dépendances ma.eai.* déclarées par l'EJB voisin", async () => {
+  it("reporte en provided le seul socle utile au web, logback exclu", async () => {
     const base = await fs.mkdtemp(path.join(os.tmpdir(), "webdep-"));
     const webDir = path.join(base, "opposition-carte-web");
     const ejbDir = path.join(base, "opposition-carte-ejb");
@@ -422,13 +422,12 @@ describe("addWebFrameworkDependencies", () => {
     const result = await fs.readFile(path.join(webDir, "pom.xml"), "utf-8");
     expect(touched).toHaveLength(1);
     expect(result.match(/sop-connector-interfaces/g)).toHaveLength(1);
-    expect(result).toContain("<groupId>ma.eai.idev</groupId>");
-    expect(result).toContain("<version>1.5.14</version>");
-    expect(result).toContain("<artifactId>spring-jms</artifactId>");
+    expect(result).not.toContain("midw-integration");
+    expect(result).toContain("<artifactId>*</artifactId>");
     expect(result).not.toContain("test-only");
     expect(result).not.toContain("axis");
     expect(result).not.toContain("ignored");
-    expect(result.match(/<scope>provided<\/scope>/g)).toHaveLength(2);
+    expect(result.match(/<scope>provided<\/scope>/g)).toHaveLength(1);
     await fs.rm(base, { recursive: true, force: true });
   });
 

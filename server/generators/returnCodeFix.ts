@@ -109,10 +109,7 @@ const RETURN_CODE_METHODS = `
     }
 
     private static Document parse(String xml) throws Exception {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(false);
-        DocumentBuilder builder = factory.newDocumentBuilder();
-        return builder.parse(new InputSource(new StringReader(xml)));
+        return newBuilder().parse(new InputSource(new StringReader(xml)));
     }
 `;
 
