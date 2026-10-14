@@ -11,6 +11,7 @@ import { generateAdapter, generateAdapterDocumentation, packageAsZip } from "../
 import { resolveJavaBinary, detectJavaVersion, MIN_JAVA_MAJOR } from "../generators/javaRuntime";
 import { detectBasePackage } from "../generators/outputMappingFix";
 import { extractArchive } from "../generators/archiveExtract";
+import { previousWebBasePackage } from "../generators/repositoryFix";
 import { generateBianWrappers, packageBianAsZip } from "../generators/bianGenerator";
 import type { BianProject, AdapterEndpoint } from "../generators/bianGenerator";
 import { storagePut } from "../storage";
@@ -134,9 +135,10 @@ export const generateRouter = router({
           }
         }
 
-        // Meme espace de nommage que l'EJB initial (detecte des sources).
+        // Meme espace de nommage que le module web deja genere, sinon que l'EJB initial (detecte des sources).
         const basePackage =
           input.basePackage ||
+          (await previousWebBasePackage(inputPath)) ||
           (await detectBasePackage(inputPath)) ||
           `${groupId}.${name.replace(/[-_]/g, "")}`;
 
@@ -401,9 +403,11 @@ export const generateRouter = router({
           }
         }
 
-        // Meme espace de nommage que l'EJB initial (detecte des sources).
+        // Meme espace de nommage que le module web deja genere, sinon que l'EJB initial (detecte des sources).
         const basePackage =
-          (await detectBasePackage(inputPath)) || `${groupId}.${fileName.replace(/[-_]/g, "")}`;
+          (await previousWebBasePackage(inputPath)) ||
+          (await detectBasePackage(inputPath)) ||
+          `${groupId}.${fileName.replace(/[-_]/g, "")}`;
 
         const genResult = await generateAdapter({
           inputPath,
