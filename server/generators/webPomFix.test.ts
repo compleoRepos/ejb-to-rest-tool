@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseDependencies, selectSocleDependencies, webDependencyBlock, rewriteWebSocle } from "./webPomFix";
+import { parseDependencies, selectSocleDependencies, webDependencyBlock, rewriteWebSocle, withLogExclusions } from "./webPomFix";
 import { patchRequestLoggingSource } from "./requestLoggingFix";
 import { patchEnvelopeJsonSource } from "./returnCodeFix";
 
@@ -74,9 +74,9 @@ describe("selectSocleDependencies", () => {
     expect(names(selectSocleDependencies(deps))).toEqual(["midw-integration"]);
   });
 
-  it("reprend tout le socle quand aucun porteur connu n'est declare", () => {
+  it("ne reprend rien quand aucun porteur n'est declare : le framework vient du parent", () => {
     const deps = parseDependencies(dep("ma.eai.midw", "properties-loader") + dep("ma.eai.boa.tv", "referentiel-compte-client"));
-    expect(names(selectSocleDependencies(deps))).toEqual(["properties-loader", "referentiel-compte-client"]);
+    expect(selectSocleDependencies(deps)).toEqual([]);
   });
 
   it("ne reprend rien quand l'EJB herite le socle de son parent", () => {
@@ -130,10 +130,34 @@ describe("rewriteWebSocle", () => {
     expect(rewriteWebSocle(once, VIREMENT_PERMANENT_EJB, "neobank-virement-permanent-ejb")).toBe(once);
   });
 
-  it("laisse intact un pom web dont l'EJB herite le socle", () => {
+  it("n'ajoute aucun socle quand l'EJB herite le framework de son parent", () => {
     const ejb = `<project><dependencies>${dep("javax.mail", "mail")}</dependencies></project>`;
     const web = WEB_POM.replace(/\s*<dependency>\s*<groupId>ma\.eai\.commons<\/groupId>[\s\S]*?<\/dependency>/, "");
-    expect(rewriteWebSocle(web, ejb, "neobank-virement-permanent-ejb")).toBe(web);
+    const out = rewriteWebSocle(web, ejb, "neobank-virement-permanent-ejb");
+    expect(out.match(/<dependency>/g)).toHaveLength(3);
+    expect(rewriteWebSocle(out, ejb, "neobank-virement-permanent-ejb")).toBe(out);
+  });
+});
+
+describe("withLogExclusions", () => {
+  it("l'EJB du depot, qui peut declarer logback en compile, n'en apporte pas au web", () => {
+    const block = `<dependency>
+            <groupId>ma.eai.boa.tv</groupId>
+            <artifactId>neobank-mise-disposition-ejb</artifactId>
+            <version>1.0</version>
+            <scope>provided</scope>
+        </dependency>`;
+    const out = withLogExclusions(block);
+    expect(out).toContain("<artifactId>neobank-mise-disposition-ejb</artifactId>");
+    expect(out).toContain("<scope>provided</scope>");
+    expect(out).toMatch(/<groupId>ch\.qos\.logback<\/groupId>\s*<artifactId>\*<\/artifactId>/);
+    expect(withLogExclusions(out)).toBe(out);
+  });
+
+  it("rewriteWebSocle exclut logback de la dependance a l'EJB", () => {
+    const out = rewriteWebSocle(WEB_POM, VIREMENT_PERMANENT_EJB, "neobank-virement-permanent-ejb");
+    const ejb = out.match(/<dependency>(?:(?!<\/dependency>)[\s\S])*neobank-virement-permanent-ejb[\s\S]*?<\/dependency>/)![0];
+    expect(ejb).toContain("<groupId>ch.qos.logback</groupId>");
   });
 });
 

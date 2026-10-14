@@ -37,14 +37,14 @@ export function parseDependencies(section: string): PomDependency[] {
  * Dépendances du socle à reporter dans le web, choisies parmi celles de l'EJB (hors test).
  * `sop-connector-interfaces` porte `SynchroneService` et tire `commons-services` ; à défaut,
  * `midw-integration` tire `sop-connector-interfaces`. `commons-services` est repris s'il est déclaré.
- * Si l'EJB déclare du socle sans aucun de ces artefacts, tout le socle est repris, comme avant.
+ * Sans aucun de ces artefacts, l'EJB hérite le framework de son parent, que le web partage : rien à reporter.
  */
 export function selectSocleDependencies(ejbDependencies: PomDependency[]): PomDependency[] {
   const socle = ejbDependencies.filter(
     (d) => d.groupId.startsWith("ma.eai.") && !/<scope>\s*test\s*<\/scope>/.test(d.body)
   );
   const service = SERVICE_CARRIERS.map((a) => socle.find((d) => d.artifactId === a)).find(Boolean);
-  if (!service) return socle;
+  if (!service) return [];
   const envelope = socle.find((d) => d.artifactId === ENVELOPE_CARRIER);
   return socle.filter((d) => d === service || d === envelope);
 }
@@ -73,6 +73,16 @@ function existingExclusions(body: string): [string, string][] {
     if (g && a) out.push([g, a]);
   }
   return out;
+}
+
+/**
+ * Dépendance à l'EJB du dépôt sans logback ni log4j : l'EJB peut les déclarer en compile, le web ne
+ * doit pas les voir. Sans effet sur l'EAR, qui embarque l'EJB depuis son propre module.
+ */
+export function withLogExclusions(block: string): string {
+  const body = block.replace(/^<dependency>|<\/dependency>$/g, "");
+  const kept = body.replace(/\s*<exclusions>[\s\S]*?<\/exclusions>/, "").replace(/\s+$/, "");
+  return `<dependency>${kept}\n${exclusionLines(existingExclusions(body)).join("\n")}\n        </dependency>`;
 }
 
 function exclusionLines(existing: [string, string][]): string[] {
@@ -116,7 +126,7 @@ export function rewriteWebSocle(webPom: string, ejbPom: string, ejbArtifactId: s
     const [dep] = parseDependencies(m[0]);
     if (!dep) continue;
     if (dep.groupId.startsWith("ma.eai.") && dep.artifactId !== ejbArtifactId) continue;
-    kept.push("        " + m[0]);
+    kept.push("        " + (dep.artifactId === ejbArtifactId ? withLogExclusions(m[0]) : m[0]));
   }
   const blocks = [...kept, ...selected.map(webDependencyBlock)];
   const lineStart = webPom.lastIndexOf("\n", close) + 1;
