@@ -18,22 +18,35 @@ interface DescriptorField {
   children?: DescriptorField[];
 }
 
-interface DescriptorEndpoint {
+export interface DescriptorEndpoint {
+  fonction: string;
   operation: string;
   method: string;
   path: string;
+  test: boolean;
+  exposer: boolean;
+  idempotence: "cle" | "sans";
+  query_params: DescriptorField[];
+  query_libre?: boolean;
   request_fields: DescriptorField[];
   response_fields: DescriptorField[];
 }
 
-interface Descriptor {
+export interface Descriptor {
+  format: number;
   adapter_name: string;
   adapter_base_url: string;
   bian: { service_domain: string };
+  codes_retour: { succes: string[]; metier: string[]; saisie: string[] };
   endpoints: DescriptorEndpoint[];
 }
 
+export const DESCRIPTOR_FORMAT = 4;
+
 const APP_PATH = "/api";
+
+/** Classement par défaut des codes retour, celui du CodeMapper des resources générées. */
+const DEFAULT_RETURN_CODES = { succes: ["000"], metier: ["001", "002", "005"], saisie: ["333", "444"] };
 
 /**
  * Reconstruit et écrit le descripteur. Renvoie le chemin du fichier écrit, ou null
@@ -43,7 +56,26 @@ export async function writeEndpointDescriptor(
   outputDir: string,
   artifactId: string
 ): Promise<string | null> {
-  const javaFiles = await collectFiles(outputDir, ".java");
+  const built = await buildEndpointDescriptor(outputDir, artifactId);
+  if (!built) return null;
+  const { descriptor, webModuleRoot } = built;
+
+  const descriptorDir = path.join(webModuleRoot, "src", "main", "resources", "descriptor");
+  await fs.mkdir(descriptorDir, { recursive: true });
+  const descriptorPath = path.join(descriptorDir, `${artifactId}.json`);
+  await fs.writeFile(descriptorPath, JSON.stringify(descriptor, null, 2) + "\n");
+  return descriptorPath;
+}
+
+/**
+ * Reconstruit le descripteur depuis les sources d'un dépôt qui porte un module web
+ * généré, sans rien écrire. Sert aussi à mettre au format courant un dépôt déjà exposé.
+ */
+export async function buildEndpointDescriptor(
+  projectDir: string,
+  artifactId: string
+): Promise<{ descriptor: Descriptor; webModuleRoot: string } | null> {
+  const javaFiles = await collectFiles(projectDir, ".java");
   const resourceFiles = javaFiles.filter(
     (f) => f.endsWith("Resource.java") && f.includes(`${path.sep}resource${path.sep}`)
   );
@@ -60,25 +92,24 @@ export async function writeEndpointDescriptor(
   const webModuleRoot = moduleRootOf(resourceFiles[0]);
   if (!webModuleRoot) return null;
 
-  const descriptor: Descriptor = {
-    adapter_name: artifactId,
-    adapter_base_url: `http://localhost:9080/${artifactId}${APP_PATH}`,
-    bian: { service_domain: "" },
-    endpoints,
+  return {
+    webModuleRoot,
+    descriptor: {
+      format: DESCRIPTOR_FORMAT,
+      adapter_name: artifactId,
+      adapter_base_url: `http://localhost:9080/${artifactId}`,
+      bian: { service_domain: await serviceDomainOf(projectDir) },
+      codes_retour: DEFAULT_RETURN_CODES,
+      endpoints,
+    },
   };
-
-  const descriptorDir = path.join(webModuleRoot, "src", "main", "resources", "descriptor");
-  await fs.mkdir(descriptorDir, { recursive: true });
-  const descriptorPath = path.join(descriptorDir, `${artifactId}.json`);
-  await fs.writeFile(descriptorPath, JSON.stringify(descriptor, null, 2) + "\n");
-  return descriptorPath;
 }
 
 /**
  * Extrait les endpoints d'une Resource : chemin de base de la classe, puis pour
  * chaque méthode le verbe HTTP, le sous-chemin, l'opération et ses champs.
  */
-async function parseResource(
+export async function parseResource(
   content: string,
   dtoIndex: Map<string, string>
 ): Promise<DescriptorEndpoint[]> {
@@ -94,8 +125,14 @@ async function parseResource(
   const lines = content.split(/\r?\n/);
   let httpMethod: string | null = null;
   let subPath = "";
+  let fonction = "";
 
   for (const line of lines) {
+    const fm = line.match(/code fonction\s*<b>\s*([^<\s]+)\s*<\/b>/i);
+    if (fm) {
+      fonction = fm[1];
+      continue;
+    }
     const hm = line.match(/@(GET|POST|PUT|DELETE|PATCH)\b/);
     if (hm) {
       httpMethod = hm[1];
@@ -110,40 +147,48 @@ async function parseResource(
     if (sig && httpMethod) {
       const methodName = sig[1];
       const params = sig[2];
-      const requestFields = extractRequestFields(params, subpkg, dtoIndex);
-      const responseClass = capitalize(methodName) + "Response";
-      const responseFields = parseDtoFields(dtoIndex, subpkg, responseClass);
-
-      endpoints.push({
+      const fullPath = normalizePath(APP_PATH + classBase + subPath);
+      const endpoint: DescriptorEndpoint = {
+        fonction: fonction || methodName,
         operation: methodName,
         method: httpMethod,
-        path: normalizePath(APP_PATH + classBase + subPath),
-        request_fields: requestFields,
-        response_fields: responseFields,
-      });
+        path: fullPath,
+        test: isTestPath(fullPath),
+        exposer: true,
+        idempotence: httpMethod === "GET" ? "sans" : "cle",
+        query_params: extractQueryParams(params),
+        request_fields: extractBodyFields(params, subpkg, dtoIndex),
+        response_fields: [],
+      };
+      if (/@Context\s+UriInfo/.test(params)) endpoint.query_libre = true;
+      endpoints.push(endpoint);
       httpMethod = null;
       subPath = "";
+      fonction = "";
     }
   }
   return endpoints;
 }
 
 /**
- * Champs de la requête : soit les @QueryParam de la signature, soit les champs du
- * DTO Request référencé en corps.
+ * Paramètres de requête : les @QueryParam de la signature.
  */
-function extractRequestFields(
+function extractQueryParams(params: string): DescriptorField[] {
+  return [...params.matchAll(/@QueryParam\("([^"]+)"\)\s*([\w.<>]+)\s+\w+/g)].map((m) => ({
+    name: m[1],
+    type: mapType(m[2]),
+    required: false,
+  }));
+}
+
+/**
+ * Corps de la requête : les champs du DTO Request référencé en paramètre.
+ */
+function extractBodyFields(
   params: string,
   subpkg: string,
   dtoIndex: Map<string, string>
 ): DescriptorField[] {
-  if (/@QueryParam/.test(params)) {
-    return [...params.matchAll(/@QueryParam\("([^"]+)"\)\s*([\w.<>]+)\s+\w+/g)].map((m) => ({
-      name: m[1],
-      type: mapType(m[2]),
-      required: false,
-    }));
-  }
   const reqMatch = params.match(/(\w+Request)\s+\w+/);
   if (reqMatch) {
     return parseDtoFields(dtoIndex, subpkg, reqMatch[1]);
@@ -284,8 +329,28 @@ function mapType(javaType: string): string {
   }
 }
 
-function capitalize(s: string): string {
-  return s.length === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1);
+/**
+ * Fonction de test : chemin sous /test/ ou suffixe --tst, --test, éventuellement numéroté.
+ */
+export function isTestPath(p: string): boolean {
+  return /\/test\//i.test(p) || /--te?st\d*$/i.test(p);
+}
+
+/**
+ * Domaine BIAN du dépôt en kebab-case, lu dans l'adresse GitLab du pom racine
+ * (`.../NEOBANK/CARD_CASE/...` donne `card-case`). Vide si introuvable.
+ */
+export async function serviceDomainOf(projectDir: string): Promise<string> {
+  try {
+    return domainFromText(await fs.readFile(path.join(projectDir, "pom.xml"), "utf-8"));
+  } catch {
+    return "";
+  }
+}
+
+export function domainFromText(text: string): string {
+  const m = text.match(/NEOBANK\/([A-Z][A-Z_]+)/);
+  return m ? m[1].toLowerCase().replace(/_/g, "-") : "";
 }
 
 function normalizePath(p: string): string {
