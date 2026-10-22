@@ -25,7 +25,7 @@ import {
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 
-type TabMode = "ejb" | "json";
+type TabMode = "ejb" | "json" | "bff";
 
 const JDK_HOME_STORAGE_KEY = "ejb-to-rest.generatorJdkHome";
 
@@ -117,10 +117,21 @@ export default function Generator() {
               <FileJson className="w-4 h-4" />
               JSON / WSDL descripteurs
             </button>
+            <button
+              onClick={() => setActiveTab("bff")}
+              className={`flex items-center gap-2 px-5 py-3 rounded-lg text-sm font-medium transition-all duration-150 border ${
+                activeTab === "bff"
+                  ? "bg-[oklch(0.78_0.15_200/0.1)] border-[oklch(0.78_0.15_200/0.5)] text-cyan"
+                  : "bg-card/50 border-border text-muted-foreground hover:text-foreground hover:border-[oklch(0.78_0.15_200/0.3)]"
+              }`}
+            >
+              <Globe className="w-4 h-4" />
+              Couche API (dépôt bff-api)
+            </button>
           </div>
 
           {/* Tab Content */}
-          {activeTab === "ejb" ? <EjbUploadTab /> : <JsonUploadTab />}
+          {activeTab === "ejb" ? <EjbUploadTab /> : activeTab === "json" ? <JsonUploadTab /> : <BffTab />}
         </div>
       </main>
     </div>
@@ -1103,6 +1114,117 @@ function BianResultsList({ results }: { results: BianWrapperResult[] }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB 3 : Couche API sur un dépôt de domaine archetype-bff-api
+// ═══════════════════════════════════════════════════════════════════════════════
+interface BffResult {
+  repository: string;
+  domain: string;
+  services: number;
+  operations: number;
+  excluded: number;
+  defaultSecurity: number;
+  filesWritten: number;
+  reportText: string;
+  zipUrl: string;
+}
+
+async function uploadFiles(endpoint: string, files: File[]) {
+  const formData = new FormData();
+  for (const file of files) formData.append("files", file);
+  const response = await fetch(endpoint, { method: "POST", body: formData, credentials: "include" });
+  if (!response.ok) throw new Error("Échec de l'upload des fichiers");
+  const data = await response.json();
+  if (!data.success || !data.files?.length) throw new Error("Aucun fichier n'a été uploadé correctement");
+  return data.files as { originalName: string; storedPath: string }[];
+}
+
+function BffTab() {
+  const [repository, setRepository] = useState<File | null>(null);
+  const [descriptors, setDescriptors] = useState<File[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [result, setResult] = useState<BffResult | null>(null);
+  const bffMutation = trpc.generate.bff.useMutation();
+
+  const generate = async () => {
+    if (!repository) {
+      toast.error("Choisir le zip du dépôt neobank-<domaine>-api");
+      return;
+    }
+    setIsGenerating(true);
+    setResult(null);
+    try {
+      const [repo] = await uploadFiles("/api/upload/ejb", [repository]);
+      const descs = descriptors.length > 0 ? await uploadFiles("/api/upload/json", descriptors) : [];
+      const res = await bffMutation.mutateAsync({ repository: repo, descriptors: descs });
+      setResult(res);
+      toast.success(`${res.operations} opérations générées dans ${res.repository}`);
+    } catch (err: any) {
+      toast.error(err.message || "Erreur lors de la génération");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <div className="p-5 rounded-lg border border-border bg-card space-y-4">
+        <div>
+          <label className="block text-sm font-medium mb-2">Dépôt de domaine (zip de neobank-&lt;domaine&gt;-api)</label>
+          <input
+            type="file"
+            accept=".zip"
+            onChange={(e) => setRepository(e.target.files?.[0] ?? null)}
+            className="text-sm text-muted-foreground"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-2">Descripteurs au format 4 des services du domaine</label>
+          <input
+            type="file"
+            accept=".json"
+            multiple
+            onChange={(e) => setDescriptors(Array.from(e.target.files ?? []))}
+            className="text-sm text-muted-foreground"
+          />
+          {descriptors.length > 0 && (
+            <p className="text-xs text-muted-foreground mt-2">{descriptors.map((d) => d.name).join(", ")}</p>
+          )}
+        </div>
+        <Button onClick={generate} disabled={isGenerating || !repository} className="gap-2">
+          {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+          Générer la couche API
+        </Button>
+      </div>
+
+      {result && (
+        <div className="p-5 rounded-lg border border-border bg-card space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="w-4 h-4 text-[oklch(0.82_0.25_140)]" />
+              <span className="font-mono text-sm font-medium">{result.repository}</span>
+            </div>
+            <a href={result.zipUrl} download>
+              <Button size="sm" variant="outline" className="text-xs gap-1">
+                <Download className="w-3 h-3" />
+                Télécharger ZIP
+              </Button>
+            </a>
+          </div>
+          <div className="space-y-1">
+            <StatRow label="Services" value={String(result.services)} />
+            <StatRow label="Opérations générées" value={String(result.operations)} />
+            <StatRow label="Opérations exclues" value={String(result.excluded)} />
+            <StatRow label="Ressource de sécurité par défaut" value={String(result.defaultSecurity)} />
+            <StatRow label="Fichiers écrits" value={String(result.filesWritten)} />
+          </div>
+          <pre className="text-xs bg-background/60 p-3 rounded overflow-x-auto whitespace-pre">{result.reportText}</pre>
+        </div>
+      )}
     </div>
   );
 }

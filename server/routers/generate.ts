@@ -13,6 +13,7 @@ import { detectBasePackage } from "../generators/outputMappingFix";
 import { extractArchive } from "../generators/archiveExtract";
 import { previousWebBasePackage } from "../generators/repositoryFix";
 import { generateBianWrappers, packageBianAsZip } from "../generators/bianGenerator";
+import { generateBffFromArchive } from "../generators/bff/bffGenerator";
 import type { BianProject, AdapterEndpoint } from "../generators/bianGenerator";
 import { storagePut } from "../storage";
 import { registerLocalDownload } from "../localDownload";
@@ -352,6 +353,60 @@ export const generateRouter = router({
   /**
    * Generate Adapter from uploaded EJB project (simplified - reads from upload path).
    */
+  /**
+   * Couche API sur un dépôt de domaine issu de archetype-bff-api : le zip du dépôt et les
+   * descripteurs au format 4 des services exposés du domaine.
+   */
+  bff: publicProcedure
+    .input(
+      z.object({
+        repository: z.object({ originalName: z.string(), storedPath: z.string() }),
+        descriptors: z.array(z.object({ originalName: z.string(), storedPath: z.string() })),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const workDir = path.join(WORK_DIR, `bff-${Date.now()}`);
+      await fs.mkdir(workDir, { recursive: true });
+      const descriptorDir = path.join(workDir, "descripteurs");
+      await fs.mkdir(descriptorDir, { recursive: true });
+      const descriptorFiles: string[] = [];
+      for (const d of input.descriptors) {
+        const target = path.join(descriptorDir, path.basename(d.originalName));
+        await fs.copyFile(d.storedPath, target);
+        descriptorFiles.push(target);
+      }
+
+      let result;
+      try {
+        result = await generateBffFromArchive(input.repository.storedPath, descriptorFiles, workDir);
+      } catch (err) {
+        await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+        throw new TRPCError({ code: "BAD_REQUEST", message: (err as Error).message });
+      }
+
+      const zipName = path.basename(result.zipPath);
+      let zipUrl: string;
+      try {
+        const s3Result = await storagePut(`generations/bff/${zipName}`, await fs.readFile(result.zipPath), "application/zip");
+        zipUrl = s3Result.url;
+      } catch {
+        zipUrl = await registerLocalDownload(result.zipPath, zipName);
+      }
+
+      const { report } = result;
+      return {
+        repository: report.repository,
+        domain: report.domain,
+        services: report.services.length,
+        operations: report.services.reduce((n, s) => n + s.operations.length, 0),
+        excluded: report.services.reduce((n, s) => n + s.excluded.length, 0),
+        defaultSecurity: report.defaultSecurity.length,
+        filesWritten: report.written.length,
+        reportText: result.reportText,
+        zipUrl,
+      };
+    }),
+
   adapterFromUpload: publicProcedure
     .input(
       z.object({
