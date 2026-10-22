@@ -203,7 +203,7 @@ describe("generateBffLayer", () => {
     );
     expect(controller).toContain('@RequestMapping("/api/v1/commande-chequier")');
     expect(controller).toContain('@PostMapping("/enrg-commande")');
-    expect(controller).toContain('@RequestHeader("Idempotency-Key") String idempotencyKey');
+    expect(controller).toContain('@RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey');
     expect(controller).toContain('idempotencyService.execute(idempotencyKey, SERVICE, "enrgCommande", request,');
     expect(controller).toContain('@RequestParam(name = "entete.numAccount", required = false) String enteteNumAccount');
     expect(controller).not.toContain("reloadconfig");
@@ -223,6 +223,28 @@ describe("generateBffLayer", () => {
       "utf-8"
     );
     expect(modif).toContain('@NotNull @JsonProperty("id-client") String idClient');
+  });
+
+  it("réserve la clé d'idempotence de façon atomique et refuse une clé invalide en 400", async () => {
+    await generateBffLayer(root, [descriptor()]);
+    const read = (rel: string) => fs.readFile(path.join(root, rel), "utf-8");
+
+    const store = await read(`${P}-container/${JAVA}/infrastructure/idempotency/DataGridOperationIdempotencyStore.java`);
+    expect(store).toContain("return dataGrid.putIfAbsent(cacheName, key, payload, ttlSeconds(record));");
+    expect(store).not.toContain("map(payload::equals)");
+
+    const service = await read(`${P}-application/${JAVA}/application/idempotency/OperationIdempotencyService.java`);
+    expect(service).toContain('Pattern.compile("[A-Za-z0-9._:@-]{1,118}")');
+    expect(service).toContain("throw new IdempotencyKeyFormatException(");
+
+    const handler = await read(`${P}-application/${JAVA}/application/error/UpstreamExceptionHandler.java`);
+    expect(handler).toContain("@ExceptionHandler(IdempotencyKeyFormatException.class)");
+    expect(handler).toContain("respond(HttpStatus.BAD_REQUEST, null, ex.getMessage(), request)");
+
+    await read(`${P}-domain/${P}-domain-core/${JAVA}/domain/exception/IdempotencyKeyFormatException.java`);
+    await read(`${P}-application/src/test/java/ma/eai/msiboa/api/application/error/IdempotencyKeyStatusTest.java`);
+    const storeTest = await read(`${P}-container/src/test/java/ma/eai/msiboa/api/infrastructure/idempotency/DataGridOperationIdempotencyStoreTest.java`);
+    expect(storeTest).toContain("void twoConcurrentRequestsOnSameKeyExecuteOnce()");
   });
 
   it("donne la même sortie à chaque génération et retire un service retiré", async () => {

@@ -74,6 +74,18 @@ public class UpstreamTechnicalException extends UpstreamException {
     }
 }
 `,
+  "<P>-domain/<P>-domain-core/src/main/java/ma/eai/msiboa/api/domain/exception/IdempotencyKeyFormatException.java": `package ma.eai.msiboa.api.domain.exception;
+
+/**
+ * Cle d'idempotence absente ou hors du format accepte par le stockage des traces.
+ */
+public class IdempotencyKeyFormatException extends DomainException {
+
+    public IdempotencyKeyFormatException(String message) {
+        super(message);
+    }
+}
+`,
   "<P>-domain/<P>-application-service/src/main/java/ma/eai/msiboa/api/domain/idempotency/model/OperationIdempotencyRecord.java": `package ma.eai.msiboa.api.domain.idempotency.model;
 
 import java.time.ZonedDateTime;
@@ -138,6 +150,7 @@ import java.time.Instant;
 
 import jakarta.servlet.http.HttpServletRequest;
 import ma.eai.idev.fwk.logging.EaiLog;
+import ma.eai.msiboa.api.domain.exception.IdempotencyKeyFormatException;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
 import ma.eai.msiboa.api.domain.exception.UpstreamException;
 import ma.eai.msiboa.api.domain.exception.UpstreamTechnicalException;
@@ -185,15 +198,27 @@ public class UpstreamExceptionHandler {
         return build(HttpStatus.BAD_GATEWAY, ex, TECHNICAL_MESSAGE, request);
     }
 
+    @ExceptionHandler(IdempotencyKeyFormatException.class)
+    public ResponseEntity<UpstreamApiError> handleIdempotencyKey(IdempotencyKeyFormatException ex, HttpServletRequest request) {
+        return respond(HttpStatus.BAD_REQUEST, null, ex.getMessage(), request);
+    }
+
     private ResponseEntity<UpstreamApiError> build(HttpStatus status,
                                                    UpstreamException ex,
                                                    String message,
                                                    HttpServletRequest request) {
+        return respond(status, ex.getCode(), message, request);
+    }
+
+    private ResponseEntity<UpstreamApiError> respond(HttpStatus status,
+                                                     String code,
+                                                     String message,
+                                                     HttpServletRequest request) {
         UpstreamApiError error = new UpstreamApiError(
                 Instant.now(),
                 status.value(),
                 status.getReasonPhrase(),
-                ex.getCode(),
+                code,
                 message,
                 request.getRequestURI(),
                 MDC.get(correlationHeaderName)
@@ -211,8 +236,10 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.HexFormat;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 import ma.eai.msiboa.api.domain.exception.IdempotencyConflictException;
+import ma.eai.msiboa.api.domain.exception.IdempotencyKeyFormatException;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
 import ma.eai.msiboa.api.domain.idempotency.model.IdempotencyStatus;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
@@ -227,6 +254,11 @@ import tools.jackson.databind.ObjectMapper;
  */
 @Component
 public class OperationIdempotencyService {
+
+    /**
+     * Format accepte par Data Grid pour une cle de 128 caracteres au plus, prefixe de stockage compris.
+     */
+    public static final Pattern KEY_FORMAT = Pattern.compile("[A-Za-z0-9._:@-]{1,118}");
 
     private final OperationIdempotencyStore store;
     private final ObjectMapper objectMapper;
@@ -245,6 +277,9 @@ public class OperationIdempotencyService {
                             String operation,
                             Object request,
                             Supplier<JsonNode> call) {
+        if (idempotencyKey == null || !KEY_FORMAT.matcher(idempotencyKey).matches()) {
+            throw new IdempotencyKeyFormatException("Idempotency-Key is missing or invalid");
+        }
         String requestHash = hash(service + "." + operation, request);
         var existing = store.find(idempotencyKey);
         if (existing.isPresent()) {
@@ -328,6 +363,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import ma.eai.msiboa.api.domain.exception.IdempotencyConflictException;
+import ma.eai.msiboa.api.domain.exception.IdempotencyKeyFormatException;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
 import ma.eai.msiboa.api.domain.exception.UpstreamTechnicalException;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
@@ -381,6 +417,36 @@ class OperationIdempotencyServiceTest {
                 .isInstanceOf(UpstreamTechnicalException.class);
         assertThatThrownBy(() -> service.execute("k4", "svc", "op", Map.of(), this::success))
                 .isInstanceOf(IdempotencyConflictException.class);
+    }
+
+    @Test
+    void missingKeyIsRejectedWithoutCallingTheService() {
+        assertThatThrownBy(() -> service.execute(null, "svc", "op", Map.of(), this::success))
+                .isInstanceOf(IdempotencyKeyFormatException.class);
+        assertThat(calls.get()).isZero();
+    }
+
+    @Test
+    void keyWithForbiddenCharacterIsRejectedWithoutCallingTheService() {
+        assertThatThrownBy(() -> service.execute("k 5", "svc", "op", Map.of(), this::success))
+                .isInstanceOf(IdempotencyKeyFormatException.class);
+        assertThatThrownBy(() -> service.execute("k/5", "svc", "op", Map.of(), this::success))
+                .isInstanceOf(IdempotencyKeyFormatException.class);
+        assertThat(calls.get()).isZero();
+    }
+
+    @Test
+    void keyLongerThanStorageLimitIsRejected() {
+        assertThatThrownBy(() -> service.execute("a".repeat(119), "svc", "op", Map.of(), this::success))
+                .isInstanceOf(IdempotencyKeyFormatException.class);
+        assertThat(calls.get()).isZero();
+    }
+
+    @Test
+    void longestAcceptedKeyIsExecuted() {
+        service.execute("a".repeat(118), "svc", "op", Map.of(), this::success);
+
+        assertThat(calls.get()).isEqualTo(1);
     }
 
     private JsonNode success() {
@@ -707,8 +773,7 @@ public class DataGridOperationIdempotencyStore implements OperationIdempotencySt
         String key = KEY_PREFIX + record.idempotencyKey();
         String payload = objectMapper.writeValueAsString(record);
         try {
-            dataGrid.putIfAbsent(cacheName, key, payload, ttlSeconds(record));
-            return dataGrid.get(cacheName, key).map(payload::equals).orElse(false);
+            return dataGrid.putIfAbsent(cacheName, key, payload, ttlSeconds(record));
         } catch (Exception e) {
             EaiLog.error("Could not create operation idempotency entry " + record.idempotencyKey(), e);
             throw new IllegalStateException("Could not create operation idempotency entry", e);
@@ -729,6 +794,275 @@ public class DataGridOperationIdempotencyStore implements OperationIdempotencySt
     private int ttlSeconds(OperationIdempotencyRecord record) {
         long seconds = Duration.between(Instant.now(), record.expiresAt().toInstant()).getSeconds();
         return Math.toIntExact(Math.max(1, Math.min(Integer.MAX_VALUE, seconds)));
+    }
+}
+`,
+  "<P>-application/src/test/java/ma/eai/msiboa/api/application/error/IdempotencyKeyStatusTest.java": `package ma.eai.msiboa.api.application.error;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+
+import ma.eai.msiboa.api.application.idempotency.OperationIdempotencyService;
+import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
+import ma.eai.msiboa.api.domain.ports.output.repository.OperationIdempotencyStore;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.ResponseEntity;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RestController;
+import tools.jackson.databind.json.JsonMapper;
+
+class IdempotencyKeyStatusTest {
+
+    private MockMvc mockMvc;
+
+    @BeforeEach
+    void setUp() {
+        JsonMapper mapper = JsonMapper.builder().build();
+        OperationIdempotencyService service = new OperationIdempotencyService(new InMemoryStore(), mapper, 3600);
+        UpstreamExceptionHandler handler = new UpstreamExceptionHandler();
+        ReflectionTestUtils.setField(handler, "correlationHeaderName", "X-Correlation-Id");
+        mockMvc = MockMvcBuilders.standaloneSetup(new ProbeController(service, mapper))
+                .setControllerAdvice(handler)
+                .build();
+    }
+
+    @Test
+    void validKeyIsAccepted() throws Exception {
+        mockMvc.perform(post("/probe").header("Idempotency-Key", "k-1"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void missingKeyReturnsBadRequest() throws Exception {
+        mockMvc.perform(post("/probe"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void keyWithForbiddenCharacterReturnsBadRequest() throws Exception {
+        mockMvc.perform(post("/probe").header("Idempotency-Key", "k 1"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void keyLongerThanStorageLimitReturnsBadRequest() throws Exception {
+        mockMvc.perform(post("/probe").header("Idempotency-Key", "a".repeat(119)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @RestController
+    public static class ProbeController {
+
+        private final OperationIdempotencyService service;
+        private final JsonMapper mapper;
+
+        public ProbeController(OperationIdempotencyService service, JsonMapper mapper) {
+            this.service = service;
+            this.mapper = mapper;
+        }
+
+        @PostMapping("/probe")
+        public ResponseEntity<String> probe(@RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+            service.execute(idempotencyKey, "svc", "op", Map.of(), mapper::createObjectNode);
+            return ResponseEntity.ok("done");
+        }
+    }
+
+    private static final class InMemoryStore implements OperationIdempotencyStore {
+
+        private final Map<String, OperationIdempotencyRecord> records = new ConcurrentHashMap<>();
+
+        @Override
+        public Optional<OperationIdempotencyRecord> find(String idempotencyKey) {
+            return Optional.ofNullable(records.get(idempotencyKey));
+        }
+
+        @Override
+        public boolean createIfAbsent(OperationIdempotencyRecord record) {
+            return records.putIfAbsent(record.idempotencyKey(), record) == null;
+        }
+
+        @Override
+        public void save(OperationIdempotencyRecord record) {
+            records.put(record.idempotencyKey(), record);
+        }
+    }
+}
+`,
+  "<P>-container/src/test/java/ma/eai/msiboa/api/infrastructure/idempotency/DataGridOperationIdempotencyStoreTest.java": `package ma.eai.msiboa.api.infrastructure.idempotency;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import ma.eai.msiboa.api.application.idempotency.OperationIdempotencyService;
+import ma.eai.msiboa.api.domain.exception.IdempotencyConflictException;
+import ma.eai.msiboa.api.domain.idempotency.model.IdempotencyStatus;
+import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
+import ma.eai.msiboa.api.domain.ports.output.repository.OperationIdempotencyStore;
+import ma.eai.msiboa.idev.datagrid.config.DataGridProperties;
+import ma.eai.msiboa.idev.datagrid.error.DataGridException;
+import ma.eai.msiboa.idev.datagrid.error.DataGridOperation;
+import ma.eai.msiboa.idev.datagrid.service.DataGridService;
+import ma.eai.msiboa.idev.datagrid.validation.DataGridInputValidator;
+import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
+class DataGridOperationIdempotencyStoreTest {
+
+    private static final String CACHE = "operation-idempotency-cache";
+
+    private final JsonMapper mapper = JsonMapper.builder().build();
+    private final DataGridOperationIdempotencyStore store =
+            new DataGridOperationIdempotencyStore(new InMemoryDataGrid(), mapper, CACHE);
+
+    @Test
+    void secondReservationOfSameKeyIsRefused() {
+        assertThat(store.createIfAbsent(record("k-1"))).isTrue();
+        assertThat(store.createIfAbsent(record("k-1"))).isFalse();
+    }
+
+    @Test
+    void twoConcurrentRequestsOnSameKeyExecuteOnce() throws Exception {
+        CyclicBarrier bothLookedUp = new CyclicBarrier(2);
+        AtomicInteger lookups = new AtomicInteger();
+        OperationIdempotencyStore racingStore = new OperationIdempotencyStore() {
+            @Override
+            public Optional<OperationIdempotencyRecord> find(String idempotencyKey) {
+                Optional<OperationIdempotencyRecord> found = store.find(idempotencyKey);
+                if (lookups.incrementAndGet() <= 2) {
+                    await(bothLookedUp);
+                }
+                return found;
+            }
+
+            @Override
+            public boolean createIfAbsent(OperationIdempotencyRecord record) {
+                return store.createIfAbsent(record);
+            }
+
+            @Override
+            public void save(OperationIdempotencyRecord record) {
+                store.save(record);
+            }
+        };
+        OperationIdempotencyService service = new OperationIdempotencyService(racingStore, mapper, 3600);
+        AtomicInteger calls = new AtomicInteger();
+        Callable<Object> request = () -> {
+            try {
+                return service.execute("k-2", "svc", "op", Map.of("a", "1"), () -> {
+                    calls.incrementAndGet();
+                    return mapper.createObjectNode();
+                });
+            } catch (IdempotencyConflictException ex) {
+                return ex;
+            }
+        };
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            for (Future<Object> result : pool.invokeAll(List.of(request, request))) {
+                assertThat(result.get()).isInstanceOfAny(JsonNode.class, IdempotencyConflictException.class);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(calls.get()).isEqualTo(1);
+    }
+
+    @Test
+    void longestAcceptedKeyFitsDataGridKeyRules() throws Exception {
+        DataGridInputValidator validator = new DataGridInputValidator(new DataGridProperties());
+        String longest = "a".repeat(118);
+
+        assertThat(OperationIdempotencyService.KEY_FORMAT.matcher(longest).matches()).isTrue();
+        validator.validateKey(CACHE, "operation:" + longest, DataGridOperation.PUT_IF_ABSENT);
+        assertThatThrownBy(() -> validator.validateKey(CACHE, "operation:" + longest + "a", DataGridOperation.PUT_IF_ABSENT))
+                .isInstanceOf(DataGridException.class);
+    }
+
+    private static OperationIdempotencyRecord record(String key) {
+        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+        return OperationIdempotencyRecord.builder()
+                .idempotencyKey(key)
+                .service("svc")
+                .operation("op")
+                .requestHash("hash")
+                .status(IdempotencyStatus.IN_PROGRESS)
+                .createdAt(now)
+                .expiresAt(now.plusSeconds(3600))
+                .build();
+    }
+
+    private static void await(CyclicBarrier barrier) {
+        try {
+            barrier.await(5, TimeUnit.SECONDS);
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    private static final class InMemoryDataGrid implements DataGridService {
+
+        private final Map<String, String> entries = new ConcurrentHashMap<>();
+
+        @Override
+        public void put(String cacheName, String key, String value, long ttlSeconds) {
+            entries.put(cacheName + "/" + key, value);
+        }
+
+        @Override
+        public boolean putIfAbsent(String cacheName, String key, String value, long ttlSeconds) {
+            return entries.putIfAbsent(cacheName + "/" + key, value) == null;
+        }
+
+        @Override
+        public Optional<String> get(String cacheName, String key) {
+            return Optional.ofNullable(entries.get(cacheName + "/" + key));
+        }
+
+        @Override
+        public boolean replace(String cacheName, String key, String value, long ttlSeconds) {
+            return entries.replace(cacheName + "/" + key, value) != null;
+        }
+
+        @Override
+        public boolean exists(String cacheName, String key) {
+            return entries.containsKey(cacheName + "/" + key);
+        }
+
+        @Override
+        public boolean remove(String cacheName, String key) {
+            return entries.remove(cacheName + "/" + key) != null;
+        }
+
+        @Override
+        public boolean isCacheAvailable(String cacheName) {
+            return true;
+        }
     }
 }
 `,
