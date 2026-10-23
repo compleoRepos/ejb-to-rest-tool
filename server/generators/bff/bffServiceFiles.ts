@@ -383,7 +383,7 @@ function controller(model: ServiceModel): string {
     typeImports(model, op, imports);
     const params: string[] = [];
     const idem = op.endpoint.idempotence === "cle";
-    if (idem) params.push(`@RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey`);
+    if (idem) params.push(`@RequestHeader(value = "Idempotency-Key", required = true) String idempotencyKey`);
     for (const p of op.queryParams) {
       imports.push("org.springframework.web.bind.annotation.RequestParam");
       params.push(`${p.annotation} ${p.javaType} ${p.javaName}`);

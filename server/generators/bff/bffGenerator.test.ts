@@ -203,7 +203,7 @@ describe("generateBffLayer", () => {
     );
     expect(controller).toContain('@RequestMapping("/api/v1/commande-chequier")');
     expect(controller).toContain('@PostMapping("/enrg-commande")');
-    expect(controller).toContain('@RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey');
+    expect(controller).toContain('@RequestHeader(value = "Idempotency-Key", required = true) String idempotencyKey');
     expect(controller).toContain('idempotencyService.execute(idempotencyKey, SERVICE, "enrgCommande", request,');
     expect(controller).toContain('@RequestParam(name = "entete.numAccount", required = false) String enteteNumAccount');
     expect(controller).not.toContain("reloadconfig");
@@ -240,6 +240,7 @@ describe("generateBffLayer", () => {
     const handler = await read(`${P}-application/${JAVA}/application/error/UpstreamExceptionHandler.java`);
     expect(handler).toContain("@ExceptionHandler(IdempotencyKeyFormatException.class)");
     expect(handler).toContain("respond(HttpStatus.BAD_REQUEST, null, ex.getMessage(), request)");
+    expect(handler).toContain("@ExceptionHandler(MissingRequestHeaderException.class)");
 
     await read(`${P}-domain/${P}-domain-core/${JAVA}/domain/exception/IdempotencyKeyFormatException.java`);
     await read(`${P}-application/src/test/java/ma/eai/msiboa/api/application/error/IdempotencyKeyStatusTest.java`);

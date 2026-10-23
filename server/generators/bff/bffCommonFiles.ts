@@ -161,6 +161,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -201,6 +202,11 @@ public class UpstreamExceptionHandler {
     @ExceptionHandler(IdempotencyKeyFormatException.class)
     public ResponseEntity<UpstreamApiError> handleIdempotencyKey(IdempotencyKeyFormatException ex, HttpServletRequest request) {
         return respond(HttpStatus.BAD_REQUEST, null, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<UpstreamApiError> handleMissingHeader(MissingRequestHeaderException ex, HttpServletRequest request) {
+        return respond(HttpStatus.BAD_REQUEST, null, ex.getHeaderName() + " is missing or invalid", request);
     }
 
     private ResponseEntity<UpstreamApiError> build(HttpStatus status,
@@ -799,6 +805,7 @@ public class DataGridOperationIdempotencyStore implements OperationIdempotencySt
 `,
   "<P>-application/src/test/java/ma/eai/msiboa/api/application/error/IdempotencyKeyStatusTest.java": `package ma.eai.msiboa.api.application.error;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -814,19 +821,22 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 class IdempotencyKeyStatusTest {
 
+    private final JsonMapper mapper = JsonMapper.builder().build();
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        JsonMapper mapper = JsonMapper.builder().build();
         OperationIdempotencyService service = new OperationIdempotencyService(new InMemoryStore(), mapper, 3600);
         UpstreamExceptionHandler handler = new UpstreamExceptionHandler();
         ReflectionTestUtils.setField(handler, "correlationHeaderName", "X-Correlation-Id");
@@ -859,6 +869,22 @@ class IdempotencyKeyStatusTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void missingAndInvalidKeyReturnTheSameErrorBody() throws Exception {
+        JsonNode missing = errorBody(mockMvc.perform(post("/probe")).andReturn());
+        JsonNode invalid = errorBody(mockMvc.perform(post("/probe").header("Idempotency-Key", "k 1")).andReturn());
+
+        assertThat(missing).isEqualTo(invalid);
+        assertThat(missing.get("status").asInt()).isEqualTo(400);
+        assertThat(missing.get("message").asString()).isEqualTo("Idempotency-Key is missing or invalid");
+    }
+
+    private JsonNode errorBody(MvcResult result) throws Exception {
+        ObjectNode body = (ObjectNode) mapper.readTree(result.getResponse().getContentAsString());
+        body.remove("timestamp");
+        return body;
+    }
+
     @RestController
     public static class ProbeController {
 
@@ -871,7 +897,7 @@ class IdempotencyKeyStatusTest {
         }
 
         @PostMapping("/probe")
-        public ResponseEntity<String> probe(@RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        public ResponseEntity<String> probe(@RequestHeader(value = "Idempotency-Key", required = true) String idempotencyKey) {
             service.execute(idempotencyKey, "svc", "op", Map.of(), mapper::createObjectNode);
             return ResponseEntity.ok("done");
         }
