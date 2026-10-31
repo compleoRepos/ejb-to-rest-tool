@@ -179,7 +179,6 @@ describe("generateBffLayer", () => {
     const dev = await fs.readFile(path.join(root, `${P}-container/src/main/resources/application-dev.properties`), "utf-8");
     expect(dev).toBe(
       "server.port=8183\n\n# neobank-upstream:debut\nneobank.upstream.business-error-status=422\n" +
-        "idempotency.lock-seconds=60\n" +
         "neobank.upstream.commande-chequier.base-url=http://localhost:9080/neobank-commande-chequier\n# neobank-upstream:fin\n"
     );
     const cloud = await fs.readFile(path.join(root, `${P}-container/src/main/resources/application-cloud.properties`), "utf-8");
@@ -254,9 +253,12 @@ describe("generateBffLayer", () => {
     const read = (rel: string) => fs.readFile(path.join(root, rel), "utf-8");
 
     const service = await read(`${P}-application/${JAVA}/application/idempotency/OperationIdempotencyService.java`);
-    expect(service).toContain('@Value("${idempotency.lock-seconds:60}") long lockSeconds');
-    expect(service).toContain(".expiresAt(now.plusSeconds(lockSeconds))");
-    expect(service).toContain("store.delete(idempotencyKey);");
+    expect(service).toContain('@Value("${rest.client.read-timeout-seconds}") long readTimeoutSeconds');
+    expect(service).toContain(".expiresAt(now.plusSeconds(ttlSeconds))");
+    expect(service).not.toContain("lock-seconds");
+    expect(service).toContain("if (isNotSent(ex)) {\n                store.delete(idempotencyKey);");
+    expect(service.match(/store\.delete\(/g)).toHaveLength(1);
+    expect(service).toContain("if (saveQuietly(completed) || saveQuietly(completed)) {");
     expect(service).toContain("OperationIdempotencyStatus.UNKNOWN");
     expect(service).not.toContain("IdempotencyStatus.FAILED");
     for (const notSent of ["CallNotPermittedException", "BulkheadFullException", "ConnectException", "UnknownHostException", "NoRouteToHostException"]) {
@@ -271,7 +273,9 @@ describe("generateBffLayer", () => {
     const serviceTest = await read(`${P}-application/src/test/java/ma/eai/msiboa/api/application/idempotency/OperationIdempotencyServiceTest.java`);
     for (const name of [
       "keyInProgressIsRefusedWhileReserved",
-      "reservationLeftByAStoppedServerExpiresAfterTheLockDelay",
+      "reservationLeftByAStoppedServerIsReportedUnknownAfterTheReadDelay",
+      "sentCallWhoseResultCannotBeStoredIsNeverExecutedAgain",
+      "completedWriteFailureFallsBackToUnknown",
       "openCircuitReleasesTheKey",
       "fullBulkheadReleasesTheKey",
       "refusedConnectionReleasesTheKey",
@@ -284,7 +288,7 @@ describe("generateBffLayer", () => {
 
     for (const profile of ["dev", "cloud"]) {
       const props = await read(`${P}-container/src/main/resources/application-${profile}.properties`);
-      expect(props).toContain("idempotency.lock-seconds=60");
+      expect(props).not.toContain("idempotency.lock-seconds");
     }
   });
 

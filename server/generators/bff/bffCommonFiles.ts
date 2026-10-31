@@ -264,8 +264,8 @@ import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import ma.eai.msiboa.api.domain.exception.IdempotencyConflictException;
 import ma.eai.msiboa.api.domain.exception.IdempotencyKeyFormatException;
+import ma.eai.idev.fwk.logging.EaiLog;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
-import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyStatus;
 import ma.eai.msiboa.api.domain.ports.output.repository.OperationIdempotencyStore;
@@ -291,29 +291,34 @@ public class OperationIdempotencyService {
     public static final String UNKNOWN_OUTCOME_MESSAGE =
             "Previous request outcome is unknown for this Idempotency-Key, check the operation before retrying with a new key";
 
+    /**
+     * Marge ajoutee au delai de lecture avant de tenir pour inconnue l'issue d'une operation encore en cours.
+     */
+    public static final long IN_PROGRESS_MARGIN_SECONDS = 30;
+
     private final OperationIdempotencyStore store;
     private final ObjectMapper objectMapper;
     private final long ttlSeconds;
-    private final long lockSeconds;
+    private final long unknownAfterSeconds;
     private final Clock clock;
 
     @Autowired
     public OperationIdempotencyService(OperationIdempotencyStore store,
                                        ObjectMapper objectMapper,
                                        @Value("\${idempotency.ttl-seconds}") long ttlSeconds,
-                                       @Value("\${idempotency.lock-seconds:60}") long lockSeconds) {
-        this(store, objectMapper, ttlSeconds, lockSeconds, Clock.systemUTC());
+                                       @Value("\${rest.client.read-timeout-seconds}") long readTimeoutSeconds) {
+        this(store, objectMapper, ttlSeconds, readTimeoutSeconds, Clock.systemUTC());
     }
 
     OperationIdempotencyService(OperationIdempotencyStore store,
                                 ObjectMapper objectMapper,
                                 long ttlSeconds,
-                                long lockSeconds,
+                                long readTimeoutSeconds,
                                 Clock clock) {
         this.store = store;
         this.objectMapper = objectMapper;
         this.ttlSeconds = ttlSeconds;
-        this.lockSeconds = lockSeconds;
+        this.unknownAfterSeconds = readTimeoutSeconds + IN_PROGRESS_MARGIN_SECONDS;
         this.clock = clock;
     }
 
@@ -339,7 +344,7 @@ public class OperationIdempotencyService {
                 .requestHash(requestHash)
                 .status(OperationIdempotencyStatus.IN_PROGRESS)
                 .createdAt(now)
-                .expiresAt(now.plusSeconds(lockSeconds))
+                .expiresAt(now.plusSeconds(ttlSeconds))
                 .build();
         if (!store.createIfAbsent(record)) {
             return replay(store.find(idempotencyKey)
@@ -357,7 +362,7 @@ public class OperationIdempotencyService {
                     .build());
             throw ex;
         } catch (RuntimeException ex) {
-            if (ex instanceof UpstreamValidationException || isNotSent(ex)) {
+            if (isNotSent(ex)) {
                 store.delete(idempotencyKey);
             } else {
                 store.save(retained(record, OperationIdempotencyStatus.UNKNOWN)
@@ -366,10 +371,33 @@ public class OperationIdempotencyService {
             }
             throw ex;
         }
-        store.save(retained(record, OperationIdempotencyStatus.COMPLETED)
-                .responseBody(objectMapper.writeValueAsString(response))
-                .build());
+        storeCompleted(record, response);
         return response;
+    }
+
+    private void storeCompleted(OperationIdempotencyRecord record, JsonNode response) {
+        Supplier<OperationIdempotencyRecord> completed = () -> retained(record, OperationIdempotencyStatus.COMPLETED)
+                .responseBody(objectMapper.writeValueAsString(response))
+                .build();
+        if (saveQuietly(completed) || saveQuietly(completed)) {
+            return;
+        }
+        EaiLog.error("Operation result could not be stored, key=" + record.idempotencyKey()
+                + " service=" + record.service()
+                + " operation=" + record.operation());
+        saveQuietly(() -> retained(record, OperationIdempotencyStatus.UNKNOWN)
+                .message("Operation result could not be stored")
+                .build());
+    }
+
+    private boolean saveQuietly(Supplier<OperationIdempotencyRecord> record) {
+        try {
+            store.save(record.get());
+            return true;
+        } catch (RuntimeException ex) {
+            EaiLog.error("Could not store operation idempotency entry", ex);
+            return false;
+        }
     }
 
     private OperationIdempotencyRecord.OperationIdempotencyRecordBuilder retained(OperationIdempotencyRecord record,
@@ -400,7 +428,8 @@ public class OperationIdempotencyService {
             throw new IdempotencyConflictException("Idempotency-Key reuse with different payload");
         }
         if (record.status() == OperationIdempotencyStatus.IN_PROGRESS) {
-            throw new IdempotencyConflictException(IN_PROGRESS_MESSAGE);
+            boolean stale = record.createdAt().plusSeconds(unknownAfterSeconds).isBefore(ZonedDateTime.now(clock));
+            throw new IdempotencyConflictException(stale ? UNKNOWN_OUTCOME_MESSAGE : IN_PROGRESS_MESSAGE);
         }
         if (record.status() == OperationIdempotencyStatus.UNKNOWN) {
             throw new IdempotencyConflictException(UNKNOWN_OUTCOME_MESSAGE);
@@ -462,7 +491,9 @@ import tools.jackson.databind.json.JsonMapper;
 class OperationIdempotencyServiceTest {
 
     private static final long TTL_SECONDS = 3600;
-    private static final long LOCK_SECONDS = 60;
+    private static final long READ_TIMEOUT_SECONDS = 30;
+    private static final long UNKNOWN_AFTER_SECONDS =
+            READ_TIMEOUT_SECONDS + OperationIdempotencyService.IN_PROGRESS_MARGIN_SECONDS;
 
     private final JsonMapper mapper = JsonMapper.builder().build();
     private final AtomicInteger calls = new AtomicInteger();
@@ -472,7 +503,7 @@ class OperationIdempotencyServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new OperationIdempotencyService(store, mapper, TTL_SECONDS, LOCK_SECONDS, clock);
+        service = new OperationIdempotencyService(store, mapper, TTL_SECONDS, READ_TIMEOUT_SECONDS, clock);
     }
 
     @Test
@@ -508,7 +539,7 @@ class OperationIdempotencyServiceTest {
 
         assertThat(store.records.get("k-done").status()).isEqualTo(OperationIdempotencyStatus.COMPLETED);
         assertThat(store.records.get("k-done").expiresAt().toInstant()).isEqualTo(clock.instant().plusSeconds(TTL_SECONDS));
-        clock.advance(LOCK_SECONDS + 1);
+        clock.advance(UNKNOWN_AFTER_SECONDS + 1);
         service.execute("k-done", "svc", "op", Map.of(), this::success);
         assertThat(calls.get()).isEqualTo(1);
     }
@@ -517,7 +548,7 @@ class OperationIdempotencyServiceTest {
     void keyInProgressIsRefusedWhileReserved() {
         AtomicReference<Throwable> concurrent = new AtomicReference<>();
         service.execute("k-busy", "svc", "op", Map.of(), () -> {
-            assertThat(store.records.get("k-busy").expiresAt().toInstant()).isEqualTo(clock.instant().plusSeconds(LOCK_SECONDS));
+            assertThat(store.records.get("k-busy").expiresAt().toInstant()).isEqualTo(clock.instant().plusSeconds(TTL_SECONDS));
             try {
                 service.execute("k-busy", "svc", "op", Map.of(), this::success);
             } catch (IdempotencyConflictException ex) {
@@ -532,19 +563,59 @@ class OperationIdempotencyServiceTest {
     }
 
     @Test
-    void reservationLeftByAStoppedServerExpiresAfterTheLockDelay() {
+    void reservationLeftByAStoppedServerIsReportedUnknownAfterTheReadDelay() {
         assertThatThrownBy(() -> service.execute("k-stop", "svc", "op", Map.of(), this::serverStopped))
                 .isInstanceOf(ServerStopped.class);
         assertThat(store.records.get("k-stop").status()).isEqualTo(OperationIdempotencyStatus.IN_PROGRESS);
 
-        clock.advance(LOCK_SECONDS - 1);
+        clock.advance(UNKNOWN_AFTER_SECONDS - 1);
         assertThatThrownBy(() -> service.execute("k-stop", "svc", "op", Map.of(), this::success))
                 .isInstanceOf(IdempotencyConflictException.class)
                 .hasMessage(OperationIdempotencyService.IN_PROGRESS_MESSAGE);
 
         clock.advance(2);
-        service.execute("k-stop", "svc", "op", Map.of(), this::success);
-        assertThat(calls.get()).isEqualTo(2);
+        assertThatThrownBy(() -> service.execute("k-stop", "svc", "op", Map.of(), this::success))
+                .isInstanceOf(IdempotencyConflictException.class)
+                .hasMessage(OperationIdempotencyService.UNKNOWN_OUTCOME_MESSAGE);
+        assertThat(calls.get()).isEqualTo(1);
+    }
+
+    @Test
+    void sentCallWhoseResultCannotBeStoredIsNeverExecutedAgain() {
+        store.failingSaves = Integer.MAX_VALUE;
+
+        JsonNode response = service.execute("k-lost", "svc", "op", Map.of(), this::success);
+
+        assertThat(response.get("CODRET").asString()).isEqualTo("000");
+        assertThat(store.records).containsKey("k-lost");
+        clock.advance(61);
+        assertThatThrownBy(() -> service.execute("k-lost", "svc", "op", Map.of(), this::success))
+                .isInstanceOf(IdempotencyConflictException.class)
+                .hasMessage(OperationIdempotencyService.UNKNOWN_OUTCOME_MESSAGE);
+        assertThat(calls.get()).isEqualTo(1);
+    }
+
+    @Test
+    void completedWriteIsRetriedOnce() {
+        store.failingSaves = 1;
+
+        service.execute("k-retry", "svc", "op", Map.of(), this::success);
+
+        assertThat(store.records.get("k-retry").status()).isEqualTo(OperationIdempotencyStatus.COMPLETED);
+    }
+
+    @Test
+    void completedWriteFailureFallsBackToUnknown() {
+        store.failingSaves = 2;
+
+        service.execute("k-fallback", "svc", "op", Map.of(), this::success);
+
+        assertThat(store.records.get("k-fallback").status()).isEqualTo(OperationIdempotencyStatus.UNKNOWN);
+        assertThat(store.records.get("k-fallback").expiresAt().toInstant()).isEqualTo(clock.instant().plusSeconds(TTL_SECONDS));
+        assertThatThrownBy(() -> service.execute("k-fallback", "svc", "op", Map.of(), this::success))
+                .isInstanceOf(IdempotencyConflictException.class)
+                .hasMessage(OperationIdempotencyService.UNKNOWN_OUTCOME_MESSAGE);
+        assertThat(calls.get()).isEqualTo(1);
     }
 
     @Test
@@ -569,8 +640,8 @@ class OperationIdempotencyServiceTest {
     }
 
     @Test
-    void inputRefusalReleasesTheKey() {
-        assertReleased("k-400", new UpstreamValidationException("svc", "002", "Compte invalide"));
+    void inputRefusalMarksTheOutcomeUnknown() {
+        assertUnknown("k-400", new UpstreamValidationException("svc", "002", "Compte invalide"));
     }
 
     @Test
@@ -602,7 +673,7 @@ class OperationIdempotencyServiceTest {
         assertThat(store.records.get(key).status()).isEqualTo(OperationIdempotencyStatus.UNKNOWN);
         assertThat(store.records.get(key).expiresAt().toInstant()).isEqualTo(clock.instant().plusSeconds(TTL_SECONDS));
 
-        clock.advance(LOCK_SECONDS + 1);
+        clock.advance(UNKNOWN_AFTER_SECONDS + 1);
         assertThatThrownBy(() -> service.execute(key, "svc", "op", Map.of(), this::success))
                 .isInstanceOf(IdempotencyConflictException.class)
                 .hasMessage(OperationIdempotencyService.UNKNOWN_OUTCOME_MESSAGE);
@@ -694,6 +765,7 @@ class OperationIdempotencyServiceTest {
 
         private final Map<String, OperationIdempotencyRecord> records = new HashMap<>();
         private final Clock clock;
+        private int failingSaves;
 
         private InMemoryStore(Clock clock) {
             this.clock = clock;
@@ -713,6 +785,10 @@ class OperationIdempotencyServiceTest {
 
         @Override
         public void save(OperationIdempotencyRecord record) {
+            if (failingSaves > 0) {
+                failingSaves--;
+                throw new IllegalStateException("Could not write operation idempotency entry");
+            }
             records.put(record.idempotencyKey(), record);
         }
 
@@ -1086,7 +1162,7 @@ class IdempotencyKeyStatusTest {
 
     @BeforeEach
     void setUp() {
-        OperationIdempotencyService service = new OperationIdempotencyService(new InMemoryStore(), mapper, 3600, 60);
+        OperationIdempotencyService service = new OperationIdempotencyService(new InMemoryStore(), mapper, 3600, 30);
         UpstreamExceptionHandler handler = new UpstreamExceptionHandler();
         ReflectionTestUtils.setField(handler, "correlationHeaderName", "X-Correlation-Id");
         GlobalExceptionHandler globalHandler = new GlobalExceptionHandler();
@@ -1268,11 +1344,11 @@ class DataGridOperationIdempotencyStoreTest {
     }
 
     @Test
-    void reservationExpiresInDataGridAfterTheLockDelay() {
-        OperationIdempotencyService service = new OperationIdempotencyService(store, mapper, 86400, 60);
+    void reservationIsKeptInDataGridForTheFullRetention() {
+        OperationIdempotencyService service = new OperationIdempotencyService(store, mapper, 86400, 30);
 
         service.execute("k-lock", "svc", "op", Map.of(), () -> {
-            assertThat(dataGrid.ttls.get(CACHE + "/operation:k-lock")).isBetween(59L, 60L);
+            assertThat(dataGrid.ttls.get(CACHE + "/operation:k-lock")).isBetween(86399L, 86400L);
             return mapper.createObjectNode();
         });
 
@@ -1308,7 +1384,7 @@ class DataGridOperationIdempotencyStoreTest {
                 store.delete(idempotencyKey);
             }
         };
-        OperationIdempotencyService service = new OperationIdempotencyService(racingStore, mapper, 3600, 60);
+        OperationIdempotencyService service = new OperationIdempotencyService(racingStore, mapper, 3600, 30);
         AtomicInteger calls = new AtomicInteger();
         Callable<Object> request = () -> {
             try {
