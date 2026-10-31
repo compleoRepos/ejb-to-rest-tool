@@ -179,6 +179,7 @@ describe("generateBffLayer", () => {
     const dev = await fs.readFile(path.join(root, `${P}-container/src/main/resources/application-dev.properties`), "utf-8");
     expect(dev).toBe(
       "server.port=8183\n\n# neobank-upstream:debut\nneobank.upstream.business-error-status=422\n" +
+        "neobank.upstream.oauth2.enabled=false\n" +
         "neobank.upstream.commande-chequier.base-url=http://localhost:9080/neobank-commande-chequier\n# neobank-upstream:fin\n"
     );
     const cloud = await fs.readFile(path.join(root, `${P}-container/src/main/resources/application-cloud.properties`), "utf-8");
@@ -246,6 +247,82 @@ describe("generateBffLayer", () => {
     await read(`${P}-application/src/test/java/ma/eai/msiboa/api/application/error/IdempotencyKeyStatusTest.java`);
     const storeTest = await read(`${P}-container/src/test/java/ma/eai/msiboa/api/infrastructure/idempotency/DataGridOperationIdempotencyStoreTest.java`);
     expect(storeTest).toContain("void twoConcurrentRequestsOnSameKeyExecuteOnce()");
+  });
+
+  it("classe l'issue d'un appel pour libérer la clé ou la garder en issue inconnue", async () => {
+    await generateBffLayer(root, [descriptor()]);
+    const read = (rel: string) => fs.readFile(path.join(root, rel), "utf-8");
+
+    const service = await read(`${P}-application/${JAVA}/application/idempotency/OperationIdempotencyService.java`);
+    expect(service).toContain('@Value("${rest.client.read-timeout-seconds}") long readTimeoutSeconds');
+    expect(service).toContain(".expiresAt(now.plusSeconds(ttlSeconds))");
+    expect(service).not.toContain("lock-seconds");
+    expect(service).toContain("if (isNotSent(ex)) {\n                store.delete(idempotencyKey);");
+    expect(service.match(/store\.delete\(/g)).toHaveLength(1);
+    expect(service).toContain("if (saveQuietly(completed) || saveQuietly(completed)) {");
+    expect(service).toContain("OperationIdempotencyStatus.UNKNOWN");
+    expect(service).not.toContain("IdempotencyStatus.FAILED");
+    for (const notSent of ["CallNotPermittedException", "BulkheadFullException", "ConnectException", "UnknownHostException", "NoRouteToHostException"]) {
+      expect(service).toContain(`cause instanceof ${notSent}`);
+    }
+
+    const status = await read(`${P}-domain/${P}-application-service/${JAVA}/domain/idempotency/model/OperationIdempotencyStatus.java`);
+    expect(status).toContain("UNKNOWN");
+    const store = await read(`${P}-container/${JAVA}/infrastructure/idempotency/DataGridOperationIdempotencyStore.java`);
+    expect(store).toContain("dataGrid.remove(cacheName, KEY_PREFIX + idempotencyKey);");
+
+    const serviceTest = await read(`${P}-application/src/test/java/ma/eai/msiboa/api/application/idempotency/OperationIdempotencyServiceTest.java`);
+    for (const name of [
+      "keyInProgressIsRefusedWhileReserved",
+      "reservationLeftByAStoppedServerIsReportedUnknownAfterTheReadDelay",
+      "sentCallWhoseResultCannotBeStoredIsNeverExecutedAgain",
+      "completedWriteFailureFallsBackToUnknown",
+      "inputRefusalIsReplayedWithoutCallingAgain",
+      "openCircuitReleasesTheKey",
+      "fullBulkheadReleasesTheKey",
+      "refusedConnectionReleasesTheKey",
+      "readTimeoutMarksTheOutcomeUnknown",
+      "upstreamServerErrorMarksTheOutcomeUnknown",
+    ]) {
+      expect(serviceTest).toContain(`void ${name}()`);
+    }
+    expect(serviceTest).not.toContain("technicalFailureBlocksTheKey");
+    expect(service).toContain("} catch (UpstreamValidationException ex) {");
+    expect(service).toContain("throw new UpstreamValidationException(record.service(), record.code(), record.message());");
+
+    for (const profile of ["dev", "cloud"]) {
+      const props = await read(`${P}-container/src/main/resources/application-${profile}.properties`);
+      expect(props).not.toContain("idempotency.lock-seconds");
+    }
+  });
+
+  it("pose le jeton OAuth2 sasAccessor seulement si le drapeau est actif et libère la clé sur un 401", async () => {
+    await generateBffLayer(root, [descriptor()]);
+    const read = (rel: string) => fs.readFile(path.join(root, rel), "utf-8");
+
+    const clients = await read(`${P}-container/${JAVA}/integration/upstream/UpstreamRestClients.java`);
+    expect(clients).toContain('@Value("${neobank.upstream.oauth2.enabled:false}") boolean oauth2Enabled');
+    const correlation = clients.indexOf(".requestInterceptor(correlationIdInterceptor)");
+    const oauth2 = clients.indexOf("oauth2InterceptorFactory.create(oauth2ClientId, OAUTH2_REGISTRATION, oauth2IssuerUri)");
+    const resilience = clients.indexOf("new UpstreamResilienceInterceptor(");
+    expect(correlation).toBeGreaterThan(0);
+    expect(oauth2).toBeGreaterThan(correlation);
+    expect(resilience).toBeGreaterThan(oauth2);
+    expect(clients).not.toContain("RestClientCircuitBreakerInterceptor");
+
+    const decoder = await read(`${P}-container/${JAVA}/integration/upstream/UpstreamErrorDecoder.java`);
+    expect(decoder).toContain("if (status == 401) {\n            throw new UpstreamAuthenticationException(");
+    expect(decoder).not.toContain("403");
+    const service = await read(`${P}-application/${JAVA}/application/idempotency/OperationIdempotencyService.java`);
+    expect(service).toContain("cause instanceof UpstreamAuthenticationException");
+
+    const tests = `${P}-container/src/test/java/ma/eai/msiboa/api/integration/upstream`;
+    expect(await read(`${tests}/UpstreamRestClientsTest.java`)).toContain("void enabledOAuth2SendsBearerTokenOfTheSasAccessorRegistration()");
+    expect(await read(`${tests}/UpstreamErrorDecoderTest.java`)).toContain("void forbiddenWithBusinessCodeStaysABusinessRefusal()");
+
+    expect(await read(`${P}-container/src/main/resources/application-dev.properties`)).toContain("neobank.upstream.oauth2.enabled=false\n");
+    expect(await read(`${P}-container/src/main/resources/application-cloud.properties`))
+      .toContain("neobank.upstream.oauth2.enabled=${NEOBANK_UPSTREAM_OAUTH2_ENABLED:false}\n");
   });
 
   it("donne la même sortie à chaque génération et retire un service retiré", async () => {

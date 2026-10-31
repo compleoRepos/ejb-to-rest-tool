@@ -74,6 +74,18 @@ public class UpstreamTechnicalException extends UpstreamException {
     }
 }
 `,
+  "<P>-domain/<P>-domain-core/src/main/java/ma/eai/msiboa/api/domain/exception/UpstreamAuthenticationException.java": `package ma.eai.msiboa.api.domain.exception;
+
+/**
+ * Appel refuse en 401 par un service expose, l'operation n'a pas ete executee.
+ */
+public class UpstreamAuthenticationException extends UpstreamTechnicalException {
+
+    public UpstreamAuthenticationException(String service, String code, String message) {
+        super(service, code, message);
+    }
+}
+`,
   "<P>-domain/<P>-domain-core/src/main/java/ma/eai/msiboa/api/domain/exception/IdempotencyKeyFormatException.java": `package ma.eai.msiboa.api.domain.exception;
 
 /**
@@ -101,13 +113,25 @@ public record OperationIdempotencyRecord(
         String service,
         String operation,
         String requestHash,
-        IdempotencyStatus status,
+        OperationIdempotencyStatus status,
         String code,
         String message,
+        boolean inputRefusal,
         String responseBody,
         ZonedDateTime createdAt,
         ZonedDateTime expiresAt
 ) {}
+`,
+  "<P>-domain/<P>-application-service/src/main/java/ma/eai/msiboa/api/domain/idempotency/model/OperationIdempotencyStatus.java": `package ma.eai.msiboa.api.domain.idempotency.model;
+
+/**
+ * Etat d'une operation non sure : en cours d'execution, terminee avec un resultat connu, ou issue inconnue.
+ */
+public enum OperationIdempotencyStatus {
+    IN_PROGRESS,
+    COMPLETED,
+    UNKNOWN
+}
 `,
   "<P>-domain/<P>-application-service/src/main/java/ma/eai/msiboa/api/domain/ports/output/repository/OperationIdempotencyStore.java": `package ma.eai.msiboa.api.domain.ports.output.repository;
 
@@ -125,6 +149,8 @@ public interface OperationIdempotencyStore {
     boolean createIfAbsent(OperationIdempotencyRecord record);
 
     void save(OperationIdempotencyRecord record);
+
+    void delete(String idempotencyKey);
 }
 `,
   "<P>-application/src/main/java/ma/eai/msiboa/api/application/error/UpstreamApiError.java": `package ma.eai.msiboa.api.application.error;
@@ -235,21 +261,30 @@ public class UpstreamExceptionHandler {
 `,
   "<P>-application/src/main/java/ma/eai/msiboa/api/application/idempotency/OperationIdempotencyService.java": `package ma.eai.msiboa.api.application.idempotency;
 
+import java.net.ConnectException;
+import java.net.NoRouteToHostException;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.ZoneOffset;
+import java.time.Clock;
 import java.time.ZonedDateTime;
 import java.util.HexFormat;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
+import io.github.resilience4j.bulkhead.BulkheadFullException;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import ma.eai.msiboa.api.domain.exception.IdempotencyConflictException;
 import ma.eai.msiboa.api.domain.exception.IdempotencyKeyFormatException;
+import ma.eai.idev.fwk.logging.EaiLog;
+import ma.eai.msiboa.api.domain.exception.UpstreamAuthenticationException;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
-import ma.eai.msiboa.api.domain.idempotency.model.IdempotencyStatus;
+import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
+import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyStatus;
 import ma.eai.msiboa.api.domain.ports.output.repository.OperationIdempotencyStore;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -266,16 +301,40 @@ public class OperationIdempotencyService {
      */
     public static final Pattern KEY_FORMAT = Pattern.compile("[A-Za-z0-9._:@-]{1,118}");
 
+    public static final String IN_PROGRESS_MESSAGE = "Request already in progress for this Idempotency-Key";
+
+    public static final String UNKNOWN_OUTCOME_MESSAGE =
+            "Previous request outcome is unknown for this Idempotency-Key, check the operation before retrying with a new key";
+
+    /**
+     * Marge ajoutee au delai de lecture avant de tenir pour inconnue l'issue d'une operation encore en cours.
+     */
+    public static final long IN_PROGRESS_MARGIN_SECONDS = 30;
+
     private final OperationIdempotencyStore store;
     private final ObjectMapper objectMapper;
     private final long ttlSeconds;
+    private final long unknownAfterSeconds;
+    private final Clock clock;
 
+    @Autowired
     public OperationIdempotencyService(OperationIdempotencyStore store,
                                        ObjectMapper objectMapper,
-                                       @Value("\${idempotency.ttl-seconds}") long ttlSeconds) {
+                                       @Value("\${idempotency.ttl-seconds}") long ttlSeconds,
+                                       @Value("\${rest.client.read-timeout-seconds}") long readTimeoutSeconds) {
+        this(store, objectMapper, ttlSeconds, readTimeoutSeconds, Clock.systemUTC());
+    }
+
+    OperationIdempotencyService(OperationIdempotencyStore store,
+                                ObjectMapper objectMapper,
+                                long ttlSeconds,
+                                long readTimeoutSeconds,
+                                Clock clock) {
         this.store = store;
         this.objectMapper = objectMapper;
         this.ttlSeconds = ttlSeconds;
+        this.unknownAfterSeconds = readTimeoutSeconds + IN_PROGRESS_MARGIN_SECONDS;
+        this.clock = clock;
     }
 
     public JsonNode execute(String idempotencyKey,
@@ -292,13 +351,13 @@ public class OperationIdempotencyService {
             return replay(existing.get(), requestHash);
         }
 
-        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+        ZonedDateTime now = ZonedDateTime.now(clock);
         OperationIdempotencyRecord record = OperationIdempotencyRecord.builder()
                 .idempotencyKey(idempotencyKey)
                 .service(service)
                 .operation(operation)
                 .requestHash(requestHash)
-                .status(IdempotencyStatus.IN_PROGRESS)
+                .status(OperationIdempotencyStatus.IN_PROGRESS)
                 .createdAt(now)
                 .expiresAt(now.plusSeconds(ttlSeconds))
                 .build();
@@ -308,38 +367,98 @@ public class OperationIdempotencyService {
                     requestHash);
         }
 
+        JsonNode response;
         try {
-            JsonNode response = call.get();
-            store.save(record.toBuilder()
-                    .status(IdempotencyStatus.COMPLETED)
-                    .responseBody(objectMapper.writeValueAsString(response))
-                    .build());
-            return response;
+            response = call.get();
         } catch (UpstreamBusinessException ex) {
-            store.save(record.toBuilder()
-                    .status(IdempotencyStatus.COMPLETED)
+            store.save(retained(record, OperationIdempotencyStatus.COMPLETED)
                     .code(ex.getCode())
                     .message(ex.getMessage())
                     .build());
             throw ex;
-        } catch (RuntimeException ex) {
-            store.save(record.toBuilder()
-                    .status(IdempotencyStatus.FAILED)
+        } catch (UpstreamValidationException ex) {
+            store.save(retained(record, OperationIdempotencyStatus.COMPLETED)
+                    .code(ex.getCode())
                     .message(ex.getMessage())
+                    .inputRefusal(true)
                     .build());
             throw ex;
+        } catch (RuntimeException ex) {
+            if (isNotSent(ex)) {
+                store.delete(idempotencyKey);
+            } else {
+                store.save(retained(record, OperationIdempotencyStatus.UNKNOWN)
+                        .message(ex.getMessage())
+                        .build());
+            }
+            throw ex;
         }
+        storeCompleted(record, response);
+        return response;
+    }
+
+    private void storeCompleted(OperationIdempotencyRecord record, JsonNode response) {
+        Supplier<OperationIdempotencyRecord> completed = () -> retained(record, OperationIdempotencyStatus.COMPLETED)
+                .responseBody(objectMapper.writeValueAsString(response))
+                .build();
+        if (saveQuietly(completed) || saveQuietly(completed)) {
+            return;
+        }
+        EaiLog.error("Operation result could not be stored, key=" + record.idempotencyKey()
+                + " service=" + record.service()
+                + " operation=" + record.operation());
+        saveQuietly(() -> retained(record, OperationIdempotencyStatus.UNKNOWN)
+                .message("Operation result could not be stored")
+                .build());
+    }
+
+    private boolean saveQuietly(Supplier<OperationIdempotencyRecord> record) {
+        try {
+            store.save(record.get());
+            return true;
+        } catch (RuntimeException ex) {
+            EaiLog.error("Could not store operation idempotency entry", ex);
+            return false;
+        }
+    }
+
+    private OperationIdempotencyRecord.OperationIdempotencyRecordBuilder retained(OperationIdempotencyRecord record,
+                                                                                 OperationIdempotencyStatus status) {
+        return record.toBuilder()
+                .status(status)
+                .expiresAt(ZonedDateTime.now(clock).plusSeconds(ttlSeconds));
+    }
+
+    /**
+     * Vrai quand l'operation n'a pas pu etre executee : disjoncteur ouvert, limite de concurrence atteinte, connexion impossible ou appel refuse en 401.
+     */
+    static boolean isNotSent(Throwable ex) {
+        for (Throwable cause = ex; cause != null; cause = cause.getCause() == cause ? null : cause.getCause()) {
+            if (cause instanceof UpstreamAuthenticationException
+                    || cause instanceof CallNotPermittedException
+                    || cause instanceof BulkheadFullException
+                    || cause instanceof ConnectException
+                    || cause instanceof UnknownHostException
+                    || cause instanceof NoRouteToHostException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private JsonNode replay(OperationIdempotencyRecord record, String requestHash) {
         if (!record.requestHash().equals(requestHash)) {
             throw new IdempotencyConflictException("Idempotency-Key reuse with different payload");
         }
-        if (record.status() == IdempotencyStatus.IN_PROGRESS) {
-            throw new IdempotencyConflictException("Request already in progress for this Idempotency-Key");
+        if (record.status() == OperationIdempotencyStatus.IN_PROGRESS) {
+            boolean stale = record.createdAt().plusSeconds(unknownAfterSeconds).isBefore(ZonedDateTime.now(clock));
+            throw new IdempotencyConflictException(stale ? UNKNOWN_OUTCOME_MESSAGE : IN_PROGRESS_MESSAGE);
         }
-        if (record.status() == IdempotencyStatus.FAILED) {
-            throw new IdempotencyConflictException("Previous request failed for this Idempotency-Key");
+        if (record.status() == OperationIdempotencyStatus.UNKNOWN) {
+            throw new IdempotencyConflictException(UNKNOWN_OUTCOME_MESSAGE);
+        }
+        if (record.responseBody() == null && record.inputRefusal()) {
+            throw new UpstreamValidationException(record.service(), record.code(), record.message());
         }
         if (record.responseBody() == null) {
             throw new UpstreamBusinessException(record.service(), record.code(), record.message());
@@ -363,31 +482,55 @@ public class OperationIdempotencyService {
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.net.ConnectException;
+import java.net.NoRouteToHostException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
+import io.github.resilience4j.bulkhead.Bulkhead;
+import io.github.resilience4j.bulkhead.BulkheadFullException;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import ma.eai.msiboa.api.domain.exception.IdempotencyConflictException;
 import ma.eai.msiboa.api.domain.exception.IdempotencyKeyFormatException;
+import ma.eai.msiboa.api.domain.exception.UpstreamAuthenticationException;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
 import ma.eai.msiboa.api.domain.exception.UpstreamTechnicalException;
+import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
+import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyStatus;
 import ma.eai.msiboa.api.domain.ports.output.repository.OperationIdempotencyStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.client.ResourceAccessException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 class OperationIdempotencyServiceTest {
 
+    private static final long TTL_SECONDS = 3600;
+    private static final long READ_TIMEOUT_SECONDS = 30;
+    private static final long UNKNOWN_AFTER_SECONDS =
+            READ_TIMEOUT_SECONDS + OperationIdempotencyService.IN_PROGRESS_MARGIN_SECONDS;
+
     private final JsonMapper mapper = JsonMapper.builder().build();
     private final AtomicInteger calls = new AtomicInteger();
+    private final MutableClock clock = new MutableClock(Instant.parse("2026-11-02T10:00:00Z"));
+    private final InMemoryStore store = new InMemoryStore(clock);
     private OperationIdempotencyService service;
 
     @BeforeEach
     void setUp() {
-        service = new OperationIdempotencyService(new InMemoryStore(), mapper, 3600);
+        service = new OperationIdempotencyService(store, mapper, TTL_SECONDS, READ_TIMEOUT_SECONDS, clock);
     }
 
     @Test
@@ -418,11 +561,183 @@ class OperationIdempotencyServiceTest {
     }
 
     @Test
-    void technicalFailureBlocksTheKey() {
-        assertThatThrownBy(() -> service.execute("k4", "svc", "op", Map.of(), this::failure))
-                .isInstanceOf(UpstreamTechnicalException.class);
-        assertThatThrownBy(() -> service.execute("k4", "svc", "op", Map.of(), this::success))
-                .isInstanceOf(IdempotencyConflictException.class);
+    void completedResponseIsKeptForTheFullRetentionFromCompletion() {
+        service.execute("k-done", "svc", "op", Map.of(), this::success);
+
+        assertThat(store.records.get("k-done").status()).isEqualTo(OperationIdempotencyStatus.COMPLETED);
+        assertThat(store.records.get("k-done").expiresAt().toInstant()).isEqualTo(clock.instant().plusSeconds(TTL_SECONDS));
+        clock.advance(UNKNOWN_AFTER_SECONDS + 1);
+        service.execute("k-done", "svc", "op", Map.of(), this::success);
+        assertThat(calls.get()).isEqualTo(1);
+    }
+
+    @Test
+    void keyInProgressIsRefusedWhileReserved() {
+        AtomicReference<Throwable> concurrent = new AtomicReference<>();
+        service.execute("k-busy", "svc", "op", Map.of(), () -> {
+            assertThat(store.records.get("k-busy").expiresAt().toInstant()).isEqualTo(clock.instant().plusSeconds(TTL_SECONDS));
+            try {
+                service.execute("k-busy", "svc", "op", Map.of(), this::success);
+            } catch (IdempotencyConflictException ex) {
+                concurrent.set(ex);
+            }
+            return success();
+        });
+
+        assertThat(concurrent.get()).isInstanceOf(IdempotencyConflictException.class)
+                .hasMessage(OperationIdempotencyService.IN_PROGRESS_MESSAGE);
+        assertThat(calls.get()).isEqualTo(1);
+    }
+
+    @Test
+    void reservationLeftByAStoppedServerIsReportedUnknownAfterTheReadDelay() {
+        assertThatThrownBy(() -> service.execute("k-stop", "svc", "op", Map.of(), this::serverStopped))
+                .isInstanceOf(ServerStopped.class);
+        assertThat(store.records.get("k-stop").status()).isEqualTo(OperationIdempotencyStatus.IN_PROGRESS);
+
+        clock.advance(UNKNOWN_AFTER_SECONDS - 1);
+        assertThatThrownBy(() -> service.execute("k-stop", "svc", "op", Map.of(), this::success))
+                .isInstanceOf(IdempotencyConflictException.class)
+                .hasMessage(OperationIdempotencyService.IN_PROGRESS_MESSAGE);
+
+        clock.advance(2);
+        assertThatThrownBy(() -> service.execute("k-stop", "svc", "op", Map.of(), this::success))
+                .isInstanceOf(IdempotencyConflictException.class)
+                .hasMessage(OperationIdempotencyService.UNKNOWN_OUTCOME_MESSAGE);
+        assertThat(calls.get()).isEqualTo(1);
+    }
+
+    @Test
+    void sentCallWhoseResultCannotBeStoredIsNeverExecutedAgain() {
+        store.failingSaves = Integer.MAX_VALUE;
+
+        JsonNode response = service.execute("k-lost", "svc", "op", Map.of(), this::success);
+
+        assertThat(response.get("CODRET").asString()).isEqualTo("000");
+        assertThat(store.records).containsKey("k-lost");
+        clock.advance(61);
+        assertThatThrownBy(() -> service.execute("k-lost", "svc", "op", Map.of(), this::success))
+                .isInstanceOf(IdempotencyConflictException.class)
+                .hasMessage(OperationIdempotencyService.UNKNOWN_OUTCOME_MESSAGE);
+        assertThat(calls.get()).isEqualTo(1);
+    }
+
+    @Test
+    void completedWriteIsRetriedOnce() {
+        store.failingSaves = 1;
+
+        service.execute("k-retry", "svc", "op", Map.of(), this::success);
+
+        assertThat(store.records.get("k-retry").status()).isEqualTo(OperationIdempotencyStatus.COMPLETED);
+    }
+
+    @Test
+    void completedWriteFailureFallsBackToUnknown() {
+        store.failingSaves = 2;
+
+        service.execute("k-fallback", "svc", "op", Map.of(), this::success);
+
+        assertThat(store.records.get("k-fallback").status()).isEqualTo(OperationIdempotencyStatus.UNKNOWN);
+        assertThat(store.records.get("k-fallback").expiresAt().toInstant()).isEqualTo(clock.instant().plusSeconds(TTL_SECONDS));
+        assertThatThrownBy(() -> service.execute("k-fallback", "svc", "op", Map.of(), this::success))
+                .isInstanceOf(IdempotencyConflictException.class)
+                .hasMessage(OperationIdempotencyService.UNKNOWN_OUTCOME_MESSAGE);
+        assertThat(calls.get()).isEqualTo(1);
+    }
+
+    @Test
+    void openCircuitReleasesTheKey() {
+        assertReleased("k-cb", CallNotPermittedException.createCallNotPermittedException(CircuitBreaker.ofDefaults("svc")));
+    }
+
+    @Test
+    void fullBulkheadReleasesTheKey() {
+        assertReleased("k-bh", BulkheadFullException.createBulkheadFullException(Bulkhead.ofDefaults("svc")));
+    }
+
+    @Test
+    void refusedConnectionReleasesTheKey() {
+        assertReleased("k-cnx", new ResourceAccessException("I/O error", new ConnectException("Connection refused")));
+    }
+
+    @Test
+    void unreachableHostReleasesTheKey() {
+        assertReleased("k-host", new ResourceAccessException("I/O error", new UnknownHostException("adapter")));
+        assertReleased("k-route", new ResourceAccessException("I/O error", new NoRouteToHostException("No route to host")));
+    }
+
+    @Test
+    void inputRefusalIsReplayedWithoutCallingAgain() {
+        assertThatThrownBy(() -> service.execute("k-400", "svc", "op", Map.of(),
+                () -> fail(new UpstreamValidationException("svc", "002", "Compte invalide"))))
+                .isInstanceOf(UpstreamValidationException.class);
+
+        OperationIdempotencyRecord stored = store.records.get("k-400");
+        assertThat(stored.status()).isEqualTo(OperationIdempotencyStatus.COMPLETED);
+        assertThat(stored.code()).isEqualTo("002");
+        assertThat(stored.message()).isEqualTo("Compte invalide");
+        assertThat(stored.expiresAt().toInstant()).isEqualTo(clock.instant().plusSeconds(TTL_SECONDS));
+
+        clock.advance(UNKNOWN_AFTER_SECONDS + 1);
+        assertThatThrownBy(() -> service.execute("k-400", "svc", "op", Map.of(), this::success))
+                .isInstanceOf(UpstreamValidationException.class)
+                .hasMessage("Compte invalide")
+                .extracting(ex -> ((UpstreamValidationException) ex).getCode())
+                .isEqualTo("002");
+        assertThat(calls.get()).isEqualTo(1);
+    }
+
+    @Test
+    void unauthorizedCallReleasesTheKey() {
+        assertReleased("k-401", new UpstreamAuthenticationException("svc", "401", "Unauthorized"));
+    }
+
+    @Test
+    void forbiddenBusinessRefusalIsReplayedUnchanged() {
+        assertThatThrownBy(() -> service.execute("k-403", "svc", "op", Map.of(),
+                () -> fail(new UpstreamBusinessException("svc", "005", "Operation non autorisee"))))
+                .isInstanceOf(UpstreamBusinessException.class);
+        assertThatThrownBy(() -> service.execute("k-403", "svc", "op", Map.of(), this::success))
+                .isInstanceOf(UpstreamBusinessException.class)
+                .hasMessage("Operation non autorisee");
+        assertThat(store.records.get("k-403").status()).isEqualTo(OperationIdempotencyStatus.COMPLETED);
+        assertThat(calls.get()).isEqualTo(1);
+    }
+
+    @Test
+    void readTimeoutMarksTheOutcomeUnknown() {
+        assertUnknown("k-read", new ResourceAccessException("I/O error", new SocketTimeoutException("Read timed out")));
+    }
+
+    @Test
+    void upstreamServerErrorMarksTheOutcomeUnknown() {
+        assertUnknown("k-5xx", new UpstreamTechnicalException("svc", "500", "Probleme technique"));
+    }
+
+    private void assertReleased(String key, RuntimeException notSent) {
+        int before = calls.get();
+        assertThatThrownBy(() -> service.execute(key, "svc", "op", Map.of(), () -> fail(notSent)))
+                .isSameAs(notSent);
+        assertThat(store.records).doesNotContainKey(key);
+
+        JsonNode response = service.execute(key, "svc", "op", Map.of(), this::success);
+
+        assertThat(response.get("CODRET").asString()).isEqualTo("000");
+        assertThat(calls.get()).isEqualTo(before + 2);
+        assertThat(store.records.get(key).status()).isEqualTo(OperationIdempotencyStatus.COMPLETED);
+    }
+
+    private void assertUnknown(String key, RuntimeException uncertain) {
+        assertThatThrownBy(() -> service.execute(key, "svc", "op", Map.of(), () -> fail(uncertain)))
+                .isSameAs(uncertain);
+        assertThat(store.records.get(key).status()).isEqualTo(OperationIdempotencyStatus.UNKNOWN);
+        assertThat(store.records.get(key).expiresAt().toInstant()).isEqualTo(clock.instant().plusSeconds(TTL_SECONDS));
+
+        clock.advance(UNKNOWN_AFTER_SECONDS + 1);
+        assertThatThrownBy(() -> service.execute(key, "svc", "op", Map.of(), this::success))
+                .isInstanceOf(IdempotencyConflictException.class)
+                .hasMessage(OperationIdempotencyService.UNKNOWN_OUTCOME_MESSAGE);
+        assertThat(calls.get()).isEqualTo(1);
     }
 
     @Test
@@ -465,28 +780,85 @@ class OperationIdempotencyServiceTest {
         throw new UpstreamBusinessException("svc", "001", "Solde insuffisant");
     }
 
-    private JsonNode failure() {
+    private JsonNode fail(RuntimeException ex) {
         calls.incrementAndGet();
-        throw new UpstreamTechnicalException("svc", "004", "Probleme technique");
+        throw ex;
+    }
+
+    private JsonNode serverStopped() {
+        calls.incrementAndGet();
+        throw new ServerStopped();
+    }
+
+    private static final class ServerStopped extends Error {
+    }
+
+    private static final class MutableClock extends Clock {
+
+        private Instant now;
+
+        private MutableClock(Instant now) {
+            this.now = now;
+        }
+
+        private void advance(long seconds) {
+            now = now.plusSeconds(seconds);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
     }
 
     private static final class InMemoryStore implements OperationIdempotencyStore {
 
         private final Map<String, OperationIdempotencyRecord> records = new HashMap<>();
+        private final Clock clock;
+        private int failingSaves;
+
+        private InMemoryStore(Clock clock) {
+            this.clock = clock;
+        }
 
         @Override
         public Optional<OperationIdempotencyRecord> find(String idempotencyKey) {
+            records.computeIfPresent(idempotencyKey, (key, record) -> isExpired(record) ? null : record);
             return Optional.ofNullable(records.get(idempotencyKey));
         }
 
         @Override
         public boolean createIfAbsent(OperationIdempotencyRecord record) {
+            find(record.idempotencyKey());
             return records.putIfAbsent(record.idempotencyKey(), record) == null;
         }
 
         @Override
         public void save(OperationIdempotencyRecord record) {
+            if (failingSaves > 0) {
+                failingSaves--;
+                throw new IllegalStateException("Could not write operation idempotency entry");
+            }
             records.put(record.idempotencyKey(), record);
+        }
+
+        @Override
+        public void delete(String idempotencyKey) {
+            records.remove(idempotencyKey);
+        }
+
+        private boolean isExpired(OperationIdempotencyRecord record) {
+            return !record.expiresAt().toInstant().isAfter(clock.instant());
         }
     }
 }
@@ -499,16 +871,21 @@ import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.RetryRegistry;
 import ma.eai.msiboa.api.integration.CorrelationIdInterceptor;
+import ma.eai.msiboa.clients.security.util.OAuth2ClientHttpRequestInterceptorFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 /**
- * Fabrique des clients HTTP vers les services exposes, un disjoncteur nomme par service.
+ * Fabrique des clients HTTP vers les services exposes, un disjoncteur nomme par service et un jeton OAuth2 optionnel.
  */
 @Component
 public class UpstreamRestClients {
+
+    static final String OAUTH2_REGISTRATION = "sasAccessor";
 
     private final CorrelationIdInterceptor correlationIdInterceptor;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
@@ -516,19 +893,45 @@ public class UpstreamRestClients {
     private final BulkheadRegistry bulkheadRegistry;
     private final long connectTimeoutSeconds;
     private final long readTimeoutSeconds;
+    private final OAuth2ClientHttpRequestInterceptorFactory oauth2InterceptorFactory;
+    private final String oauth2ClientId;
+    private final String oauth2IssuerUri;
 
+    @Autowired
     public UpstreamRestClients(CorrelationIdInterceptor correlationIdInterceptor,
                                CircuitBreakerRegistry circuitBreakerRegistry,
                                RetryRegistry retryRegistry,
                                BulkheadRegistry bulkheadRegistry,
                                @Value("\${rest.client.connect-timeout-seconds}") long connectTimeoutSeconds,
-                               @Value("\${rest.client.read-timeout-seconds}") long readTimeoutSeconds) {
+                               @Value("\${rest.client.read-timeout-seconds}") long readTimeoutSeconds,
+                               @Value("\${neobank.upstream.oauth2.enabled:false}") boolean oauth2Enabled,
+                               ObjectProvider<OAuth2ClientHttpRequestInterceptorFactory> oauth2InterceptorFactory,
+                               @Value("\${spring.security.oauth2.client.registration.sasAccessor.client-id:}") String oauth2ClientId,
+                               @Value("\${spring.security.oauth2.client.provider.sasAccessor.issuer-uri:}") String oauth2IssuerUri) {
+        this(correlationIdInterceptor, circuitBreakerRegistry, retryRegistry, bulkheadRegistry,
+                connectTimeoutSeconds, readTimeoutSeconds,
+                oauth2Enabled ? oauth2InterceptorFactory.getObject() : null,
+                oauth2ClientId, oauth2IssuerUri);
+    }
+
+    UpstreamRestClients(CorrelationIdInterceptor correlationIdInterceptor,
+                        CircuitBreakerRegistry circuitBreakerRegistry,
+                        RetryRegistry retryRegistry,
+                        BulkheadRegistry bulkheadRegistry,
+                        long connectTimeoutSeconds,
+                        long readTimeoutSeconds,
+                        OAuth2ClientHttpRequestInterceptorFactory oauth2InterceptorFactory,
+                        String oauth2ClientId,
+                        String oauth2IssuerUri) {
         this.correlationIdInterceptor = correlationIdInterceptor;
         this.circuitBreakerRegistry = circuitBreakerRegistry;
         this.retryRegistry = retryRegistry;
         this.bulkheadRegistry = bulkheadRegistry;
         this.connectTimeoutSeconds = connectTimeoutSeconds;
         this.readTimeoutSeconds = readTimeoutSeconds;
+        this.oauth2InterceptorFactory = oauth2InterceptorFactory;
+        this.oauth2ClientId = oauth2ClientId;
+        this.oauth2IssuerUri = oauth2IssuerUri;
     }
 
     public RestClient build(String service, String baseUrl) {
@@ -539,10 +942,14 @@ public class UpstreamRestClients {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(connectTimeoutSeconds));
         requestFactory.setReadTimeout(Duration.ofSeconds(readTimeoutSeconds));
-        return RestClient.builder()
+        RestClient.Builder builder = RestClient.builder()
                 .baseUrl(baseUrl)
                 .requestFactory(requestFactory)
-                .requestInterceptor(correlationIdInterceptor)
+                .requestInterceptor(correlationIdInterceptor);
+        if (oauth2InterceptorFactory != null) {
+            builder.requestInterceptor(oauth2InterceptorFactory.create(oauth2ClientId, OAUTH2_REGISTRATION, oauth2IssuerUri));
+        }
+        return builder
                 .requestInterceptor(new UpstreamResilienceInterceptor(
                         circuitBreakerRegistry.circuitBreaker(service),
                         retryRegistry.retry(service),
@@ -658,10 +1065,140 @@ class UpstreamResilienceInterceptorTest {
     }
 }
 `,
+  "<P>-container/src/test/java/ma/eai/msiboa/api/integration/upstream/UpstreamRestClientsTest.java": `package ma.eai.msiboa.api.integration.upstream;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+
+import io.github.resilience4j.bulkhead.BulkheadRegistry;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.github.resilience4j.retry.RetryRegistry;
+import ma.eai.msiboa.api.integration.CorrelationIdInterceptor;
+import ma.eai.msiboa.clients.security.config.ForwardHeadersProperties;
+import ma.eai.msiboa.clients.security.service.TokenManagementService;
+import ma.eai.msiboa.clients.security.util.OAuth2ClientHttpRequestInterceptorFactory;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClient;
+
+class UpstreamRestClientsTest {
+
+    private static final String BASE_URL = "http://adapter.test/neobank-svc";
+
+    @Test
+    void disabledOAuth2SendsNoAuthorizationHeader() {
+        RestClient.Builder builder = clients(null).builder("svc", BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/api/x"))
+                .andExpect(headerDoesNotExist(HttpHeaders.AUTHORIZATION))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        builder.build().get().uri("/api/x").retrieve().toBodilessEntity();
+
+        server.verify();
+    }
+
+    @Test
+    void enabledOAuth2SendsBearerTokenOfTheSasAccessorRegistration() {
+        AtomicReference<List<String>> requested = new AtomicReference<>();
+        TokenManagementService tokens = new TokenManagementService(null) {
+            @Override
+            public String getAccessToken(String first, String second, String third) {
+                requested.set(List.of(first, second, third));
+                return "jeton-de-test";
+            }
+        };
+        OAuth2ClientHttpRequestInterceptorFactory factory =
+                new OAuth2ClientHttpRequestInterceptorFactory(tokens, new ForwardHeadersProperties());
+        RestClient.Builder builder = clients(factory).builder("svc", BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/api/x"))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer jeton-de-test"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        builder.build().post().uri("/api/x").retrieve().toBodilessEntity();
+
+        server.verify();
+        assertThat(requested.get()).contains(UpstreamRestClients.OAUTH2_REGISTRATION, "client-test");
+    }
+
+    private static UpstreamRestClients clients(OAuth2ClientHttpRequestInterceptorFactory factory) {
+        CorrelationIdInterceptor correlation = new CorrelationIdInterceptor();
+        ReflectionTestUtils.setField(correlation, "correlationHeaderName", "X-Correlation-ID");
+        return new UpstreamRestClients(correlation,
+                CircuitBreakerRegistry.ofDefaults(),
+                RetryRegistry.ofDefaults(),
+                BulkheadRegistry.ofDefaults(),
+                5,
+                30,
+                factory,
+                "client-test",
+                "http://localhost:1/realms/test");
+    }
+}
+`,
+  "<P>-container/src/test/java/ma/eai/msiboa/api/integration/upstream/UpstreamErrorDecoderTest.java": `package ma.eai.msiboa.api.integration.upstream;
+
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+
+import ma.eai.msiboa.api.domain.exception.UpstreamAuthenticationException;
+import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
+import ma.eai.msiboa.api.domain.exception.UpstreamTechnicalException;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.mock.http.client.MockClientHttpRequest;
+import org.springframework.mock.http.client.MockClientHttpResponse;
+import tools.jackson.databind.json.JsonMapper;
+
+class UpstreamErrorDecoderTest {
+
+    private final UpstreamErrorDecoder decoder = new UpstreamErrorDecoder("svc",
+            UpstreamReturnCodes.of(List.of("005"), List.of("333")), JsonMapper.builder().build());
+    private final MockClientHttpRequest request = new MockClientHttpRequest(HttpMethod.POST, URI.create("http://h/api/x"));
+
+    @Test
+    void unauthorizedIsAnAuthenticationRefusal() {
+        assertThatThrownBy(() -> decoder.handle(request, response(401, "<html>Error 401</html>")))
+                .isInstanceOf(UpstreamAuthenticationException.class);
+    }
+
+    @Test
+    void forbiddenWithBusinessCodeStaysABusinessRefusal() {
+        assertThatThrownBy(() -> decoder.handle(request, response(403, "{\\"code\\":\\"005\\",\\"message\\":\\"Operation non autorisee\\"}")))
+                .isInstanceOf(UpstreamBusinessException.class)
+                .hasMessage("Operation non autorisee");
+    }
+
+    @Test
+    void forbiddenWithUnknownCodeStaysATechnicalError() {
+        assertThatThrownBy(() -> decoder.handle(request, response(403, "{\\"code\\":\\"999\\"}")))
+                .isExactlyInstanceOf(UpstreamTechnicalException.class);
+    }
+
+    private static MockClientHttpResponse response(int status, String body) {
+        return new MockClientHttpResponse(body.getBytes(StandardCharsets.UTF_8), HttpStatusCode.valueOf(status));
+    }
+}
+`,
   "<P>-container/src/main/java/ma/eai/msiboa/api/integration/upstream/UpstreamErrorDecoder.java": `package ma.eai.msiboa.api.integration.upstream;
 
 import java.io.IOException;
 
+import ma.eai.msiboa.api.domain.exception.UpstreamAuthenticationException;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
 import ma.eai.msiboa.api.domain.exception.UpstreamTechnicalException;
 import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
@@ -707,6 +1244,9 @@ public class UpstreamErrorDecoder {
         }
         if (returnCodes.validation().contains(code) || status == 400) {
             throw new UpstreamValidationException(service, code, message);
+        }
+        if (status == 401) {
+            throw new UpstreamAuthenticationException(service, code, message);
         }
         throw new UpstreamTechnicalException(service, code, message);
     }
@@ -797,6 +1337,16 @@ public class DataGridOperationIdempotencyStore implements OperationIdempotencySt
         }
     }
 
+    @Override
+    public void delete(String idempotencyKey) {
+        try {
+            dataGrid.remove(cacheName, KEY_PREFIX + idempotencyKey);
+        } catch (Exception e) {
+            EaiLog.error("Could not delete operation idempotency entry " + idempotencyKey, e);
+            throw new IllegalStateException("Could not delete operation idempotency entry", e);
+        }
+    }
+
     private int ttlSeconds(OperationIdempotencyRecord record) {
         long seconds = Duration.between(Instant.now(), record.expiresAt().toInstant()).getSeconds();
         return Math.toIntExact(Math.max(1, Math.min(Integer.MAX_VALUE, seconds)));
@@ -809,11 +1359,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 import ma.eai.msiboa.api.application.idempotency.OperationIdempotencyService;
+import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
 import ma.eai.msiboa.api.domain.ports.output.repository.OperationIdempotencyStore;
 import org.junit.jupiter.api.BeforeEach;
@@ -826,6 +1379,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.client.ResourceAccessException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -837,12 +1391,47 @@ class IdempotencyKeyStatusTest {
 
     @BeforeEach
     void setUp() {
-        OperationIdempotencyService service = new OperationIdempotencyService(new InMemoryStore(), mapper, 3600);
+        OperationIdempotencyService service = new OperationIdempotencyService(new InMemoryStore(), mapper, 3600, 30);
         UpstreamExceptionHandler handler = new UpstreamExceptionHandler();
         ReflectionTestUtils.setField(handler, "correlationHeaderName", "X-Correlation-Id");
+        GlobalExceptionHandler globalHandler = new GlobalExceptionHandler();
+        ReflectionTestUtils.setField(globalHandler, "correlationHeaderName", "X-Correlation-Id");
         mockMvc = MockMvcBuilders.standaloneSetup(new ProbeController(service, mapper))
-                .setControllerAdvice(handler)
+                .setControllerAdvice(handler, globalHandler)
                 .build();
+    }
+
+    @Test
+    void unknownOutcomeIsRefusedWithConflictAndExplicitMessage() throws Exception {
+        mockMvc.perform(post("/probe").header("Idempotency-Key", "k-unknown").header("X-Probe-Outcome", "timeout"))
+                .andExpect(status().isServiceUnavailable());
+
+        MvcResult replay = mockMvc.perform(post("/probe").header("Idempotency-Key", "k-unknown")).andReturn();
+
+        assertThat(replay.getResponse().getStatus()).isEqualTo(409);
+        assertThat(errorBody(replay).get("message").asString())
+                .isEqualTo(OperationIdempotencyService.UNKNOWN_OUTCOME_MESSAGE);
+    }
+
+    @Test
+    void inputRefusalIsReplayedAsTheSameBadRequest() throws Exception {
+        MvcResult first = mockMvc.perform(post("/probe").header("Idempotency-Key", "k-invalid").header("X-Probe-Outcome", "invalid"))
+                .andReturn();
+        MvcResult replay = mockMvc.perform(post("/probe").header("Idempotency-Key", "k-invalid")).andReturn();
+
+        assertThat(first.getResponse().getStatus()).isEqualTo(400);
+        assertThat(replay.getResponse().getStatus()).isEqualTo(400);
+        assertThat(errorBody(replay).get("code").asString()).isEqualTo("002");
+        assertThat(errorBody(replay)).isEqualTo(errorBody(first));
+    }
+
+    @Test
+    void callNotSentLetsTheSameKeyRunAgain() throws Exception {
+        mockMvc.perform(post("/probe").header("Idempotency-Key", "k-refused").header("X-Probe-Outcome", "refused"))
+                .andExpect(status().isServiceUnavailable());
+
+        mockMvc.perform(post("/probe").header("Idempotency-Key", "k-refused"))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -897,8 +1486,20 @@ class IdempotencyKeyStatusTest {
         }
 
         @PostMapping("/probe")
-        public ResponseEntity<String> probe(@RequestHeader(value = "Idempotency-Key", required = true) String idempotencyKey) {
-            service.execute(idempotencyKey, "svc", "op", Map.of(), mapper::createObjectNode);
+        public ResponseEntity<String> probe(@RequestHeader(value = "Idempotency-Key", required = true) String idempotencyKey,
+                                            @RequestHeader(value = "X-Probe-Outcome", required = false) String outcome) {
+            service.execute(idempotencyKey, "svc", "op", Map.of(), () -> {
+                if ("timeout".equals(outcome)) {
+                    throw new ResourceAccessException("I/O error", new SocketTimeoutException("Read timed out"));
+                }
+                if ("refused".equals(outcome)) {
+                    throw new ResourceAccessException("I/O error", new ConnectException("Connection refused"));
+                }
+                if ("invalid".equals(outcome)) {
+                    throw new UpstreamValidationException("svc", "002", "Compte invalide");
+                }
+                return mapper.createObjectNode();
+            });
             return ResponseEntity.ok("done");
         }
     }
@@ -920,6 +1521,11 @@ class IdempotencyKeyStatusTest {
         @Override
         public void save(OperationIdempotencyRecord record) {
             records.put(record.idempotencyKey(), record);
+        }
+
+        @Override
+        public void delete(String idempotencyKey) {
+            records.remove(idempotencyKey);
         }
     }
 }
@@ -945,8 +1551,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import ma.eai.msiboa.api.application.idempotency.OperationIdempotencyService;
 import ma.eai.msiboa.api.domain.exception.IdempotencyConflictException;
-import ma.eai.msiboa.api.domain.idempotency.model.IdempotencyStatus;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
+import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyStatus;
 import ma.eai.msiboa.api.domain.ports.output.repository.OperationIdempotencyStore;
 import ma.eai.msiboa.idev.datagrid.config.DataGridProperties;
 import ma.eai.msiboa.idev.datagrid.error.DataGridException;
@@ -962,13 +1568,35 @@ class DataGridOperationIdempotencyStoreTest {
     private static final String CACHE = "operation-idempotency-cache";
 
     private final JsonMapper mapper = JsonMapper.builder().build();
+    private final InMemoryDataGrid dataGrid = new InMemoryDataGrid();
     private final DataGridOperationIdempotencyStore store =
-            new DataGridOperationIdempotencyStore(new InMemoryDataGrid(), mapper, CACHE);
+            new DataGridOperationIdempotencyStore(dataGrid, mapper, CACHE);
 
     @Test
     void secondReservationOfSameKeyIsRefused() {
         assertThat(store.createIfAbsent(record("k-1"))).isTrue();
         assertThat(store.createIfAbsent(record("k-1"))).isFalse();
+    }
+
+    @Test
+    void deletedKeyCanBeReservedAgain() {
+        assertThat(store.createIfAbsent(record("k-del"))).isTrue();
+        store.delete("k-del");
+
+        assertThat(store.find("k-del")).isEmpty();
+        assertThat(store.createIfAbsent(record("k-del"))).isTrue();
+    }
+
+    @Test
+    void reservationIsKeptInDataGridForTheFullRetention() {
+        OperationIdempotencyService service = new OperationIdempotencyService(store, mapper, 86400, 30);
+
+        service.execute("k-lock", "svc", "op", Map.of(), () -> {
+            assertThat(dataGrid.ttls.get(CACHE + "/operation:k-lock")).isBetween(86399L, 86400L);
+            return mapper.createObjectNode();
+        });
+
+        assertThat(dataGrid.ttls.get(CACHE + "/operation:k-lock")).isBetween(86399L, 86400L);
     }
 
     @Test
@@ -994,8 +1622,13 @@ class DataGridOperationIdempotencyStoreTest {
             public void save(OperationIdempotencyRecord record) {
                 store.save(record);
             }
+
+            @Override
+            public void delete(String idempotencyKey) {
+                store.delete(idempotencyKey);
+            }
         };
-        OperationIdempotencyService service = new OperationIdempotencyService(racingStore, mapper, 3600);
+        OperationIdempotencyService service = new OperationIdempotencyService(racingStore, mapper, 3600, 30);
         AtomicInteger calls = new AtomicInteger();
         Callable<Object> request = () -> {
             try {
@@ -1037,7 +1670,7 @@ class DataGridOperationIdempotencyStoreTest {
                 .service("svc")
                 .operation("op")
                 .requestHash("hash")
-                .status(IdempotencyStatus.IN_PROGRESS)
+                .status(OperationIdempotencyStatus.IN_PROGRESS)
                 .createdAt(now)
                 .expiresAt(now.plusSeconds(3600))
                 .build();
@@ -1054,15 +1687,21 @@ class DataGridOperationIdempotencyStoreTest {
     private static final class InMemoryDataGrid implements DataGridService {
 
         private final Map<String, String> entries = new ConcurrentHashMap<>();
+        private final Map<String, Long> ttls = new ConcurrentHashMap<>();
 
         @Override
         public void put(String cacheName, String key, String value, long ttlSeconds) {
             entries.put(cacheName + "/" + key, value);
+            ttls.put(cacheName + "/" + key, ttlSeconds);
         }
 
         @Override
         public boolean putIfAbsent(String cacheName, String key, String value, long ttlSeconds) {
-            return entries.putIfAbsent(cacheName + "/" + key, value) == null;
+            boolean created = entries.putIfAbsent(cacheName + "/" + key, value) == null;
+            if (created) {
+                ttls.put(cacheName + "/" + key, ttlSeconds);
+            }
+            return created;
         }
 
         @Override
