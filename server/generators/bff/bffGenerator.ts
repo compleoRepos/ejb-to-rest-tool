@@ -114,6 +114,9 @@ function propertiesBlock(models: ServiceModel[], profile: "dev" | "cloud"): stri
     profile === "dev"
       ? "neobank.upstream.business-error-status=422"
       : "neobank.upstream.business-error-status=${neobank-upstream-business-error-status}",
+    profile === "dev"
+      ? "neobank.upstream.oauth2.enabled=false"
+      : "neobank.upstream.oauth2.enabled=${NEOBANK_UPSTREAM_OAUTH2_ENABLED:false}",
     ...models.map((m) =>
       profile === "dev"
         ? `neobank.upstream.${m.key}.base-url=${m.descriptor.adapter_base_url}`

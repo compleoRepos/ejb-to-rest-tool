@@ -74,6 +74,18 @@ public class UpstreamTechnicalException extends UpstreamException {
     }
 }
 `,
+  "<P>-domain/<P>-domain-core/src/main/java/ma/eai/msiboa/api/domain/exception/UpstreamAuthenticationException.java": `package ma.eai.msiboa.api.domain.exception;
+
+/**
+ * Appel refuse en 401 par un service expose, l'operation n'a pas ete executee.
+ */
+public class UpstreamAuthenticationException extends UpstreamTechnicalException {
+
+    public UpstreamAuthenticationException(String service, String code, String message) {
+        super(service, code, message);
+    }
+}
+`,
   "<P>-domain/<P>-domain-core/src/main/java/ma/eai/msiboa/api/domain/exception/IdempotencyKeyFormatException.java": `package ma.eai.msiboa.api.domain.exception;
 
 /**
@@ -266,6 +278,7 @@ import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import ma.eai.msiboa.api.domain.exception.IdempotencyConflictException;
 import ma.eai.msiboa.api.domain.exception.IdempotencyKeyFormatException;
 import ma.eai.idev.fwk.logging.EaiLog;
+import ma.eai.msiboa.api.domain.exception.UpstreamAuthenticationException;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
 import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
@@ -417,11 +430,12 @@ public class OperationIdempotencyService {
     }
 
     /**
-     * Vrai quand la requete n'a pas pu quitter la couche API : disjoncteur ouvert, limite de concurrence atteinte ou connexion impossible.
+     * Vrai quand l'operation n'a pas pu etre executee : disjoncteur ouvert, limite de concurrence atteinte, connexion impossible ou appel refuse en 401.
      */
     static boolean isNotSent(Throwable ex) {
         for (Throwable cause = ex; cause != null; cause = cause.getCause() == cause ? null : cause.getCause()) {
-            if (cause instanceof CallNotPermittedException
+            if (cause instanceof UpstreamAuthenticationException
+                    || cause instanceof CallNotPermittedException
                     || cause instanceof BulkheadFullException
                     || cause instanceof ConnectException
                     || cause instanceof UnknownHostException
@@ -488,6 +502,7 @@ import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import ma.eai.msiboa.api.domain.exception.IdempotencyConflictException;
 import ma.eai.msiboa.api.domain.exception.IdempotencyKeyFormatException;
+import ma.eai.msiboa.api.domain.exception.UpstreamAuthenticationException;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
 import ma.eai.msiboa.api.domain.exception.UpstreamTechnicalException;
 import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
@@ -673,6 +688,23 @@ class OperationIdempotencyServiceTest {
     }
 
     @Test
+    void unauthorizedCallReleasesTheKey() {
+        assertReleased("k-401", new UpstreamAuthenticationException("svc", "401", "Unauthorized"));
+    }
+
+    @Test
+    void forbiddenBusinessRefusalIsReplayedUnchanged() {
+        assertThatThrownBy(() -> service.execute("k-403", "svc", "op", Map.of(),
+                () -> fail(new UpstreamBusinessException("svc", "005", "Operation non autorisee"))))
+                .isInstanceOf(UpstreamBusinessException.class);
+        assertThatThrownBy(() -> service.execute("k-403", "svc", "op", Map.of(), this::success))
+                .isInstanceOf(UpstreamBusinessException.class)
+                .hasMessage("Operation non autorisee");
+        assertThat(store.records.get("k-403").status()).isEqualTo(OperationIdempotencyStatus.COMPLETED);
+        assertThat(calls.get()).isEqualTo(1);
+    }
+
+    @Test
     void readTimeoutMarksTheOutcomeUnknown() {
         assertUnknown("k-read", new ResourceAccessException("I/O error", new SocketTimeoutException("Read timed out")));
     }
@@ -839,16 +871,21 @@ import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.RetryRegistry;
 import ma.eai.msiboa.api.integration.CorrelationIdInterceptor;
+import ma.eai.msiboa.clients.security.util.OAuth2ClientHttpRequestInterceptorFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 /**
- * Fabrique des clients HTTP vers les services exposes, un disjoncteur nomme par service.
+ * Fabrique des clients HTTP vers les services exposes, un disjoncteur nomme par service et un jeton OAuth2 optionnel.
  */
 @Component
 public class UpstreamRestClients {
+
+    static final String OAUTH2_REGISTRATION = "sasAccessor";
 
     private final CorrelationIdInterceptor correlationIdInterceptor;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
@@ -856,19 +893,45 @@ public class UpstreamRestClients {
     private final BulkheadRegistry bulkheadRegistry;
     private final long connectTimeoutSeconds;
     private final long readTimeoutSeconds;
+    private final OAuth2ClientHttpRequestInterceptorFactory oauth2InterceptorFactory;
+    private final String oauth2ClientId;
+    private final String oauth2IssuerUri;
 
+    @Autowired
     public UpstreamRestClients(CorrelationIdInterceptor correlationIdInterceptor,
                                CircuitBreakerRegistry circuitBreakerRegistry,
                                RetryRegistry retryRegistry,
                                BulkheadRegistry bulkheadRegistry,
                                @Value("\${rest.client.connect-timeout-seconds}") long connectTimeoutSeconds,
-                               @Value("\${rest.client.read-timeout-seconds}") long readTimeoutSeconds) {
+                               @Value("\${rest.client.read-timeout-seconds}") long readTimeoutSeconds,
+                               @Value("\${neobank.upstream.oauth2.enabled:false}") boolean oauth2Enabled,
+                               ObjectProvider<OAuth2ClientHttpRequestInterceptorFactory> oauth2InterceptorFactory,
+                               @Value("\${spring.security.oauth2.client.registration.sasAccessor.client-id:}") String oauth2ClientId,
+                               @Value("\${spring.security.oauth2.client.provider.sasAccessor.issuer-uri:}") String oauth2IssuerUri) {
+        this(correlationIdInterceptor, circuitBreakerRegistry, retryRegistry, bulkheadRegistry,
+                connectTimeoutSeconds, readTimeoutSeconds,
+                oauth2Enabled ? oauth2InterceptorFactory.getObject() : null,
+                oauth2ClientId, oauth2IssuerUri);
+    }
+
+    UpstreamRestClients(CorrelationIdInterceptor correlationIdInterceptor,
+                        CircuitBreakerRegistry circuitBreakerRegistry,
+                        RetryRegistry retryRegistry,
+                        BulkheadRegistry bulkheadRegistry,
+                        long connectTimeoutSeconds,
+                        long readTimeoutSeconds,
+                        OAuth2ClientHttpRequestInterceptorFactory oauth2InterceptorFactory,
+                        String oauth2ClientId,
+                        String oauth2IssuerUri) {
         this.correlationIdInterceptor = correlationIdInterceptor;
         this.circuitBreakerRegistry = circuitBreakerRegistry;
         this.retryRegistry = retryRegistry;
         this.bulkheadRegistry = bulkheadRegistry;
         this.connectTimeoutSeconds = connectTimeoutSeconds;
         this.readTimeoutSeconds = readTimeoutSeconds;
+        this.oauth2InterceptorFactory = oauth2InterceptorFactory;
+        this.oauth2ClientId = oauth2ClientId;
+        this.oauth2IssuerUri = oauth2IssuerUri;
     }
 
     public RestClient build(String service, String baseUrl) {
@@ -879,10 +942,14 @@ public class UpstreamRestClients {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(connectTimeoutSeconds));
         requestFactory.setReadTimeout(Duration.ofSeconds(readTimeoutSeconds));
-        return RestClient.builder()
+        RestClient.Builder builder = RestClient.builder()
                 .baseUrl(baseUrl)
                 .requestFactory(requestFactory)
-                .requestInterceptor(correlationIdInterceptor)
+                .requestInterceptor(correlationIdInterceptor);
+        if (oauth2InterceptorFactory != null) {
+            builder.requestInterceptor(oauth2InterceptorFactory.create(oauth2ClientId, OAUTH2_REGISTRATION, oauth2IssuerUri));
+        }
+        return builder
                 .requestInterceptor(new UpstreamResilienceInterceptor(
                         circuitBreakerRegistry.circuitBreaker(service),
                         retryRegistry.retry(service),
@@ -998,10 +1065,140 @@ class UpstreamResilienceInterceptorTest {
     }
 }
 `,
+  "<P>-container/src/test/java/ma/eai/msiboa/api/integration/upstream/UpstreamRestClientsTest.java": `package ma.eai.msiboa.api.integration.upstream;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+
+import io.github.resilience4j.bulkhead.BulkheadRegistry;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.github.resilience4j.retry.RetryRegistry;
+import ma.eai.msiboa.api.integration.CorrelationIdInterceptor;
+import ma.eai.msiboa.clients.security.config.ForwardHeadersProperties;
+import ma.eai.msiboa.clients.security.service.TokenManagementService;
+import ma.eai.msiboa.clients.security.util.OAuth2ClientHttpRequestInterceptorFactory;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClient;
+
+class UpstreamRestClientsTest {
+
+    private static final String BASE_URL = "http://adapter.test/neobank-svc";
+
+    @Test
+    void disabledOAuth2SendsNoAuthorizationHeader() {
+        RestClient.Builder builder = clients(null).builder("svc", BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/api/x"))
+                .andExpect(headerDoesNotExist(HttpHeaders.AUTHORIZATION))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        builder.build().get().uri("/api/x").retrieve().toBodilessEntity();
+
+        server.verify();
+    }
+
+    @Test
+    void enabledOAuth2SendsBearerTokenOfTheSasAccessorRegistration() {
+        AtomicReference<List<String>> requested = new AtomicReference<>();
+        TokenManagementService tokens = new TokenManagementService(null) {
+            @Override
+            public String getAccessToken(String first, String second, String third) {
+                requested.set(List.of(first, second, third));
+                return "jeton-de-test";
+            }
+        };
+        OAuth2ClientHttpRequestInterceptorFactory factory =
+                new OAuth2ClientHttpRequestInterceptorFactory(tokens, new ForwardHeadersProperties());
+        RestClient.Builder builder = clients(factory).builder("svc", BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/api/x"))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer jeton-de-test"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        builder.build().post().uri("/api/x").retrieve().toBodilessEntity();
+
+        server.verify();
+        assertThat(requested.get()).contains(UpstreamRestClients.OAUTH2_REGISTRATION, "client-test");
+    }
+
+    private static UpstreamRestClients clients(OAuth2ClientHttpRequestInterceptorFactory factory) {
+        CorrelationIdInterceptor correlation = new CorrelationIdInterceptor();
+        ReflectionTestUtils.setField(correlation, "correlationHeaderName", "X-Correlation-ID");
+        return new UpstreamRestClients(correlation,
+                CircuitBreakerRegistry.ofDefaults(),
+                RetryRegistry.ofDefaults(),
+                BulkheadRegistry.ofDefaults(),
+                5,
+                30,
+                factory,
+                "client-test",
+                "http://localhost:1/realms/test");
+    }
+}
+`,
+  "<P>-container/src/test/java/ma/eai/msiboa/api/integration/upstream/UpstreamErrorDecoderTest.java": `package ma.eai.msiboa.api.integration.upstream;
+
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+
+import ma.eai.msiboa.api.domain.exception.UpstreamAuthenticationException;
+import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
+import ma.eai.msiboa.api.domain.exception.UpstreamTechnicalException;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.mock.http.client.MockClientHttpRequest;
+import org.springframework.mock.http.client.MockClientHttpResponse;
+import tools.jackson.databind.json.JsonMapper;
+
+class UpstreamErrorDecoderTest {
+
+    private final UpstreamErrorDecoder decoder = new UpstreamErrorDecoder("svc",
+            UpstreamReturnCodes.of(List.of("005"), List.of("333")), JsonMapper.builder().build());
+    private final MockClientHttpRequest request = new MockClientHttpRequest(HttpMethod.POST, URI.create("http://h/api/x"));
+
+    @Test
+    void unauthorizedIsAnAuthenticationRefusal() {
+        assertThatThrownBy(() -> decoder.handle(request, response(401, "<html>Error 401</html>")))
+                .isInstanceOf(UpstreamAuthenticationException.class);
+    }
+
+    @Test
+    void forbiddenWithBusinessCodeStaysABusinessRefusal() {
+        assertThatThrownBy(() -> decoder.handle(request, response(403, "{\\"code\\":\\"005\\",\\"message\\":\\"Operation non autorisee\\"}")))
+                .isInstanceOf(UpstreamBusinessException.class)
+                .hasMessage("Operation non autorisee");
+    }
+
+    @Test
+    void forbiddenWithUnknownCodeStaysATechnicalError() {
+        assertThatThrownBy(() -> decoder.handle(request, response(403, "{\\"code\\":\\"999\\"}")))
+                .isExactlyInstanceOf(UpstreamTechnicalException.class);
+    }
+
+    private static MockClientHttpResponse response(int status, String body) {
+        return new MockClientHttpResponse(body.getBytes(StandardCharsets.UTF_8), HttpStatusCode.valueOf(status));
+    }
+}
+`,
   "<P>-container/src/main/java/ma/eai/msiboa/api/integration/upstream/UpstreamErrorDecoder.java": `package ma.eai.msiboa.api.integration.upstream;
 
 import java.io.IOException;
 
+import ma.eai.msiboa.api.domain.exception.UpstreamAuthenticationException;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
 import ma.eai.msiboa.api.domain.exception.UpstreamTechnicalException;
 import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
@@ -1047,6 +1244,9 @@ public class UpstreamErrorDecoder {
         }
         if (returnCodes.validation().contains(code) || status == 400) {
             throw new UpstreamValidationException(service, code, message);
+        }
+        if (status == 401) {
+            throw new UpstreamAuthenticationException(service, code, message);
         }
         throw new UpstreamTechnicalException(service, code, message);
     }
