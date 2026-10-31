@@ -179,6 +179,7 @@ describe("generateBffLayer", () => {
     const dev = await fs.readFile(path.join(root, `${P}-container/src/main/resources/application-dev.properties`), "utf-8");
     expect(dev).toBe(
       "server.port=8183\n\n# neobank-upstream:debut\nneobank.upstream.business-error-status=422\n" +
+        "idempotency.lock-seconds=60\n" +
         "neobank.upstream.commande-chequier.base-url=http://localhost:9080/neobank-commande-chequier\n# neobank-upstream:fin\n"
     );
     const cloud = await fs.readFile(path.join(root, `${P}-container/src/main/resources/application-cloud.properties`), "utf-8");
@@ -246,6 +247,45 @@ describe("generateBffLayer", () => {
     await read(`${P}-application/src/test/java/ma/eai/msiboa/api/application/error/IdempotencyKeyStatusTest.java`);
     const storeTest = await read(`${P}-container/src/test/java/ma/eai/msiboa/api/infrastructure/idempotency/DataGridOperationIdempotencyStoreTest.java`);
     expect(storeTest).toContain("void twoConcurrentRequestsOnSameKeyExecuteOnce()");
+  });
+
+  it("classe l'issue d'un appel pour libérer la clé ou la garder en issue inconnue", async () => {
+    await generateBffLayer(root, [descriptor()]);
+    const read = (rel: string) => fs.readFile(path.join(root, rel), "utf-8");
+
+    const service = await read(`${P}-application/${JAVA}/application/idempotency/OperationIdempotencyService.java`);
+    expect(service).toContain('@Value("${idempotency.lock-seconds:60}") long lockSeconds');
+    expect(service).toContain(".expiresAt(now.plusSeconds(lockSeconds))");
+    expect(service).toContain("store.delete(idempotencyKey);");
+    expect(service).toContain("OperationIdempotencyStatus.UNKNOWN");
+    expect(service).not.toContain("IdempotencyStatus.FAILED");
+    for (const notSent of ["CallNotPermittedException", "BulkheadFullException", "ConnectException", "UnknownHostException", "NoRouteToHostException"]) {
+      expect(service).toContain(`cause instanceof ${notSent}`);
+    }
+
+    const status = await read(`${P}-domain/${P}-application-service/${JAVA}/domain/idempotency/model/OperationIdempotencyStatus.java`);
+    expect(status).toContain("UNKNOWN");
+    const store = await read(`${P}-container/${JAVA}/infrastructure/idempotency/DataGridOperationIdempotencyStore.java`);
+    expect(store).toContain("dataGrid.remove(cacheName, KEY_PREFIX + idempotencyKey);");
+
+    const serviceTest = await read(`${P}-application/src/test/java/ma/eai/msiboa/api/application/idempotency/OperationIdempotencyServiceTest.java`);
+    for (const name of [
+      "keyInProgressIsRefusedWhileReserved",
+      "reservationLeftByAStoppedServerExpiresAfterTheLockDelay",
+      "openCircuitReleasesTheKey",
+      "fullBulkheadReleasesTheKey",
+      "refusedConnectionReleasesTheKey",
+      "readTimeoutMarksTheOutcomeUnknown",
+      "upstreamServerErrorMarksTheOutcomeUnknown",
+    ]) {
+      expect(serviceTest).toContain(`void ${name}()`);
+    }
+    expect(serviceTest).not.toContain("technicalFailureBlocksTheKey");
+
+    for (const profile of ["dev", "cloud"]) {
+      const props = await read(`${P}-container/src/main/resources/application-${profile}.properties`);
+      expect(props).toContain("idempotency.lock-seconds=60");
+    }
   });
 
   it("donne la même sortie à chaque génération et retire un service retiré", async () => {
