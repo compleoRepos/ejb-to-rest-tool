@@ -276,6 +276,7 @@ describe("generateBffLayer", () => {
       "reservationLeftByAStoppedServerIsReportedUnknownAfterTheReadDelay",
       "sentCallWhoseResultCannotBeStoredIsNeverExecutedAgain",
       "completedWriteFailureFallsBackToUnknown",
+      "inputRefusalIsReplayedWithoutCallingAgain",
       "openCircuitReleasesTheKey",
       "fullBulkheadReleasesTheKey",
       "refusedConnectionReleasesTheKey",
@@ -285,6 +286,8 @@ describe("generateBffLayer", () => {
       expect(serviceTest).toContain(`void ${name}()`);
     }
     expect(serviceTest).not.toContain("technicalFailureBlocksTheKey");
+    expect(service).toContain("} catch (UpstreamValidationException ex) {");
+    expect(service).toContain("throw new UpstreamValidationException(record.service(), record.code(), record.message());");
 
     for (const profile of ["dev", "cloud"]) {
       const props = await read(`${P}-container/src/main/resources/application-${profile}.properties`);

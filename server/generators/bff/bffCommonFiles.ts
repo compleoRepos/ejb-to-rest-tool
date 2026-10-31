@@ -104,6 +104,7 @@ public record OperationIdempotencyRecord(
         OperationIdempotencyStatus status,
         String code,
         String message,
+        boolean inputRefusal,
         String responseBody,
         ZonedDateTime createdAt,
         ZonedDateTime expiresAt
@@ -266,6 +267,7 @@ import ma.eai.msiboa.api.domain.exception.IdempotencyConflictException;
 import ma.eai.msiboa.api.domain.exception.IdempotencyKeyFormatException;
 import ma.eai.idev.fwk.logging.EaiLog;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
+import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyStatus;
 import ma.eai.msiboa.api.domain.ports.output.repository.OperationIdempotencyStore;
@@ -361,6 +363,13 @@ public class OperationIdempotencyService {
                     .message(ex.getMessage())
                     .build());
             throw ex;
+        } catch (UpstreamValidationException ex) {
+            store.save(retained(record, OperationIdempotencyStatus.COMPLETED)
+                    .code(ex.getCode())
+                    .message(ex.getMessage())
+                    .inputRefusal(true)
+                    .build());
+            throw ex;
         } catch (RuntimeException ex) {
             if (isNotSent(ex)) {
                 store.delete(idempotencyKey);
@@ -433,6 +442,9 @@ public class OperationIdempotencyService {
         }
         if (record.status() == OperationIdempotencyStatus.UNKNOWN) {
             throw new IdempotencyConflictException(UNKNOWN_OUTCOME_MESSAGE);
+        }
+        if (record.responseBody() == null && record.inputRefusal()) {
+            throw new UpstreamValidationException(record.service(), record.code(), record.message());
         }
         if (record.responseBody() == null) {
             throw new UpstreamBusinessException(record.service(), record.code(), record.message());
@@ -640,8 +652,24 @@ class OperationIdempotencyServiceTest {
     }
 
     @Test
-    void inputRefusalMarksTheOutcomeUnknown() {
-        assertUnknown("k-400", new UpstreamValidationException("svc", "002", "Compte invalide"));
+    void inputRefusalIsReplayedWithoutCallingAgain() {
+        assertThatThrownBy(() -> service.execute("k-400", "svc", "op", Map.of(),
+                () -> fail(new UpstreamValidationException("svc", "002", "Compte invalide"))))
+                .isInstanceOf(UpstreamValidationException.class);
+
+        OperationIdempotencyRecord stored = store.records.get("k-400");
+        assertThat(stored.status()).isEqualTo(OperationIdempotencyStatus.COMPLETED);
+        assertThat(stored.code()).isEqualTo("002");
+        assertThat(stored.message()).isEqualTo("Compte invalide");
+        assertThat(stored.expiresAt().toInstant()).isEqualTo(clock.instant().plusSeconds(TTL_SECONDS));
+
+        clock.advance(UNKNOWN_AFTER_SECONDS + 1);
+        assertThatThrownBy(() -> service.execute("k-400", "svc", "op", Map.of(), this::success))
+                .isInstanceOf(UpstreamValidationException.class)
+                .hasMessage("Compte invalide")
+                .extracting(ex -> ((UpstreamValidationException) ex).getCode())
+                .isEqualTo("002");
+        assertThat(calls.get()).isEqualTo(1);
     }
 
     @Test
@@ -1138,6 +1166,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 import ma.eai.msiboa.api.application.idempotency.OperationIdempotencyService;
+import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
 import ma.eai.msiboa.api.domain.ports.output.repository.OperationIdempotencyStore;
 import org.junit.jupiter.api.BeforeEach;
@@ -1182,6 +1211,18 @@ class IdempotencyKeyStatusTest {
         assertThat(replay.getResponse().getStatus()).isEqualTo(409);
         assertThat(errorBody(replay).get("message").asString())
                 .isEqualTo(OperationIdempotencyService.UNKNOWN_OUTCOME_MESSAGE);
+    }
+
+    @Test
+    void inputRefusalIsReplayedAsTheSameBadRequest() throws Exception {
+        MvcResult first = mockMvc.perform(post("/probe").header("Idempotency-Key", "k-invalid").header("X-Probe-Outcome", "invalid"))
+                .andReturn();
+        MvcResult replay = mockMvc.perform(post("/probe").header("Idempotency-Key", "k-invalid")).andReturn();
+
+        assertThat(first.getResponse().getStatus()).isEqualTo(400);
+        assertThat(replay.getResponse().getStatus()).isEqualTo(400);
+        assertThat(errorBody(replay).get("code").asString()).isEqualTo("002");
+        assertThat(errorBody(replay)).isEqualTo(errorBody(first));
     }
 
     @Test
@@ -1253,6 +1294,9 @@ class IdempotencyKeyStatusTest {
                 }
                 if ("refused".equals(outcome)) {
                     throw new ResourceAccessException("I/O error", new ConnectException("Connection refused"));
+                }
+                if ("invalid".equals(outcome)) {
+                    throw new UpstreamValidationException("svc", "002", "Compte invalide");
                 }
                 return mapper.createObjectNode();
             });
