@@ -17,6 +17,7 @@ import { removeDeadResponseMapping } from "./deadCodeFix";
 import { fixReturnCodeReading } from "./returnCodeFix";
 import { fixRequestFields } from "./requestFieldsFix";
 import { restoreOriginalPoms } from "./pomPreservationFix";
+import { fixActionCase } from "./actionCaseFix";
 import { removeNonEjbExposures } from "./nonEjbExposureFix";
 import { fixRequestLogging } from "./requestLoggingFix";
 import { withoutGeneratedWeb, keepRepositoryFiles, hasRepositoryReadme } from "./repositoryFix";
@@ -261,6 +262,14 @@ export async function generateAdapter(options: AdapterGenerationOptions): Promis
         for (const s of fields.skipped) stderr += `\n[fixRequestFields] ${s}`;
       } catch (rfErr) {
         stderr += `\n[fixRequestFields] ${(rfErr as Error).message}`;
+      }
+
+      // Valeur d'aiguillage ecrite dans la casse que l'EJB compare exactement, quand son aiguillage tolere toute casse.
+      try {
+        const cases = await fixActionCase(outputDir);
+        for (const r of cases.replaced) stderr += `\n[fixActionCase] ${r.from} -> ${r.to}`;
+      } catch (acErr) {
+        stderr += `\n[fixActionCase] ${(acErr as Error).message}`;
       }
 
       // Conversion de réponse jamais utilisée : appel fromXxxEnvelope, méthodes et accesseurs orphelins.
