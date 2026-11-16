@@ -28,8 +28,13 @@ interface MethodBody {
   body: string;
 }
 
+/** Résout un nom de constante, qualifié ou non, dans la portée de la classe qui le lit. */
+type ConstantLookup = (qualifier: string | undefined, name: string) => string | undefined;
+
 interface Module {
   constants: Map<string, string>;
+  locals: Map<string, string>;
+  classConstants: Map<string, Map<string, string>>;
   methods: MethodBody[];
   byName: Map<string, MethodBody[]>;
   byClass: Map<string, MethodBody[]>;
@@ -50,9 +55,9 @@ export async function analyzeEjbInputs(ejbDir: string, codes: string[]): Promise
     const reads = new Map<string, boolean>();
     const relay = { found: false };
     const blocks = findFunctionBlocks(mod, code);
-    for (const block of blocks) collectReads(mod, block.text, reads, new Set<string>(), 0, false, relay);
+    for (const block of blocks) collectReads(mod, block.text, block.cls, reads, new Set<string>(), 0, false, relay);
     if (blocks.length > 0) {
-      for (const d of dispatchers) collectReads(mod, d, reads, new Set<string>(), 0, true);
+      for (const d of dispatchers) collectReads(mod, d.text, d.cls, reads, new Set<string>(), 0, true);
     }
     const paths: string[] = [];
     const lists: string[] = [];
@@ -72,29 +77,81 @@ async function loadModule(ejbDir: string): Promise<Module> {
   const files = await javaFiles(ejbDir);
   const sources: string[] = [];
   for (const f of files) sources.push(stripComments(await fs.readFile(f, "latin1")));
-  const raw = new Map<string, string>();
+  const raw: { cls: string; name: string; expr: string }[] = [];
+  const localRaw: { cls: string; name: string; expr: string }[] = [];
+  const methods: MethodBody[] = [];
   for (const src of sources) {
+    methods.push(...extractMethods(src));
+    const bodies = methodRanges(src);
     for (const m of src.matchAll(/\bString\s+(\w+)\s*=\s*([^;]+);/g)) {
-      if (!raw.has(m[1])) raw.set(m[1], m[2].trim());
+      const at = m.index ?? 0;
+      const decl = { cls: classChainAt(src, at)[0] ?? "", name: m[1], expr: m[2].trim() };
+      (bodies.some((r) => r.start < at && r.end > at) ? localRaw : raw).push(decl);
     }
   }
   const constants = new Map<string, string>();
+  const locals = new Map<string, string>();
+  const classConstants = new Map<string, Map<string, string>>();
+  const scoped = (cls: string): ConstantLookup => (qualifier, name) =>
+    (qualifier ? classConstants.get(qualifier)?.get(name) : classConstants.get(cls)?.get(name)) ??
+    constants.get(name) ??
+    locals.get(name);
   for (let pass = 0; pass < 6; pass++) {
-    for (const [name, expr] of raw) {
-      if (constants.has(name)) continue;
-      const v = resolveExpr(expr, constants);
-      if (v !== null && !v.indexed) constants.set(name, v.value);
+    for (const { cls, name, expr } of raw) {
+      const own = classConstants.get(cls) ?? new Map<string, string>();
+      if (own.has(name)) continue;
+      const v = resolveExpr(expr, constants, scoped(cls));
+      if (v === null || v.indexed) continue;
+      own.set(name, v.value);
+      classConstants.set(cls, own);
+      if (!constants.has(name)) constants.set(name, v.value);
+    }
+    for (const { cls, name, expr } of localRaw) {
+      if (locals.has(name)) continue;
+      const v = resolveExpr(expr, constants, scoped(cls));
+      if (v !== null && !v.indexed) locals.set(name, v.value);
     }
   }
-  const methods: MethodBody[] = [];
-  for (const src of sources) methods.push(...extractMethods(src));
   const byName = new Map<string, MethodBody[]>();
   const byClass = new Map<string, MethodBody[]>();
   for (const m of methods) {
     byName.set(m.name, [...(byName.get(m.name) ?? []), m]);
     byClass.set(m.className, [...(byClass.get(m.className) ?? []), m]);
   }
-  return { constants, methods, byName, byClass, sources };
+  return { constants, locals, classConstants, methods, byName, byClass, sources };
+}
+
+/**
+ * Lecture d'une constante depuis la classe cls : la classe nommée ou la classe lectrice d'abord,
+ * puis les champs du module, puis les variables locales littérales.
+ */
+function lookupFor(mod: Module, cls: string | undefined): ConstantLookup {
+  return (qualifier, name) =>
+    (qualifier ? mod.classConstants.get(qualifier)?.get(name) : cls ? mod.classConstants.get(cls)?.get(name) : undefined) ??
+    mod.constants.get(name) ??
+    mod.locals.get(name);
+}
+
+/** Classes englobant la position at, de la plus interne à la plus externe. */
+function classChainAt(src: string, at: number): string[] {
+  const chain: { name: string; start: number }[] = [];
+  for (const m of src.matchAll(/\b(?:class|enum|interface)\s+(\w+)[^{;]*\{/g)) {
+    const open = (m.index ?? 0) + m[0].length - 1;
+    if (open < at && matchingClose(src, open) > at) chain.push({ name: m[1], start: open });
+  }
+  return chain.sort((a, b) => b.start - a.start).map((c) => c.name);
+}
+
+/** Étendues des corps de méthode d'un source, pour écarter les variables locales des constantes. */
+function methodRanges(src: string): { start: number; end: number }[] {
+  const out: { start: number; end: number }[] = [];
+  const headerRe = /(?:^|[;{}\s])((?:public|private|protected|static|final|synchronized|\s)*[\w<>\[\],.?\s]+?\s+(\w+)\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)\s*(?:throws\s+[\w.,\s]+)?)\{/g;
+  for (const m of src.matchAll(headerRe)) {
+    if (KEYWORDS.has(m[2])) continue;
+    const open = (m.index ?? 0) + m[0].length - 1;
+    out.push({ start: open, end: matchingClose(src, open) });
+  }
+  return out;
 }
 
 async function javaFiles(dir: string): Promise<string[]> {
@@ -137,7 +194,11 @@ export function stripComments(src: string): string {
 }
 
 /** Valeur d'une expression String : littéraux et constantes concaténés. Un terme inconnu rend la suite indexée. */
-export function resolveExpr(expr: string, constants: Map<string, string>): { value: string; indexed: boolean } | null {
+export function resolveExpr(
+  expr: string,
+  constants: Map<string, string>,
+  lookup?: ConstantLookup
+): { value: string; indexed: boolean } | null {
   const terms = splitTopLevel(expr.trim(), "+");
   let value = "";
   for (let k = 0; k < terms.length; k++) {
@@ -147,9 +208,10 @@ export function resolveExpr(expr: string, constants: Map<string, string>): { val
       value += lit[1];
       continue;
     }
-    const id = t.match(/^(?:[\w]+\.)*([A-Za-z_]\w*)$/);
-    if (id && constants.has(id[1])) {
-      value += constants.get(id[1]);
+    const id = t.match(/^(?:(?:[\w]+\.)*(\w+)\.)?([A-Za-z_]\w*)$/);
+    const resolved = id ? (lookup ? lookup(id[1], id[2]) : constants.get(id[2])) : undefined;
+    if (resolved !== undefined) {
+      value += resolved;
       continue;
     }
     if (k === 0) return null;
@@ -228,6 +290,8 @@ function extractMethods(src: string): MethodBody[] {
 
 interface Block {
   text: string;
+  /** Classe qui porte le texte, pour résoudre ses constantes dans leur portée. */
+  cls?: string;
 }
 
 /** Blocs qui traitent un code fonction : case d'un switch, branche d'un if sur equals, classe dédiée instanciée. */
@@ -249,7 +313,7 @@ function findFunctionBlocks(mod: Module, code: string, seen: Set<string> = new S
     const handlerRe = new RegExp(`(?:\\w+\\.)?\\b${esc}\\s*,\\s*(?:(\\w+)\\s*::\\s*new|new\\s+(\\w+)\\s*\\()`, "g");
     for (const m of src.matchAll(handlerRe)) {
       const bodies = mod.byClass.get(m[1] ?? m[2]);
-      if (bodies) blocks.push({ text: bodies.map((b) => b.body).join("\n") });
+      if (bodies) blocks.push({ text: bodies.map((b) => b.body).join("\n"), cls: m[1] ?? m[2] });
     }
   }
   return blocks;
@@ -261,7 +325,7 @@ function directBlocks(mod: Module, code: string): Block[] {
   for (const src of mod.sources) {
     const caseRe = new RegExp(`case\\s+(?:[\\w]+\\.)*(?:${esc}|"${esc}")\\s*:`, "gi");
     for (const m of src.matchAll(caseRe)) {
-      blocks.push({ text: caseBlock(src, (m.index ?? 0) + m[0].length) });
+      blocks.push({ text: caseBlock(src, (m.index ?? 0) + m[0].length), cls: classChainAt(src, m.index ?? 0)[0] });
     }
     const eqRe = new RegExp(`(?:"${esc}"\\s*\\.\\s*equals(?:IgnoreCase)?\\s*\\(|\\.\\s*equals(?:IgnoreCase)?\\s*\\(\\s*"${esc}"\\s*\\)|==\\s*(?:\\w+\\.)*${esc}\\b)`, "gi");
     for (const m of src.matchAll(eqRe)) {
@@ -269,7 +333,7 @@ function directBlocks(mod: Module, code: string): Block[] {
       const open = src.indexOf("{", from);
       const semi = src.indexOf(";", from);
       if (open < 0 || (semi >= 0 && semi < open && !/\)\s*$/.test(src.slice(from, semi)))) continue;
-      blocks.push({ text: src.slice(open + 1, matchingClose(src, open)) });
+      blocks.push({ text: src.slice(open + 1, matchingClose(src, open)), cls: classChainAt(src, open)[0] });
     }
   }
   return blocks;
@@ -310,7 +374,7 @@ function caseBlock(src: string, from: number): string {
  * Méthodes qui aiguillent : celles qui contiennent le switch ou les if des codes fonction, et process().
  * Leurs lectures hors des blocs de fonction sont communes à toutes les fonctions.
  */
-function findDispatchers(mod: Module, codes: string[]): string[] {
+function findDispatchers(mod: Module, codes: string[]): Block[] {
   const known = codes.map((c) => c.toLowerCase());
   const scored = mod.methods.map((m) => {
     const lower = m.body.toLowerCase();
@@ -318,11 +382,11 @@ function findDispatchers(mod: Module, codes: string[]): string[] {
   });
   const max = Math.max(0, ...scored.map((x) => x.hits));
   const threshold = Math.max(Math.min(2, known.length), Math.ceil(max * 0.6));
-  const out: string[] = [];
+  const out: Block[] = [];
   for (const { m, hits } of scored) {
     const dispatcher = hits >= threshold && /\bswitch\s*\(|equals/.test(m.body);
     if (dispatcher || (m.name === "process" && /getNode/.test(m.body))) {
-      out.push(stripFunctionBlocks(m.body, codes));
+      out.push({ text: stripFunctionBlocks(m.body, codes), cls: m.className });
     }
   }
   return out;
@@ -354,12 +418,14 @@ function stripFunctionBlocks(body: string, codes: string[]): string {
 function collectReads(
   mod: Module,
   text: string,
+  cls: string | undefined,
   reads: Map<string, boolean>,
   visited: Set<string>,
   depth: number,
   noFollow = false,
   relay: { found: boolean } = { found: false }
 ): void {
+  const lookup = lookupFor(mod, cls);
   if (depth <= 1 && RELAY_CALL.test(text)) relay.found = true;
   const readRe = /(\w+)\s*\.\s*getNode(?:AsString|AsInt|AsInteger|AsLong|AsDouble|AsBoolean|AsList)?\s*\(/g;
   for (const m of text.matchAll(readRe)) {
@@ -367,7 +433,7 @@ function collectReads(
     const open = (m.index ?? 0) + m[0].length - 1;
     const close = matchingClose(text, open, "(", ")");
     const arg = splitTopLevel(text.slice(open + 1, close), ",")[0];
-    const v = resolveExpr(arg, mod.constants);
+    const v = resolveExpr(arg, mod.constants, lookup);
     if (!v) continue;
     const segs = v.value.split("/").filter((s) => s.length > 0);
     if (segs.length < 2 || segs[0].toLowerCase() !== "flux") continue;
@@ -380,12 +446,12 @@ function collectReads(
     else if (!reads.has(key)) reads.set(key, true);
   }
   if (noFollow || depth > 6) return;
-  const follow = (body: string) => collectReads(mod, body, reads, visited, depth + 1, false, relay);
+  const follow = (b: MethodBody) => collectReads(mod, b.body, b.className, reads, visited, depth + 1, false, relay);
   for (const m of text.matchAll(/\bnew\s+(\w+)\s*\(/g)) {
     const bodies = mod.byClass.get(m[1]);
     if (!bodies || visited.has("class:" + m[1])) continue;
     visited.add("class:" + m[1]);
-    for (const b of bodies) follow(b.body);
+    for (const b of bodies) follow(b);
   }
   for (const m of text.matchAll(/\b([A-Za-z_]\w*)\s*\(/g)) {
     const name = m[1];
@@ -395,6 +461,6 @@ function collectReads(
     const classes = new Set(bodies.map((b) => b.className));
     if (classes.size > 3) continue;
     visited.add(name);
-    for (const b of bodies) follow(b.body);
+    for (const b of bodies) follow(b);
   }
 }

@@ -163,6 +163,70 @@ describe("ejbInputAnalysis", () => {
     expect(res.get("LISTER")?.lists).toEqual(["items/item"]);
     expect(res.get("CARTES")?.relay).toBe(true);
   });
+
+  it("resout une constante dans la classe qui la lit, pas dans la premiere classe qui porte le meme nom", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ia-"));
+    const put = async (rel: string, content: string) => {
+      const f = path.join(dir, rel);
+      await fs.mkdir(path.dirname(f), { recursive: true });
+      await fs.writeFile(f, content, "utf-8");
+    };
+    await put(
+      "ejb/src/main/java/ma/x/a/AutreService.java",
+      `package ma.x.a;
+public class AutreService {
+    public static final String FLUX_ID_CLIENT_FLUX_KEY = "flux/id_client";
+    public static final String CODE_CREANCIER = "flux/inutile";
+    public void lire(Envelope envIn) {
+        String CODE_CREANCIER = envIn.getNodeAsString("flux/codeLocal");
+        String cle = "flux/cleLocale";
+        envIn.getNodeAsString(cle);
+    }
+}
+`
+    );
+    await put(
+      "ejb/src/main/java/ma/x/b/RejectService.java",
+      `package ma.x.b;
+public class RejectService {
+    private static final String FLUX_ID_CLIENT_FLUX_KEY = "flux/idClient";
+    public Envelope execute(Envelope envIn) {
+        String id = envIn.getNodeAsString(FLUX_ID_CLIENT_FLUX_KEY);
+        String creancier = envIn.getNodeAsString(Constante.CODE_CREANCIER);
+        return null;
+    }
+}
+`
+    );
+    await put(
+      "ejb/src/main/java/ma/x/util/Constante.java",
+      `package ma.x.util;
+public class Constante {
+    public static String CODE_CREANCIER = "flux/codeCreancier";
+}
+`
+    );
+    await put(
+      "ejb/src/main/java/ma/x/Dispatch.java",
+      `package ma.x;
+public class Dispatch {
+    public Envelope process(Envelope envIn) {
+        switch (fonction) {
+            case REJECT:
+                return new RejectService().execute(envIn);
+            case LIRE:
+                new AutreService().lire(envIn);
+                return null;
+        }
+        return null;
+    }
+}
+`
+    );
+    const res = await analyzeEjbInputs(path.join(dir, "ejb"), ["REJECT", "LIRE"]);
+    expect(res.get("REJECT")?.paths).toEqual(["codeCreancier", "idClient"]);
+    expect(res.get("LIRE")?.paths).toEqual(["cleLocale", "codeLocal"]);
+  });
 });
 
 describe("fixRequestFields", () => {

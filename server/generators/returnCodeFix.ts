@@ -17,9 +17,9 @@ import fs from "fs/promises";
 import path from "path";
 
 const RETURN_CODE_METHODS = `
-    private static final String[] CODE_TAGS = {"CODRET", "codeRetour", "CodeRetour", "CODE_RETOUR"};
+    private static final String[] CODE_TAGS = {"CODRET", "codeRetour", "CodeRetour", "CODE_RETOUR", "codeErreur"};
 
-    private static final String[] MESSAGE_TAGS = {"MSGRET", "messageRetour", "MessageRetour", "MSG_RETOUR", "libelleRetour"};
+    private static final String[] MESSAGE_TAGS = {"MSGRET", "messageRetour", "MessageRetour", "MSG_RETOUR", "libelleRetour", "libErreur"};
 
     /** Code technique rendu quand l'EJB n'a renvoyé aucun flux. */
     public static final String EMPTY_RESPONSE_CODE = "009";
@@ -32,7 +32,8 @@ const RETURN_CODE_METHODS = `
         if (flux == null || childElements(flux).isEmpty() && flux.getTextContent().trim().isEmpty()) {
             return EMPTY_RESPONSE_CODE;
         }
-        return firstTag(flux, CODE_TAGS, "code");
+        String code = firstTag(flux, CODE_TAGS, "code");
+        return code != null ? code : singleRowChild(flux, "code");
     }
 
     /**
@@ -43,7 +44,27 @@ const RETURN_CODE_METHODS = `
         if (flux == null || childElements(flux).isEmpty() && flux.getTextContent().trim().isEmpty()) {
             return "Reponse vide du service";
         }
-        return firstTag(flux, MESSAGE_TAGS, "message");
+        String message = firstTag(flux, MESSAGE_TAGS, "message");
+        if (message == null) {
+            Element msg = firstChildNamed(flux, "msg");
+            message = msg != null ? msg.getTextContent().trim() : singleRowChild(flux, "msg");
+        }
+        return message;
+    }
+
+    /** Valeur d'un enfant de l'unique élément row placé directement sous le flux, null sinon. */
+    private static String singleRowChild(Element flux, String name) {
+        Element row = null;
+        for (Element child : childElements(flux)) {
+            if ("row".equals(localName(child))) {
+                if (row != null) {
+                    return null;
+                }
+                row = child;
+            }
+        }
+        Element value = row == null ? null : firstChildNamed(row, name);
+        return value == null ? null : value.getTextContent().trim();
     }
 
     private static String readBody(Envelope envelope) {
