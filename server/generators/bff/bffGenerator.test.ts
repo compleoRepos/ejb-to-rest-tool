@@ -226,6 +226,23 @@ describe("generateBffLayer", () => {
     expect(modif).toContain('@NotNull @JsonProperty("id-client") String idClient');
   });
 
+  it("envoie un objet JSON vide quand l'opération n'a aucun champ d'entrée hors GET", async () => {
+    const d = descriptor();
+    d.endpoints = [
+      { ...d.endpoints[1] },
+      { ...d.endpoints[0], fonction: "VIRFRONT", path: "/api/synchrone/vir-front", request_fields: [] },
+    ];
+    await generateBffLayer(root, [d]);
+    const adapter = await fs.readFile(
+      path.join(root, `${P}-container/${JAVA}/integration/commandechequier/CommandeChequierRestAdapter.java`),
+      "utf-8"
+    );
+    const post = adapter.slice(adapter.indexOf("public JsonNode virfront("));
+    expect(post.slice(0, post.indexOf("}\n"))).toContain('.contentType(MediaType.APPLICATION_JSON)\n                .body("{}")');
+    const get = adapter.slice(adapter.indexOf("public JsonNode historyCmd("));
+    expect(get.slice(0, get.indexOf("}\n"))).not.toContain(".body(\"{}\")");
+  });
+
   it("réserve la clé d'idempotence de façon atomique et refuse une clé invalide en 400", async () => {
     await generateBffLayer(root, [descriptor()]);
     const read = (rel: string) => fs.readFile(path.join(root, rel), "utf-8");

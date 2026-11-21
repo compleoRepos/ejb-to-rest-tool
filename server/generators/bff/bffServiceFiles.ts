@@ -543,6 +543,9 @@ function adapter(model: ServiceModel): string {
     if (op.requestClass) {
       imports.push("org.springframework.http.MediaType");
       lines.push("                .contentType(MediaType.APPLICATION_JSON)", "                .body(request)");
+    } else if (op.endpoint.method !== "GET") {
+      imports.push("org.springframework.http.MediaType");
+      lines.push("                .contentType(MediaType.APPLICATION_JSON)", '                .body("{}")');
     }
     lines.push(
       "                .retrieve()",
