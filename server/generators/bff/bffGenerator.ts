@@ -107,6 +107,32 @@ export async function generateBffLayer(root: string, descriptors: BffDescriptor[
   return report(repo, models, files, removed);
 }
 
+/**
+ * Réglages de l'appel vers les services exposés, avec leur valeur par défaut : jeton envoyé, en-têtes
+ * où lire le canal de l'appelant, table de traduction des canaux des projets vers ceux que les
+ * services admettent, canal envoyé quand aucun n'est reçu. Le profil cloud les lit dans une variable
+ * d'environnement du même nom, en majuscules.
+ */
+const UPSTREAM_CALL_SETTINGS: Array<{ key: string; value: string; comment?: string }> = [
+  {
+    key: "token.mode",
+    value: "client-or-service",
+    comment: "Jeton envoye au service expose : client-or-service, client, service ou none",
+  },
+  {
+    key: "channel.headers",
+    value: "X-Canal,X-Channel",
+    comment: "Canal de l'appelant : en-tetes lus dans l'ordre, table de traduction vers les canaux admis, canal envoye quand aucun n'est recu",
+  },
+  {
+    key: "channel.mapping",
+    value:
+      "NEOBANQUE_MOBILE:MOBILE,BANQUE_EN_LIGNE_MOBILE:MOBILE,BANQUE_EN_LIGNE_WEB:WEB," +
+      "BACK_OFFICE:WEB,INTERNE:WEB,AGENCE:WEB,PFM:MOBILE,SAVING_GOALS:MOBILE",
+  },
+  { key: "channel.default", value: "" },
+];
+
 function propertiesBlock(models: ServiceModel[], profile: "dev" | "cloud"): string | null {
   if (models.length === 0) return null;
   const lines = [
@@ -114,9 +140,11 @@ function propertiesBlock(models: ServiceModel[], profile: "dev" | "cloud"): stri
     profile === "dev"
       ? "neobank.upstream.business-error-status=422"
       : "neobank.upstream.business-error-status=${neobank-upstream-business-error-status}",
-    profile === "dev"
-      ? "neobank.upstream.oauth2.enabled=false"
-      : "neobank.upstream.oauth2.enabled=${NEOBANK_UPSTREAM_OAUTH2_ENABLED:false}",
+    ...UPSTREAM_CALL_SETTINGS.flatMap((s) => {
+      const variable = `NEOBANK_UPSTREAM_${s.key.toUpperCase().replace(/[.-]/g, "_")}`;
+      const line = `neobank.upstream.${s.key}=${profile === "dev" ? s.value : `\${${variable}:${s.value}}`}`;
+      return s.comment ? [`# ${s.comment}`, line] : [line];
+    }),
     ...models.map((m) =>
       profile === "dev"
         ? `neobank.upstream.${m.key}.base-url=${m.descriptor.adapter_base_url}`
