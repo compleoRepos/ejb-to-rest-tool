@@ -12,17 +12,24 @@ public abstract class UpstreamException extends DomainException {
 
     private final String service;
     private final String code;
+    private final transient UpstreamErrorDetail detail;
 
     protected UpstreamException(String service, String code, String message) {
+        this(service, code, message, UpstreamErrorDetail.NONE);
+    }
+
+    protected UpstreamException(String service, String code, String message, UpstreamErrorDetail detail) {
         super(message);
         this.service = service;
         this.code = code;
+        this.detail = detail == null ? UpstreamErrorDetail.NONE : detail;
     }
 
     protected UpstreamException(String service, String code, String message, Throwable cause) {
         super(message, cause);
         this.service = service;
         this.code = code;
+        this.detail = UpstreamErrorDetail.NONE;
     }
 
     public String getService() {
@@ -31,6 +38,41 @@ public abstract class UpstreamException extends DomainException {
 
     public String getCode() {
         return code;
+    }
+
+    public UpstreamErrorDetail getDetail() {
+        return detail;
+    }
+}
+`,
+  "<P>-domain/<P>-domain-core/src/main/java/ma/eai/msiboa/api/domain/exception/UpstreamErrorDetail.java": `package ma.eai.msiboa.api.domain.exception;
+
+import java.util.Map;
+
+/**
+ * Message codifie rendu par un service expose : code du message, parametres et libelle d'origine.
+ */
+public record UpstreamErrorDetail(String codeMessage, Map<String, Object> parametres, String messageLegacy) {
+
+    public static final UpstreamErrorDetail NONE = new UpstreamErrorDetail(null, null, null);
+}
+`,
+  "<P>-domain/<P>-domain-core/src/main/java/ma/eai/msiboa/api/domain/exception/UpstreamChannelException.java": `package ma.eai.msiboa.api.domain.exception;
+
+/**
+ * Appel refuse par un service expose pour son canal, absent ou hors referentiel : l'operation n'a pas ete executee.
+ */
+public class UpstreamChannelException extends UpstreamException {
+
+    private final int status;
+
+    public UpstreamChannelException(String service, String code, String message, UpstreamErrorDetail detail, int status) {
+        super(service, code, message, detail);
+        this.status = status;
+    }
+
+    public int getStatus() {
+        return status;
     }
 }
 `,
@@ -44,6 +86,10 @@ public class UpstreamBusinessException extends UpstreamException {
     public UpstreamBusinessException(String service, String code, String message) {
         super(service, code, message);
     }
+
+    public UpstreamBusinessException(String service, String code, String message, UpstreamErrorDetail detail) {
+        super(service, code, message, detail);
+    }
 }
 `,
   "<P>-domain/<P>-domain-core/src/main/java/ma/eai/msiboa/api/domain/exception/UpstreamValidationException.java": `package ma.eai.msiboa.api.domain.exception;
@@ -55,6 +101,10 @@ public class UpstreamValidationException extends UpstreamException {
 
     public UpstreamValidationException(String service, String code, String message) {
         super(service, code, message);
+    }
+
+    public UpstreamValidationException(String service, String code, String message, UpstreamErrorDetail detail) {
+        super(service, code, message, detail);
     }
 }
 `,
@@ -103,6 +153,7 @@ public class IdempotencyKeyFormatException extends DomainException {
 import java.time.ZonedDateTime;
 
 import lombok.Builder;
+import ma.eai.msiboa.api.domain.exception.UpstreamErrorDetail;
 
 /**
  * Trace d'une operation non sure, avec la reponse ou le refus rendu, pour rejouer le meme resultat.
@@ -116,6 +167,7 @@ public record OperationIdempotencyRecord(
         OperationIdempotencyStatus status,
         String code,
         String message,
+        UpstreamErrorDetail detail,
         boolean inputRefusal,
         String responseBody,
         ZonedDateTime createdAt,
@@ -156,9 +208,10 @@ public interface OperationIdempotencyStore {
   "<P>-application/src/main/java/ma/eai/msiboa/api/application/error/UpstreamApiError.java": `package ma.eai.msiboa.api.application.error;
 
 import java.time.Instant;
+import java.util.Map;
 
 /**
- * Erreur rendue au canal quand un service expose refuse ou echoue, avec le code retour d'origine.
+ * Erreur rendue au canal quand un service expose refuse ou echoue, avec le code retour et le message codifie d'origine.
  */
 public record UpstreamApiError(
         Instant timestamp,
@@ -167,7 +220,10 @@ public record UpstreamApiError(
         String code,
         String message,
         String path,
-        String correlationId
+        String correlationId,
+        String codeMessage,
+        Map<String, Object> parametres,
+        String messageLegacy
 ) {}
 `,
   "<P>-application/src/main/java/ma/eai/msiboa/api/application/error/UpstreamExceptionHandler.java": `package ma.eai.msiboa.api.application.error;
@@ -178,7 +234,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import ma.eai.idev.fwk.logging.EaiLog;
 import ma.eai.msiboa.api.domain.exception.IdempotencyKeyFormatException;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
-import ma.eai.msiboa.api.domain.exception.UpstreamException;
+import ma.eai.msiboa.api.domain.exception.UpstreamChannelException;
+import ma.eai.msiboa.api.domain.exception.UpstreamErrorDetail;
 import ma.eai.msiboa.api.domain.exception.UpstreamTechnicalException;
 import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
 import org.slf4j.MDC;
@@ -208,12 +265,17 @@ public class UpstreamExceptionHandler {
 
     @ExceptionHandler(UpstreamBusinessException.class)
     public ResponseEntity<UpstreamApiError> handleBusiness(UpstreamBusinessException ex, HttpServletRequest request) {
-        return build(HttpStatus.valueOf(businessErrorStatus), ex, ex.getMessage(), request);
+        return respond(HttpStatus.valueOf(businessErrorStatus), ex.getCode(), ex.getMessage(), ex.getDetail(), request);
     }
 
     @ExceptionHandler(UpstreamValidationException.class)
     public ResponseEntity<UpstreamApiError> handleValidation(UpstreamValidationException ex, HttpServletRequest request) {
-        return build(HttpStatus.BAD_REQUEST, ex, ex.getMessage(), request);
+        return respond(HttpStatus.BAD_REQUEST, ex.getCode(), ex.getMessage(), ex.getDetail(), request);
+    }
+
+    @ExceptionHandler(UpstreamChannelException.class)
+    public ResponseEntity<UpstreamApiError> handleChannel(UpstreamChannelException ex, HttpServletRequest request) {
+        return respond(HttpStatus.valueOf(ex.getStatus()), ex.getCode(), ex.getMessage(), ex.getDetail(), request);
     }
 
     @ExceptionHandler(UpstreamTechnicalException.class)
@@ -222,29 +284,23 @@ public class UpstreamExceptionHandler {
                 + " code=" + ex.getCode()
                 + " during " + request.getMethod() + " " + request.getRequestURI()
                 + " (corrId=" + MDC.get(correlationHeaderName) + ")", ex);
-        return build(HttpStatus.BAD_GATEWAY, ex, TECHNICAL_MESSAGE, request);
+        return respond(HttpStatus.BAD_GATEWAY, ex.getCode(), TECHNICAL_MESSAGE, UpstreamErrorDetail.NONE, request);
     }
 
     @ExceptionHandler(IdempotencyKeyFormatException.class)
     public ResponseEntity<UpstreamApiError> handleIdempotencyKey(IdempotencyKeyFormatException ex, HttpServletRequest request) {
-        return respond(HttpStatus.BAD_REQUEST, null, ex.getMessage(), request);
+        return respond(HttpStatus.BAD_REQUEST, null, ex.getMessage(), UpstreamErrorDetail.NONE, request);
     }
 
     @ExceptionHandler(MissingRequestHeaderException.class)
     public ResponseEntity<UpstreamApiError> handleMissingHeader(MissingRequestHeaderException ex, HttpServletRequest request) {
-        return respond(HttpStatus.BAD_REQUEST, null, ex.getHeaderName() + " is missing or invalid", request);
-    }
-
-    private ResponseEntity<UpstreamApiError> build(HttpStatus status,
-                                                   UpstreamException ex,
-                                                   String message,
-                                                   HttpServletRequest request) {
-        return respond(status, ex.getCode(), message, request);
+        return respond(HttpStatus.BAD_REQUEST, null, ex.getHeaderName() + " is missing or invalid", UpstreamErrorDetail.NONE, request);
     }
 
     private ResponseEntity<UpstreamApiError> respond(HttpStatus status,
                                                      String code,
                                                      String message,
+                                                     UpstreamErrorDetail detail,
                                                      HttpServletRequest request) {
         UpstreamApiError error = new UpstreamApiError(
                 Instant.now(),
@@ -253,7 +309,10 @@ public class UpstreamExceptionHandler {
                 code,
                 message,
                 request.getRequestURI(),
-                MDC.get(correlationHeaderName)
+                MDC.get(correlationHeaderName),
+                detail.codeMessage(),
+                detail.parametres(),
+                detail.messageLegacy()
         );
         return ResponseEntity.status(status).body(error);
     }
@@ -280,6 +339,7 @@ import ma.eai.msiboa.api.domain.exception.IdempotencyKeyFormatException;
 import ma.eai.idev.fwk.logging.EaiLog;
 import ma.eai.msiboa.api.domain.exception.UpstreamAuthenticationException;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
+import ma.eai.msiboa.api.domain.exception.UpstreamChannelException;
 import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyStatus;
@@ -374,12 +434,14 @@ public class OperationIdempotencyService {
             store.save(retained(record, OperationIdempotencyStatus.COMPLETED)
                     .code(ex.getCode())
                     .message(ex.getMessage())
+                    .detail(ex.getDetail())
                     .build());
             throw ex;
         } catch (UpstreamValidationException ex) {
             store.save(retained(record, OperationIdempotencyStatus.COMPLETED)
                     .code(ex.getCode())
                     .message(ex.getMessage())
+                    .detail(ex.getDetail())
                     .inputRefusal(true)
                     .build());
             throw ex;
@@ -430,11 +492,12 @@ public class OperationIdempotencyService {
     }
 
     /**
-     * Vrai quand l'operation n'a pas pu etre executee : disjoncteur ouvert, limite de concurrence atteinte, connexion impossible ou appel refuse en 401.
+     * Vrai quand l'operation n'a pas pu etre executee : disjoncteur ouvert, limite de concurrence atteinte, connexion impossible, appel refuse en 401 ou pour son canal.
      */
     static boolean isNotSent(Throwable ex) {
         for (Throwable cause = ex; cause != null; cause = cause.getCause() == cause ? null : cause.getCause()) {
             if (cause instanceof UpstreamAuthenticationException
+                    || cause instanceof UpstreamChannelException
                     || cause instanceof CallNotPermittedException
                     || cause instanceof BulkheadFullException
                     || cause instanceof ConnectException
@@ -458,10 +521,10 @@ public class OperationIdempotencyService {
             throw new IdempotencyConflictException(UNKNOWN_OUTCOME_MESSAGE);
         }
         if (record.responseBody() == null && record.inputRefusal()) {
-            throw new UpstreamValidationException(record.service(), record.code(), record.message());
+            throw new UpstreamValidationException(record.service(), record.code(), record.message(), record.detail());
         }
         if (record.responseBody() == null) {
-            throw new UpstreamBusinessException(record.service(), record.code(), record.message());
+            throw new UpstreamBusinessException(record.service(), record.code(), record.message(), record.detail());
         }
         return objectMapper.readTree(record.responseBody());
     }
@@ -871,67 +934,42 @@ import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.RetryRegistry;
 import ma.eai.msiboa.api.integration.CorrelationIdInterceptor;
-import ma.eai.msiboa.clients.security.util.OAuth2ClientHttpRequestInterceptorFactory;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 /**
- * Fabrique des clients HTTP vers les services exposes, un disjoncteur nomme par service et un jeton OAuth2 optionnel.
+ * Fabrique des clients HTTP vers les services exposes : correlation, jeton, canal et langue de l'appelant, puis un disjoncteur nomme par service.
  */
 @Component
 public class UpstreamRestClients {
 
-    static final String OAUTH2_REGISTRATION = "sasAccessor";
-
     private final CorrelationIdInterceptor correlationIdInterceptor;
+    private final UpstreamTokenInterceptor tokenInterceptor;
+    private final UpstreamCallerContextInterceptor callerContextInterceptor;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
     private final RetryRegistry retryRegistry;
     private final BulkheadRegistry bulkheadRegistry;
     private final long connectTimeoutSeconds;
     private final long readTimeoutSeconds;
-    private final OAuth2ClientHttpRequestInterceptorFactory oauth2InterceptorFactory;
-    private final String oauth2ClientId;
-    private final String oauth2IssuerUri;
 
-    @Autowired
     public UpstreamRestClients(CorrelationIdInterceptor correlationIdInterceptor,
+                               UpstreamTokenInterceptor tokenInterceptor,
+                               UpstreamCallerContextInterceptor callerContextInterceptor,
                                CircuitBreakerRegistry circuitBreakerRegistry,
                                RetryRegistry retryRegistry,
                                BulkheadRegistry bulkheadRegistry,
                                @Value("\${rest.client.connect-timeout-seconds}") long connectTimeoutSeconds,
-                               @Value("\${rest.client.read-timeout-seconds}") long readTimeoutSeconds,
-                               @Value("\${neobank.upstream.oauth2.enabled:false}") boolean oauth2Enabled,
-                               ObjectProvider<OAuth2ClientHttpRequestInterceptorFactory> oauth2InterceptorFactory,
-                               @Value("\${spring.security.oauth2.client.registration.sasAccessor.client-id:}") String oauth2ClientId,
-                               @Value("\${spring.security.oauth2.client.provider.sasAccessor.issuer-uri:}") String oauth2IssuerUri) {
-        this(correlationIdInterceptor, circuitBreakerRegistry, retryRegistry, bulkheadRegistry,
-                connectTimeoutSeconds, readTimeoutSeconds,
-                oauth2Enabled ? oauth2InterceptorFactory.getObject() : null,
-                oauth2ClientId, oauth2IssuerUri);
-    }
-
-    UpstreamRestClients(CorrelationIdInterceptor correlationIdInterceptor,
-                        CircuitBreakerRegistry circuitBreakerRegistry,
-                        RetryRegistry retryRegistry,
-                        BulkheadRegistry bulkheadRegistry,
-                        long connectTimeoutSeconds,
-                        long readTimeoutSeconds,
-                        OAuth2ClientHttpRequestInterceptorFactory oauth2InterceptorFactory,
-                        String oauth2ClientId,
-                        String oauth2IssuerUri) {
+                               @Value("\${rest.client.read-timeout-seconds}") long readTimeoutSeconds) {
         this.correlationIdInterceptor = correlationIdInterceptor;
+        this.tokenInterceptor = tokenInterceptor;
+        this.callerContextInterceptor = callerContextInterceptor;
         this.circuitBreakerRegistry = circuitBreakerRegistry;
         this.retryRegistry = retryRegistry;
         this.bulkheadRegistry = bulkheadRegistry;
         this.connectTimeoutSeconds = connectTimeoutSeconds;
         this.readTimeoutSeconds = readTimeoutSeconds;
-        this.oauth2InterceptorFactory = oauth2InterceptorFactory;
-        this.oauth2ClientId = oauth2ClientId;
-        this.oauth2IssuerUri = oauth2IssuerUri;
     }
 
     public RestClient build(String service, String baseUrl) {
@@ -942,18 +980,248 @@ public class UpstreamRestClients {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(connectTimeoutSeconds));
         requestFactory.setReadTimeout(Duration.ofSeconds(readTimeoutSeconds));
-        RestClient.Builder builder = RestClient.builder()
+        return RestClient.builder()
                 .baseUrl(baseUrl)
                 .requestFactory(requestFactory)
-                .requestInterceptor(correlationIdInterceptor);
-        if (oauth2InterceptorFactory != null) {
-            builder.requestInterceptor(oauth2InterceptorFactory.create(oauth2ClientId, OAUTH2_REGISTRATION, oauth2IssuerUri));
-        }
-        return builder
+                .requestInterceptor(correlationIdInterceptor)
+                .requestInterceptor(tokenInterceptor)
+                .requestInterceptor(callerContextInterceptor)
                 .requestInterceptor(new UpstreamResilienceInterceptor(
                         circuitBreakerRegistry.circuitBreaker(service),
                         retryRegistry.retry(service),
                         bulkheadRegistry.bulkhead(service)));
+    }
+}
+`,
+  "<P>-container/src/main/java/ma/eai/msiboa/api/integration/upstream/UpstreamTokenInterceptor.java": `package ma.eai.msiboa.api.integration.upstream;
+
+import java.io.IOException;
+import java.util.Locale;
+
+import ma.eai.idev.fwk.logging.EaiLog;
+import ma.eai.msiboa.clients.security.util.OAuth2ClientHttpRequestInterceptorFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpRequest;
+import org.springframework.http.client.ClientHttpRequestExecution;
+import org.springframework.http.client.ClientHttpRequestInterceptor;
+import org.springframework.http.client.ClientHttpResponse;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.stereotype.Component;
+
+/**
+ * Jeton presente au service expose selon neobank.upstream.token.mode : celui du client authentifie, sinon le jeton de service sasAccessor.
+ */
+@Component
+public class UpstreamTokenInterceptor implements ClientHttpRequestInterceptor {
+
+    static final String OAUTH2_REGISTRATION = "sasAccessor";
+
+    /**
+     * Choix du jeton : aucun, celui du client, celui du service, ou celui du client avec repli sur celui du service.
+     */
+    enum Mode {
+        NONE, CLIENT, SERVICE, CLIENT_OR_SERVICE;
+
+        static Mode of(String value) {
+            String name = value == null ? "" : value.trim().toUpperCase(Locale.ROOT).replace('-', '_');
+            for (Mode mode : values()) {
+                if (mode.name().equals(name)) {
+                    return mode;
+                }
+            }
+            throw new IllegalArgumentException(
+                    "Invalid neobank.upstream.token.mode, expected none, client, service or client-or-service");
+        }
+    }
+
+    private final Mode mode;
+    private final ClientHttpRequestInterceptor clientRelay;
+    private final ClientHttpRequestInterceptor serviceToken;
+
+    @Autowired
+    public UpstreamTokenInterceptor(@Value("\${neobank.upstream.token.mode:client-or-service}") String mode,
+                                    ObjectProvider<OAuth2ClientHttpRequestInterceptorFactory> oauth2InterceptorFactory,
+                                    @Value("\${spring.security.oauth2.client.registration.sasAccessor.client-id:}") String oauth2ClientId,
+                                    @Value("\${spring.security.oauth2.client.provider.sasAccessor.issuer-uri:}") String oauth2IssuerUri) {
+        this(Mode.of(mode),
+                Mode.of(mode) == Mode.NONE ? null : oauth2InterceptorFactory.getObject(),
+                oauth2ClientId, oauth2IssuerUri);
+    }
+
+    UpstreamTokenInterceptor(Mode mode,
+                             OAuth2ClientHttpRequestInterceptorFactory oauth2InterceptorFactory,
+                             String oauth2ClientId,
+                             String oauth2IssuerUri) {
+        this.mode = mode;
+        boolean serviceTokenUsed = mode == Mode.SERVICE || mode == Mode.CLIENT_OR_SERVICE;
+        if (serviceTokenUsed && (isBlank(oauth2ClientId) || isBlank(oauth2IssuerUri))) {
+            throw new IllegalArgumentException(
+                    "neobank.upstream.token.mode requires the sasAccessor client-id and issuer-uri");
+        }
+        if (mode == Mode.NONE) {
+            EaiLog.warn("neobank.upstream.token.mode=none, upstream calls carry no token");
+        }
+        this.clientRelay = mode == Mode.CLIENT || mode == Mode.CLIENT_OR_SERVICE
+                ? oauth2InterceptorFactory.create("", "", "")
+                : null;
+        this.serviceToken = serviceTokenUsed
+                ? oauth2InterceptorFactory.create(oauth2ClientId, OAUTH2_REGISTRATION, oauth2IssuerUri)
+                : null;
+    }
+
+    @Override
+    public ClientHttpResponse intercept(HttpRequest request, byte[] body, ClientHttpRequestExecution execution)
+            throws IOException {
+        ClientHttpRequestInterceptor chosen = switch (mode) {
+            case NONE -> null;
+            case CLIENT -> clientRelay;
+            case SERVICE -> serviceToken;
+            case CLIENT_OR_SERVICE -> hasClientToken() ? clientRelay : serviceToken;
+        };
+        return chosen == null ? execution.execute(request, body) : chosen.intercept(request, body, execution);
+    }
+
+    private static boolean hasClientToken() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null && authentication.getCredentials() instanceof Jwt;
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+}
+`,
+  "<P>-container/src/main/java/ma/eai/msiboa/api/integration/upstream/UpstreamCallerContextInterceptor.java": `package ma.eai.msiboa.api.integration.upstream;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.regex.Pattern;
+
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpRequest;
+import org.springframework.http.client.ClientHttpRequestExecution;
+import org.springframework.http.client.ClientHttpRequestInterceptor;
+import org.springframework.http.client.ClientHttpResponse;
+import org.springframework.stereotype.Component;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+
+/**
+ * Canal et langue de l'appelant transmis au service expose : X-Canal traduit par la table neobank.upstream.channel.mapping, Accept-Language tel que recu.
+ */
+@Component
+public class UpstreamCallerContextInterceptor implements ClientHttpRequestInterceptor {
+
+    static final String CHANNEL_HEADER = "X-Canal";
+
+    private static final Pattern CHANNEL_FORMAT = Pattern.compile("[A-Za-z0-9_]{1,30}");
+    private static final Pattern HEADER_NAME_FORMAT = Pattern.compile("[A-Za-z0-9-]{1,60}");
+    private static final Pattern LANGUAGE_FORMAT = Pattern.compile("[A-Za-z0-9,;=.* -]{1,100}");
+
+    private final List<String> sourceHeaders;
+    private final Map<String, String> mapping;
+    private final String defaultChannel;
+
+    public UpstreamCallerContextInterceptor(@Value("\${neobank.upstream.channel.headers:X-Canal}") String sourceHeaders,
+                                            @Value("\${neobank.upstream.channel.mapping:}") String mapping,
+                                            @Value("\${neobank.upstream.channel.default:}") String defaultChannel) {
+        this.sourceHeaders = sourceHeaders(sourceHeaders);
+        this.mapping = mapping(mapping);
+        this.defaultChannel = defaultChannel == null || defaultChannel.isBlank() ? null : checked(defaultChannel.trim(), "default");
+    }
+
+    @Override
+    public ClientHttpResponse intercept(HttpRequest request, byte[] body, ClientHttpRequestExecution execution)
+            throws IOException {
+        HttpServletRequest inbound = inbound();
+        HttpHeaders headers = request.getHeaders();
+        String channel = channel(inbound);
+        headers.remove(CHANNEL_HEADER);
+        if (channel != null) {
+            headers.set(CHANNEL_HEADER, channel);
+        }
+        String language = inbound == null ? null : inbound.getHeader(HttpHeaders.ACCEPT_LANGUAGE);
+        headers.remove(HttpHeaders.ACCEPT_LANGUAGE);
+        if (language != null && LANGUAGE_FORMAT.matcher(language).matches()) {
+            headers.set(HttpHeaders.ACCEPT_LANGUAGE, language);
+        }
+        return execution.execute(request, body);
+    }
+
+    private String channel(HttpServletRequest inbound) {
+        String received = received(inbound);
+        if (received == null) {
+            return defaultChannel;
+        }
+        if (!CHANNEL_FORMAT.matcher(received).matches()) {
+            return null;
+        }
+        return mapping.getOrDefault(received.toUpperCase(Locale.ROOT), received);
+    }
+
+    private String received(HttpServletRequest inbound) {
+        if (inbound == null) {
+            return null;
+        }
+        for (String header : sourceHeaders) {
+            String value = inbound.getHeader(header);
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private static HttpServletRequest inbound() {
+        return RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes
+                ? attributes.getRequest()
+                : null;
+    }
+
+    private static List<String> sourceHeaders(String value) {
+        List<String> headers = new ArrayList<>();
+        for (String header : value.split(",")) {
+            if (header.isBlank()) {
+                continue;
+            }
+            if (!HEADER_NAME_FORMAT.matcher(header.trim()).matches()) {
+                throw new IllegalArgumentException("Invalid neobank.upstream.channel.headers entry: " + header.trim());
+            }
+            headers.add(header.trim());
+        }
+        return List.copyOf(headers);
+    }
+
+    private static Map<String, String> mapping(String value) {
+        Map<String, String> mapping = new HashMap<>();
+        for (String entry : value.split(",")) {
+            if (entry.isBlank()) {
+                continue;
+            }
+            String[] pair = entry.trim().split(":");
+            if (pair.length != 2) {
+                throw new IllegalArgumentException("Invalid neobank.upstream.channel.mapping entry: " + entry.trim());
+            }
+            mapping.put(checked(pair[0].trim(), "mapping").toUpperCase(Locale.ROOT), checked(pair[1].trim(), "mapping"));
+        }
+        return Map.copyOf(mapping);
+    }
+
+    private static String checked(String value, String property) {
+        if (!CHANNEL_FORMAT.matcher(value).matches()) {
+            throw new IllegalArgumentException("Invalid neobank.upstream.channel." + property + " value: " + value);
+        }
+        return value;
     }
 }
 `,
@@ -1067,14 +1335,10 @@ class UpstreamResilienceInterceptorTest {
 `,
   "<P>-container/src/test/java/ma/eai/msiboa/api/integration/upstream/UpstreamRestClientsTest.java": `package ma.eai.msiboa.api.integration.upstream;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
-
-import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 
 import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -1083,23 +1347,53 @@ import ma.eai.msiboa.api.integration.CorrelationIdInterceptor;
 import ma.eai.msiboa.clients.security.config.ForwardHeadersProperties;
 import ma.eai.msiboa.clients.security.service.TokenManagementService;
 import ma.eai.msiboa.clients.security.util.OAuth2ClientHttpRequestInterceptorFactory;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 class UpstreamRestClientsTest {
 
     private static final String BASE_URL = "http://adapter.test/neobank-svc";
 
+    @AfterEach
+    void tearDown() {
+        RequestContextHolder.resetRequestAttributes();
+    }
+
     @Test
-    void disabledOAuth2SendsNoAuthorizationHeader() {
-        RestClient.Builder builder = clients(null).builder("svc", BASE_URL);
+    void callCarriesTheTokenTheChannelAndTheLanguageOfTheCaller() {
+        MockHttpServletRequest inbound = new MockHttpServletRequest();
+        inbound.addHeader("X-Canal", "NEOBANQUE_MOBILE");
+        inbound.addHeader(HttpHeaders.ACCEPT_LANGUAGE, "ar");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(inbound));
+        RestClient.Builder builder = clients(UpstreamTokenInterceptor.Mode.SERVICE).builder("svc", BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/api/x"))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer jeton-de-test"))
+                .andExpect(header("X-Canal", "MOBILE"))
+                .andExpect(header(HttpHeaders.ACCEPT_LANGUAGE, "ar"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        builder.build().post().uri("/api/x").retrieve().toBodilessEntity();
+
+        server.verify();
+    }
+
+    @Test
+    void callOutsideOfARequestWithoutTokenCarriesNoCallerHeader() {
+        RestClient.Builder builder = clients(UpstreamTokenInterceptor.Mode.NONE).builder("svc", BASE_URL);
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(requestTo(BASE_URL + "/api/x"))
                 .andExpect(headerDoesNotExist(HttpHeaders.AUTHORIZATION))
+                .andExpect(headerDoesNotExist("X-Canal"))
+                .andExpect(headerDoesNotExist(HttpHeaders.ACCEPT_LANGUAGE))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
         builder.build().get().uri("/api/x").retrieve().toBodilessEntity();
@@ -1107,47 +1401,265 @@ class UpstreamRestClientsTest {
         server.verify();
     }
 
-    @Test
-    void enabledOAuth2SendsBearerTokenOfTheSasAccessorRegistration() {
-        AtomicReference<List<String>> requested = new AtomicReference<>();
+    private static UpstreamRestClients clients(UpstreamTokenInterceptor.Mode mode) {
+        CorrelationIdInterceptor correlation = new CorrelationIdInterceptor();
+        ReflectionTestUtils.setField(correlation, "correlationHeaderName", "X-Correlation-ID");
         TokenManagementService tokens = new TokenManagementService(null) {
             @Override
             public String getAccessToken(String first, String second, String third) {
-                requested.set(List.of(first, second, third));
                 return "jeton-de-test";
             }
         };
-        OAuth2ClientHttpRequestInterceptorFactory factory =
-                new OAuth2ClientHttpRequestInterceptorFactory(tokens, new ForwardHeadersProperties());
-        RestClient.Builder builder = clients(factory).builder("svc", BASE_URL);
-        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        server.expect(requestTo(BASE_URL + "/api/x"))
-                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer jeton-de-test"))
-                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
-
-        builder.build().post().uri("/api/x").retrieve().toBodilessEntity();
-
-        server.verify();
-        assertThat(requested.get()).contains(UpstreamRestClients.OAUTH2_REGISTRATION, "client-test");
-    }
-
-    private static UpstreamRestClients clients(OAuth2ClientHttpRequestInterceptorFactory factory) {
-        CorrelationIdInterceptor correlation = new CorrelationIdInterceptor();
-        ReflectionTestUtils.setField(correlation, "correlationHeaderName", "X-Correlation-ID");
         return new UpstreamRestClients(correlation,
+                new UpstreamTokenInterceptor(mode,
+                        new OAuth2ClientHttpRequestInterceptorFactory(tokens, new ForwardHeadersProperties()),
+                        "client-test",
+                        "http://localhost:1/realms/test"),
+                new UpstreamCallerContextInterceptor("X-Canal", "NEOBANQUE_MOBILE:MOBILE", ""),
                 CircuitBreakerRegistry.ofDefaults(),
                 RetryRegistry.ofDefaults(),
                 BulkheadRegistry.ofDefaults(),
                 5,
-                30,
-                factory,
-                "client-test",
-                "http://localhost:1/realms/test");
+                30);
+    }
+}
+`,
+  "<P>-container/src/test/java/ma/eai/msiboa/api/integration/upstream/UpstreamTokenInterceptorTest.java": `package ma.eai.msiboa.api.integration.upstream;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.io.IOException;
+import java.net.URI;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import ma.eai.msiboa.api.integration.upstream.UpstreamTokenInterceptor.Mode;
+import ma.eai.msiboa.clients.security.config.ForwardHeadersProperties;
+import ma.eai.msiboa.clients.security.service.TokenManagementService;
+import ma.eai.msiboa.clients.security.util.OAuth2ClientHttpRequestInterceptorFactory;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.mock.http.client.MockClientHttpRequest;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.util.StringUtils;
+
+class UpstreamTokenInterceptorTest {
+
+    private final AtomicInteger serviceTokenRequests = new AtomicInteger();
+    private final OAuth2ClientHttpRequestInterceptorFactory factory = new OAuth2ClientHttpRequestInterceptorFactory(
+            new TokenManagementService(null) {
+                @Override
+                public String getAccessToken(String first, String second, String third) {
+                    if (StringUtils.hasText(first) && StringUtils.hasText(second)) {
+                        serviceTokenRequests.incrementAndGet();
+                        return "jeton-de-service";
+                    }
+                    return super.getAccessToken(first, second, third);
+                }
+            },
+            new ForwardHeadersProperties());
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void clientOrServiceRelaysTheClientTokenWithoutAskingForAServiceToken() throws IOException {
+        authenticate("jeton-du-client");
+
+        assertThat(authorization(Mode.CLIENT_OR_SERVICE)).isEqualTo("Bearer jeton-du-client");
+        assertThat(serviceTokenRequests).hasValue(0);
+    }
+
+    @Test
+    void clientOrServiceFallsBackToTheServiceTokenWithoutAuthenticatedClient() throws IOException {
+        assertThat(authorization(Mode.CLIENT_OR_SERVICE)).isEqualTo("Bearer jeton-de-service");
+    }
+
+    @Test
+    void serviceModeIgnoresTheClientToken() throws IOException {
+        authenticate("jeton-du-client");
+
+        assertThat(authorization(Mode.SERVICE)).isEqualTo("Bearer jeton-de-service");
+    }
+
+    @Test
+    void clientModeSendsNoTokenWithoutAuthenticatedClient() throws IOException {
+        assertThat(authorization(Mode.CLIENT)).isNull();
+        assertThat(serviceTokenRequests).hasValue(0);
+    }
+
+    @Test
+    void noneModeSendsNoToken() throws IOException {
+        authenticate("jeton-du-client");
+
+        assertThat(authorization(Mode.NONE)).isNull();
+    }
+
+    @Test
+    void modeIsReadFromItsPropertyValueAndRefusedWhenUnknown() {
+        assertThat(Mode.of("client-or-service")).isEqualTo(Mode.CLIENT_OR_SERVICE);
+        assertThat(Mode.of(" Service ")).isEqualTo(Mode.SERVICE);
+        assertThatThrownBy(() -> Mode.of("jwt")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Mode.of("")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void modesUsingTheServiceTokenRefuseABlankClientIdOrIssuer() {
+        assertThatThrownBy(() -> new UpstreamTokenInterceptor(Mode.SERVICE, factory, " ", "http://localhost:1/realms/test"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new UpstreamTokenInterceptor(Mode.CLIENT_OR_SERVICE, factory, "client-test", ""))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private String authorization(Mode mode) throws IOException {
+        UpstreamTokenInterceptor interceptor = new UpstreamTokenInterceptor(mode,
+                mode == Mode.NONE ? null : factory, "client-test", "http://localhost:1/realms/test");
+        MockClientHttpRequest request = new MockClientHttpRequest(HttpMethod.POST, URI.create("http://h/api/x"));
+        interceptor.intercept(request, new byte[0], (sent, body) -> null);
+        return request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+    }
+
+    private static void authenticate(String token) {
+        Jwt jwt = Jwt.withTokenValue(token).header("alg", "RS256").subject("client-1").build();
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
+    }
+}
+`,
+  "<P>-container/src/test/java/ma/eai/msiboa/api/integration/upstream/UpstreamCallerContextInterceptorTest.java": `package ma.eai.msiboa.api.integration.upstream;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.io.IOException;
+import java.net.URI;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.mock.http.client.MockClientHttpRequest;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+
+class UpstreamCallerContextInterceptorTest {
+
+    private static final String MAPPING = "NEOBANQUE_MOBILE:MOBILE,BACK_OFFICE:WEB,PFM:MOBILE";
+
+    @AfterEach
+    void tearDown() {
+        RequestContextHolder.resetRequestAttributes();
+    }
+
+    @Test
+    void projectChannelIsTranslatedWhateverItsCase() throws IOException {
+        inbound("X-Canal", "neobanque_mobile");
+
+        assertThat(sent(interceptor("")).getFirst("X-Canal")).isEqualTo("MOBILE");
+    }
+
+    @Test
+    void channelOutOfTheMappingIsSentAsReceived() throws IOException {
+        inbound("X-Canal", "WEB");
+
+        assertThat(sent(interceptor("")).getFirst("X-Canal")).isEqualTo("WEB");
+    }
+
+    @Test
+    void nextSourceHeaderIsReadWhenTheFirstIsMissing() throws IOException {
+        inbound("X-Channel", "PFM");
+
+        assertThat(sent(interceptor("")).getFirst("X-Canal")).isEqualTo("MOBILE");
+    }
+
+    @Test
+    void missingChannelIsSentOnlyWhenADefaultIsSet() throws IOException {
+        inbound(HttpHeaders.ACCEPT_LANGUAGE, "fr");
+
+        assertThat(sent(interceptor("")).getFirst("X-Canal")).isNull();
+        assertThat(sent(interceptor("WEB")).getFirst("X-Canal")).isEqualTo("WEB");
+    }
+
+    @Test
+    void malformedChannelIsNotSent() throws IOException {
+        inbound("X-Canal", "MOBILE WEB");
+
+        assertThat(sent(interceptor("WEB")).getFirst("X-Canal")).isNull();
+    }
+
+    @Test
+    void languageIsRelayedAsReceived() throws IOException {
+        inbound(HttpHeaders.ACCEPT_LANGUAGE, "ar-MA,ar;q=0.9,fr;q=0.8");
+
+        assertThat(sent(interceptor("")).getFirst(HttpHeaders.ACCEPT_LANGUAGE)).isEqualTo("ar-MA,ar;q=0.9,fr;q=0.8");
+    }
+
+    @Test
+    void malformedLanguageIsNotSent() throws IOException {
+        inbound(HttpHeaders.ACCEPT_LANGUAGE, "fr<script>");
+
+        assertThat(sent(interceptor("")).getFirst(HttpHeaders.ACCEPT_LANGUAGE)).isNull();
+    }
+
+    @Test
+    void callOutsideOfARequestSendsOnlyTheDefaultChannel() throws IOException {
+        HttpHeaders headers = sent(interceptor("WEB"));
+
+        assertThat(headers.getFirst("X-Canal")).isEqualTo("WEB");
+        assertThat(headers.getFirst(HttpHeaders.ACCEPT_LANGUAGE)).isNull();
+    }
+
+    @Test
+    void valuesAlreadySetOnTheOutgoingRequestAreDroppedWhenTheReceivedOnesAreRefused() throws IOException {
+        inbound("X-Canal", "MOBILE WEB");
+        MockClientHttpRequest request = new MockClientHttpRequest(HttpMethod.GET, URI.create("http://h/api/x"));
+        request.getHeaders().set("X-Canal", "AGENCE");
+        request.getHeaders().set(HttpHeaders.ACCEPT_LANGUAGE, "fr<script>");
+
+        interceptor("").intercept(request, new byte[0], (outbound, body) -> null);
+
+        assertThat(request.getHeaders().getFirst("X-Canal")).isNull();
+        assertThat(request.getHeaders().getFirst(HttpHeaders.ACCEPT_LANGUAGE)).isNull();
+    }
+
+    @Test
+    void invalidConfigurationIsRefusedAtStartup() {
+        assertThatThrownBy(() -> new UpstreamCallerContextInterceptor("X-Canal", "NEOBANQUE_MOBILE", ""))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new UpstreamCallerContextInterceptor("X-Canal", "BACK OFFICE:WEB", ""))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new UpstreamCallerContextInterceptor("X Canal", MAPPING, ""))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new UpstreamCallerContextInterceptor("X-Canal", MAPPING, "WEB MOBILE"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private static void inbound(String name, String value) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(name, value);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+    }
+
+    private static UpstreamCallerContextInterceptor interceptor(String defaultChannel) {
+        return new UpstreamCallerContextInterceptor("X-Canal,X-Channel", MAPPING, defaultChannel);
+    }
+
+    private static HttpHeaders sent(UpstreamCallerContextInterceptor interceptor) throws IOException {
+        MockClientHttpRequest request = new MockClientHttpRequest(HttpMethod.GET, URI.create("http://h/api/x"));
+        interceptor.intercept(request, new byte[0], (outbound, body) -> null);
+        return request.getHeaders();
     }
 }
 `,
   "<P>-container/src/test/java/ma/eai/msiboa/api/integration/upstream/UpstreamErrorDecoderTest.java": `package ma.eai.msiboa.api.integration.upstream;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.net.URI;
@@ -1156,7 +1668,9 @@ import java.util.List;
 
 import ma.eai.msiboa.api.domain.exception.UpstreamAuthenticationException;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
+import ma.eai.msiboa.api.domain.exception.UpstreamChannelException;
 import ma.eai.msiboa.api.domain.exception.UpstreamTechnicalException;
+import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
@@ -1189,6 +1703,75 @@ class UpstreamErrorDecoderTest {
                 .isExactlyInstanceOf(UpstreamTechnicalException.class);
     }
 
+    @Test
+    void codifiedMessageOfABusinessRefusalIsKept() {
+        String body = "{\\"code\\":\\"005\\",\\"message\\":\\"Plafond depasse\\",\\"timestamp\\":0,"
+                + "\\"codeMessage\\":\\"PLAFOND_DEPASSE\\",\\"parametres\\":{\\"p1\\":\\"5000\\"},\\"messageLegacy\\":\\"Plafond atteint\\"}";
+
+        assertThatThrownBy(() -> decoder.handle(request, response(422, body)))
+                .isInstanceOfSatisfying(UpstreamBusinessException.class, ex -> {
+                    assertThat(ex.getMessage()).isEqualTo("Plafond depasse");
+                    assertThat(ex.getDetail().codeMessage()).isEqualTo("PLAFOND_DEPASSE");
+                    assertThat(ex.getDetail().parametres()).containsEntry("p1", "5000");
+                    assertThat(ex.getDetail().messageLegacy()).isEqualTo("Plafond atteint");
+                });
+    }
+
+    @Test
+    void codifiedMessageOfAnInputRefusalIsKept() {
+        String body = "{\\"code\\":\\"400\\",\\"message\\":\\"Demande illisible\\","
+                + "\\"codeMessage\\":\\"API_FLUX_INVALIDE\\",\\"parametres\\":{},\\"messageLegacy\\":\\"Demande illisible\\"}";
+
+        assertThatThrownBy(() -> decoder.handle(request, response(400, body)))
+                .isInstanceOfSatisfying(UpstreamValidationException.class, ex -> {
+                    assertThat(ex.getDetail().codeMessage()).isEqualTo("API_FLUX_INVALIDE");
+                    assertThat(ex.getDetail().parametres()).isEmpty();
+                });
+    }
+
+    @Test
+    void bodyWithoutCodifiedMessageIsStillRead() {
+        assertThatThrownBy(() -> decoder.handle(request, response(422, "{\\"code\\":\\"005\\",\\"message\\":\\"Motif\\",\\"timestamp\\":0}")))
+                .isInstanceOfSatisfying(UpstreamBusinessException.class, ex -> {
+                    assertThat(ex.getDetail().codeMessage()).isNull();
+                    assertThat(ex.getDetail().parametres()).isNull();
+                    assertThat(ex.getDetail().messageLegacy()).isNull();
+                });
+    }
+
+    @Test
+    void channelRefusalKeepsTheStatusGivenByTheService() {
+        assertThatThrownBy(() -> decoder.handle(request, response(400, "{\\"code\\":\\"400\\",\\"codeMessage\\":\\"CANAL_MANQUANT\\"}")))
+                .isInstanceOfSatisfying(UpstreamChannelException.class, ex -> assertThat(ex.getStatus()).isEqualTo(400));
+        assertThatThrownBy(() -> decoder.handle(request,
+                response(403, "{\\"code\\":\\"403\\",\\"codeMessage\\":\\"CANAL_INCONNU\\",\\"parametres\\":{\\"p1\\":\\"AGENCE\\"}}")))
+                .isInstanceOfSatisfying(UpstreamChannelException.class, ex -> {
+                    assertThat(ex.getStatus()).isEqualTo(403);
+                    assertThat(ex.getDetail().parametres()).containsEntry("p1", "AGENCE");
+                });
+    }
+
+    @Test
+    void channelCodeUnderAnotherStatusIsClassifiedAsUsual() {
+        assertThatThrownBy(() -> decoder.handle(request, response(500, "{\\"code\\":\\"500\\",\\"codeMessage\\":\\"CANAL_INCONNU\\"}")))
+                .isExactlyInstanceOf(UpstreamTechnicalException.class);
+        assertThatThrownBy(() -> decoder.handle(request, response(403, "{\\"code\\":\\"005\\",\\"codeMessage\\":\\"CANAL_MANQUANT\\"}")))
+                .isInstanceOf(UpstreamBusinessException.class);
+    }
+
+    @Test
+    void messageParametersKeepOnlyBoundedScalars() {
+        String body = "{\\"code\\":\\"005\\",\\"codeMessage\\":\\"PLAFOND_DEPASSE\\",\\"parametres\\":{\\"p1\\":\\"" + "9".repeat(300)
+                + "\\",\\"p2\\":{\\"a\\":1},\\"p3\\":[1],\\"p4\\":12,\\"p5\\":null}}";
+
+        assertThatThrownBy(() -> decoder.handle(request, response(422, body)))
+                .isInstanceOfSatisfying(UpstreamBusinessException.class, ex -> {
+                    assertThat(ex.getDetail().parametres()).containsOnlyKeys("p1", "p4");
+                    assertThat(ex.getDetail().parametres().get("p1")).isEqualTo("9".repeat(200));
+                    assertThat(ex.getDetail().parametres().get("p4")).isEqualTo(12);
+                });
+    }
+
     private static MockClientHttpResponse response(int status, String body) {
         return new MockClientHttpResponse(body.getBytes(StandardCharsets.UTF_8), HttpStatusCode.valueOf(status));
     }
@@ -1197,9 +1780,13 @@ class UpstreamErrorDecoderTest {
   "<P>-container/src/main/java/ma/eai/msiboa/api/integration/upstream/UpstreamErrorDecoder.java": `package ma.eai.msiboa.api.integration.upstream;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import ma.eai.msiboa.api.domain.exception.UpstreamAuthenticationException;
 import ma.eai.msiboa.api.domain.exception.UpstreamBusinessException;
+import ma.eai.msiboa.api.domain.exception.UpstreamChannelException;
+import ma.eai.msiboa.api.domain.exception.UpstreamErrorDetail;
 import ma.eai.msiboa.api.domain.exception.UpstreamTechnicalException;
 import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
 import org.springframework.http.HttpRequest;
@@ -1209,9 +1796,13 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Lecture du corps d'erreur d'un service expose et classement par code retour, le statut HTTP de l'aval n'etant pas fiable.
+ * Lecture du corps d'erreur d'un service expose, message codifie compris, et classement par code retour, le statut HTTP de l'aval n'etant pas fiable.
  */
 public class UpstreamErrorDecoder {
+
+    private static final Map<String, Integer> CHANNEL_REFUSALS = Map.of("CANAL_MANQUANT", 400, "CANAL_INCONNU", 403);
+    private static final int MAX_PARAMETERS = 20;
+    private static final int MAX_PARAMETER_LENGTH = 200;
 
     private final String service;
     private final UpstreamReturnCodes returnCodes;
@@ -1227,6 +1818,7 @@ public class UpstreamErrorDecoder {
         int status = response.getStatusCode().value();
         String code = String.valueOf(status);
         String message = null;
+        UpstreamErrorDetail detail = UpstreamErrorDetail.NONE;
         try {
             JsonNode body = objectMapper.readTree(response.getBody());
             if (body != null && body.hasNonNull("code")) {
@@ -1235,20 +1827,53 @@ public class UpstreamErrorDecoder {
             if (body != null && body.hasNonNull("message")) {
                 message = body.get("message").asString();
             }
+            if (body != null) {
+                detail = new UpstreamErrorDetail(text(body, "codeMessage"), parameters(body), text(body, "messageLegacy"));
+            }
         } catch (JacksonException ex) {
             message = null;
         }
 
+        if (detail.codeMessage() != null && Integer.valueOf(status).equals(CHANNEL_REFUSALS.get(detail.codeMessage()))) {
+            throw new UpstreamChannelException(service, code, message, detail, status);
+        }
         if (returnCodes.business().contains(code)) {
-            throw new UpstreamBusinessException(service, code, message);
+            throw new UpstreamBusinessException(service, code, message, detail);
         }
         if (returnCodes.validation().contains(code) || status == 400) {
-            throw new UpstreamValidationException(service, code, message);
+            throw new UpstreamValidationException(service, code, message, detail);
         }
         if (status == 401) {
             throw new UpstreamAuthenticationException(service, code, message);
         }
         throw new UpstreamTechnicalException(service, code, message);
+    }
+
+    private static String text(JsonNode body, String field) {
+        JsonNode value = body.get(field);
+        return value != null && value.isValueNode() && !value.isNull() ? value.asString() : null;
+    }
+
+    private Map<String, Object> parameters(JsonNode body) {
+        JsonNode value = body.get("parametres");
+        if (value == null || !value.isObject()) {
+            return null;
+        }
+        Map<String, Object> parameters = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonNode> entry : value.properties()) {
+            JsonNode parameter = entry.getValue();
+            if (parameters.size() == MAX_PARAMETERS) {
+                break;
+            }
+            if (!parameter.isValueNode() || parameter.isNull() || entry.getKey().length() > MAX_PARAMETER_LENGTH) {
+                continue;
+            }
+            Object scalar = objectMapper.treeToValue(parameter, Object.class);
+            parameters.put(entry.getKey(), scalar instanceof String text && text.length() > MAX_PARAMETER_LENGTH
+                    ? text.substring(0, MAX_PARAMETER_LENGTH)
+                    : scalar);
+        }
+        return parameters;
     }
 }
 `,
@@ -1366,6 +1991,8 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 import ma.eai.msiboa.api.application.idempotency.OperationIdempotencyService;
+import ma.eai.msiboa.api.domain.exception.UpstreamChannelException;
+import ma.eai.msiboa.api.domain.exception.UpstreamErrorDetail;
 import ma.eai.msiboa.api.domain.exception.UpstreamValidationException;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
 import ma.eai.msiboa.api.domain.ports.output.repository.OperationIdempotencyStore;
@@ -1422,7 +2049,21 @@ class IdempotencyKeyStatusTest {
         assertThat(first.getResponse().getStatus()).isEqualTo(400);
         assertThat(replay.getResponse().getStatus()).isEqualTo(400);
         assertThat(errorBody(replay).get("code").asString()).isEqualTo("002");
+        assertThat(errorBody(replay).get("codeMessage").asString()).isEqualTo("COMPTE_INVALIDE");
+        assertThat(errorBody(replay).get("parametres").get("p1").asString()).isEqualTo("RIB");
+        assertThat(errorBody(replay).get("messageLegacy").asString()).isEqualTo("Compte errone");
         assertThat(errorBody(replay)).isEqualTo(errorBody(first));
+    }
+
+    @Test
+    void channelRefusalKeepsItsStatusAndLetsTheSameKeyRunAgain() throws Exception {
+        MvcResult refused = mockMvc.perform(post("/probe").header("Idempotency-Key", "k-channel").header("X-Probe-Outcome", "channel"))
+                .andReturn();
+
+        assertThat(refused.getResponse().getStatus()).isEqualTo(403);
+        assertThat(errorBody(refused).get("codeMessage").asString()).isEqualTo("CANAL_INCONNU");
+        mockMvc.perform(post("/probe").header("Idempotency-Key", "k-channel"))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -1496,7 +2137,12 @@ class IdempotencyKeyStatusTest {
                     throw new ResourceAccessException("I/O error", new ConnectException("Connection refused"));
                 }
                 if ("invalid".equals(outcome)) {
-                    throw new UpstreamValidationException("svc", "002", "Compte invalide");
+                    throw new UpstreamValidationException("svc", "002", "Compte invalide",
+                            new UpstreamErrorDetail("COMPTE_INVALIDE", Map.of("p1", "RIB"), "Compte errone"));
+                }
+                if ("channel".equals(outcome)) {
+                    throw new UpstreamChannelException("svc", "403", "Canal non autorise",
+                            new UpstreamErrorDetail("CANAL_INCONNU", Map.of("p1", "AGENCE"), "Canal non autorise"), 403);
                 }
                 return mapper.createObjectNode();
             });
@@ -1551,6 +2197,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import ma.eai.msiboa.api.application.idempotency.OperationIdempotencyService;
 import ma.eai.msiboa.api.domain.exception.IdempotencyConflictException;
+import ma.eai.msiboa.api.domain.exception.UpstreamErrorDetail;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyRecord;
 import ma.eai.msiboa.api.domain.idempotency.model.OperationIdempotencyStatus;
 import ma.eai.msiboa.api.domain.ports.output.repository.OperationIdempotencyStore;
@@ -1585,6 +2232,22 @@ class DataGridOperationIdempotencyStoreTest {
 
         assertThat(store.find("k-del")).isEmpty();
         assertThat(store.createIfAbsent(record("k-del"))).isTrue();
+    }
+
+    @Test
+    void codifiedMessageOfARefusalIsReadBackFromDataGrid() {
+        store.save(record("k-detail").toBuilder()
+                .code("005")
+                .message("Plafond depasse")
+                .detail(new UpstreamErrorDetail("PLAFOND_DEPASSE", Map.of("p1", "5000"), "Plafond atteint"))
+                .build());
+
+        UpstreamErrorDetail detail = store.find("k-detail").orElseThrow().detail();
+
+        assertThat(detail.codeMessage()).isEqualTo("PLAFOND_DEPASSE");
+        assertThat(detail.parametres()).containsEntry("p1", "5000");
+        assertThat(detail.messageLegacy()).isEqualTo("Plafond atteint");
+        assertThat(store.find("k-absent")).isEmpty();
     }
 
     @Test

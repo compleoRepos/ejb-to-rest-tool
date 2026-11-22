@@ -179,7 +179,13 @@ describe("generateBffLayer", () => {
     const dev = await fs.readFile(path.join(root, `${P}-container/src/main/resources/application-dev.properties`), "utf-8");
     expect(dev).toBe(
       "server.port=8183\n\n# neobank-upstream:debut\nneobank.upstream.business-error-status=422\n" +
-        "neobank.upstream.oauth2.enabled=false\n" +
+        "# Jeton envoye au service expose : client-or-service, client, service ou none\n" +
+        "neobank.upstream.token.mode=client-or-service\n" +
+        "# Canal de l'appelant : en-tetes lus dans l'ordre, table de traduction vers les canaux admis, canal envoye quand aucun n'est recu\n" +
+        "neobank.upstream.channel.headers=X-Canal,X-Channel\n" +
+        "neobank.upstream.channel.mapping=NEOBANQUE_MOBILE:MOBILE,BANQUE_EN_LIGNE_MOBILE:MOBILE,BANQUE_EN_LIGNE_WEB:WEB," +
+        "BACK_OFFICE:WEB,INTERNE:WEB,AGENCE:WEB,PFM:MOBILE,SAVING_GOALS:MOBILE\n" +
+        "neobank.upstream.channel.default=\n" +
         "neobank.upstream.commande-chequier.base-url=http://localhost:9080/neobank-commande-chequier\n# neobank-upstream:fin\n"
     );
     const cloud = await fs.readFile(path.join(root, `${P}-container/src/main/resources/application-cloud.properties`), "utf-8");
@@ -257,7 +263,7 @@ describe("generateBffLayer", () => {
 
     const handler = await read(`${P}-application/${JAVA}/application/error/UpstreamExceptionHandler.java`);
     expect(handler).toContain("@ExceptionHandler(IdempotencyKeyFormatException.class)");
-    expect(handler).toContain("respond(HttpStatus.BAD_REQUEST, null, ex.getMessage(), request)");
+    expect(handler).toContain("respond(HttpStatus.BAD_REQUEST, null, ex.getMessage(), UpstreamErrorDetail.NONE, request)");
     expect(handler).toContain("@ExceptionHandler(MissingRequestHeaderException.class)");
 
     await read(`${P}-domain/${P}-domain-core/${JAVA}/domain/exception/IdempotencyKeyFormatException.java`);
@@ -305,7 +311,9 @@ describe("generateBffLayer", () => {
     }
     expect(serviceTest).not.toContain("technicalFailureBlocksTheKey");
     expect(service).toContain("} catch (UpstreamValidationException ex) {");
-    expect(service).toContain("throw new UpstreamValidationException(record.service(), record.code(), record.message());");
+    expect(service).toContain(
+      "throw new UpstreamValidationException(record.service(), record.code(), record.message(), record.detail());"
+    );
 
     for (const profile of ["dev", "cloud"]) {
       const props = await read(`${P}-container/src/main/resources/application-${profile}.properties`);
@@ -313,33 +321,121 @@ describe("generateBffLayer", () => {
     }
   });
 
-  it("pose le jeton OAuth2 sasAccessor seulement si le drapeau est actif et libère la clé sur un 401", async () => {
+  it("envoie le jeton du client ou à défaut celui du service, selon le paramétrage, et libère la clé sur un 401", async () => {
     await generateBffLayer(root, [descriptor()]);
     const read = (rel: string) => fs.readFile(path.join(root, rel), "utf-8");
+    const upstream = `${P}-container/${JAVA}/integration/upstream`;
 
-    const clients = await read(`${P}-container/${JAVA}/integration/upstream/UpstreamRestClients.java`);
-    expect(clients).toContain('@Value("${neobank.upstream.oauth2.enabled:false}") boolean oauth2Enabled');
+    const clients = await read(`${upstream}/UpstreamRestClients.java`);
     const correlation = clients.indexOf(".requestInterceptor(correlationIdInterceptor)");
-    const oauth2 = clients.indexOf("oauth2InterceptorFactory.create(oauth2ClientId, OAUTH2_REGISTRATION, oauth2IssuerUri)");
+    const token = clients.indexOf(".requestInterceptor(tokenInterceptor)");
+    const caller = clients.indexOf(".requestInterceptor(callerContextInterceptor)");
     const resilience = clients.indexOf("new UpstreamResilienceInterceptor(");
     expect(correlation).toBeGreaterThan(0);
-    expect(oauth2).toBeGreaterThan(correlation);
-    expect(resilience).toBeGreaterThan(oauth2);
+    expect(token).toBeGreaterThan(correlation);
+    expect(caller).toBeGreaterThan(token);
+    expect(resilience).toBeGreaterThan(caller);
     expect(clients).not.toContain("RestClientCircuitBreakerInterceptor");
+    expect(clients).not.toContain("oauth2");
 
-    const decoder = await read(`${P}-container/${JAVA}/integration/upstream/UpstreamErrorDecoder.java`);
+    const interceptor = await read(`${upstream}/UpstreamTokenInterceptor.java`);
+    expect(interceptor).toContain('@Value("${neobank.upstream.token.mode:client-or-service}") String mode');
+    expect(interceptor).toContain("case CLIENT_OR_SERVICE -> hasClientToken() ? clientRelay : serviceToken;");
+    expect(interceptor).toContain("oauth2InterceptorFactory.create(oauth2ClientId, OAUTH2_REGISTRATION, oauth2IssuerUri)");
+    expect(interceptor).toContain("authentication.getCredentials() instanceof Jwt");
+    expect(interceptor).toContain("if (serviceTokenUsed && (isBlank(oauth2ClientId) || isBlank(oauth2IssuerUri))) {");
+    expect(interceptor).toContain('EaiLog.warn("neobank.upstream.token.mode=none, upstream calls carry no token");');
+
+    const decoder = await read(`${upstream}/UpstreamErrorDecoder.java`);
     expect(decoder).toContain("if (status == 401) {\n            throw new UpstreamAuthenticationException(");
-    expect(decoder).not.toContain("403");
+    expect(decoder).not.toContain("status == 403");
     const service = await read(`${P}-application/${JAVA}/application/idempotency/OperationIdempotencyService.java`);
     expect(service).toContain("cause instanceof UpstreamAuthenticationException");
 
     const tests = `${P}-container/src/test/java/ma/eai/msiboa/api/integration/upstream`;
-    expect(await read(`${tests}/UpstreamRestClientsTest.java`)).toContain("void enabledOAuth2SendsBearerTokenOfTheSasAccessorRegistration()");
+    const tokenTest = await read(`${tests}/UpstreamTokenInterceptorTest.java`);
+    expect(tokenTest).toContain("void clientOrServiceRelaysTheClientTokenWithoutAskingForAServiceToken()");
+    expect(tokenTest).toContain("void clientOrServiceFallsBackToTheServiceTokenWithoutAuthenticatedClient()");
+    expect(tokenTest).toContain("void serviceModeIgnoresTheClientToken()");
+    expect(tokenTest).toContain("void modesUsingTheServiceTokenRefuseABlankClientIdOrIssuer()");
     expect(await read(`${tests}/UpstreamErrorDecoderTest.java`)).toContain("void forbiddenWithBusinessCodeStaysABusinessRefusal()");
 
-    expect(await read(`${P}-container/src/main/resources/application-dev.properties`)).toContain("neobank.upstream.oauth2.enabled=false\n");
-    expect(await read(`${P}-container/src/main/resources/application-cloud.properties`))
-      .toContain("neobank.upstream.oauth2.enabled=${NEOBANK_UPSTREAM_OAUTH2_ENABLED:false}\n");
+    const dev = await read(`${P}-container/src/main/resources/application-dev.properties`);
+    const cloud = await read(`${P}-container/src/main/resources/application-cloud.properties`);
+    expect(dev).toContain("neobank.upstream.token.mode=client-or-service\n");
+    expect(cloud).toContain("neobank.upstream.token.mode=${NEOBANK_UPSTREAM_TOKEN_MODE:client-or-service}\n");
+    for (const props of [dev, cloud]) expect(props).not.toContain("neobank.upstream.oauth2.enabled");
+  });
+
+  it("transmet le canal traduit et la langue de l'appelant", async () => {
+    await generateBffLayer(root, [descriptor()]);
+    const read = (rel: string) => fs.readFile(path.join(root, rel), "utf-8");
+
+    const interceptor = await read(`${P}-container/${JAVA}/integration/upstream/UpstreamCallerContextInterceptor.java`);
+    expect(interceptor).toContain('static final String CHANNEL_HEADER = "X-Canal";');
+    expect(interceptor).toContain('@Value("${neobank.upstream.channel.mapping:}") String mapping');
+    expect(interceptor).toContain("return mapping.getOrDefault(received.toUpperCase(Locale.ROOT), received);");
+    expect(interceptor).toContain("headers.remove(CHANNEL_HEADER);\n        if (channel != null) {\n            headers.set(CHANNEL_HEADER, channel);");
+    expect(interceptor).toContain("headers.remove(HttpHeaders.ACCEPT_LANGUAGE);");
+    expect(interceptor).toContain("headers.set(HttpHeaders.ACCEPT_LANGUAGE, language);");
+
+    const test = await read(
+      `${P}-container/src/test/java/ma/eai/msiboa/api/integration/upstream/UpstreamCallerContextInterceptorTest.java`
+    );
+    expect(test).toContain("void projectChannelIsTranslatedWhateverItsCase()");
+    expect(test).toContain("void languageIsRelayedAsReceived()");
+    expect(test).toContain("void valuesAlreadySetOnTheOutgoingRequestAreDroppedWhenTheReceivedOnesAreRefused()");
+
+    const mapping =
+      "NEOBANQUE_MOBILE:MOBILE,BANQUE_EN_LIGNE_MOBILE:MOBILE,BANQUE_EN_LIGNE_WEB:WEB," +
+      "BACK_OFFICE:WEB,INTERNE:WEB,AGENCE:WEB,PFM:MOBILE,SAVING_GOALS:MOBILE";
+    const cloud = await read(`${P}-container/src/main/resources/application-cloud.properties`);
+    expect(cloud).toContain("neobank.upstream.channel.headers=${NEOBANK_UPSTREAM_CHANNEL_HEADERS:X-Canal,X-Channel}\n");
+    expect(cloud).toContain(`neobank.upstream.channel.mapping=\${NEOBANK_UPSTREAM_CHANNEL_MAPPING:${mapping}}\n`);
+    expect(cloud).toContain("neobank.upstream.channel.default=${NEOBANK_UPSTREAM_CHANNEL_DEFAULT:}\n");
+  });
+
+  it("lit le message codifié des services, le rend au canal et libère la clé sur un refus de canal", async () => {
+    await generateBffLayer(root, [descriptor()]);
+    const read = (rel: string) => fs.readFile(path.join(root, rel), "utf-8");
+    const exceptions = `${P}-domain/${P}-domain-core/${JAVA}/domain/exception`;
+
+    expect(await read(`${exceptions}/UpstreamErrorDetail.java`)).toContain(
+      "public record UpstreamErrorDetail(String codeMessage, Map<String, Object> parametres, String messageLegacy)"
+    );
+    expect(await read(`${exceptions}/UpstreamChannelException.java`)).toContain(
+      "public class UpstreamChannelException extends UpstreamException"
+    );
+
+    const decoder = await read(`${P}-container/${JAVA}/integration/upstream/UpstreamErrorDecoder.java`);
+    expect(decoder).toContain('Map.of("CANAL_MANQUANT", 400, "CANAL_INCONNU", 403)');
+    expect(decoder).toContain("Integer.valueOf(status).equals(CHANNEL_REFUSALS.get(detail.codeMessage()))");
+    expect(decoder).toContain("if (!parameter.isValueNode() || parameter.isNull() || entry.getKey().length() > MAX_PARAMETER_LENGTH) {");
+    expect(decoder).toContain('text(body, "codeMessage"), parameters(body), text(body, "messageLegacy")');
+    expect(decoder).toContain("throw new UpstreamBusinessException(service, code, message, detail);");
+
+    const error = await read(`${P}-application/${JAVA}/application/error/UpstreamApiError.java`);
+    for (const field of ["String codeMessage,", "Map<String, Object> parametres,", "String messageLegacy"]) {
+      expect(error).toContain(field);
+    }
+    const handler = await read(`${P}-application/${JAVA}/application/error/UpstreamExceptionHandler.java`);
+    expect(handler).toContain("@ExceptionHandler(UpstreamChannelException.class)");
+    expect(handler).toContain("return respond(HttpStatus.BAD_GATEWAY, ex.getCode(), TECHNICAL_MESSAGE, UpstreamErrorDetail.NONE, request);");
+
+    const service = await read(`${P}-application/${JAVA}/application/idempotency/OperationIdempotencyService.java`);
+    expect(service).toContain("cause instanceof UpstreamChannelException");
+    expect(service).toContain("new UpstreamBusinessException(record.service(), record.code(), record.message(), record.detail())");
+
+    const tests = `${P}-container/src/test/java/ma/eai/msiboa/api/integration/upstream`;
+    const decoderTest = await read(`${tests}/UpstreamErrorDecoderTest.java`);
+    expect(decoderTest).toContain("void codifiedMessageOfABusinessRefusalIsKept()");
+    expect(decoderTest).toContain("void bodyWithoutCodifiedMessageIsStillRead()");
+    expect(decoderTest).toContain("void channelRefusalKeepsTheStatusGivenByTheService()");
+    expect(decoderTest).toContain("void channelCodeUnderAnotherStatusIsClassifiedAsUsual()");
+    expect(decoderTest).toContain("void messageParametersKeepOnlyBoundedScalars()");
+    expect(
+      await read(`${P}-application/src/test/java/ma/eai/msiboa/api/application/error/IdempotencyKeyStatusTest.java`)
+    ).toContain("void channelRefusalKeepsItsStatusAndLetsTheSameKeyRunAgain()");
   });
 
   it("donne la même sortie à chaque génération et retire un service retiré", async () => {
